@@ -8,12 +8,14 @@
 
 /* Begin PBXBuildFile section */
 		03DBE749DD0BE039825F5CCB /* ChatViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E66E23AA153269F23D4AB426 /* ChatViewModelTests.swift */; };
+		12974D3CADEA1B996BE81E3A /* WebKitAgent in Frameworks */ = {isa = PBXBuildFile; productRef = 3D607B170316C9DBE0ED5D56 /* WebKitAgent */; };
 		18C6EFAEB92EF3DCA920E1BF /* BrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C883C860AF9FB8AC76EF2092 /* BrowserView.swift */; };
 		20DD84491B79856EDCFF7601 /* CopilotIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EA7D7D797F83218D5477B37 /* CopilotIntegrationTests.swift */; };
 		2EB22715889A3618AE487852 /* SpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100FB5A0FF3D87C033D6C603 /* SpeechRecognizer.swift */; };
 		37ED3AA65F2A53E8859421E6 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5207428BC5E6750ACC5A9FC /* ContentView.swift */; };
 		38852AC190FC94E3CDFD6F5D /* ConnectionManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80BC261C20020C539BFAFC3B /* ConnectionManagerTests.swift */; };
 		481D6508FEDF280818185D7D /* ChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85427F58EFDB402CDE31F104 /* ChatViewModel.swift */; };
+		56C5B4D768A590D855C81C16 /* WeChatAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85CA36BEADA8D83511E76B9F /* WeChatAdapterTests.swift */; };
 		5ABE4701D4A9509794FCF5A4 /* CopilotSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 57B45C4E69586D04F11B529E /* CopilotSDK */; };
 		627240FD3D227401B9E08D88 /* AgentCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1712A3E7E39C96DB9DE375A /* AgentCoordinatorTests.swift */; };
 		6A918344187C59447DDDC515 /* AppAgentSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3375491FB7AE5BBF342A4F1 /* AppAgentSetup.swift */; };
@@ -45,6 +47,7 @@
 		418207ED5F8A754F490D10E6 /* NeoxApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoxApp.swift; sourceTree = "<group>"; };
 		80BC261C20020C539BFAFC3B /* ConnectionManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionManagerTests.swift; sourceTree = "<group>"; };
 		85427F58EFDB402CDE31F104 /* ChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModel.swift; sourceTree = "<group>"; };
+		85CA36BEADA8D83511E76B9F /* WeChatAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatAdapterTests.swift; sourceTree = "<group>"; };
 		91570FF6EA62274C2457A7EF /* AgentCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCoordinator.swift; sourceTree = "<group>"; };
 		928F90A2C3745D5227793FE6 /* ConnectionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionManager.swift; sourceTree = "<group>"; };
 		97DB23F6143C0A626A2709C0 /* TaskQueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskQueueView.swift; sourceTree = "<group>"; };
@@ -64,6 +67,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F40CB541E64720EBB56C886A /* CopilotSDK in Frameworks */,
+				12974D3CADEA1B996BE81E3A /* WebKitAgent in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -88,6 +92,7 @@
 				E66E23AA153269F23D4AB426 /* ChatViewModelTests.swift */,
 				80BC261C20020C539BFAFC3B /* ConnectionManagerTests.swift */,
 				0EA7D7D797F83218D5477B37 /* CopilotIntegrationTests.swift */,
+				85CA36BEADA8D83511E76B9F /* WeChatAdapterTests.swift */,
 			);
 			path = NeoxTests;
 			sourceTree = "<group>";
@@ -216,6 +221,7 @@
 			name = NeoxTests;
 			packageProductDependencies = (
 				39B829183A8BCE9F0485BD2A /* CopilotSDK */,
+				3D607B170316C9DBE0ED5D56 /* WebKitAgent */,
 			);
 			productName = NeoxTests;
 			productReference = FB31DAB467D169CCF15EF0D6 /* NeoxTests.xctest */;
@@ -267,6 +273,7 @@
 				03DBE749DD0BE039825F5CCB /* ChatViewModelTests.swift in Sources */,
 				38852AC190FC94E3CDFD6F5D /* ConnectionManagerTests.swift in Sources */,
 				20DD84491B79856EDCFF7601 /* CopilotIntegrationTests.swift in Sources */,
+				56C5B4D768A590D855C81C16 /* WeChatAdapterTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -547,6 +554,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 01D2C0A589E8BDAB0148D1D8 /* XCRemoteSwiftPackageReference "copilot-ios" */;
 			productName = CopilotSDK;
+		};
+		3D607B170316C9DBE0ED5D56 /* WebKitAgent */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 01D2C0A589E8BDAB0148D1D8 /* XCRemoteSwiftPackageReference "copilot-ios" */;
+			productName = WebKitAgent;
 		};
 		57B45C4E69586D04F11B529E /* CopilotSDK */ = {
 			isa = XCSwiftPackageProductDependency;

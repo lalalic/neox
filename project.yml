@@ -49,3 +49,5 @@ targets:
       - target: Neox
       - package: copilot-ios
         product: CopilotSDK
+      - package: copilot-ios
+        product: WebKitAgent
