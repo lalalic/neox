@@ -1,0 +1,51 @@
+name: Neox
+options:
+  bundleIdPrefix: com.neox
+  deploymentTarget:
+    iOS: "18.0"
+  xcodeVersion: "16.0"
+  createIntermediateGroups: true
+  defaultConfig: Debug
+
+packages:
+  copilot-ios:
+    url: https://github.com/lalalic/copilot-ios.git
+    branch: main
+
+targets:
+  Neox:
+    type: application
+    platform: iOS
+    sources:
+      - Neox
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.neox.app
+        INFOPLIST_FILE: Neox/Info.plist
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        DEVELOPMENT_TEAM: "JABNLDLN8G"
+    dependencies:
+      - package: copilot-ios
+        product: CopilotSDK
+      - package: copilot-ios
+        product: WebKitAgent
+      - package: copilot-ios
+        product: AppAgent
+      - package: copilot-ios
+        product: CameraKit
+
+  NeoxTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - NeoxTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.neox.tests
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: "YES"
+    dependencies:
+      - target: Neox
+      - package: copilot-ios
+        product: CopilotSDK

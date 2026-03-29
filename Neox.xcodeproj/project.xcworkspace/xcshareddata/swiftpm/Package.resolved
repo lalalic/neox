@@ -1,0 +1,15 @@
+{
+  "originHash" : "1243e33fb376de16f5421c827f832cbbdcad1783e36142d6372a01b2ebf2747f",
+  "pins" : [
+    {
+      "identity" : "copilot-ios",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/lalalic/copilot-ios.git",
+      "state" : {
+        "branch" : "main",
+        "revision" : "f1bf9cc6435acfc03c9c87dff9ece9fac99ff8d6"
+      }
+    }
+  ],
+  "version" : 3
+}

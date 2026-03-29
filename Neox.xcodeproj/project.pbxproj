@@ -1,0 +1,564 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		03DBE749DD0BE039825F5CCB /* ChatViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E66E23AA153269F23D4AB426 /* ChatViewModelTests.swift */; };
+		18C6EFAEB92EF3DCA920E1BF /* BrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C883C860AF9FB8AC76EF2092 /* BrowserView.swift */; };
+		20DD84491B79856EDCFF7601 /* CopilotIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EA7D7D797F83218D5477B37 /* CopilotIntegrationTests.swift */; };
+		2EB22715889A3618AE487852 /* SpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100FB5A0FF3D87C033D6C603 /* SpeechRecognizer.swift */; };
+		37ED3AA65F2A53E8859421E6 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5207428BC5E6750ACC5A9FC /* ContentView.swift */; };
+		38852AC190FC94E3CDFD6F5D /* ConnectionManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80BC261C20020C539BFAFC3B /* ConnectionManagerTests.swift */; };
+		481D6508FEDF280818185D7D /* ChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85427F58EFDB402CDE31F104 /* ChatViewModel.swift */; };
+		5ABE4701D4A9509794FCF5A4 /* CopilotSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 57B45C4E69586D04F11B529E /* CopilotSDK */; };
+		627240FD3D227401B9E08D88 /* AgentCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1712A3E7E39C96DB9DE375A /* AgentCoordinatorTests.swift */; };
+		6A918344187C59447DDDC515 /* AppAgentSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3375491FB7AE5BBF342A4F1 /* AppAgentSetup.swift */; };
+		6E2A5DB9AD705172205A5951 /* WebKitAgent in Frameworks */ = {isa = PBXBuildFile; productRef = AFDDCABE9F461516EC5ACA9E /* WebKitAgent */; };
+		8171DFC6774737D5F1E7BCD1 /* ConnectionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 928F90A2C3745D5227793FE6 /* ConnectionManager.swift */; };
+		8F48A0C1FB3A677868DA3DEB /* NeoxApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 418207ED5F8A754F490D10E6 /* NeoxApp.swift */; };
+		BD16622516E56FFB6CA685DF /* TaskQueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97DB23F6143C0A626A2709C0 /* TaskQueueView.swift */; };
+		DAD78552513ADB5ACA4ACDC6 /* CameraKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1422CA69286436F0228132CC /* CameraKit */; };
+		E5CD5FB2AA4C277B827C63BF /* AgentCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91570FF6EA62274C2457A7EF /* AgentCoordinator.swift */; };
+		F40CB541E64720EBB56C886A /* CopilotSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 39B829183A8BCE9F0485BD2A /* CopilotSDK */; };
+		F8C30529CD8228476DC7A214 /* AppAgent in Frameworks */ = {isa = PBXBuildFile; productRef = 0735BD6B8E5889534FBA4187 /* AppAgent */; };
+		FD1E36756EEC810B80C495F6 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AA17A688D31F58708024BC7 /* ChatView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		4469B6244180013D128E7140 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A76DF71FCBDC78B4FB1C78FC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 322E57CA9E2A313AB81D003E;
+			remoteInfo = Neox;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		0C0896E9C5D7BB8138151B5E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		0EA7D7D797F83218D5477B37 /* CopilotIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CopilotIntegrationTests.swift; sourceTree = "<group>"; };
+		100FB5A0FF3D87C033D6C603 /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
+		418207ED5F8A754F490D10E6 /* NeoxApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoxApp.swift; sourceTree = "<group>"; };
+		80BC261C20020C539BFAFC3B /* ConnectionManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionManagerTests.swift; sourceTree = "<group>"; };
+		85427F58EFDB402CDE31F104 /* ChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModel.swift; sourceTree = "<group>"; };
+		91570FF6EA62274C2457A7EF /* AgentCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCoordinator.swift; sourceTree = "<group>"; };
+		928F90A2C3745D5227793FE6 /* ConnectionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionManager.swift; sourceTree = "<group>"; };
+		97DB23F6143C0A626A2709C0 /* TaskQueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskQueueView.swift; sourceTree = "<group>"; };
+		9AA17A688D31F58708024BC7 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+		C3375491FB7AE5BBF342A4F1 /* AppAgentSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAgentSetup.swift; sourceTree = "<group>"; };
+		C883C860AF9FB8AC76EF2092 /* BrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserView.swift; sourceTree = "<group>"; };
+		D1712A3E7E39C96DB9DE375A /* AgentCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCoordinatorTests.swift; sourceTree = "<group>"; };
+		E5207428BC5E6750ACC5A9FC /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		E66E23AA153269F23D4AB426 /* ChatViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModelTests.swift; sourceTree = "<group>"; };
+		F8099EBDCCDC9A54406CD81C /* Neox.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Neox.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FB31DAB467D169CCF15EF0D6 /* NeoxTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = NeoxTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		7D96C1435EE80448F0D5FFE7 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F40CB541E64720EBB56C886A /* CopilotSDK in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FC4C7350078EEA8A19507547 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5ABE4701D4A9509794FCF5A4 /* CopilotSDK in Frameworks */,
+				6E2A5DB9AD705172205A5951 /* WebKitAgent in Frameworks */,
+				F8C30529CD8228476DC7A214 /* AppAgent in Frameworks */,
+				DAD78552513ADB5ACA4ACDC6 /* CameraKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		01DCCE1D3107569E9A7FBCF4 /* NeoxTests */ = {
+			isa = PBXGroup;
+			children = (
+				D1712A3E7E39C96DB9DE375A /* AgentCoordinatorTests.swift */,
+				E66E23AA153269F23D4AB426 /* ChatViewModelTests.swift */,
+				80BC261C20020C539BFAFC3B /* ConnectionManagerTests.swift */,
+				0EA7D7D797F83218D5477B37 /* CopilotIntegrationTests.swift */,
+			);
+			path = NeoxTests;
+			sourceTree = "<group>";
+		};
+		1B2897D8FF4911DF1A260117 /* Browser */ = {
+			isa = PBXGroup;
+			children = (
+				C883C860AF9FB8AC76EF2092 /* BrowserView.swift */,
+			);
+			path = Browser;
+			sourceTree = "<group>";
+		};
+		25F65BE53BB6EA9C224FAD7F = {
+			isa = PBXGroup;
+			children = (
+				525076733AE5FD04E85145E3 /* Neox */,
+				01DCCE1D3107569E9A7FBCF4 /* NeoxTests */,
+				4F1A705A934AB7047F90D216 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		42A154701E8F1587C35E779C /* App */ = {
+			isa = PBXGroup;
+			children = (
+				E5207428BC5E6750ACC5A9FC /* ContentView.swift */,
+				418207ED5F8A754F490D10E6 /* NeoxApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		4F1A705A934AB7047F90D216 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				F8099EBDCCDC9A54406CD81C /* Neox.app */,
+				FB31DAB467D169CCF15EF0D6 /* NeoxTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		525076733AE5FD04E85145E3 /* Neox */ = {
+			isa = PBXGroup;
+			children = (
+				0C0896E9C5D7BB8138151B5E /* Info.plist */,
+				94C01F2A2B4437191B0C74EA /* Agent */,
+				42A154701E8F1587C35E779C /* App */,
+				1B2897D8FF4911DF1A260117 /* Browser */,
+				D6EADCB33EEF3D5BAD1CB103 /* Chat */,
+				558E0F7CC7D03BF864AAD270 /* Tasks */,
+				710C319BF113CF9A62AD9D8E /* Testing */,
+			);
+			path = Neox;
+			sourceTree = "<group>";
+		};
+		558E0F7CC7D03BF864AAD270 /* Tasks */ = {
+			isa = PBXGroup;
+			children = (
+				97DB23F6143C0A626A2709C0 /* TaskQueueView.swift */,
+			);
+			path = Tasks;
+			sourceTree = "<group>";
+		};
+		710C319BF113CF9A62AD9D8E /* Testing */ = {
+			isa = PBXGroup;
+			children = (
+				C3375491FB7AE5BBF342A4F1 /* AppAgentSetup.swift */,
+			);
+			path = Testing;
+			sourceTree = "<group>";
+		};
+		94C01F2A2B4437191B0C74EA /* Agent */ = {
+			isa = PBXGroup;
+			children = (
+				91570FF6EA62274C2457A7EF /* AgentCoordinator.swift */,
+				928F90A2C3745D5227793FE6 /* ConnectionManager.swift */,
+			);
+			path = Agent;
+			sourceTree = "<group>";
+		};
+		D6EADCB33EEF3D5BAD1CB103 /* Chat */ = {
+			isa = PBXGroup;
+			children = (
+				9AA17A688D31F58708024BC7 /* ChatView.swift */,
+				85427F58EFDB402CDE31F104 /* ChatViewModel.swift */,
+				100FB5A0FF3D87C033D6C603 /* SpeechRecognizer.swift */,
+			);
+			path = Chat;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		322E57CA9E2A313AB81D003E /* Neox */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DD6CDB7C82D684B96C67AEFE /* Build configuration list for PBXNativeTarget "Neox" */;
+			buildPhases = (
+				873C6D9106FC1C69CC622554 /* Sources */,
+				FC4C7350078EEA8A19507547 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Neox;
+			packageProductDependencies = (
+				57B45C4E69586D04F11B529E /* CopilotSDK */,
+				AFDDCABE9F461516EC5ACA9E /* WebKitAgent */,
+				0735BD6B8E5889534FBA4187 /* AppAgent */,
+				1422CA69286436F0228132CC /* CameraKit */,
+			);
+			productName = Neox;
+			productReference = F8099EBDCCDC9A54406CD81C /* Neox.app */;
+			productType = "com.apple.product-type.application";
+		};
+		CC1A8B1CF2C80DE53075C887 /* NeoxTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A9A1112B9262FA7E36400345 /* Build configuration list for PBXNativeTarget "NeoxTests" */;
+			buildPhases = (
+				35AEB7684DBE43E68D171326 /* Sources */,
+				7D96C1435EE80448F0D5FFE7 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A92D9573A68F617303E9A850 /* PBXTargetDependency */,
+			);
+			name = NeoxTests;
+			packageProductDependencies = (
+				39B829183A8BCE9F0485BD2A /* CopilotSDK */,
+			);
+			productName = NeoxTests;
+			productReference = FB31DAB467D169CCF15EF0D6 /* NeoxTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A76DF71FCBDC78B4FB1C78FC /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					322E57CA9E2A313AB81D003E = {
+						DevelopmentTeam = JABNLDLN8G;
+					};
+				};
+			};
+			buildConfigurationList = 14290247EA13095ED2976EF7 /* Build configuration list for PBXProject "Neox" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 25F65BE53BB6EA9C224FAD7F;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				01D2C0A589E8BDAB0148D1D8 /* XCRemoteSwiftPackageReference "copilot-ios" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 4F1A705A934AB7047F90D216 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				322E57CA9E2A313AB81D003E /* Neox */,
+				CC1A8B1CF2C80DE53075C887 /* NeoxTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		35AEB7684DBE43E68D171326 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				627240FD3D227401B9E08D88 /* AgentCoordinatorTests.swift in Sources */,
+				03DBE749DD0BE039825F5CCB /* ChatViewModelTests.swift in Sources */,
+				38852AC190FC94E3CDFD6F5D /* ConnectionManagerTests.swift in Sources */,
+				20DD84491B79856EDCFF7601 /* CopilotIntegrationTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		873C6D9106FC1C69CC622554 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E5CD5FB2AA4C277B827C63BF /* AgentCoordinator.swift in Sources */,
+				6A918344187C59447DDDC515 /* AppAgentSetup.swift in Sources */,
+				18C6EFAEB92EF3DCA920E1BF /* BrowserView.swift in Sources */,
+				FD1E36756EEC810B80C495F6 /* ChatView.swift in Sources */,
+				481D6508FEDF280818185D7D /* ChatViewModel.swift in Sources */,
+				8171DFC6774737D5F1E7BCD1 /* ConnectionManager.swift in Sources */,
+				37ED3AA65F2A53E8859421E6 /* ContentView.swift in Sources */,
+				8F48A0C1FB3A677868DA3DEB /* NeoxApp.swift in Sources */,
+				2EB22715889A3618AE487852 /* SpeechRecognizer.swift in Sources */,
+				BD16622516E56FFB6CA685DF /* TaskQueueView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A92D9573A68F617303E9A850 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 322E57CA9E2A313AB81D003E /* Neox */;
+			targetProxy = 4469B6244180013D128E7140 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		37D86652929AA17DEF474D76 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		4CD34C017A5B567C94494DF2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.neox.tests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Neox.app/Neox";
+			};
+			name = Release;
+		};
+		509F6321B11B1E4F5BF7E201 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.neox.tests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Neox.app/Neox";
+			};
+			name = Debug;
+		};
+		8B969994417635D36D5879A8 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = JABNLDLN8G;
+				INFOPLIST_FILE = Neox/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.neox.app;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		BF39C725410301FBC0EE386B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = JABNLDLN8G;
+				INFOPLIST_FILE = Neox/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.neox.app;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		CBE87A26149E382C6FDB8716 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		14290247EA13095ED2976EF7 /* Build configuration list for PBXProject "Neox" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				37D86652929AA17DEF474D76 /* Debug */,
+				CBE87A26149E382C6FDB8716 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A9A1112B9262FA7E36400345 /* Build configuration list for PBXNativeTarget "NeoxTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				509F6321B11B1E4F5BF7E201 /* Debug */,
+				4CD34C017A5B567C94494DF2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		DD6CDB7C82D684B96C67AEFE /* Build configuration list for PBXNativeTarget "Neox" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BF39C725410301FBC0EE386B /* Debug */,
+				8B969994417635D36D5879A8 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		01D2C0A589E8BDAB0148D1D8 /* XCRemoteSwiftPackageReference "copilot-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/lalalic/copilot-ios.git";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		0735BD6B8E5889534FBA4187 /* AppAgent */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 01D2C0A589E8BDAB0148D1D8 /* XCRemoteSwiftPackageReference "copilot-ios" */;
+			productName = AppAgent;
+		};
+		1422CA69286436F0228132CC /* CameraKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 01D2C0A589E8BDAB0148D1D8 /* XCRemoteSwiftPackageReference "copilot-ios" */;
+			productName = CameraKit;
+		};
+		39B829183A8BCE9F0485BD2A /* CopilotSDK */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 01D2C0A589E8BDAB0148D1D8 /* XCRemoteSwiftPackageReference "copilot-ios" */;
+			productName = CopilotSDK;
+		};
+		57B45C4E69586D04F11B529E /* CopilotSDK */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 01D2C0A589E8BDAB0148D1D8 /* XCRemoteSwiftPackageReference "copilot-ios" */;
+			productName = CopilotSDK;
+		};
+		AFDDCABE9F461516EC5ACA9E /* WebKitAgent */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 01D2C0A589E8BDAB0148D1D8 /* XCRemoteSwiftPackageReference "copilot-ios" */;
+			productName = WebKitAgent;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A76DF71FCBDC78B4FB1C78FC /* Project object */;
+}

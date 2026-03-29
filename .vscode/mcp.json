@@ -1,0 +1,7 @@
+{
+  "servers": {
+    "neox": {
+      "url": "http://localhost:9223/mcp"
+    }
+  }
+}
