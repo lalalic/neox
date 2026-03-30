@@ -18,7 +18,7 @@ struct ContentView: View {
             if !showWebView {
                 if let chatVM = coordinator.chatViewModel {
                     NavigationStack {
-                        CopilotChat.ChatView(viewModel: chatVM, inputModes: .all)
+                        CopilotChat.ChatView(viewModel: chatVM, inputModes: coordinator.chatInputModes)
                             .navigationTitle("Neo")
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
@@ -65,35 +65,44 @@ struct RelaySettingsView: View {
         NavigationStack {
             Form {
                 Section("Relay Server") {
-                    TextField("Host", text: $coordinator.relayHost)
+                    Toggle("Use local relay server", isOn: $coordinator.useLocalRelay)
+
+                    TextField("http://10.0.0.111:8765", text: $coordinator.localRelayURL)
                         .textContentType(.URL)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
-                    
+                        .disabled(!coordinator.useLocalRelay)
+
+                    if !coordinator.useLocalRelay {
+                        Text("relay.ai.qili2.com")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                
+                Section("Dev Server") {
+                    Toggle("Enable dev server bridge", isOn: $coordinator.useDevServer)
+
                     HStack {
                         Text("Port")
                         Spacer()
-                        TextField("Port", value: $coordinator.relayPort, format: .number)
+                        TextField("9227", value: $coordinator.devServerPort, format: .number)
                             .multilineTextAlignment(.trailing)
-                            .frame(width: 80)
+                            .frame(width: 90)
                             .keyboardType(.numberPad)
+                            .disabled(!coordinator.useDevServer)
                     }
+                }
+
+                Section("Chat Input") {
+                    Toggle("Text", isOn: $coordinator.enableTextInput)
+                    Toggle("Speech", isOn: $coordinator.enableSpeechInput)
+                    Toggle("Attachment", isOn: $coordinator.enableAttachmentInput)
                 }
                 
                 Section {
-                    Button("Use Local Dev Server") {
-                        coordinator.relayHost = "10.0.0.111"
-                        coordinator.relayPort = 8765
-                    }
-                    
-                    Button("Use Production Server") {
-                        coordinator.relayHost = "relay.ai.qili2.com"
-                        coordinator.relayPort = 443
-                    }
-                }
-                
-                Section {
-                    Button("Reconnect") {
+                    Button("Apply & Reconnect") {
+                        applySettings()
                         coordinator.reconnect()
                         dismiss()
                     }
@@ -107,6 +116,22 @@ struct RelaySettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
+        }
+    }
+
+    private func applySettings() {
+        if coordinator.devServerPort <= 0 {
+            coordinator.devServerPort = 9227
+        }
+
+        coordinator.applyRelaySelection()
+        coordinator.saveRelaySettings()
+
+        let setup = AppAgentSetup.shared
+        if coordinator.useDevServer {
+            setup.connectBridge(url: "ws://10.0.0.101:\(coordinator.devServerPort)/ws")
+        } else {
+            setup.disconnectBridge()
         }
     }
 }

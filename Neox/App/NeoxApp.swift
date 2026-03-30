@@ -26,9 +26,11 @@ struct NeoxApp: App {
             print("[NeoxApp] AppAgent MCP server failed to start: \(error)")
         }
         
-        // On device: connect to bridge server for reverse MCP
+        // On device: connect to bridge server for reverse MCP (when enabled in settings)
         #if !targetEnvironment(simulator)
-        setup.connectBridge(url: "ws://10.0.0.101:9224/ws")
+        if coordinator.useDevServer {
+            setup.connectBridge(url: "ws://10.0.0.101:\(coordinator.devServerPort)/ws")
+        }
         #endif
     }
 }
