@@ -115,6 +115,7 @@ final class AgentCoordinator: ObservableObject {
         )
         
         self.chatViewModel = vm
+        Task { await vm.connect() }
         return vm
     }
     
@@ -123,7 +124,8 @@ final class AgentCoordinator: ObservableObject {
         saveRelaySettings()
         chatViewModel?.disconnect()
         chatViewModel = nil
-        let _ = createChatViewModel()
+        let vm = createChatViewModel()
+        Task { await vm.connect() }
     }
     
     func stopAgent() {
