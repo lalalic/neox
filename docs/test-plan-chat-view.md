@@ -9,6 +9,11 @@ Endpoint: http://10.0.0.81:9223/mcp
 ### Passed
 - T1.1 Cold launch stable (no crash)
 - T2.1–T2.3 Text input/send/assistant response
+- T2.4 Empty send guard (empty input shows mic; no send action exposed)
+- T3.1 Mic button visible
+- T3.2 Start listening (mic → stop button transition confirmed)
+- T3.5 Stop listening manually (stop button → mic transition confirmed)
+- T7.1 Steering placeholder shown during working state
 - T8.1 ask_user waiting state shown
 - T8.3 ask_user answer via text resumes loop
 - AQ.1 ask_questions state entered (new feature)
@@ -17,17 +22,25 @@ Endpoint: http://10.0.0.81:9223/mcp
 - T9.2 Attachment picker opens (Photo Library + Files visible)
 - T15.1 AppAgent screenshot returns image payload
 - T15.2 AppAgent snapshot returns accessibility tree
+- T15.3 AppAgent tap (input/button refs)
+- T15.4 AppAgent type (input value updated)
+- T15.5 MCP send_message tool sends successfully
+- T15.6 MCP get_messages returns current transcript entries
+- T15.7 MCP get_status returns runtime state payload
 - T11.1–T11.4 Settings sheet controls verified (Relay Server section + presets)
 
 ### Failed / Needs follow-up
 - T11.5 Reconnect path previously dropped chat to disconnected (fixed in code; needs clean rerun confirmation)
+- `get_status.connected` still reports `false` while MCP tool exchange and UI interaction work (status signal mismatch)
 
 ### Blocked in this run
-- T3.* Speech quality/permission scenarios require live microphone interaction
+- T3.3–T3.4 partial transcription and auto-send need live spoken input validation
+- T3.6 permission-denied path requires resetting speech/mic permissions manually
 - T9.3–T9.12 file/photo selection completion needs manual picker interaction beyond current AppAgent control
 - Several later UI checks became blocked once attachment sheet remained presented (AppAgent could open it reliably but dismissal control was not discoverable)
 
 ### Notes
+- AppAgent re-test reproduced the prior mic crash, then verified fix: mic tap no longer terminates app; button transitions `Microphone` ↔ `stop.circle.fill` are stable.
 - `connected: false` in `get_status` remained inconsistent with actual message exchange success (send/receive worked through relay). This appears to be a status-reporting issue in `connectionManager` exposure, not transport failure.
 
 ## Prerequisites
