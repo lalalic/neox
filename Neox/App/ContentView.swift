@@ -22,13 +22,11 @@ struct ContentView: View {
                             .navigationTitle("Neox")
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
-                                ToolbarItem(placement: .topBarLeading) {
-                                    Button(action: { showSettings = true }) {
-                                        Image(systemName: "gear")
-                                    }
-                                }
                                 ToolbarItem(placement: .topBarTrailing) {
-                                    statusIndicator
+                                    Button(action: { showSettings = true }) {
+                                        Image(systemName: "gearshape.fill")
+                                            .foregroundStyle(statusColor)
+                                    }
                                 }
                             }
                     }
@@ -63,23 +61,9 @@ struct ContentView: View {
         }
     }
     
-    private var statusIndicator: some View {
-        HStack(spacing: 4) {
-            let setup = AppAgentSetup.shared
-            if let err = setup.startError {
-                Text(err)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-                    .lineLimit(1)
-            } else {
-                Text(setup.bridgeState != "off" ? "bridge:\(setup.bridgeState)" : setup.serverState)
-                    .font(.caption2)
-                    .foregroundStyle(setup.isRunning || setup.bridgeState == "connected" ? .green : .secondary)
-            }
-            Circle()
-                .fill(setup.isRunning || setup.bridgeState == "connected" ? Color.green : Color.red)
-                .frame(width: 8, height: 8)
-        }
+    private var statusColor: Color {
+        let setup = AppAgentSetup.shared
+        return (setup.isRunning || setup.bridgeState == "connected") ? .green : .gray
     }
 }
 
