@@ -1,5 +1,4 @@
 import Foundation
-import Observation
 import CopilotSDK
 import CopilotChat
 import WebKitAgent
@@ -14,21 +13,31 @@ struct RegisteredTool: Identifiable, Equatable {
     }
 }
 
-@Observable
 @MainActor
 final class AgentCoordinator: ObservableObject {
     let connectionManager = ConnectionManager()
-    var currentSession: String? = nil
+    @Published var currentSession: String? = nil
     var isConnected: Bool { connectionManager.state == .connected }
-    var registeredTools: [RegisteredTool] = []
-    var isAgentRunning: Bool = false
+    @Published var registeredTools: [RegisteredTool] = []
+    @Published var isAgentRunning: Bool = false
+    
+    /// Relay server host — defaults to local dev server, override for production.
+    @Published var relayHost: String = UserDefaults.standard.string(forKey: "relayHost") ?? "10.0.0.111"
+    /// Relay server port.
+    @Published var relayPort: UInt16 = UInt16(UserDefaults.standard.integer(forKey: "relayPort")) == 0 ? 8765 : UInt16(UserDefaults.standard.integer(forKey: "relayPort"))
     
     private var webToolProvider: WebAgentToolProvider?
     private let fileToolProvider = FileToolProvider()
     private var agent: CopilotAgent?
     private var agentTask: Task<Void, Never>?
     /// Reference to the shared CopilotChat view model
-    private(set) var chatViewModel: ChatViewModel?
+    @Published private(set) var chatViewModel: ChatViewModel?
+    
+    /// Save relay settings to UserDefaults.
+    func saveRelaySettings() {
+        UserDefaults.standard.set(relayHost, forKey: "relayHost")
+        UserDefaults.standard.set(Int(relayPort), forKey: "relayPort")
+    }
     
     var allTools: [RegisteredTool] {
         var tools = registeredTools
@@ -87,11 +96,10 @@ final class AgentCoordinator: ObservableObject {
     /// Create the shared CopilotChat view model configured for agent mode.
     func createChatViewModel() -> ChatViewModel {
         let tools = buildTools()
-        connectionManager.configureRelay()
         
         let transport = WebSocketTransport(
-            host: connectionManager.host ?? "relay.ai.qili2.com",
-            port: connectionManager.port ?? 443
+            host: relayHost,
+            port: relayPort
         )
         
         let vm = ChatViewModel(
@@ -108,6 +116,14 @@ final class AgentCoordinator: ObservableObject {
         
         self.chatViewModel = vm
         return vm
+    }
+    
+    /// Reconnect with new relay settings.
+    func reconnect() {
+        saveRelaySettings()
+        chatViewModel?.disconnect()
+        chatViewModel = nil
+        let _ = createChatViewModel()
     }
     
     func stopAgent() {

@@ -9,8 +9,7 @@ struct NeoxApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(coordinator)
-                .onAppear {
-                    // Create ChatViewModel via coordinator (handles agent config + tools)
+                .task {
                     let _ = coordinator.createChatViewModel()
                     startAppAgent(coordinator: coordinator)
                 }

@@ -6,6 +6,7 @@ struct ContentView: View {
     @EnvironmentObject var coordinator: AgentCoordinator
     @State private var webManager = WebViewManager()
     @State private var showWebView = false
+    @State private var showSettings = false
     
     var body: some View {
         ZStack {
@@ -21,6 +22,11 @@ struct ContentView: View {
                             .navigationTitle("Neox")
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
+                                ToolbarItem(placement: .topBarLeading) {
+                                    Button(action: { showSettings = true }) {
+                                        Image(systemName: "gear")
+                                    }
+                                }
                                 ToolbarItem(placement: .topBarTrailing) {
                                     statusIndicator
                                 }
@@ -51,6 +57,10 @@ struct ContentView: View {
         .onAppear {
             coordinator.setupWebKitAgent(manager: webManager)
         }
+        .sheet(isPresented: $showSettings) {
+            RelaySettingsView()
+                .environmentObject(coordinator)
+        }
     }
     
     private var statusIndicator: some View {
@@ -69,6 +79,62 @@ struct ContentView: View {
             Circle()
                 .fill(setup.isRunning || setup.bridgeState == "connected" ? Color.green : Color.red)
                 .frame(width: 8, height: 8)
+        }
+    }
+}
+
+// MARK: - Relay Settings View
+
+struct RelaySettingsView: View {
+    @EnvironmentObject var coordinator: AgentCoordinator
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Relay Server") {
+                    TextField("Host", text: $coordinator.relayHost)
+                        .textContentType(.URL)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    
+                    HStack {
+                        Text("Port")
+                        Spacer()
+                        TextField("Port", value: $coordinator.relayPort, format: .number)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                            .keyboardType(.numberPad)
+                    }
+                }
+                
+                Section {
+                    Button("Use Local Dev Server") {
+                        coordinator.relayHost = "10.0.0.111"
+                        coordinator.relayPort = 8765
+                    }
+                    
+                    Button("Use Production Server") {
+                        coordinator.relayHost = "relay.ai.qili2.com"
+                        coordinator.relayPort = 443
+                    }
+                }
+                
+                Section {
+                    Button("Reconnect") {
+                        coordinator.reconnect()
+                        dismiss()
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
         }
     }
 }
