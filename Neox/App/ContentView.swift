@@ -19,9 +19,14 @@ struct ContentView: View {
                 if let chatVM = coordinator.chatViewModel {
                     NavigationStack {
                         CopilotChat.ChatView(viewModel: chatVM, inputModes: .all)
-                            .navigationTitle("Neox")
+                            .navigationTitle("Neo")
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
+                                ToolbarItem(placement: .topBarLeading) {
+                                    Button(action: { showWebView.toggle() }) {
+                                        Image(systemName: showWebView ? "bubble.left.fill" : "globe")
+                                    }
+                                }
                                 ToolbarItem(placement: .topBarTrailing) {
                                     Button(action: { showSettings = true }) {
                                         Image(systemName: "gearshape.fill")
@@ -33,23 +38,6 @@ struct ContentView: View {
                 } else {
                     ProgressView("Initializing...")
                 }
-            }
-            
-            // Toggle button
-            VStack {
-                HStack {
-                    Spacer()
-                    Button(action: { showWebView.toggle() }) {
-                        Image(systemName: showWebView ? "bubble.left.fill" : "globe")
-                            .font(.title2)
-                            .padding(10)
-                            .background(.ultraThinMaterial)
-                            .clipShape(Circle())
-                    }
-                    .padding(.trailing, 16)
-                    .padding(.top, 8)
-                }
-                Spacer()
             }
         }
         .onAppear {
