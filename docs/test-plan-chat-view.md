@@ -27,11 +27,11 @@ Endpoint: http://10.0.0.81:9223/mcp
 - T15.5 MCP send_message tool sends successfully
 - T15.6 MCP get_messages returns current transcript entries
 - T15.7 MCP get_status returns runtime state payload
+- T15.7b `get_status.connected` now reflects chat state correctly (`true` when idle/working)
 - T11.1–T11.4 Settings sheet controls verified (Relay Server section + presets)
 
 ### Failed / Needs follow-up
 - T11.5 Reconnect path previously dropped chat to disconnected (fixed in code; needs clean rerun confirmation)
-- `get_status.connected` still reports `false` while MCP tool exchange and UI interaction work (status signal mismatch)
 
 ### Blocked in this run
 - T3.3–T3.4 partial transcription and auto-send need live spoken input validation

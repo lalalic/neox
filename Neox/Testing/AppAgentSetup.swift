@@ -131,14 +131,20 @@ final class AppAgentSetup {
             guard let self else { return "Error: setup deallocated" }
             let status = await MainActor.run { [weak self] () -> String in
                 guard let self else { return "Error: setup deallocated" }
-                let connected = self.coordinator?.isConnected ?? false
+                let chatState = self.coordinator?.chatViewModel?.chatState ?? .disconnected
+                let connected: Bool
+                switch chatState {
+                case .idle, .working, .waitingForUser, .waitingForQuestions:
+                    connected = true
+                case .connecting, .error, .disconnected:
+                    connected = false
+                }
                 let agentRunning = self.coordinator?.isAgentRunning ?? false
-                let chatState = self.coordinator?.chatViewModel?.chatState
                 let msgCount = self.coordinator?.chatViewModel?.messages.count ?? 0
                 return """
                 connected: \(connected)
                 agentRunning: \(agentRunning)
-                chatState: \(String(describing: chatState ?? .disconnected))
+                chatState: \(String(describing: chatState))
                 messageCount: \(msgCount)
                 mcpServerRunning: \(self.isRunning)
                 bridgeState: \(self.bridgeState)
