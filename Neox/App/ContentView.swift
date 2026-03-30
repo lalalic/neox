@@ -86,7 +86,7 @@ struct RelaySettingsView: View {
                     HStack {
                         Text("Port")
                         Spacer()
-                        TextField("9227", value: $coordinator.devServerPort, format: .number)
+                        TextField("9223", value: $coordinator.devServerPort, format: .number)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 90)
                             .keyboardType(.numberPad)
@@ -121,7 +121,7 @@ struct RelaySettingsView: View {
 
     private func applySettings() {
         if coordinator.devServerPort <= 0 {
-            coordinator.devServerPort = 9227
+            coordinator.devServerPort = 9223
         }
 
         coordinator.applyRelaySelection()

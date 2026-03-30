@@ -32,7 +32,7 @@ final class AgentCoordinator: ObservableObject {
     @Published var useDevServer: Bool = UserDefaults.standard.object(forKey: "useDevServer") == nil ? true : UserDefaults.standard.bool(forKey: "useDevServer")
     @Published var devServerPort: Int = {
         let saved = UserDefaults.standard.integer(forKey: "devServerPort")
-        return saved == 0 ? 9227 : saved
+        return saved == 0 ? 9223 : saved
     }()
 
     /// Chat input mode toggles.
