@@ -1,5 +1,6 @@
 import SwiftUI
 import AppAgent
+import CopilotChat
 import Observation
 
 @Observable
@@ -15,7 +16,6 @@ final class AppAgentSetup {
     var startError: String?
     var serverState: String = "idle"
     var bridgeState: String = "off"
-    weak var chatViewModel: ChatViewModel?
     weak var coordinator: AgentCoordinator?
     private var bridgeTask: Task<Void, Never>?
     
@@ -78,14 +78,9 @@ final class AppAgentSetup {
             } else {
                 return "Error: 'text' parameter required"
             }
-            let result = await MainActor.run { [weak self] () -> String? in
-                guard let chatVM = self?.chatViewModel else { return nil }
-                chatVM.inputText = text
-                return "ok"
-            }
-            guard result != nil else { return "Error: chatViewModel not wired" }
             await MainActor.run { [weak self] in
-                guard let chatVM = self?.chatViewModel else { return }
+                guard let chatVM = self?.coordinator?.chatViewModel else { return }
+                chatVM.inputText = text
                 Task { await chatVM.send() }
             }
             return "Message sent: \(text)"
@@ -108,14 +103,15 @@ final class AppAgentSetup {
         
         let getMessagesHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] _ in
             let messages = await MainActor.run { [weak self] () -> [String] in
-                guard let chatVM = self?.chatViewModel else { return [] }
+                guard let chatVM = self?.coordinator?.chatViewModel else { return [] }
                 return chatVM.messages.map { msg in
                     let role: String = switch msg.role {
                     case .user: "user"
                     case .assistant: "assistant"
                     case .system: "system"
+                    case .tool: "tool"
                     }
-                    return "\(role): \(msg.content)"
+                    return "\(role): \(msg.fullText)"
                 }
             }
             if messages.isEmpty { return "No messages yet." }
@@ -137,12 +133,12 @@ final class AppAgentSetup {
                 guard let self else { return "Error: setup deallocated" }
                 let connected = self.coordinator?.isConnected ?? false
                 let agentRunning = self.coordinator?.isAgentRunning ?? false
-                let waiting = self.chatViewModel?.isWaitingForAnswer ?? false
-                let msgCount = self.chatViewModel?.messages.count ?? 0
+                let chatState = self.coordinator?.chatViewModel?.chatState
+                let msgCount = self.coordinator?.chatViewModel?.messages.count ?? 0
                 return """
                 connected: \(connected)
                 agentRunning: \(agentRunning)
-                waitingForAnswer: \(waiting)
+                chatState: \(String(describing: chatState ?? .disconnected))
                 messageCount: \(msgCount)
                 mcpServerRunning: \(self.isRunning)
                 bridgeState: \(self.bridgeState)

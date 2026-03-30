@@ -1,9 +1,9 @@
 import SwiftUI
 import WebKitAgent
+import CopilotChat
 
 struct ContentView: View {
     @EnvironmentObject var coordinator: AgentCoordinator
-    @Bindable var chatViewModel: ChatViewModel
     @State private var webManager = WebViewManager()
     @State private var showWebView = false
     
@@ -15,7 +15,20 @@ struct ContentView: View {
                 .opacity(showWebView ? 1 : 0)
             
             if !showWebView {
-                ChatView(viewModel: chatViewModel)
+                if let chatVM = coordinator.chatViewModel {
+                    NavigationStack {
+                        CopilotChat.ChatView(viewModel: chatVM, inputModes: .all)
+                            .navigationTitle("Neox")
+                            .navigationBarTitleDisplayMode(.inline)
+                            .toolbar {
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    statusIndicator
+                                }
+                            }
+                    }
+                } else {
+                    ProgressView("Initializing...")
+                }
             }
             
             // Toggle button
@@ -37,6 +50,25 @@ struct ContentView: View {
         }
         .onAppear {
             coordinator.setupWebKitAgent(manager: webManager)
+        }
+    }
+    
+    private var statusIndicator: some View {
+        HStack(spacing: 4) {
+            let setup = AppAgentSetup.shared
+            if let err = setup.startError {
+                Text(err)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .lineLimit(1)
+            } else {
+                Text(setup.bridgeState != "off" ? "bridge:\(setup.bridgeState)" : setup.serverState)
+                    .font(.caption2)
+                    .foregroundStyle(setup.isRunning || setup.bridgeState == "connected" ? .green : .secondary)
+            }
+            Circle()
+                .fill(setup.isRunning || setup.bridgeState == "connected" ? Color.green : Color.red)
+                .frame(width: 8, height: 8)
         }
     }
 }

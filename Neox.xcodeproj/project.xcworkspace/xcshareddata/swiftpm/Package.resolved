@@ -1,13 +1,13 @@
 {
-  "originHash" : "1243e33fb376de16f5421c827f832cbbdcad1783e36142d6372a01b2ebf2747f",
+  "originHash" : "fb3cd8e60cb7d9fc9b2a82fd90d0f4ad179e24c2e44f73ba1204c5fc2c243e74",
   "pins" : [
     {
-      "identity" : "copilot-ios",
+      "identity" : "ffmpeg-kit-spm",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/lalalic/copilot-ios.git",
+      "location" : "https://github.com/yangliu-1995/ffmpeg-kit-spm.git",
       "state" : {
-        "branch" : "main",
-        "revision" : "38da4e702addb99ceda00c8bb80bdbf6131847af"
+        "revision" : "1e881126683aef6d2686b479acb67a261efc5a40",
+        "version" : "6.0.0"
       }
     }
   ],

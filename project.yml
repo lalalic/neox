@@ -9,8 +9,7 @@ options:
 
 packages:
   copilot-ios:
-    url: https://github.com/lalalic/copilot-ios.git
-    branch: main
+    path: copilot-ios
 
 targets:
   Neox:
@@ -28,6 +27,8 @@ targets:
     dependencies:
       - package: copilot-ios
         product: CopilotSDK
+      - package: copilot-ios
+        product: CopilotChat
       - package: copilot-ios
         product: WebKitAgent
       - package: copilot-ios

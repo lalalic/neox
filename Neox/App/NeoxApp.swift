@@ -1,24 +1,24 @@
 import SwiftUI
+import CopilotChat
 
 @main
 struct NeoxApp: App {
     @StateObject private var coordinator = AgentCoordinator()
-    @State private var chatViewModel = ChatViewModel()
     
     var body: some Scene {
         WindowGroup {
-            ContentView(chatViewModel: chatViewModel)
+            ContentView()
                 .environmentObject(coordinator)
                 .onAppear {
-                    coordinator.wireChat(chatViewModel)
-                    startAppAgent(chatViewModel: chatViewModel, coordinator: coordinator)
+                    // Create ChatViewModel via coordinator (handles agent config + tools)
+                    let _ = coordinator.createChatViewModel()
+                    startAppAgent(coordinator: coordinator)
                 }
         }
     }
     
-    private func startAppAgent(chatViewModel: ChatViewModel, coordinator: AgentCoordinator) {
+    private func startAppAgent(coordinator: AgentCoordinator) {
         let setup = AppAgentSetup.shared
-        setup.chatViewModel = chatViewModel
         setup.coordinator = coordinator
         do {
             try setup.start()
