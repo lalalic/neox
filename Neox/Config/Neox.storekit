@@ -1,0 +1,76 @@
+{
+  "identifier" : "com.neox.app.storekit",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "4.99",
+      "familyShareable" : false,
+      "internalID" : "3B4E9038-0D8A-4E45-BD58-92A6E249F9A1",
+      "localizations" : [
+        {
+          "description" : "Starter credits pack",
+          "displayName" : "Starter Credits",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.neox.credits.starter",
+      "referenceName" : "Starter Credits",
+      "type" : "Consumable",
+      "price" : 4.99
+    },
+    {
+      "displayPrice" : "9.99",
+      "familyShareable" : false,
+      "internalID" : "9E76F6DD-37A4-4E4B-9386-4A54A80A48EA",
+      "localizations" : [
+        {
+          "description" : "Standard credits pack",
+          "displayName" : "Standard Credits",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.neox.credits.standard",
+      "referenceName" : "Standard Credits",
+      "type" : "Consumable",
+      "price" : 9.99
+    },
+    {
+      "displayPrice" : "29.99",
+      "familyShareable" : false,
+      "internalID" : "2F58D7F2-8F4E-4F9A-9C2E-7D1E167F8E0D",
+      "localizations" : [
+        {
+          "description" : "Pro credits pack",
+          "displayName" : "Pro Credits",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.neox.credits.pro",
+      "referenceName" : "Pro Credits",
+      "type" : "Consumable",
+      "price" : 29.99
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "D1327D75-328E-4D38-8E98-7B89F37DFF40",
+    "_developerTeamID" : "P84M4B2QYY",
+    "_disableDialogs" : false,
+    "_failTransactionsEnabled" : false,
+    "_lastSynchronizedDate" : 765504000,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+
+    ],
+    "_timeRate" : 0
+  },
+  "subscriptionGroups" : [
+
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}
