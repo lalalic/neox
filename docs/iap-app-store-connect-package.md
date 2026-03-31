@@ -81,6 +81,28 @@ Consumable behavior:
 - Credits are non-refundable in-app and not restored across devices.
 ```
 
+### Review Notes (zh-Hans, copy-ready)
+
+```
+Neox 提供一次性消耗型额度包，用于支付应用内 AI 模型调用。
+
+产品列表：
+- com.neox.credits.starter（入门额度包）
+- com.neox.credits.standard（标准额度包）
+- com.neox.credits.pro（专业额度包）
+
+购买入口：
+1）打开 Neox
+2）点击设置（齿轮图标）
+3）进入 Credits / Buy Credits
+4）选择任意额度包完成购买
+
+消耗型行为说明：
+- 购买成功后，额度会立即加入应用内余额。
+- AI 请求执行时会按用量扣减额度。
+- 额度为消耗型，不跨设备恢复。
+```
+
 ---
 
 ## Compliance / Behavior Checklist
