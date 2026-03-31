@@ -130,6 +130,7 @@ final class AgentCoordinator: ObservableObject {
             RegisteredTool(name: "memory_list", description: "List memory files under .neo"),
             RegisteredTool(name: "create_new_project", description: "Scaffold a new project from .neo/templates/project"),
             RegisteredTool(name: "create_plan", description: "Create a scheduled plan from chat"),
+            RegisteredTool(name: "stripe_checkout", description: "Generate external Stripe checkout link when requested"),
             RegisteredTool(name: "ffmpeg", description: "Run ffmpeg media processing commands"),
             RegisteredTool(name: "ffprobe", description: "Inspect media metadata and streams"),
         ]
