@@ -29,6 +29,25 @@ Currency: USD
 
 ---
 
+## zh-Hans Localization (copy-ready)
+
+### 1) Starter Credits
+- Product ID: `com.neox.credits.starter`
+- Display Name (zh-Hans): `入门额度包`
+- Description (zh-Hans): `适合轻量使用的快速充值。用于补充 Neox 内 AI 请求所需额度。`
+
+### 2) Standard Credits
+- Product ID: `com.neox.credits.standard`
+- Display Name (zh-Hans): `标准额度包`
+- Description (zh-Hans): `适合日常使用的高性价比充值。用于补充 Neox 内 AI 请求所需额度。`
+
+### 3) Pro Credits
+- Product ID: `com.neox.credits.pro`
+- Display Name (zh-Hans): `专业额度包`
+- Description (zh-Hans): `适合高频用户的大额充值。用于补充 Neox 内 AI 请求所需额度。`
+
+---
+
 ## Review Screenshot Guidance
 
 Use one screenshot from the app showing:
