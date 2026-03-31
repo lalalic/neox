@@ -2,6 +2,7 @@ import Foundation
 import CopilotSDK
 import CopilotChat
 import WebKitAgent
+import MediaKit
 
 struct RegisteredTool: Identifiable, Equatable {
     let id = UUID()
@@ -42,6 +43,7 @@ final class AgentCoordinator: ObservableObject {
     
     private var webToolProvider: WebAgentToolProvider?
     private let fileToolProvider = FileToolProvider()
+    private let ffmpegToolProvider = FFmpegToolProvider()
     private var agent: CopilotAgent?
     private var agentTask: Task<Void, Never>?
     /// Reference to the shared CopilotChat view model
@@ -84,6 +86,8 @@ final class AgentCoordinator: ObservableObject {
             RegisteredTool(name: "notify", description: "Send local notification"),
             RegisteredTool(name: "take_photo", description: "Capture photo with camera"),
             RegisteredTool(name: "copy_to_clipboard", description: "Copy text to clipboard"),
+            RegisteredTool(name: "ffmpeg", description: "Run ffmpeg media processing commands"),
+            RegisteredTool(name: "ffprobe", description: "Inspect media metadata and streams"),
         ]
     }
     
@@ -119,6 +123,9 @@ final class AgentCoordinator: ObservableObject {
         
         // File tools (read_file, write_file, list_files)
         tools.append(contentsOf: fileToolProvider.tools)
+
+        // Media tools (ffmpeg, ffprobe)
+        tools.append(contentsOf: ffmpegToolProvider.tools)
         
         return tools
     }
