@@ -1,16 +1,31 @@
 import SwiftUI
 import CopilotChat
+import CopilotSDK
 
 @main
 struct NeoxApp: App {
     @StateObject private var coordinator = AgentCoordinator()
+    
+    init() {
+        // Register BGTask handlers before app finishes launching
+        PlanExecutor.shared.registerBGTasks()
+    }
     
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(coordinator)
                 .task {
-                    let _ = coordinator.createChatViewModel()
+                    let vm = coordinator.createChatViewModel()
+                    
+                    // Configure PlanExecutor with relay settings and plan store
+                    PlanExecutor.shared.configure(
+                        planStore: vm.planStore,
+                        relayHost: coordinator.relayHost,
+                        relayPort: coordinator.relayPort
+                    )
+                    PlanExecutor.shared.scheduleNextCheck()
+                    
                     startAppAgent(coordinator: coordinator)
                 }
         }

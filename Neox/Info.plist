@@ -51,6 +51,13 @@
     <array>
         <string>com.neox.agent.fetch</string>
         <string>com.neox.agent.processing</string>
+        <string>com.neox.plan.process</string>
+        <string>com.neox.plan.refresh</string>
+    </array>
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>processing</string>
+        <string>fetch</string>
     </array>
     <key>NSAppTransportSecurity</key>
     <dict>

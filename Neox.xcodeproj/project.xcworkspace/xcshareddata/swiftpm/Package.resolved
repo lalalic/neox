@@ -1,5 +1,5 @@
 {
-  "originHash" : "fb3cd8e60cb7d9fc9b2a82fd90d0f4ad179e24c2e44f73ba1204c5fc2c243e74",
+  "originHash" : "322926a38a89bd188650f284456dc49e9b90f16f552d7662ea1c5ef88e74ab41",
   "pins" : [
     {
       "identity" : "ffmpeg-kit-spm",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "1e881126683aef6d2686b479acb67a261efc5a40",
         "version" : "6.0.0"
+      }
+    },
+    {
+      "identity" : "zipfoundation",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/weichsel/ZIPFoundation.git",
+      "state" : {
+        "revision" : "22787ffb59de99e5dc1fbfe80b19c97a904ad48d",
+        "version" : "0.9.20"
       }
     }
   ],

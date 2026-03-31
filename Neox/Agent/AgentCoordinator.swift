@@ -40,14 +40,50 @@ final class AgentCoordinator: ObservableObject {
     @Published var enableTextInput: Bool = UserDefaults.standard.object(forKey: "enableTextInput") == nil ? true : UserDefaults.standard.bool(forKey: "enableTextInput")
     @Published var enableSpeechInput: Bool = UserDefaults.standard.object(forKey: "enableSpeechInput") == nil ? true : UserDefaults.standard.bool(forKey: "enableSpeechInput")
     @Published var enableAttachmentInput: Bool = UserDefaults.standard.object(forKey: "enableAttachmentInput") == nil ? true : UserDefaults.standard.bool(forKey: "enableAttachmentInput")
+
+    /// Selected LLM model.
+    @Published var selectedModel: String = UserDefaults.standard.string(forKey: "selectedModel") ?? "gpt-4.1"
     
     private var webToolProvider: WebAgentToolProvider?
-    private let fileToolProvider = FileToolProvider()
-    private let ffmpegToolProvider = FFmpegToolProvider()
+    private let workspaceBootstrapper: WorkspaceBootstrapper
+    private let profileLoader: AgentProfileLoader
+    private let workspaceURL: URL
+    private let fileToolProvider: FileToolProvider
+    private let memoryToolProvider: MemoryToolProvider
+    private let ffmpegToolProvider: FFmpegToolProvider
+    private let agentProfile: AgentRuntimeProfile?
     private var agent: CopilotAgent?
     private var agentTask: Task<Void, Never>?
     /// Reference to the shared CopilotChat view model
     @Published private(set) var chatViewModel: ChatViewModel?
+    /// Payment manager for IAP credit purchases
+    @Published private(set) var paymentManager: PaymentManager?
+
+    init() {
+        let bootstrapper = WorkspaceBootstrapper()
+        let loader = AgentProfileLoader()
+        let resolvedWorkspace: URL
+        if let bootstrapped = try? bootstrapper.ensureWorkspaceReady() {
+            resolvedWorkspace = bootstrapped
+        } else {
+            let appSupport = (try? FileManager.default.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            )) ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            resolvedWorkspace = appSupport.appendingPathComponent("workspace", isDirectory: true)
+            try? FileManager.default.createDirectory(at: resolvedWorkspace, withIntermediateDirectories: true)
+        }
+
+        self.workspaceBootstrapper = bootstrapper
+        self.profileLoader = loader
+        self.workspaceURL = resolvedWorkspace
+        self.fileToolProvider = FileToolProvider(baseDirectory: resolvedWorkspace)
+        self.memoryToolProvider = MemoryToolProvider(baseDirectory: resolvedWorkspace)
+        self.ffmpegToolProvider = FFmpegToolProvider(baseDirectory: resolvedWorkspace)
+        self.agentProfile = try? loader.load(from: resolvedWorkspace)
+    }
     
     /// Save relay settings to UserDefaults.
     func saveRelaySettings() {
@@ -61,6 +97,7 @@ final class AgentCoordinator: ObservableObject {
         UserDefaults.standard.set(enableTextInput, forKey: "enableTextInput")
         UserDefaults.standard.set(enableSpeechInput, forKey: "enableSpeechInput")
         UserDefaults.standard.set(enableAttachmentInput, forKey: "enableAttachmentInput")
+        UserDefaults.standard.set(selectedModel, forKey: "selectedModel")
     }
 
     var chatInputModes: InputMode {
@@ -86,6 +123,13 @@ final class AgentCoordinator: ObservableObject {
             RegisteredTool(name: "notify", description: "Send local notification"),
             RegisteredTool(name: "take_photo", description: "Capture photo with camera"),
             RegisteredTool(name: "copy_to_clipboard", description: "Copy text to clipboard"),
+            RegisteredTool(name: "memory_read", description: "Read memory notes under .neo"),
+            RegisteredTool(name: "memory_append", description: "Append timestamped memory notes"),
+            RegisteredTool(name: "memory_write_section", description: "Write/replace memory markdown sections"),
+            RegisteredTool(name: "memory_log_session", description: "Create session notes in .neo/reports/sessions"),
+            RegisteredTool(name: "memory_list", description: "List memory files under .neo"),
+            RegisteredTool(name: "create_new_project", description: "Scaffold a new project from .neo/templates/project"),
+            RegisteredTool(name: "create_plan", description: "Create a scheduled plan from chat"),
             RegisteredTool(name: "ffmpeg", description: "Run ffmpeg media processing commands"),
             RegisteredTool(name: "ffprobe", description: "Inspect media metadata and streams"),
         ]
@@ -94,13 +138,27 @@ final class AgentCoordinator: ObservableObject {
     func setupWebKitAgent(manager: WebViewManager) {
         webToolProvider = WebAgentToolProvider(manager: manager)
     }
+
+    var mainAgentFileURL: URL {
+        workspaceURL
+            .appendingPathComponent(".github", isDirectory: true)
+            .appendingPathComponent("agents", isDirectory: true)
+            .appendingPathComponent("main.agent.md")
+    }
+
+    /// The root URL of the on-device workspace (for file explorer, etc.)
+    var workspaceRootURL: URL {
+        workspaceURL
+    }
     
     func buildSystemPrompt() -> String {
         var prompt = """
         You are Neox, an autonomous AI assistant on iPhone.
         You can browse the web, take photos, speak to the user, and listen.
         Use the browser to operate websites like GitHub, Vercel, etc.
-        You have file tools (read_file, write_file, list_files) to manage files in the on-device workspace.
+        You have file tools (read_file, write_file, list_files, create_new_project) to manage files in the on-device workspace.
+        You have memory tools to manage long-term notes under .neo/ (memory_read, memory_append, memory_write_section, memory_log_session, memory_list).
+        You have a create_plan tool to create scheduled plans directly from chat. Users can say "create a plan for X" and you create it.
         
         You have a manage_todo_list tool — use it for multi-step tasks to track progress.
         The todo list is displayed above the chat input in the app.
@@ -124,6 +182,9 @@ final class AgentCoordinator: ObservableObject {
         // File tools (read_file, write_file, list_files)
         tools.append(contentsOf: fileToolProvider.tools)
 
+        // Memory tools (.neo/* memory lifecycle)
+        tools.append(contentsOf: memoryToolProvider.tools)
+
         // Media tools (ffmpeg, ffprobe)
         tools.append(contentsOf: ffmpegToolProvider.tools)
         
@@ -134,6 +195,11 @@ final class AgentCoordinator: ObservableObject {
     func createChatViewModel() -> ChatViewModel {
         normalizeInputSettings()
         let tools = buildTools()
+        let hasProfileSections = !(agentProfile?.sections.isEmpty ?? true)
+        let profileInstructions = agentProfile?.preambleBody?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let instructions = profileInstructions?.isEmpty == false ? profileInstructions! : buildSystemPrompt()
+        let sections = hasProfileSections ? agentProfile?.sections : nil
+        let model = selectedModel
         
         let transport = WebSocketTransport(
             host: relayHost,
@@ -143,8 +209,9 @@ final class AgentCoordinator: ObservableObject {
         let vm = ChatViewModel(
             transport: transport,
             mode: .agent(AgentConfig(
-                model: "gpt-4.1",
-                instructions: buildSystemPrompt(),
+                model: model,
+                instructions: instructions,
+                sections: sections,
                 tools: tools,
                 onResponse: { _ in },
                 onAskUser: { _ in "" }
@@ -153,6 +220,7 @@ final class AgentCoordinator: ObservableObject {
         )
         
         self.chatViewModel = vm
+        self.paymentManager = PaymentManager(usageTracker: vm.usageTracker)
         Task { await vm.connect() }
         return vm
     }

@@ -1,12 +1,16 @@
 import SwiftUI
 import WebKitAgent
 import CopilotChat
+import CopilotSDK
 
 struct ContentView: View {
     @EnvironmentObject var coordinator: AgentCoordinator
     @State private var webManager = WebViewManager()
     @State private var showWebView = false
     @State private var showSettings = false
+    @State private var showProjects = false
+    @State private var showModelPicker = false
+    @State private var currentProject: String? = nil
     
     var body: some View {
         ZStack {
@@ -19,18 +23,30 @@ struct ContentView: View {
                 if let chatVM = coordinator.chatViewModel {
                     NavigationStack {
                         CopilotChat.ChatView(viewModel: chatVM, inputModes: coordinator.chatInputModes)
-                            .navigationTitle("Neo")
+                            .navigationTitle(currentProject ?? "Neo")
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
                                 ToolbarItem(placement: .topBarLeading) {
-                                    Button(action: { showWebView.toggle() }) {
-                                        Image(systemName: showWebView ? "bubble.left.fill" : "globe")
+                                    HStack(spacing: 4) {
+                                        ProjectBadgeView(
+                                            currentProject: currentProject,
+                                            action: { showProjects = true }
+                                        )
+                                        Button(action: { showWebView.toggle() }) {
+                                            Image(systemName: "globe")
+                                        }
                                     }
                                 }
                                 ToolbarItem(placement: .topBarTrailing) {
-                                    Button(action: { showSettings = true }) {
-                                        Image(systemName: "gearshape.fill")
-                                            .foregroundStyle(statusColor)
+                                    HStack(spacing: 8) {
+                                        ModelBadgeView(modelId: coordinator.selectedModel) {
+                                            showModelPicker = true
+                                        }
+                                        UsageBadgeView(tracker: chatVM.usageTracker)
+                                        Button(action: { showSettings = true }) {
+                                            Image(systemName: "gearshape.fill")
+                                                .foregroundStyle(statusColor)
+                                        }
                                     }
                                 }
                             }
@@ -43,9 +59,38 @@ struct ContentView: View {
         .onAppear {
             coordinator.setupWebKitAgent(manager: webManager)
         }
+        .sheet(isPresented: $showProjects) {
+            ProjectsView(
+                rootURL: coordinator.workspaceRootURL,
+                currentProject: currentProject,
+                onSelect: { project in
+                    currentProject = project?.name
+                    if let chatVM = coordinator.chatViewModel {
+                        chatVM.projectScope = project?.name
+                    }
+                }
+            )
+        }
         .sheet(isPresented: $showSettings) {
             RelaySettingsView()
                 .environmentObject(coordinator)
+        }
+        .sheet(isPresented: $showModelPicker) {
+            NavigationStack {
+                ModelPickerView(
+                    selectedModelId: $coordinator.selectedModel,
+                    onModelChanged: { newModel in
+                        coordinator.saveRelaySettings()
+                        coordinator.reconnect()
+                        showModelPicker = false
+                    }
+                )
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { showModelPicker = false }
+                    }
+                }
+            }
         }
     }
     
@@ -98,6 +143,77 @@ struct RelaySettingsView: View {
                     Toggle("Text", isOn: $coordinator.enableTextInput)
                     Toggle("Speech", isOn: $coordinator.enableSpeechInput)
                     Toggle("Attachment", isOn: $coordinator.enableAttachmentInput)
+                }
+
+                Section("Agent Profile") {
+                    NavigationLink("Edit main.agent.md") {
+                        MarkdownH1FileEditorView(
+                            fileURL: coordinator.mainAgentFileURL,
+                            navigationTitleText: "Edit main.agent.md",
+                            loadingText: "Loading main.agent.md...",
+                            availableTools: Array(Set(coordinator.allTools.map(\.name))).sorted()
+                        )
+                    }
+                    NavigationLink {
+                        ModelPickerView(
+                            selectedModelId: $coordinator.selectedModel,
+                            onModelChanged: { _ in
+                                coordinator.saveRelaySettings()
+                            }
+                        )
+                    } label: {
+                        HStack {
+                            Text("Model")
+                            Spacer()
+                            Text(ModelCatalog.model(for: coordinator.selectedModel)?.name ?? coordinator.selectedModel)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                Section("Plans") {
+                    NavigationLink {
+                        PlanManagerView(
+                            store: coordinator.chatViewModel?.planStore ?? PlanStore(),
+                            onRunPlan: { plan in
+                                if let chatVM = coordinator.chatViewModel {
+                                    Task {
+                                        await chatVM.runPlan(plan)
+                                    }
+                                }
+                            }
+                        )
+                    } label: {
+                        Label("Manage Plans", systemImage: "calendar.badge.clock")
+                    }
+                }
+
+                Section("Credits") {
+                    if let chatVM = coordinator.chatViewModel,
+                       let pm = coordinator.paymentManager {
+                        NavigationLink {
+                            PaymentView(paymentManager: pm, usageTracker: chatVM.usageTracker)
+                        } label: {
+                            HStack {
+                                Label("Buy Credits", systemImage: "creditcard.fill")
+                                Spacer()
+                                Text(String(format: "$%.2f", chatVM.usageTracker.balance))
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                            }
+                        }
+                    }
+                }
+
+                Section("Workspace") {
+                    NavigationLink {
+                        FileExplorerView(
+                            rootURL: coordinator.workspaceRootURL,
+                            title: "Workspace"
+                        )
+                    } label: {
+                        Label("File Explorer", systemImage: "folder")
+                    }
                 }
                 
                 Section {
