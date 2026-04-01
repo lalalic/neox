@@ -62,6 +62,8 @@ final class AgentCoordinator: ObservableObject {
     @Published private(set) var chatViewModel: ChatViewModel?
     /// Payment manager for IAP credit purchases
     @Published private(set) var paymentManager: PaymentManager?
+    /// WeChat channel service (owns its own WKWebView).
+    @Published private(set) var weChatService: WeChatService!
 
     init() {
         let bootstrapper = WorkspaceBootstrapper()
@@ -89,6 +91,7 @@ final class AgentCoordinator: ObservableObject {
         self.ffmpegToolProvider = FFmpegToolProvider(baseDirectory: resolvedWorkspace)
         #endif
         self.agentProfile = try? loader.load(from: resolvedWorkspace)
+        self.weChatService = WeChatService(workspaceURL: resolvedWorkspace)
     }
     
     /// Save relay settings to UserDefaults.
@@ -226,8 +229,25 @@ final class AgentCoordinator: ObservableObject {
                 instructions: instructions,
                 sections: sections,
                 tools: tools,
-                onResponse: { _ in },
-                onAskUser: { _ in "" }
+                onResponse: { [weak self] message in
+                    guard let self else { return }
+                    await MainActor.run {
+                        let project = self.chatViewModel?.projectScope
+                        Task {
+                            await self.weChatService.forward(message: message, project: project)
+                        }
+                    }
+                },
+                onAskUser: { [weak self] question in
+                    guard let self else { return "" }
+                    await MainActor.run {
+                        let project = self.chatViewModel?.projectScope
+                        Task {
+                            await self.weChatService.forward(message: "❓ \(question)", project: project)
+                        }
+                    }
+                    return ""
+                }
             )),
             inputModes: chatInputModes
         )

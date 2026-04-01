@@ -15,6 +15,7 @@ struct ContentView: View {
     @State private var stripeCheckoutURL: URL? = nil
     @State private var showCreditToast = false
     @State private var creditToastText = ""
+    @State private var showContactSelector = false
     
     var body: some View {
         ZStack {
@@ -43,6 +44,13 @@ struct ContentView: View {
                                 }
                                 ToolbarItem(placement: .topBarTrailing) {
                                     HStack(spacing: 8) {
+                                        if coordinator.weChatService.config.enabled {
+                                            WeChatStatusIndicator(
+                                                weChatService: coordinator.weChatService,
+                                                project: currentProject,
+                                                onLongPress: { showContactSelector = true }
+                                            )
+                                        }
                                         Button(action: { showSettings = true }) {
                                             Image(systemName: "gearshape.fill")
                                                 .foregroundStyle(statusColor)
@@ -118,6 +126,12 @@ struct ContentView: View {
                     // Clear the URL in ChatViewModel so fallback doesn't trigger
                     coordinator.chatViewModel?.stripeCheckoutURL = nil
                 }
+        }
+        .sheet(isPresented: $showContactSelector) {
+            ContactSelectorView(
+                weChatService: coordinator.weChatService,
+                project: currentProject
+            )
         }
         .onReceive(NotificationCenter.default.publisher(for: .stripeCheckoutRequested)) { note in
             if let url = note.object as? URL {
@@ -198,6 +212,24 @@ struct RelaySettingsView: View {
                     Toggle("Text", isOn: $coordinator.enableTextInput)
                     Toggle("Speech", isOn: $coordinator.enableSpeechInput)
                     Toggle("Attachment", isOn: $coordinator.enableAttachmentInput)
+                }
+
+                // MARK: WeChat Channel
+                Section("WeChat Channel") {
+                    Toggle("Enable WeChat", isOn: Binding(
+                        get: { coordinator.weChatService.config.enabled },
+                        set: { newValue in
+                            if newValue {
+                                coordinator.weChatService.enable()
+                            } else {
+                                coordinator.weChatService.disable()
+                            }
+                        }
+                    ))
+
+                    if coordinator.weChatService.config.enabled {
+                        WeChatChannelStatusView(weChatService: coordinator.weChatService)
+                    }
                 }
 
                 Section("Agent Profile") {

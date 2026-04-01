@@ -64,3 +64,4 @@ fastlane/test_output
 build/
 build/
 build-sim/
+build-device/
