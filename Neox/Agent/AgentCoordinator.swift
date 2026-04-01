@@ -2,7 +2,9 @@ import Foundation
 import CopilotSDK
 import CopilotChat
 import WebKitAgent
+#if canImport(MediaKit)
 import MediaKit
+#endif
 
 struct RegisteredTool: Identifiable, Equatable {
     let id = UUID()
@@ -50,7 +52,9 @@ final class AgentCoordinator: ObservableObject {
     private let workspaceURL: URL
     private let fileToolProvider: FileToolProvider
     private let memoryToolProvider: MemoryToolProvider
+    #if canImport(MediaKit)
     private let ffmpegToolProvider: FFmpegToolProvider
+    #endif
     private let agentProfile: AgentRuntimeProfile?
     private var agent: CopilotAgent?
     private var agentTask: Task<Void, Never>?
@@ -81,7 +85,9 @@ final class AgentCoordinator: ObservableObject {
         self.workspaceURL = resolvedWorkspace
         self.fileToolProvider = FileToolProvider(baseDirectory: resolvedWorkspace)
         self.memoryToolProvider = MemoryToolProvider(baseDirectory: resolvedWorkspace)
+        #if canImport(MediaKit)
         self.ffmpegToolProvider = FFmpegToolProvider(baseDirectory: resolvedWorkspace)
+        #endif
         self.agentProfile = try? loader.load(from: resolvedWorkspace)
     }
     
@@ -131,9 +137,13 @@ final class AgentCoordinator: ObservableObject {
             RegisteredTool(name: "create_new_project", description: "Scaffold a new project from .neo/templates/project"),
             RegisteredTool(name: "create_plan", description: "Create a scheduled plan from chat"),
             RegisteredTool(name: "stripe_checkout", description: "Generate external Stripe checkout link when requested"),
+        ]
+        #if canImport(MediaKit)
+        registeredTools.append(contentsOf: [
             RegisteredTool(name: "ffmpeg", description: "Run ffmpeg media processing commands"),
             RegisteredTool(name: "ffprobe", description: "Inspect media metadata and streams"),
-        ]
+        ])
+        #endif
     }
     
     func setupWebKitAgent(manager: WebViewManager) {
@@ -187,7 +197,9 @@ final class AgentCoordinator: ObservableObject {
         tools.append(contentsOf: memoryToolProvider.tools)
 
         // Media tools (ffmpeg, ffprobe)
+        #if canImport(MediaKit)
         tools.append(contentsOf: ffmpegToolProvider.tools)
+        #endif
         
         return tools
     }

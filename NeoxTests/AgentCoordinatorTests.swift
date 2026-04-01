@@ -1,5 +1,6 @@
 import Testing
 @testable import Neox
+import CopilotChat
 
 @Suite("AgentCoordinator Tests")
 @MainActor
@@ -50,14 +51,12 @@ struct AgentCoordinatorTests {
         #expect(!coordinator.isAgentRunning)
     }
     
-    @Test("Wire chat connects onSend to agent")
-    func wireChat() {
+    @Test("Create chat view model produces a connected ViewModel")
+    func createChat() {
         let coordinator = AgentCoordinator()
-        let chatVM = ChatViewModel()
+        let chatVM = coordinator.createChatViewModel()
         
-        coordinator.wireChat(chatVM)
-        
-        #expect(chatVM.onSend != nil)
+        #expect(chatVM.chatState == .disconnected || chatVM.chatState == .connecting)
     }
     
     @Test("Default relay host and port")
