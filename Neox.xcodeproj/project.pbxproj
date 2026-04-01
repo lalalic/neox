@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		03DBE749DD0BE039825F5CCB /* ChatViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E66E23AA153269F23D4AB426 /* ChatViewModelTests.swift */; };
+		0C9C4519B8B4232A1CE550CC /* WeChatQRLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0FB09E85C77555917883E6A /* WeChatQRLoginView.swift */; };
 		12974D3CADEA1B996BE81E3A /* CopilotChat in Frameworks */ = {isa = PBXBuildFile; productRef = AE4C537440B9D9C94B8EE84C /* CopilotChat */; };
 		18C6EFAEB92EF3DCA920E1BF /* BrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C883C860AF9FB8AC76EF2092 /* BrowserView.swift */; };
 		18CAB09FB488BD590B2BC13A /* WebKitAgent in Frameworks */ = {isa = PBXBuildFile; productRef = 3D607B170316C9DBE0ED5D56 /* WebKitAgent */; };
@@ -58,6 +59,7 @@
 		928F90A2C3745D5227793FE6 /* ConnectionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionManager.swift; sourceTree = "<group>"; };
 		97DB23F6143C0A626A2709C0 /* TaskQueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskQueueView.swift; sourceTree = "<group>"; };
 		9A2E1FCDF66DE3D92CD5D817 /* WeChatChannelStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatChannelStatusView.swift; sourceTree = "<group>"; };
+		B0FB09E85C77555917883E6A /* WeChatQRLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatQRLoginView.swift; sourceTree = "<group>"; };
 		B37B4665FD704C52F25C6474 /* ContactSelectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactSelectorView.swift; sourceTree = "<group>"; };
 		C3375491FB7AE5BBF342A4F1 /* AppAgentSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAgentSetup.swift; sourceTree = "<group>"; };
 		C883C860AF9FB8AC76EF2092 /* BrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserView.swift; sourceTree = "<group>"; };
@@ -207,6 +209,7 @@
 			children = (
 				B37B4665FD704C52F25C6474 /* ContactSelectorView.swift */,
 				9A2E1FCDF66DE3D92CD5D817 /* WeChatChannelStatusView.swift */,
+				B0FB09E85C77555917883E6A /* WeChatQRLoginView.swift */,
 				16940B046D021DBFE959F0F0 /* WeChatStatusIndicator.swift */,
 			);
 			path = Views;
@@ -344,6 +347,7 @@
 				8F48A0C1FB3A677868DA3DEB /* NeoxApp.swift in Sources */,
 				BD16622516E56FFB6CA685DF /* TaskQueueView.swift in Sources */,
 				63D5C9301533970D920E366B /* WeChatChannelStatusView.swift in Sources */,
+				0C9C4519B8B4232A1CE550CC /* WeChatQRLoginView.swift in Sources */,
 				A613BC2C32B79761A1AC8B24 /* WeChatService.swift in Sources */,
 				D67818723B954E1882521830 /* WeChatStatusIndicator.swift in Sources */,
 			);

@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKitAgent
+import WebKit
 
 // MARK: - Persistence Types
 
@@ -51,7 +52,7 @@ final class WeChatService: ObservableObject {
     var isOnline: Bool { channel?.state == .ready }
     var loggedInUser: WeChatUser? { channel?.loggedInUser }
     var contacts: [WeChatContact] { channel?.contacts ?? [] }
-    var channelState: WeChatChannelState { channel?.state ?? .disconnected }
+    @Published var channelState: WeChatChannelState = .disconnected
     var qrCodeURL: String? { channel?.qrCodeURL }
 
     func statusColor(for project: String?) -> Color {
@@ -66,6 +67,9 @@ final class WeChatService: ObservableObject {
 
     private let defaults: UserDefaults
     private let bindingsFileURL: URL
+
+    /// Hidden window to host the WKWebView (required on-device).
+    private var hiddenWindow: UIWindow?
 
     private static let configKey = "wechat_service_config"
     private static let bindingsFileName = "wechat-bindings.json"
@@ -107,12 +111,33 @@ final class WeChatService: ObservableObject {
     func enable() {
         guard channel == nil else { return }
         let ch = WeChatChannel()
-        ch.onStateChange = { [weak self] _ in
+        ch.onStateChange = { [weak self] newState in
             Task { @MainActor in
+                self?.channelState = newState
                 self?.objectWillChange.send()
             }
         }
         self.channel = ch
+
+        // WKWebView must be in a UIWindow hierarchy to load content on-device.
+        // On iOS 13+, windows must be associated with a UIWindowScene.
+        // The webView needs a reasonable frame for WebKit to render content.
+        if let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene }).first {
+            let window = UIWindow(windowScene: scene)
+            window.frame = scene.coordinateSpace.bounds  // Full screen for proper rendering
+            window.windowLevel = .init(rawValue: -1000)  // Far below everything
+            window.isUserInteractionEnabled = false
+            window.alpha = 0.01  // Near-invisible (alpha=0 causes iOS to skip rendering)
+            let vc = UIViewController()
+            vc.view.addSubview(ch.webView)
+            // Keep webView at its original 1280×900 for proper wx.qq.com rendering
+            ch.webView.frame = CGRect(x: 0, y: 0, width: 1280, height: 900)
+            window.rootViewController = vc
+            window.isHidden = false
+            self.hiddenWindow = window
+        }
+
         ch.start()
         config.enabled = true
     }
@@ -120,6 +145,9 @@ final class WeChatService: ObservableObject {
     func disable() {
         channel?.destroy()
         channel = nil
+        channelState = .disconnected
+        hiddenWindow?.isHidden = true
+        hiddenWindow = nil
         config.enabled = false
     }
 

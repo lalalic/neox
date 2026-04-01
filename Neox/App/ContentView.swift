@@ -16,6 +16,7 @@ struct ContentView: View {
     @State private var showCreditToast = false
     @State private var creditToastText = ""
     @State private var showContactSelector = false
+    @State private var showQRLogin = false
     
     var body: some View {
         ZStack {
@@ -99,7 +100,7 @@ struct ContentView: View {
             )
         }
         .sheet(isPresented: $showSettings) {
-            RelaySettingsView()
+            RelaySettingsView(weChatService: coordinator.weChatService)
                 .environmentObject(coordinator)
         }
         .sheet(isPresented: $showModelPicker) {
@@ -132,6 +133,16 @@ struct ContentView: View {
                 weChatService: coordinator.weChatService,
                 project: currentProject
             )
+        }
+        .sheet(isPresented: $showQRLogin) {
+            WeChatQRLoginView(weChatService: coordinator.weChatService)
+        }
+        .onReceive(coordinator.weChatService.$channelState) { newState in
+            if newState == .qrReady && !showQRLogin {
+                showQRLogin = true
+            } else if newState == .ready || newState == .dead || newState == .disconnected {
+                showQRLogin = false
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .stripeCheckoutRequested)) { note in
             if let url = note.object as? URL {
@@ -173,6 +184,7 @@ struct ContentView: View {
 
 struct RelaySettingsView: View {
     @EnvironmentObject var coordinator: AgentCoordinator
+    @ObservedObject var weChatService: WeChatService
     @Environment(\.dismiss) private var dismiss
     
     var body: some View {
@@ -217,19 +229,15 @@ struct RelaySettingsView: View {
                 // MARK: WeChat Channel
                 Section("WeChat Channel") {
                     Toggle("Enable WeChat", isOn: Binding(
-                        get: { coordinator.weChatService.config.enabled },
+                        get: { weChatService.config.enabled },
                         set: { newValue in
                             if newValue {
-                                coordinator.weChatService.enable()
+                                weChatService.enable()
                             } else {
-                                coordinator.weChatService.disable()
+                                weChatService.disable()
                             }
                         }
                     ))
-
-                    if coordinator.weChatService.config.enabled {
-                        WeChatChannelStatusView(weChatService: coordinator.weChatService)
-                    }
                 }
 
                 Section("Agent Profile") {

@@ -20,7 +20,7 @@ struct WeChatStatusIndicator: View {
         }) {
             Image(systemName: iconName)
                 .font(.body)
-                .foregroundStyle(weChatService.statusColor(for: project))
+                .foregroundStyle(iconColor)
                 .contentTransition(.symbolEffect(.replace))
         }
         .simultaneousGesture(
@@ -31,16 +31,28 @@ struct WeChatStatusIndicator: View {
     }
 
     private var iconName: String {
-        guard weChatService.config.enabled else { return "message" }
+        guard weChatService.config.enabled else { return "ellipsis.bubble" }
         switch weChatService.channelState {
         case .ready:
             return weChatService.isRoutingActive(for: project)
-                ? "message.fill"
-                : "message.badge.clock.fill"
+                ? "ellipsis.bubble.fill"       // Online + routing
+                : "ellipsis.bubble"             // Online + paused
         case .loading, .extractingQR, .qrReady, .loggingIn:
-            return "message.badge.circle.fill"
+            return "ellipsis.bubble"            // Loading/QR states
         case .disconnected, .dead:
-            return "message"
+            return "ellipsis.bubble"            // Offline
+        }
+    }
+
+    private var iconColor: Color {
+        guard weChatService.config.enabled else { return .gray }
+        switch weChatService.channelState {
+        case .ready:
+            return weChatService.isRoutingActive(for: project) ? .green : .yellow
+        case .loading, .extractingQR, .qrReady, .loggingIn:
+            return .orange
+        case .disconnected, .dead:
+            return .gray
         }
     }
 
