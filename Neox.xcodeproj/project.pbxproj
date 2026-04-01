@@ -8,9 +8,9 @@
 
 /* Begin PBXBuildFile section */
 		03DBE749DD0BE039825F5CCB /* ChatViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E66E23AA153269F23D4AB426 /* ChatViewModelTests.swift */; };
-		0A1B2C3D4E5F6789ABCDEF01 /* MediaKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F7890ABCDEF02 /* MediaKit */; };
-		12974D3CADEA1B996BE81E3A /* WebKitAgent in Frameworks */ = {isa = PBXBuildFile; productRef = 3D607B170316C9DBE0ED5D56 /* WebKitAgent */; };
+		12974D3CADEA1B996BE81E3A /* CopilotChat in Frameworks */ = {isa = PBXBuildFile; productRef = AE4C537440B9D9C94B8EE84C /* CopilotChat */; };
 		18C6EFAEB92EF3DCA920E1BF /* BrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C883C860AF9FB8AC76EF2092 /* BrowserView.swift */; };
+		18CAB09FB488BD590B2BC13A /* WebKitAgent in Frameworks */ = {isa = PBXBuildFile; productRef = 3D607B170316C9DBE0ED5D56 /* WebKitAgent */; };
 		20DD84491B79856EDCFF7601 /* CopilotIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EA7D7D797F83218D5477B37 /* CopilotIntegrationTests.swift */; };
 		37ED3AA65F2A53E8859421E6 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5207428BC5E6750ACC5A9FC /* ContentView.swift */; };
 		38852AC190FC94E3CDFD6F5D /* ConnectionManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80BC261C20020C539BFAFC3B /* ConnectionManagerTests.swift */; };
@@ -22,6 +22,7 @@
 		6EBD2CAE819755F220560940 /* CameraKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1422CA69286436F0228132CC /* CameraKit */; };
 		8171DFC6774737D5F1E7BCD1 /* ConnectionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 928F90A2C3745D5227793FE6 /* ConnectionManager.swift */; };
 		8F48A0C1FB3A677868DA3DEB /* NeoxApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 418207ED5F8A754F490D10E6 /* NeoxApp.swift */; };
+		9D745037123904342BCD4551 /* Neox.storekit in Resources */ = {isa = PBXBuildFile; fileRef = E1641F6FF4066ACD4F03721A /* Neox.storekit */; };
 		BD16622516E56FFB6CA685DF /* TaskQueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97DB23F6143C0A626A2709C0 /* TaskQueueView.swift */; };
 		DAD78552513ADB5ACA4ACDC6 /* AppAgent in Frameworks */ = {isa = PBXBuildFile; productRef = 0735BD6B8E5889534FBA4187 /* AppAgent */; };
 		E5CD5FB2AA4C277B827C63BF /* AgentCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91570FF6EA62274C2457A7EF /* AgentCoordinator.swift */; };
@@ -52,6 +53,7 @@
 		C3375491FB7AE5BBF342A4F1 /* AppAgentSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAgentSetup.swift; sourceTree = "<group>"; };
 		C883C860AF9FB8AC76EF2092 /* BrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserView.swift; sourceTree = "<group>"; };
 		D1712A3E7E39C96DB9DE375A /* AgentCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCoordinatorTests.swift; sourceTree = "<group>"; };
+		E1641F6FF4066ACD4F03721A /* Neox.storekit */ = {isa = PBXFileReference; path = Neox.storekit; sourceTree = "<group>"; };
 		E5207428BC5E6750ACC5A9FC /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		E66E23AA153269F23D4AB426 /* ChatViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModelTests.swift; sourceTree = "<group>"; };
 		F8099EBDCCDC9A54406CD81C /* Neox.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Neox.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -64,7 +66,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				F40CB541E64720EBB56C886A /* CopilotSDK in Frameworks */,
-				12974D3CADEA1B996BE81E3A /* WebKitAgent in Frameworks */,
+				12974D3CADEA1B996BE81E3A /* CopilotChat in Frameworks */,
+				18CAB09FB488BD590B2BC13A /* WebKitAgent in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -77,7 +80,6 @@
 				F8C30529CD8228476DC7A214 /* WebKitAgent in Frameworks */,
 				DAD78552513ADB5ACA4ACDC6 /* AppAgent in Frameworks */,
 				6EBD2CAE819755F220560940 /* CameraKit in Frameworks */,
-				0A1B2C3D4E5F6789ABCDEF01 /* MediaKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -94,6 +96,14 @@
 				85CA36BEADA8D83511E76B9F /* WeChatAdapterTests.swift */,
 			);
 			path = NeoxTests;
+			sourceTree = "<group>";
+		};
+		10629035F1497BD5530A9DF3 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				E1641F6FF4066ACD4F03721A /* Neox.storekit */,
+			);
+			path = Config;
 			sourceTree = "<group>";
 		};
 		1B2897D8FF4911DF1A260117 /* Browser */ = {
@@ -139,6 +149,7 @@
 				94C01F2A2B4437191B0C74EA /* Agent */,
 				42A154701E8F1587C35E779C /* App */,
 				1B2897D8FF4911DF1A260117 /* Browser */,
+				10629035F1497BD5530A9DF3 /* Config */,
 				558E0F7CC7D03BF864AAD270 /* Tasks */,
 				710C319BF113CF9A62AD9D8E /* Testing */,
 			);
@@ -186,6 +197,7 @@
 			buildConfigurationList = DD6CDB7C82D684B96C67AEFE /* Build configuration list for PBXNativeTarget "Neox" */;
 			buildPhases = (
 				873C6D9106FC1C69CC622554 /* Sources */,
+				611FC8D8C9B1D83A04252A57 /* Resources */,
 				FC4C7350078EEA8A19507547 /* Frameworks */,
 			);
 			buildRules = (
@@ -199,7 +211,6 @@
 				AFDDCABE9F461516EC5ACA9E /* WebKitAgent */,
 				0735BD6B8E5889534FBA4187 /* AppAgent */,
 				1422CA69286436F0228132CC /* CameraKit */,
-				1A2B3C4D5E6F7890ABCDEF02 /* MediaKit */,
 			);
 			productName = Neox;
 			productReference = F8099EBDCCDC9A54406CD81C /* Neox.app */;
@@ -220,6 +231,7 @@
 			name = NeoxTests;
 			packageProductDependencies = (
 				39B829183A8BCE9F0485BD2A /* CopilotSDK */,
+				AE4C537440B9D9C94B8EE84C /* CopilotChat */,
 				3D607B170316C9DBE0ED5D56 /* WebKitAgent */,
 			);
 			productName = NeoxTests;
@@ -262,6 +274,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		611FC8D8C9B1D83A04252A57 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9D745037123904342BCD4551 /* Neox.storekit in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		35AEB7684DBE43E68D171326 /* Sources */ = {
@@ -552,13 +575,13 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = WebKitAgent;
 		};
-		1A2B3C4D5E6F7890ABCDEF02 /* MediaKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = MediaKit;
-		};
 		57B45C4E69586D04F11B529E /* CopilotSDK */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = CopilotSDK;
+		};
+		AE4C537440B9D9C94B8EE84C /* CopilotChat */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CopilotChat;
 		};
 		AFDDCABE9F461516EC5ACA9E /* WebKitAgent */ = {
 			isa = XCSwiftPackageProductDependency;

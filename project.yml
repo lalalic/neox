@@ -51,4 +51,6 @@ targets:
       - package: copilot-ios
         product: CopilotSDK
       - package: copilot-ios
+        product: CopilotChat
+      - package: copilot-ios
         product: WebKitAgent
