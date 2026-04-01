@@ -3,8 +3,8 @@ import WebKitAgent
 
 /// Small toolbar icon showing WeChat channel status.
 ///
-/// - **Green**: Online and actively routing messages.
-/// - **Yellow**: Online but routing paused or no contacts bound.
+/// - **Green**: Online (filled = routing active).
+/// - **Green + slash**: Online but routing off.
 /// - **Gray**: Offline or service disabled.
 ///
 /// Tap to toggle routing on/off. Long-press to open the contact selector.
@@ -18,10 +18,20 @@ struct WeChatStatusIndicator: View {
             guard weChatService.config.enabled else { return }
             weChatService.toggleRouting(for: project)
         }) {
-            Image(systemName: iconName)
-                .font(.body)
-                .foregroundStyle(iconColor)
-                .contentTransition(.symbolEffect(.replace))
+            ZStack {
+                Image(systemName: iconName)
+                    .font(.body)
+                    .foregroundStyle(iconColor)
+                    .contentTransition(.symbolEffect(.replace))
+
+                // Slash overlay when online but routing off
+                if showSlash {
+                    Image(systemName: "line.diagonal")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.green)
+                        .rotationEffect(.degrees(45))
+                }
+            }
         }
         .simultaneousGesture(
             LongPressGesture(minimumDuration: 0.5)
@@ -31,29 +41,25 @@ struct WeChatStatusIndicator: View {
     }
 
     private var iconName: String {
-        guard weChatService.config.enabled else { return "ellipsis.bubble" }
-        switch weChatService.channelState {
-        case .ready:
-            return weChatService.isRoutingActive(for: project)
-                ? "ellipsis.bubble.fill"       // Online + routing
-                : "ellipsis.bubble"             // Online + paused
-        case .loading, .extractingQR, .qrReady, .loggingIn:
-            return "ellipsis.bubble"            // Loading/QR states
-        case .disconnected, .dead:
-            return "ellipsis.bubble"            // Offline
-        }
+        "ellipsis.bubble.fill"
     }
 
     private var iconColor: Color {
         guard weChatService.config.enabled else { return .gray }
         switch weChatService.channelState {
         case .ready:
-            return weChatService.isRoutingActive(for: project) ? .green : .yellow
+            return .green
         case .loading, .extractingQR, .qrReady, .loggingIn:
-            return .orange
+            return .gray  // still loading
         case .disconnected, .dead:
             return .gray
         }
+    }
+
+    private var showSlash: Bool {
+        weChatService.config.enabled
+            && weChatService.channelState == .ready
+            && !weChatService.isRoutingActive(for: project)
     }
 
     private var accessibilityStatus: String {
