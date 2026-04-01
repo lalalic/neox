@@ -1,3 +1,4 @@
+import Testing
 import XCTest
 import CopilotSDK
 import WebKitAgent
@@ -5,176 +6,169 @@ import WebKitAgent
 
 /// Tests for WeChat site adapters dispatched through Neox's AgentCoordinator.
 /// Validates the full path: AgentCoordinator → buildTools() → web_agent → site command → WeChat adapters.
-/// Uses @MainActor since WebViewManager requires WKWebView on main thread.
+@Suite("WeChatAdapter Tests")
 @MainActor
-final class WeChatAdapterTests: XCTestCase {
+struct WeChatAdapterTests {
 
-    var coordinator: AgentCoordinator!
-    var manager: WebViewManager!
-    var webAgentTool: ToolDefinition!
+    let coordinator: AgentCoordinator
+    let manager: WebViewManager
+    let webAgentTool: ToolDefinition
 
-    override func setUp() {
-        super.setUp()
+    init() throws {
         coordinator = AgentCoordinator()
         manager = WebViewManager()
         coordinator.setupWebKitAgent(manager: manager)
         coordinator.registerDefaultTools()
 
-        // Find the web_agent tool from built tools
         let tools = coordinator.buildTools()
-        webAgentTool = tools.first(where: { $0.name == "web_agent" })
-        XCTAssertNotNil(webAgentTool, "web_agent tool should be registered")
-    }
-
-    override func tearDown() {
-        webAgentTool = nil
-        coordinator = nil
-        manager = nil
-        super.tearDown()
+        guard let tool = tools.first(where: { $0.name == "web_agent" }) else {
+            throw TestError("web_agent tool should be registered")
+        }
+        webAgentTool = tool
     }
 
     // MARK: - Adapter Listing
 
-    func testListAllAdapters() async throws {
+    @Test("List all adapters")
+    func listAllAdapters() async throws {
         let result = try await webAgentTool.handler(.object([
             "command": .string("site"),
             "action": .string("list")
         ]))
-        XCTAssertTrue(result.contains("Available site adapters:"), "Should list adapters")
-        XCTAssertTrue(result.contains("wechat"), "Should include wechat adapters")
-        XCTAssertTrue(result.contains("hackernews"), "Should include hackernews adapters")
+        #expect(result.contains("Available site adapters:"))
+        #expect(result.contains("wechat"))
+        #expect(result.contains("hackernews"))
     }
 
-    func testListWeChatAdapters() async throws {
+    @Test("List WeChat adapters")
+    func listWeChatAdapters() async throws {
         let result = try await webAgentTool.handler(.object([
             "command": .string("site"),
             "site": .string("wechat")
         ]))
-        // No action → list adapters for this site
-        XCTAssertTrue(result.contains("login"), "Should list wechat/login adapter")
-        XCTAssertTrue(result.contains("status"), "Should list wechat/status adapter")
-        XCTAssertTrue(result.contains("contacts"), "Should list wechat/contacts adapter")
-        XCTAssertTrue(result.contains("send"), "Should list wechat/send adapter")
+        #expect(result.contains("login"))
+        #expect(result.contains("status"))
+        #expect(result.contains("contacts"))
+        #expect(result.contains("send"))
     }
 
     // MARK: - wechat/login — Navigate to wx.qq.com + detect QR code
 
-    func testWeChatLoginAdapter() async throws {
+    @Test("WeChat login adapter")
+    func weChatLoginAdapter() async throws {
         let result = try await webAgentTool.handler(.object([
             "command": .string("site"),
             "site": .string("wechat"),
             "action": .string("login")
         ]))
 
-        // The login adapter navigates to wx.qq.com, waits 5s, then runs JS to detect QR/login state.
-        // Result should be a JSON array with status field.
-        XCTAssertFalse(result.isEmpty, "Login adapter should return result")
+        #expect(!result.isEmpty, "Login adapter should return result")
 
-        // Parse the status — could be qr_ready, qr_image, loading, or logged_in
         let validStatuses = ["qr_ready", "qr_image", "loading", "logged_in", "status"]
         let hasValidStatus = validStatuses.contains(where: { result.contains($0) })
-        XCTAssertTrue(hasValidStatus,
-                      "Login should return a valid status (qr_ready/qr_image/loading/logged_in), got: \(result.prefix(200))")
+        #expect(hasValidStatus,
+                "Login should return a valid status, got: \(result.prefix(200))")
 
-        // Verify the browser actually navigated
-        XCTAssertNotNil(manager.currentURL, "Browser should have navigated to wx.qq.com")
+        #expect(manager.currentURL != nil, "Browser should have navigated to wx.qq.com")
     }
 
     // MARK: - wechat/status — Check login state (after login adapter navigated)
 
-    func testWeChatStatusAfterLogin() async throws {
-        // First navigate via login adapter
+    @Test("WeChat status after login")
+    func weChatStatusAfterLogin() async throws {
         _ = try await webAgentTool.handler(.object([
             "command": .string("site"),
             "site": .string("wechat"),
             "action": .string("login")
         ]))
 
-        // Then check status (reuses current page — no preNavigate on status adapter)
         let result = try await webAgentTool.handler(.object([
             "command": .string("site"),
             "site": .string("wechat"),
             "action": .string("status")
         ]))
 
-        XCTAssertFalse(result.isEmpty, "Status adapter should return result")
-        // Should contain status and angularReady fields
+        #expect(!result.isEmpty, "Status adapter should return result")
         let hasStatus = result.contains("status") || result.contains("not_loaded") || result.contains("not_logged_in")
-        XCTAssertTrue(hasStatus, "Status should report login state, got: \(result.prefix(200))")
+        #expect(hasStatus, "Status should report login state, got: \(result.prefix(200))")
     }
 
     // MARK: - wechat/contacts — Should report not logged in
 
-    func testWeChatContactsNotLoggedIn() async throws {
-        // Navigate to wx.qq.com first
+    @Test("WeChat contacts not logged in")
+    func weChatContactsNotLoggedIn() async throws {
         _ = try await webAgentTool.handler(.object([
             "command": .string("navigate"),
             "url": .string("https://wx.qq.com")
         ]))
 
-        // Try contacts without being logged in
         let result = try await webAgentTool.handler(.object([
             "command": .string("site"),
             "site": .string("wechat"),
             "action": .string("contacts")
         ]))
 
-        XCTAssertFalse(result.isEmpty, "Contacts adapter should return result")
-        // Without login, should get an error about not being logged in, Angular not ready, or no results
+        #expect(!result.isEmpty, "Contacts adapter should return result")
         let isNotLoggedIn = result.contains("error") || result.contains("Not logged in")
             || result.contains("not ready") || result.contains("not_loaded")
             || result.contains("No results")
-        XCTAssertTrue(isNotLoggedIn,
-                      "Contacts should indicate not logged in or empty, got: \(result.prefix(200))")
+        #expect(isNotLoggedIn,
+                "Contacts should indicate not logged in or empty, got: \(result.prefix(200))")
     }
 
     // MARK: - Error handling
 
-    func testInvalidSiteAdapter() async throws {
+    @Test("Invalid site adapter")
+    func invalidSiteAdapter() async throws {
         let result = try await webAgentTool.handler(.object([
             "command": .string("site"),
             "site": .string("wechat"),
             "action": .string("nonexistent")
         ]))
-        XCTAssertTrue(result.contains("Error") || result.contains("not found"),
-                      "Should error for nonexistent adapter")
+        #expect(result.contains("Error") || result.contains("not found"),
+                "Should error for nonexistent adapter")
     }
 
-    func testSiteCommandWithoutParams() async throws {
+    @Test("Site command without params")
+    func siteCommandWithoutParams() async throws {
         let result = try await webAgentTool.handler(.object([
             "command": .string("site")
         ]))
-        XCTAssertTrue(result.contains("Error") || result.contains("site") || result.contains("required"),
-                      "Should error when 'site' param missing")
+        #expect(result.contains("Error") || result.contains("site") || result.contains("required"),
+                "Should error when 'site' param missing")
     }
 
     // MARK: - Combined workflow: navigate → snapshot → site adapter
 
-    func testNavigateThenSiteStatus() async throws {
-        // Step 1: Navigate manually
+    @Test("Navigate then site status")
+    func navigateThenSiteStatus() async throws {
         let navResult = try await webAgentTool.handler(.object([
             "command": .string("navigate"),
             "url": .string("https://wx.qq.com")
         ]))
-        XCTAssertTrue(navResult.contains("Page loaded") || navResult.contains("loaded"),
-                      "Should navigate to wx.qq.com")
+        #expect(navResult.contains("Page loaded") || navResult.contains("loaded"),
+                "Should navigate to wx.qq.com")
 
-        // Step 2: Take a snapshot
         let snapResult = try await webAgentTool.handler(.object([
             "command": .string("snapshot")
         ]))
-        XCTAssertTrue(snapResult.contains("Page:") || snapResult.contains("URL:"),
-                      "Should get page snapshot")
+        #expect(snapResult.contains("Page:") || snapResult.contains("URL:"),
+                "Should get page snapshot")
 
-        // Step 3: Use site adapter to check status
         let statusResult = try await webAgentTool.handler(.object([
             "command": .string("site"),
             "site": .string("wechat"),
             "action": .string("status")
         ]))
-        XCTAssertTrue(statusResult.contains("status"),
-                      "Status adapter should work on already-loaded page")
+        #expect(statusResult.contains("status"),
+                "Status adapter should work on already-loaded page")
     }
+}
+
+/// Simple error for test setup failures.
+private struct TestError: Error, CustomStringConvertible {
+    let description: String
+    init(_ message: String) { self.description = message }
 }
 
 /// Relay integration test: Agent uses web_agent site command for WeChat.
