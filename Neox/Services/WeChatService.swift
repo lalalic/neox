@@ -73,6 +73,10 @@ final class WeChatService: ObservableObject {
 
     private static let configKey = "wechat_service_config"
     private static let bindingsFileName = "wechat-bindings.json"
+    private static let sessionDiedKey = "wechat_session_died"
+    /// Bumped when cookie-clearing logic changes; force-clears on first run of new code.
+    private static let cookieClearVersionKey = "wechat_cookie_clear_v"
+    private static let cookieClearVersionValue = 1
 
     // MARK: - Init
 
@@ -110,11 +114,62 @@ final class WeChatService: ObservableObject {
 
     func enable() {
         guard channel == nil else { return }
+
+        // Clear WeChat cookies when:
+        // 1. Previous session died (kicked/expired) so wx.qq.com shows fresh QR
+        // 2. First run after code update (migration) — old builds never set the flag
+        // Skip if this is a fresh install (no saved config → no cached cookies)
+        let hasPriorSession = defaults.data(forKey: Self.configKey) != nil
+        let sessionDied = defaults.bool(forKey: Self.sessionDiedKey)
+        let currentVersion = defaults.integer(forKey: Self.cookieClearVersionKey)
+        let needsMigration = currentVersion < Self.cookieClearVersionValue
+
+        if hasPriorSession && (sessionDied || needsMigration) {
+            defaults.removeObject(forKey: Self.sessionDiedKey)
+            defaults.set(Self.cookieClearVersionValue, forKey: Self.cookieClearVersionKey)
+            clearWeChatCookiesThenStart()
+            return
+        }
+
+        startChannel()
+    }
+
+    private func clearWeChatCookiesThenStart() {
+        let dataStore = WKWebsiteDataStore.default()
+        let types: Set<String> = [
+            WKWebsiteDataTypeCookies,
+            WKWebsiteDataTypeLocalStorage,
+            WKWebsiteDataTypeSessionStorage,
+        ]
+        dataStore.fetchDataRecords(ofTypes: types) { [weak self] records in
+            let wechatRecords = records.filter { record in
+                record.displayName.contains("qq.com") || record.displayName.contains("wechat")
+            }
+            if !wechatRecords.isEmpty {
+                dataStore.removeData(ofTypes: types, for: wechatRecords) { [weak self] in
+                    Task { @MainActor [weak self] in
+                        self?.startChannel()
+                    }
+                }
+            } else {
+                Task { @MainActor [weak self] in
+                    self?.startChannel()
+                }
+            }
+        }
+    }
+
+    private func startChannel() {
+        guard channel == nil else { return }
         let ch = WeChatChannel()
         ch.onStateChange = { [weak self] newState in
             Task { @MainActor in
                 self?.channelState = newState
                 self?.objectWillChange.send()
+                // Track if session died so cookies can be cleared on next start
+                if newState == .dead {
+                    self?.defaults.set(true, forKey: WeChatService.sessionDiedKey)
+                }
             }
         }
         self.channel = ch
@@ -143,18 +198,26 @@ final class WeChatService: ObservableObject {
     }
 
     func disable() {
+        teardown()
+        config.enabled = false
+    }
+
+    /// Restart the channel after being kicked off / session expired.
+    /// Clears WeChat cookies (kicked session causes redirect instead of QR),
+    /// then creates a fresh WKWebView + channel.
+    func restart() {
+        teardown()
+        defaults.set(true, forKey: Self.sessionDiedKey)  // force cookie clear
+        enable()
+    }
+
+    /// Internal teardown — destroys channel and window without disabling the service.
+    private func teardown() {
         channel?.destroy()
         channel = nil
         channelState = .disconnected
         hiddenWindow?.isHidden = true
         hiddenWindow = nil
-        config.enabled = false
-    }
-
-    /// Restart the channel after being kicked off / session expired.
-    /// Triggers full QR login flow again (the QR sheet auto-shows via channelState observation).
-    func restart() {
-        channel?.restart()
     }
 
     // MARK: - Routing
