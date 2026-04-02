@@ -181,6 +181,15 @@ final class AgentCoordinator: ObservableObject {
         if webToolProvider != nil {
             prompt += "\n\n" + WebAgentToolProvider.skillPrompt
         }
+
+        // Append on-device skills catalog
+        if let skills = agentProfile?.skills, !skills.isEmpty {
+            prompt += "\n\n<instructions>\nHere is a list of skills on this phone that contain domain specific knowledge on a variety of topics.\nEach skill comes with a description of the topic and a file path that contains the detailed instructions.\nWhen a user asks you to perform a task that falls within the domain of a skill, use the 'read_file' tool to acquire the full instructions from the file path.\n<skills>\n"
+            for skill in skills {
+                prompt += "<skill>\n<name>\(skill.name)</name>\n<description>\(skill.description)</description>\n<file>\(skill.filePath)</file>\n</skill>\n"
+            }
+            prompt += "</skills>\n</instructions>"
+        }
         
         return prompt
     }
