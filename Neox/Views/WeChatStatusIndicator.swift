@@ -5,9 +5,11 @@ import WebKitAgent
 ///
 /// - **Green**: Online (filled = routing active).
 /// - **Green + slash**: Online but routing off.
-/// - **Gray**: Offline or service disabled.
+/// - **Orange**: Kicked off / session expired (tap to re-login).
+/// - **Gray**: Offline, loading, or service disabled.
 ///
-/// Tap to toggle routing on/off. Long-press to open the contact selector.
+/// Tap: toggle routing (when online), or re-login (when kicked off).
+/// Long-press: open the contact selector.
 struct WeChatStatusIndicator: View {
     @ObservedObject var weChatService: WeChatService
     let project: String?
@@ -16,7 +18,14 @@ struct WeChatStatusIndicator: View {
     var body: some View {
         Button(action: {
             guard weChatService.config.enabled else { return }
-            weChatService.toggleRouting(for: project)
+            switch weChatService.channelState {
+            case .dead, .disconnected:
+                weChatService.restart()
+            case .ready:
+                weChatService.toggleRouting(for: project)
+            default:
+                break  // loading / extracting / qrReady / loggingIn — do nothing
+            }
         }) {
             ZStack {
                 Image(systemName: iconName)
@@ -51,7 +60,9 @@ struct WeChatStatusIndicator: View {
             return .green
         case .loading, .extractingQR, .qrReady, .loggingIn:
             return .gray  // still loading
-        case .disconnected, .dead:
+        case .dead:
+            return .orange  // kicked off — tap to re-login
+        case .disconnected:
             return .gray
         }
     }
@@ -67,6 +78,7 @@ struct WeChatStatusIndicator: View {
         if weChatService.isOnline {
             return weChatService.isRoutingActive(for: project) ? "routing" : "paused"
         }
+        if weChatService.channelState == .dead { return "kicked off, tap to re-login" }
         return "offline"
     }
 }

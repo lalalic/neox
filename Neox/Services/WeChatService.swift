@@ -151,6 +151,12 @@ final class WeChatService: ObservableObject {
         config.enabled = false
     }
 
+    /// Restart the channel after being kicked off / session expired.
+    /// Triggers full QR login flow again (the QR sheet auto-shows via channelState observation).
+    func restart() {
+        channel?.restart()
+    }
+
     // MARK: - Routing
 
     func getBindings(for project: String?) -> WeChatContactBindings {
