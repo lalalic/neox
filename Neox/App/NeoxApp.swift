@@ -2,10 +2,74 @@ import SwiftUI
 import CopilotChat
 import CopilotSDK
 import UIKit
+import UserNotifications
 
-/// AppDelegate to reliably capture URL opens on physical devices.
-class AppDelegate: NSObject, UIApplicationDelegate {
+/// AppDelegate to reliably capture URL opens and push notifications on physical devices.
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     weak var coordinator: AgentCoordinator?
+    
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+        // Set notification delegate
+        UNUserNotificationCenter.current().delegate = self
+        
+        // Request notification permission and register for remote notifications
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
+            print("[AppDelegate] Notification permission: \(granted), error: \(error?.localizedDescription ?? "none")")
+            if granted {
+                DispatchQueue.main.async {
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
+            }
+        }
+        return true
+    }
+    
+    // MARK: - Push Notification Registration
+    
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        let tokenString = deviceToken.map { String(format: "%02x", $0) }.joined()
+        print("[AppDelegate] APNs device token: \(tokenString)")
+        // Store token for relay registration
+        UserDefaults.standard.set(tokenString, forKey: "apnsDeviceToken")
+        // Notify relay via NotificationCenter
+        NotificationCenter.default.post(name: .deviceTokenReceived, object: tokenString)
+    }
+    
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        print("[AppDelegate] Failed to register for remote notifications: \(error.localizedDescription)")
+    }
+    
+    // MARK: - Handle incoming push while app is in foreground
+    
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        let userInfo = notification.request.content.userInfo
+        print("[AppDelegate] Push received in foreground: \(userInfo)")
+        // Show banner even when app is in foreground
+        completionHandler([.banner, .sound, .badge])
+    }
+    
+    // MARK: - Handle notification tap
+    
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        let userInfo = response.notification.request.content.userInfo
+        print("[AppDelegate] Notification tapped: \(userInfo)")
+        // Handle action from push (e.g., install build, open repo)
+        if let action = userInfo["action"] as? String {
+            NotificationCenter.default.post(name: .pushNotificationAction, object: nil, userInfo: ["action": action, "data": userInfo])
+        }
+        completionHandler()
+    }
+    
+    // MARK: - Silent push (background wake)
+    
+    func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable : Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        print("[AppDelegate] Silent push received: \(userInfo)")
+        // Use silent push to reconnect MCP if needed
+        NotificationCenter.default.post(name: .silentPushReceived, object: nil, userInfo: userInfo as? [String: Any])
+        completionHandler(.newData)
+    }
+    
+    // MARK: - URL handling
     
     func application(_ application: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
         print("[AppDelegate] open URL called: \(url)")
@@ -22,6 +86,9 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 
 extension Notification.Name {
     static let stripeDeepLink = Notification.Name("stripeDeepLink")
+    static let deviceTokenReceived = Notification.Name("deviceTokenReceived")
+    static let pushNotificationAction = Notification.Name("pushNotificationAction")
+    static let silentPushReceived = Notification.Name("silentPushReceived")
 }
 
 @main
