@@ -342,11 +342,12 @@ User tests app → "Tab icons are too small"
 5. **Android** — Just add `--platform android` to EAS build (future phase)
 6. **ask_user for Tier 2** — Deferred. Blocking the GitHub VM while waiting for user input is expensive. Consider: async question queue, or agent makes best-judgment decisions instead of asking.
 
-## 14. Future: Shared Notification Handler
+## 14. Shared Notification Handler (Implemented)
 
-Currently notification → chat + token cost logic is split across app-specific code (NeoxApp.swift) and shared framework (ChatViewModel.swift). Plan: move to a `CopilotNotificationHandler` in `copilot-ios`:
+`CodingAgentNotificationHandler` in copilot-ios handles all coding agent notifications. Any app using copilot-ios gets coding agent support automatically.
 
-- Parse coding agent notifications (type: "coding_agent")
-- Route by action: `send_response` → chat, `report_progress` → status, `report_usage` → usage tracker
-- On-device token accounting from `report_usage` payloads (model, promptTokens, completionTokens)
-- Any app using copilot-ios gets coding agent notifications for free
+- **Schema & data flow:** See [copilot-ios/docs/coding-agent-notification-schema.md](../../copilot-ios/docs/coding-agent-notification-schema.md)
+- **Handler:** `CopilotChat/Sources/Services/CodingAgentNotificationHandler.swift` — parse/apply pattern
+- **Integration:** `ChatViewModel.addNotification()` delegates to handler for `type=coding_agent`
+- **App delegate:** Forwards all custom APNs fields (no hardcoded field names — future actions work automatically)
+- **Token tracking:** `report_usage` → `UsageTracker.record()` with `CostCalculator` multipliers
