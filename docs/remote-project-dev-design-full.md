@@ -346,7 +346,7 @@ User tests app → "Tab icons are too small"
 
 `CodingAgentNotificationHandler` in copilot-ios handles all coding agent notifications. Any app using copilot-ios gets coding agent support automatically.
 
-- **Schema & data flow:** See [copilot-ios/docs/coding-agent-notification-schema.md](../../copilot-ios/docs/coding-agent-notification-schema.md)
+- **Schema & data flow:** See [copilot-ios/CopilotSDK/docs/coding-agent-notification-schema.md](../../copilot-ios/CopilotSDK/docs/coding-agent-notification-schema.md)
 - **Handler:** `CopilotChat/Sources/Services/CodingAgentNotificationHandler.swift` — parse/apply pattern
 - **Integration:** `ChatViewModel.addNotification()` delegates to handler for `type=coding_agent`
 - **App delegate:** Forwards all custom APNs fields (no hardcoded field names — future actions work automatically)
