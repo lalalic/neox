@@ -14,11 +14,13 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         
         // Request notification permission and register for remote notifications
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
-            print("[AppDelegate] Notification permission: \(granted), error: \(error?.localizedDescription ?? "none")")
+            NSLog("[AppDelegate] Notification permission: \(granted), error: \(error?.localizedDescription ?? "none")")
             if granted {
                 DispatchQueue.main.async {
                     UIApplication.shared.registerForRemoteNotifications()
                 }
+            } else {
+                NSLog("[AppDelegate] Notification permission denied")
             }
         }
         return true
@@ -28,7 +30,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let tokenString = deviceToken.map { String(format: "%02x", $0) }.joined()
-        print("[AppDelegate] APNs device token: \(tokenString)")
+        NSLog("[AppDelegate] APNs device token: \(tokenString)")
         // Store token for relay registration
         UserDefaults.standard.set(tokenString, forKey: "apnsDeviceToken")
         // Notify relay via NotificationCenter
@@ -36,7 +38,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
     
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        print("[AppDelegate] Failed to register for remote notifications: \(error.localizedDescription)")
+        NSLog("[AppDelegate] Failed to register for remote notifications: \(error.localizedDescription)")
     }
     
     // MARK: - Handle incoming push while app is in foreground
@@ -135,10 +137,24 @@ struct NeoxApp: App {
                     }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .deviceTokenReceived)) { note in
-                    if let token = note.object as? String,
-                       let vm = coordinator.chatViewModel {
+                    if let token = note.object as? String {
                         Task {
-                            await vm.setDeviceToken(token)
+                            // Wait for chatViewModel to be ready and connected
+                            for attempt in 0..<15 {
+                                if let vm = coordinator.chatViewModel, vm.chatState == .idle {
+                                    await vm.setDeviceToken(token)
+                                    print("[NeoxApp] Device token sent to relay (attempt \(attempt))")
+                                    return
+                                }
+                                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                            }
+                            // Last resort: try anyway
+                            if let vm = coordinator.chatViewModel {
+                                await vm.setDeviceToken(token)
+                                print("[NeoxApp] Device token sent (final attempt)")
+                            } else {
+                                print("[NeoxApp] Failed to send device token — chatViewModel not ready")
+                            }
                         }
                     }
                 }

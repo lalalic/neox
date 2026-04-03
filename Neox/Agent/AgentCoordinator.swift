@@ -25,11 +25,11 @@ final class AgentCoordinator: ObservableObject {
     @Published var isAgentRunning: Bool = false
     
     /// Relay toggle and endpoint settings.
-    @Published var useLocalRelay: Bool = UserDefaults.standard.object(forKey: "useLocalRelay") == nil ? true : UserDefaults.standard.bool(forKey: "useLocalRelay")
+    @Published var useLocalRelay: Bool = UserDefaults.standard.object(forKey: "useLocalRelay") == nil ? false : UserDefaults.standard.bool(forKey: "useLocalRelay")
     @Published var localRelayURL: String = UserDefaults.standard.string(forKey: "localRelayURL") ?? "http://10.0.0.111:8765"
     /// Relay server host/port currently in use.
-    @Published var relayHost: String = UserDefaults.standard.string(forKey: "relayHost") ?? "10.0.0.111"
-    @Published var relayPort: UInt16 = UInt16(UserDefaults.standard.integer(forKey: "relayPort")) == 0 ? 8765 : UInt16(UserDefaults.standard.integer(forKey: "relayPort"))
+    @Published var relayHost: String = UserDefaults.standard.string(forKey: "relayHost") ?? "relay.ai.qili2.com"
+    @Published var relayPort: UInt16 = UInt16(UserDefaults.standard.integer(forKey: "relayPort")) == 0 ? 443 : UInt16(UserDefaults.standard.integer(forKey: "relayPort"))
 
     /// Dev bridge settings.
     @Published var useDevServer: Bool = UserDefaults.standard.object(forKey: "useDevServer") == nil ? true : UserDefaults.standard.bool(forKey: "useDevServer")
