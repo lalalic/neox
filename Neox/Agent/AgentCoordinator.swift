@@ -48,6 +48,9 @@ final class AgentCoordinator: ObservableObject {
     
     private var webToolProvider: WebAgentToolProvider?
     private let workspaceBootstrapper: WorkspaceBootstrapper
+    
+    /// WeChat service for forwarding messages.
+    let weChatService: WeChatService
     private let profileLoader: AgentProfileLoader
     private let workspaceURL: URL
     private let fileToolProvider: FileToolProvider
@@ -83,6 +86,7 @@ final class AgentCoordinator: ObservableObject {
         self.workspaceBootstrapper = bootstrapper
         self.profileLoader = loader
         self.workspaceURL = resolvedWorkspace
+        self.weChatService = WeChatService(workspaceURL: resolvedWorkspace)
         self.fileToolProvider = FileToolProvider(baseDirectory: resolvedWorkspace)
         self.memoryToolProvider = MemoryToolProvider(baseDirectory: resolvedWorkspace)
         #if canImport(MediaKit)
