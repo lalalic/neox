@@ -46,14 +46,18 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         let content = notification.request.content
         NSLog("[AppDelegate] Push received in foreground: \(content.title) - \(content.body)")
-        // Post to merge into chat
+        // Forward all custom fields from APNs payload (type, action, repo, status, model, tokens, etc.)
+        // The shared CodingAgentNotificationHandler parses these by action type.
         let title = content.title
         let body = content.body
-        let type = content.userInfo["type"] as? String ?? "notification"
-        let status = content.userInfo["status"] as? String ?? ""
-        let repo = content.userInfo["repo"] as? String ?? ""
+        var data: [String: Any] = [:]
+        for (key, value) in content.userInfo {
+            if let k = key as? String, k != "aps" {
+                data[k] = value
+            }
+        }
         DispatchQueue.main.async {
-            let info: [String: Any] = ["title": title, "body": body, "data": ["type": type, "status": status, "repo": repo]]
+            let info: [String: Any] = ["title": title, "body": body, "data": data]
             NotificationCenter.default.post(name: .pushReceivedForChat, object: nil, userInfo: info)
         }
         // Remove from notification center so it doesn't get re-added on foreground sync
@@ -175,6 +179,7 @@ struct NeoxApp: App {
                             let ids = notifications.map { $0.request.identifier }
                             DispatchQueue.main.async {
                                 for (title, body, type, status, repo) in items {
+                                    guard coordinator.shouldShowNotificationInChat(type: type) else { continue }
                                     coordinator.chatViewModel?.addNotification(title: title, body: body, data: ["type": type, "status": status, "repo": repo])
                                 }
                                 UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
@@ -209,6 +214,8 @@ struct NeoxApp: App {
                           let title = info["title"] as? String,
                           let body = info["body"] as? String else { return }
                     let data = info["data"] as? [String: Any] ?? [:]
+                    let type = (data["type"] as? String) ?? "notification"
+                    guard coordinator.shouldShowNotificationInChat(type: type) else { return }
                     coordinator.chatViewModel?.addNotification(title: title, body: body, data: data)
                 }
         }
