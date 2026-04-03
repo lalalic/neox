@@ -51,8 +51,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         let body = content.body
         let type = content.userInfo["type"] as? String ?? "notification"
         let status = content.userInfo["status"] as? String ?? ""
+        let repo = content.userInfo["repo"] as? String ?? ""
         DispatchQueue.main.async {
-            let info: [String: Any] = ["title": title, "body": body, "data": ["type": type, "status": status]]
+            let info: [String: Any] = ["title": title, "body": body, "data": ["type": type, "status": status, "repo": repo]]
             NotificationCenter.default.post(name: .pushReceivedForChat, object: nil, userInfo: info)
         }
         // Remove from notification center so it doesn't get re-added on foreground sync
@@ -75,9 +76,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         let body = content.body
         let type = userInfo["type"] as? String ?? "notification"
         let status = userInfo["status"] as? String ?? ""
+        let repo = userInfo["repo"] as? String ?? ""
         let action = userInfo["action"] as? String
         DispatchQueue.main.async {
-            let info: [String: Any] = ["title": title, "body": body, "data": ["type": type, "status": status]]
+            let info: [String: Any] = ["title": title, "body": body, "data": ["type": type, "status": status, "repo": repo]]
             NotificationCenter.default.post(name: .pushReceivedForChat, object: nil, userInfo: info)
             if let action = action {
                 NotificationCenter.default.post(name: .pushNotificationAction, object: nil, userInfo: ["action": action])
@@ -162,14 +164,14 @@ struct NeoxApp: App {
                         // Sync any delivered notifications that weren't tapped into chat
                         UNUserNotificationCenter.current().getDeliveredNotifications { notifications in
                             guard !notifications.isEmpty else { return }
-                            let items = notifications.map { n -> (String, String, String, String) in
+                            let items = notifications.map { n -> (String, String, String, String, String) in
                                 let c = n.request.content
-                                return (c.title, c.body, c.userInfo["type"] as? String ?? "notification", c.userInfo["status"] as? String ?? "")
+                                return (c.title, c.body, c.userInfo["type"] as? String ?? "notification", c.userInfo["status"] as? String ?? "", c.userInfo["repo"] as? String ?? "")
                             }
                             let ids = notifications.map { $0.request.identifier }
                             DispatchQueue.main.async {
-                                for (title, body, type, status) in items {
-                                    coordinator.chatViewModel?.addNotification(title: title, body: body, data: ["type": type, "status": status])
+                                for (title, body, type, status, repo) in items {
+                                    coordinator.chatViewModel?.addNotification(title: title, body: body, data: ["type": type, "status": status, "repo": repo])
                                 }
                                 UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
                             }
