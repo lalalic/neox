@@ -44,8 +44,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     // MARK: - Handle incoming push while app is in foreground
     
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        let userInfo = notification.request.content.userInfo
-        print("[AppDelegate] Push received in foreground: \(userInfo)")
+        let content = notification.request.content
+        NSLog("[AppDelegate] Push received in foreground: \(content.title) - \(content.body)")
+        // Post to merge into chat
+        let title = content.title
+        let body = content.body
+        let type = content.userInfo["type"] as? String ?? "notification"
+        let status = content.userInfo["status"] as? String ?? ""
+        DispatchQueue.main.async {
+            let info: [String: Any] = ["title": title, "body": body, "data": ["type": type, "status": status]]
+            NotificationCenter.default.post(name: .pushReceivedForChat, object: nil, userInfo: info)
+        }
         // Show banner even when app is in foreground
         completionHandler([.banner, .sound, .badge])
     }
@@ -53,11 +62,21 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     // MARK: - Handle notification tap
     
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
-        let userInfo = response.notification.request.content.userInfo
-        print("[AppDelegate] Notification tapped: \(userInfo)")
-        // Handle action from push (e.g., install build, open repo)
-        if let action = userInfo["action"] as? String {
-            NotificationCenter.default.post(name: .pushNotificationAction, object: nil, userInfo: ["action": action, "data": userInfo])
+        let content = response.notification.request.content
+        let userInfo = content.userInfo
+        NSLog("[AppDelegate] Notification tapped: \(content.title)")
+        // Post to merge into chat
+        let title = content.title
+        let body = content.body
+        let type = userInfo["type"] as? String ?? "notification"
+        let status = userInfo["status"] as? String ?? ""
+        let action = userInfo["action"] as? String
+        DispatchQueue.main.async {
+            let info: [String: Any] = ["title": title, "body": body, "data": ["type": type, "status": status]]
+            NotificationCenter.default.post(name: .pushReceivedForChat, object: nil, userInfo: info)
+            if let action = action {
+                NotificationCenter.default.post(name: .pushNotificationAction, object: nil, userInfo: ["action": action])
+            }
         }
         completionHandler()
     }
@@ -90,6 +109,7 @@ extension Notification.Name {
     static let stripeDeepLink = Notification.Name("stripeDeepLink")
     static let deviceTokenReceived = Notification.Name("deviceTokenReceived")
     static let pushNotificationAction = Notification.Name("pushNotificationAction")
+    static let pushReceivedForChat = Notification.Name("pushReceivedForChat")
     static let silentPushReceived = Notification.Name("silentPushReceived")
 }
 
@@ -157,6 +177,13 @@ struct NeoxApp: App {
                             }
                         }
                     }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .pushReceivedForChat)) { note in
+                    guard let info = note.userInfo,
+                          let title = info["title"] as? String,
+                          let body = info["body"] as? String else { return }
+                    let data = info["data"] as? [String: Any] ?? [:]
+                    coordinator.chatViewModel?.addNotification(title: title, body: body, data: data)
                 }
         }
     }
