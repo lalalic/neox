@@ -130,6 +130,8 @@ The agent controls *when* to call it — only after the 5-step guided flow and e
 
 ## 4. create_task Pipeline
 
+> **Detailed design:** [copilot-relay/docs/create-task-pipeline.md](../../copilot-relay/docs/create-task-pipeline.md)
+
 When the Tier 1 agent calls `create_task(appName, taskDescription)`, the relay executes 8 steps:
 
 ```mermaid
