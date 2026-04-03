@@ -55,6 +55,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             let info: [String: Any] = ["title": title, "body": body, "data": ["type": type, "status": status]]
             NotificationCenter.default.post(name: .pushReceivedForChat, object: nil, userInfo: info)
         }
+        // Remove from notification center so it doesn't get re-added on foreground sync
+        let identifier = notification.request.identifier
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [identifier])
+        }
         // Show banner even when app is in foreground
         completionHandler([.banner, .sound, .badge])
     }
@@ -154,6 +159,21 @@ struct NeoxApp: App {
                 .onChange(of: scenePhase) { newPhase in
                     if newPhase == .active {
                         checkPendingStripePayment()
+                        // Sync any delivered notifications that weren't tapped into chat
+                        UNUserNotificationCenter.current().getDeliveredNotifications { notifications in
+                            guard !notifications.isEmpty else { return }
+                            let items = notifications.map { n -> (String, String, String, String) in
+                                let c = n.request.content
+                                return (c.title, c.body, c.userInfo["type"] as? String ?? "notification", c.userInfo["status"] as? String ?? "")
+                            }
+                            let ids = notifications.map { $0.request.identifier }
+                            DispatchQueue.main.async {
+                                for (title, body, type, status) in items {
+                                    coordinator.chatViewModel?.addNotification(title: title, body: body, data: ["type": type, "status": status])
+                                }
+                                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
+                            }
+                        }
                     }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .deviceTokenReceived)) { note in
