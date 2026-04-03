@@ -134,6 +134,14 @@ struct NeoxApp: App {
                         checkPendingStripePayment()
                     }
                 }
+                .onReceive(NotificationCenter.default.publisher(for: .deviceTokenReceived)) { note in
+                    if let token = note.object as? String,
+                       let vm = coordinator.chatViewModel {
+                        Task {
+                            await vm.setDeviceToken(token)
+                        }
+                    }
+                }
         }
     }
     

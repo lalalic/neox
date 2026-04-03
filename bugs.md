@@ -110,3 +110,4 @@ let w = Int(frame.width), h = Int(frame.height)
 5. **Bug #5** — Improve formatOutput field ordering
 6. **Bug #7** — Fix CGRect width/height for macOS build
 7. **Bug #6** — Investigate chat pipeline stuck state (separate task)
+8. **Bug #8** — WeChat QR login: scanned barcode shows QR code but not logged in (reported 2026-04-03)
