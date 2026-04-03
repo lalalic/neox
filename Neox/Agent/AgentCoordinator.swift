@@ -43,6 +43,11 @@ final class AgentCoordinator: ObservableObject {
     @Published var enableSpeechInput: Bool = UserDefaults.standard.object(forKey: "enableSpeechInput") == nil ? true : UserDefaults.standard.bool(forKey: "enableSpeechInput")
     @Published var enableAttachmentInput: Bool = UserDefaults.standard.object(forKey: "enableAttachmentInput") == nil ? true : UserDefaults.standard.bool(forKey: "enableAttachmentInput")
 
+    /// Notification visibility in chat (which notification types show as messages).
+    @Published var showUsageInChat: Bool = UserDefaults.standard.object(forKey: "showUsageInChat") == nil ? false : UserDefaults.standard.bool(forKey: "showUsageInChat")
+    @Published var showProgressInChat: Bool = UserDefaults.standard.object(forKey: "showProgressInChat") == nil ? true : UserDefaults.standard.bool(forKey: "showProgressInChat")
+    @Published var showBuildInChat: Bool = UserDefaults.standard.object(forKey: "showBuildInChat") == nil ? true : UserDefaults.standard.bool(forKey: "showBuildInChat")
+
     /// Selected LLM model.
     @Published var selectedModel: String = UserDefaults.standard.string(forKey: "selectedModel") ?? "gpt-4.1"
     
@@ -108,6 +113,9 @@ final class AgentCoordinator: ObservableObject {
         UserDefaults.standard.set(enableSpeechInput, forKey: "enableSpeechInput")
         UserDefaults.standard.set(enableAttachmentInput, forKey: "enableAttachmentInput")
         UserDefaults.standard.set(selectedModel, forKey: "selectedModel")
+        UserDefaults.standard.set(showUsageInChat, forKey: "showUsageInChat")
+        UserDefaults.standard.set(showProgressInChat, forKey: "showProgressInChat")
+        UserDefaults.standard.set(showBuildInChat, forKey: "showBuildInChat")
     }
 
     var chatInputModes: InputMode {
@@ -234,7 +242,16 @@ final class AgentCoordinator: ObservableObject {
                 onResponse: { _ in },
                 onAskUser: { _ in "" }
             )),
-            inputModes: chatInputModes
+            inputModes: chatInputModes,
+            notificationFilter: { [weak self] type in
+                guard let self else { return true }
+                switch type {
+                case "usage": return self.showUsageInChat
+                case "agent_progress": return self.showProgressInChat
+                case "build_complete", "build_failed": return self.showBuildInChat
+                default: return true
+                }
+            }
         )
         
         self.chatViewModel = vm

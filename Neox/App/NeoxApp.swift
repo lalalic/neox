@@ -136,7 +136,11 @@ struct NeoxApp: App {
             ContentView()
                 .environmentObject(coordinator)
                 .task {
+                    NSLog("[NeoxApp] .task started — relay: %@:%d, useLocal: %@", coordinator.relayHost, coordinator.relayPort, coordinator.useLocalRelay ? "yes" : "no")
+                    coordinator.applyRelaySelection()
+                    NSLog("[NeoxApp] After applyRelaySelection — relay: %@:%d", coordinator.relayHost, coordinator.relayPort)
                     let vm = coordinator.createChatViewModel()
+                    NSLog("[NeoxApp] ChatViewModel created, connecting...")
                     
                     // Configure PlanExecutor with relay settings and plan store
                     PlanExecutor.shared.configure(

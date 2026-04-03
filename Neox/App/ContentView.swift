@@ -226,6 +226,12 @@ struct RelaySettingsView: View {
                     Toggle("Attachment", isOn: $coordinator.enableAttachmentInput)
                 }
 
+                Section("Chat Notifications") {
+                    Toggle("Usage/Cost", isOn: $coordinator.showUsageInChat)
+                    Toggle("Agent Progress", isOn: $coordinator.showProgressInChat)
+                    Toggle("Build Status", isOn: $coordinator.showBuildInChat)
+                }
+
                 // MARK: WeChat Channel
                 Section("WeChat Channel") {
                     Toggle("Enable WeChat", isOn: Binding(
