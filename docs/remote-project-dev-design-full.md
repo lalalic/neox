@@ -53,7 +53,7 @@ graph TD
 | **Where** | Relay server, copilot CLI session | GitHub cloud VM |
 | **Triggered by** | User chat message | Issue assignment |
 | **Role** | Discover requirements, design, dispatch | Implement code, create PRs, build |
-| **Tools** | `create_task`, `send_response`, `ask_user` | `send_response`, `report_progress`, `report_usage` (via relay MCP) |
+| **Tools** | `create_project`, `create_task`, `send_response`, `ask_user` | `send_response`, `report_progress`, `report_usage` (via relay MCP) |
 | **Lifetime** | Persistent (session pool) | Per-issue (disposable VM) |
 
 ---
@@ -73,9 +73,12 @@ graph LR
     subgraph "Tier 1 Agent (copilot CLI)"
         A[Agent calls tool] -->|intercepted| R[Relay Server]
     end
-    R -->|"send_response"| Phone[User Phone]
+    R -->|"create_project"| Phone[User Phone]
+    R -->|"send_response"| Phone
     R -->|"ask_user"| Phone
-    R -->|"create_task"| GH[GitHub + EAS APIs]
+    R -->|"create_task"| Phone
+    Phone -->|"GitHub ops via /github/ proxy"| GH[GitHub API]
+    R -->|"activate"| GH
 
     subgraph "Tier 2 Agent (GitHub VM)"
         CA[Coding Agent] -->|MCP| MCP["/mcp endpoint"]
@@ -88,13 +91,16 @@ graph LR
 
 | Tool | Available to | Registration | Handler |
 |------|-------------|-------------|---------|
+| `create_project` | Tier 1 only | Agent tool (intercepted) | On-device scaffold from `.neo/templates/` ([design](create-project-tool.md)) |
 | `send_response` | Tier 1 + Tier 2 | Agent tool + MCP | Delivers chat message to phone |
 | `ask_user` | Tier 1 only | Agent tool | Asks question, holds session for answer |
-| `create_task` | Tier 1 only | Agent tool (intercepted) | 8-step pipeline: repo + secrets + EAS + issue |
+| `create_task` | Tier 1 only | Agent tool (intercepted) | Relay-orchestrated: phone does GitHub, relay activates ([design](../../copilot-relay/docs/create-task-pipeline.md)) |
 | `report_progress` | Tier 2 only | MCP only | Push notification for milestones |
 | `report_usage` | Tier 2 only | MCP only | Token usage via APNs, on-device accounting |
 
-**`create_task` is an agent tool** injected into the Tier 1 copilot session. The coding agent never sees it. The relay intercepts the call and executes server-side JavaScript (GitHub API, EAS API, etc).
+**`create_project` is an on-device tool.** The relay intercepts the call and delegates to the phone via WebSocket. The phone scaffolds a project folder from `.neo/templates/`, creating README.md, docs/, and progress/. This runs early in the guided flow so that context files (specs, mockups) have a folder to live in.
+
+**`create_task` is a relay-orchestrated tool.** The relay intercepts it, delegates GitHub work to the phone (repo creation, file upload, issue creation via `/github/` proxy), then activates the project server-side (secrets, MCP token, @copilot, build).
 
 **`report_progress` and `report_usage` are MCP-only tools.** The Tier 1 agent doesn't need them — the user sees everything in real-time chat, and Tier 1 usage is tracked by the relay directly. The Tier 2 coding agent runs asynchronously and uses these to report milestones and token consumption.
 
@@ -128,11 +134,19 @@ The agent controls *when* to call it — only after the 5-step guided flow and e
 
 ---
 
-## 4. create_task Pipeline
+## 4. Project Creation Pipeline
 
-> **Detailed design:** [copilot-relay/docs/create-task-pipeline.md](../../copilot-relay/docs/create-task-pipeline.md)
+Two tools work together:
+- **`create_project`** — on-device scaffold from templates ([design](create-project-tool.md))
+- **`create_task`** — relay-orchestrated GitHub + activation ([design](../../copilot-relay/docs/create-task-pipeline.md))
 
-When the Tier 1 agent calls `create_task(appName, taskDescription)`, the relay executes 8 steps:
+### create_project (on-device)
+
+The agent reads `.neo/templates/{name}/README.md` on the device (via intercepted `read_file`), follows it to gather info, then calls `create_project`. The phone scaffolds a project folder locally.
+
+### create_task (relay-orchestrated)
+
+When the Tier 1 agent calls `create_task`, the relay orchestrates:
 
 ```mermaid
 flowchart TD
@@ -159,21 +173,25 @@ flowchart TD
 
 ## 5. Agent Guided Flow
 
-The Tier 1 agent MUST follow this 5-step process before calling `create_task`:
+The Tier 1 agent MUST follow this process before calling `create_task`:
 
-### Step 1: Discover
+### Step 1: Discover + Create Project
 - What problem does the app solve?
 - Who is the target user?
 - Similar apps?
+- Agent reads `.neo/templates/` to pick template
+- Agent calls `create_project` to scaffold local folder
 
 ### Step 2: Define Features
 - Narrow to 3-5 MVP features
 - Get explicit confirmation on the list
+- Agent writes docs/spec.md into project folder
 
 ### Step 3: Design
 - Screen flow in plain language
 - What's on each screen
 - Navigation between screens
+- Agent writes docs/screens.md into project folder
 
 ### Step 4: Confirm
 Present a structured spec:
@@ -185,8 +203,9 @@ Screens: Home → Detail → Settings
 ```
 Ask: "Say 'go' to start building."
 
-### Step 5: Create
+### Step 5: Create Task
 Only after explicit user approval → call `create_task`.
+Phone uploads project files to GitHub, relay activates.
 
 ---
 
