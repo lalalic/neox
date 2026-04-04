@@ -56,8 +56,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 data[k] = value
             }
         }
+        nonisolated(unsafe) let info: [String: Any] = ["title": title, "body": body, "data": data]
         DispatchQueue.main.async {
-            let info: [String: Any] = ["title": title, "body": body, "data": data]
             NotificationCenter.default.post(name: .pushReceivedForChat, object: nil, userInfo: info)
         }
         // Remove from notification center so it doesn't get re-added on foreground sync

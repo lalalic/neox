@@ -216,8 +216,17 @@ Phone uploads project files to GitHub, relay activates.
 ```
 .github/
 ├── agents/builder.agent.md       # Coding agent persona
+├── copilot-instructions.md       # Project-level Copilot instructions
 ├── copilot-mcp.json              # Relay MCP server config (token injected per project)
 ├── copilot-setup-steps.yml       # VM setup: Node 22 + EAS CLI
+├── hooks/
+│   ├── hooks.json                # GitHub Copilot hooks config
+│   └── scripts/
+│       ├── mcp-call.sh           # Helper: call MCP tool via JSON-RPC
+│       ├── session-start.sh      # Report session start to phone
+│       ├── session-end.sh        # Report session completion with duration
+│       ├── pre-tool-use.sh       # Notify phone about bash/edit/create actions
+│       └── error-occurred.sh     # Report errors to phone
 ├── workflows/
 │   ├── ci.yml                    # Lint + typecheck + test on PR
 │   ├── auto-review.yml           # Scope check + auto-merge
@@ -227,6 +236,23 @@ app.json                           # Expo config (customized per project)
 eas.json                           # Build profiles
 package.json
 ```
+
+### Hooks
+
+GitHub Copilot [hooks](https://docs.github.com/en/copilot/reference/hooks-configuration) run shell scripts at key agent lifecycle points. They call the relay MCP endpoint to push notifications to the user's phone:
+
+| Hook | Trigger | Action |
+|------|---------|--------|
+| `sessionStart` | Agent session begins | Push "🚀 Session Started" |
+| `preToolUse` | Before bash/edit/create | Push "🔧 Running: ..." or "✏️ Editing: ..." |
+| `sessionEnd` | Agent session ends | Push "✅ Session Complete" with duration |
+| `errorOccurred` | Agent error | Push "❌ Agent Error" with details |
+
+Scripts authenticate via `$PROJECT_TOKEN` env var and call the relay's MCP endpoint (`tools/call` JSON-RPC).
+
+### Template Sync
+
+Templates are managed locally in `neox/workspace/.neo/templates/` and auto-synced to GitHub via `.github/workflows/sync-templates.yml` on push to main.
 
 **On repo creation**, `create_task` customizes:
 - `app.json`: name, slug, bundleIdentifier
@@ -342,12 +368,21 @@ User tests app → "Tab icons are too small"
 |-----------|--------|
 | Relay server + session pooling | ✅ Deployed |
 | Agent loop (send_response + ask_user) | ✅ Working |
-| create_task pipeline | ✅ Working (8 steps) |
+| create_task pipeline (delegation) | ✅ Working — phone creates repo/issue, relay activates |
+| /github/* proxy | ✅ Working — transparent proxy, 6 tests pass |
 | Secret injection (libsodium) | ✅ Working |
-| Template repo | ✅ Created |
+| Template repo | ✅ Created (neos-apps/expo-app-template) |
 | EAS build workflow | ✅ Fixed (env.HAS_ASC_KEY pattern) |
 | 5-step guided flow | ✅ Implemented (main.agent.md) |
-| Phone test (Neox agent) | 🔄 Needs retest |
+| Phone delegation (simulator) | ✅ Tested — iPhone 17 Pro simulator E2E |
+| Phone delegation (physical) | ✅ Tested — iPhone 12 mini via production relay (~9s) |
+| MCP endpoint (/mcp) | ✅ Working — send_response, report_progress, report_usage |
+| APNs notifications | ✅ Working — project_activated, coding agent messages |
+| Debug endpoint (/debug/delegate) | ✅ Working — test delegation without UI |
+| /api/projects/* REST endpoints | ⬜ Not implemented (projects.json exists but no REST API) |
+| /api/projects/activate endpoint | ⬜ Not implemented (activation only inside handleCreateTask) |
+| Full projects.json schema | ⬜ Minimal (repo + projectToken only; missing userId, displayName, etc.) |
+| WebSocket auto-reconnect | ⬜ Not implemented (manual "Apply & Reconnect" required) |
 | Coding agent picks up issue | ⬜ Untested |
 | EAS build succeeds | ⬜ Untested |
 | TestFlight delivery | ⬜ Untested |

@@ -1,50 +1,26 @@
-# App Store Connect IAP Package (Consumables)
+# App Store Connect IAP Package (Consumable)
 
 Bundle ID: `com.neox.app`  
 Product type: **Consumable**  
 Currency: USD
 
-## Products
+## Product
 
-### 1) Starter Credits
-- Product ID: `com.neox.credits.starter`
-- Reference Name: `Starter Credits`
-- Price Tier: `$4.99`
-- Display Name (en-US): `Starter Credits`
-- Description (en-US): `Quick top-up for light usage. Adds credits to your Neox balance for AI requests.`
-
-### 2) Standard Credits
-- Product ID: `com.neox.credits.standard`
-- Reference Name: `Standard Credits`
+### Top Up Credits
+- Product ID: `com.neox.credits.topup`
+- Reference Name: `Top Up Credits`
 - Price Tier: `$9.99`
-- Display Name (en-US): `Standard Credits`
-- Description (en-US): `Best value for regular usage. Adds credits to your Neox balance for AI requests.`
-
-### 3) Pro Credits
-- Product ID: `com.neox.credits.pro`
-- Reference Name: `Pro Credits`
-- Price Tier: `$29.99`
-- Display Name (en-US): `Pro Credits`
-- Description (en-US): `Large top-up for power users. Adds credits to your Neox balance for AI requests.`
+- Display Name (en-US): `Top Up Credits`
+- Description (en-US): `Adds $7.50 in credits to your Neox balance for AI requests.`
 
 ---
 
-## zh-Hans Localization (copy-ready)
+## zh-Hans Localization
 
-### 1) Starter Credits
-- Product ID: `com.neox.credits.starter`
-- Display Name (zh-Hans): `入门额度包`
-- Description (zh-Hans): `适合轻量使用的快速充值。用于补充 Neox 内 AI 请求所需额度。`
-
-### 2) Standard Credits
-- Product ID: `com.neox.credits.standard`
-- Display Name (zh-Hans): `标准额度包`
-- Description (zh-Hans): `适合日常使用的高性价比充值。用于补充 Neox 内 AI 请求所需额度。`
-
-### 3) Pro Credits
-- Product ID: `com.neox.credits.pro`
-- Display Name (zh-Hans): `专业额度包`
-- Description (zh-Hans): `适合高频用户的大额充值。用于补充 Neox 内 AI 请求所需额度。`
+### Top Up Credits
+- Product ID: `com.neox.credits.topup`
+- Display Name (zh-Hans): `充值额度`
+- Description (zh-Hans): `为 Neox 账户充值 $7.50 额度，用于 AI 请求。`
 
 ---
 

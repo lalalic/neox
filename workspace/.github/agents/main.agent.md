@@ -44,3 +44,8 @@ workspace/                       # monorepo root
 │   ├── ...
 │   └── progress/
 └── ProjectB/
+
+## project README.md
+- each project MUST have README.md, with frontmatter name and description.
+- README.md is project's wiki index
+- from README.md, any doc/knowledge can be reached.

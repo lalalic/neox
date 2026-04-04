@@ -1,0 +1,51 @@
+name: EAS Build
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Build profile'
+        required: true
+        default: 'preview'
+        type: choice
+        options:
+          - development
+          - preview
+          - production
+      platform:
+        description: 'Platform'
+        required: true
+        default: 'ios'
+        type: choice
+        options:
+          - ios
+          - android
+          - all
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      HAS_ASC_KEY: ${{ secrets.EXPO_ASC_API_KEY_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Setup ASC API Key
+        if: env.HAS_ASC_KEY == 'true'
+        run: |
+          echo "${{ secrets.EXPO_ASC_API_KEY_BASE64 }}" | base64 -d > /tmp/asc-api-key.p8
+      - name: EAS Build
+        env:
+          EXPO_ASC_API_KEY_PATH: ${{ env.HAS_ASC_KEY == 'true' && '/tmp/asc-api-key.p8' || '' }}
+          EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+          EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+          EXPO_APPLE_TEAM_ID: JABNLDLN8G
+          EXPO_APPLE_TEAM_TYPE: INDIVIDUAL
+        run: eas build --profile ${{ inputs.profile }} --platform ${{ inputs.platform }} --non-interactive --no-wait

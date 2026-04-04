@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "neox-relay": {
+      "url": "https://relay.ai.qili2.com/mcp",
+      "headers": {
+        "Authorization": "Bearer {{PROJECT_TOKEN}}"
+      }
+    }
+  }
+}
