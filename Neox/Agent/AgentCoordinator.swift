@@ -146,7 +146,7 @@ final class AgentCoordinator: ObservableObject {
             RegisteredTool(name: "memory_write_section", description: "Write/replace memory markdown sections"),
             RegisteredTool(name: "memory_log_session", description: "Create session notes in .neo/reports/sessions"),
             RegisteredTool(name: "memory_list", description: "List memory files under .neo"),
-            RegisteredTool(name: "create_new_project", description: "Scaffold a new project from .neo/templates/project"),
+            RegisteredTool(name: "create_project", description: "Scaffold a new project from .neo/templates/"),
             RegisteredTool(name: "create_plan", description: "Create a scheduled plan from chat"),
             RegisteredTool(name: "stripe_checkout", description: "Generate external Stripe checkout link when requested"),
         ]
@@ -179,7 +179,7 @@ final class AgentCoordinator: ObservableObject {
         You are Neox, an autonomous AI assistant on iPhone.
         You can browse the web, take photos, speak to the user, and listen.
         Use the browser to operate websites like GitHub, Vercel, etc.
-        You have file tools (read_file, write_file, list_files, create_new_project) to manage files in the on-device workspace.
+        You have file tools (read_file, write_file, list_files, create_project) to manage files in the on-device workspace.
         You have memory tools to manage long-term notes under .neo/ (memory_read, memory_append, memory_write_section, memory_log_session, memory_list).
         You have a create_plan tool to create scheduled plans directly from chat. Users can say "create a plan for X" and you create it.
         
@@ -192,6 +192,16 @@ final class AgentCoordinator: ObservableObject {
         }
         
         return prompt
+    }
+    
+    /// Check if a notification type should be shown in the chat UI.
+    func shouldShowNotificationInChat(type: String) -> Bool {
+        switch type {
+        case "usage": return showUsageInChat
+        case "agent_progress": return showProgressInChat
+        case "build_complete", "build_failed": return showBuildInChat
+        default: return true
+        }
     }
     
     func buildTools() -> [CopilotSDK.ToolDefinition] {
