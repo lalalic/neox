@@ -25,11 +25,11 @@ sequenceDiagram
 ```json
 {
   "name": "create_project",
-  "description": "Create a new project in the workspace. Steps: 1) Read .neo/templates/{template}/README.md to understand the structure 2) Follow the README to gather required info from the user 3) Call this tool with the gathered info. The client will scaffold the project folder.",
+  "description": "Create a new project in the workspace. Steps: 1) Read .templates/projects/{template}/README.md to understand the structure 2) Follow the README to gather required info from the user 3) Call this tool with the gathered info. The client will scaffold the project folder.",
   "parameters": {
     "name": { "type": "string", "description": "Project name (e.g., 'Fitness Tracker')" },
     "description": { "type": "string", "description": "One-line project description" },
-    "template": { "type": "string", "description": "Template name from .neo/templates/ (default: 'project')" },
+    "template": { "type": "string", "description": "Template name from .templates/projects/ (default: 'general')" },
     "goal": { "type": "string", "description": "Project goal (1-2 sentences)" },
     "features": {
       "type": "array",
@@ -43,25 +43,24 @@ sequenceDiagram
 
 ## Templates
 
-Templates live in `workspace/.neo/templates/`. Each folder is a template with a `README.md` that guides the agent on how to scaffold.
+Templates live in `workspace/.templates/`. Two layers are merged when creating a project:
 
 ```
-workspace/.neo/templates/
-├── project/              # General project (default)
-│   ├── README.md         # goal, features, strategy, phases, references
-│   ├── docs/
-│   └── progress/
-├── expo-app/             # Future: Expo mobile app
-├── web-app/              # Future: Web application
-└── ...
+workspace/.templates/
+├── coding-agent-infra/   # Always included — agent lifecycle, MCP, hooks
+│   └── .github/          # agents/, copilot-mcp.json, hooks/, workflows/auto-review.yml
+└── projects/
+    ├── general/          # Default — minimal scaffold (README, docs/, progress/)
+    ├── expo-app/         # Expo mobile app (App.tsx, app.json, CI, EAS)
+    └── ...               # Future: web-app, etc.
 ```
 
 ### How the Agent Discovers Templates
 
 The agent's `read_file` tool is intercepted by the relay and delegated to the phone. So the agent can directly read phone-local files:
 
-1. List `.neo/templates/` to see available templates
-2. Read `.neo/templates/{name}/README.md` to understand structure and required fields
+1. List `.templates/projects/` to see available templates
+2. Read `.templates/projects/{name}/README.md` to understand structure and required fields
 3. Follow the README guidance to gather info from user
 4. Call `create_project` with the gathered info
 
@@ -137,7 +136,7 @@ func handleCreateProject(name: String, description: String?, template: String?, 
     // Copy template structure
     let templateName = template ?? "project"
     let templateDir = workspaceURL
-        .appendingPathComponent(".neo/templates/\(templateName)")
+        .appendingPathComponent(".templates/projects/\(templateName)")
     
     if FileManager.default.fileExists(atPath: templateDir.path) {
         try FileManager.default.copyItem(at: templateDir, to: projectDir)

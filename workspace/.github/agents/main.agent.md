@@ -15,7 +15,7 @@
 - Agent MUST follow this folder structure to read and create files.
 - All files(except .neo, .github) must be in a project
 - make file name more meaningful to agent, such as imageA.png, imageA-shrink-512x512.jpg, imageA-meta.md
-- read `.neo/templates/project/README.md` before create project
+- read `.templates/projects/general/README.md` before create project
 
 workspace/                       # monorepo root
 ├── .github/                     

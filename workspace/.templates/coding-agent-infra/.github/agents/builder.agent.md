@@ -56,13 +56,14 @@ You have three tools via the relay MCP server:
 
 ### Phase 1: Plan
 1. Read the issue spec (Goal, Constraints, Validation checklist)
-2. Plan the implementation — which files to create/modify, what components to build
-3. `send_response("Plan: [brief description of approach]")`
+2. Read `.github/copilot-instructions.md` for project-specific coding standards
+3. Plan the implementation — which files to create/modify, what components to build
+4. `send_response("Plan: [brief description of approach]")`
 
 ### Phase 2: Implement
-5. Write the code — components, screens, navigation, styles
-6. Run `npx tsc --noEmit` — fix any type errors
-7. `report_progress("✅ Type Check", "All types pass", "success")`
+5. Write the code following the project's coding standards
+6. Run the project's validation commands (see copilot-instructions.md)
+7. `report_progress("✅ Validation", "All checks pass", "success")`
 8. Walk through the Validation checklist from the issue — verify each item
 
 ### Phase 3: Deliver
@@ -71,33 +72,15 @@ You have three tools via the relay MCP server:
     - Title: same as issue title
     - Body: brief summary of changes + "Closes #N"
 11. `report_progress("📝 PR Created", "PR #X ready, CI running", "info")`
-12. Wait for CI (TypeScript check) to pass
+12. Wait for CI to pass
 13. If CI fails: fix, push, wait again
 14. Merge the PR (squash)
 
-## Technology
-
-- **Stack:** Expo SDK 55+, React Native, TypeScript
-- **Routing:** Expo Router (file-based, `app/` directory)
-- **Styling:** StyleSheet.create — no external CSS libraries
-- **State:** React hooks (useState, useReducer, useContext). No Redux unless spec requires it
-- **Platform:** iOS (iPhone) primary
-
-## Coding Standards
-
-- All code must be TypeScript (`.tsx` for components, `.ts` for utilities)
-- Run `npx tsc --noEmit` before every commit
-- Functional components with hooks only — no class components
-- Keep files small: one component per file, max ~200 lines
-- Name files by their component: `TaskList.tsx`, `AddTaskModal.tsx`
-- Use `app/` directory for Expo Router pages
-- Use `components/` for reusable components
-- Destructure props at the function signature level
-
 ## Error Recovery
 
-- **Type error:** Fix it. Don't skip or use `any` unless truly unavoidable.
-- **Missing dependency:** Install it with `npx expo install <package>` (not npm/yarn directly)
+- Read `.github/copilot-instructions.md` for project-specific error handling
+- If blocked, `send_response` with what you tried and what failed
+- Never skip validation — fix all errors before committing
 - **Spec ambiguity:** Make a reasonable decision and note it in the PR description.
 - **CI failure:** Read the error, fix, push again. Don't merge with failing CI.
 - **Stuck for >5 minutes:** Simplify the approach. Ship something working over something perfect.

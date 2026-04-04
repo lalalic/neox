@@ -91,14 +91,14 @@ graph LR
 
 | Tool | Available to | Registration | Handler |
 |------|-------------|-------------|---------|
-| `create_project` | Tier 1 only | Agent tool (intercepted) | On-device scaffold from `.neo/templates/` ([design](create-project-tool.md)) |
+| `create_project` | Tier 1 only | Agent tool (intercepted) | On-device scaffold from `.templates/projects/` ([design](create-project-tool.md)) |
 | `send_response` | Tier 1 + Tier 2 | Agent tool + MCP | Delivers chat message to phone |
 | `ask_user` | Tier 1 only | Agent tool | Asks question, holds session for answer |
 | `create_task` | Tier 1 only | Agent tool (intercepted) | Relay-orchestrated: phone does GitHub, relay activates ([design](../../copilot-relay/docs/create-task-pipeline.md)) |
 | `report_progress` | Tier 2 only | MCP only | Push notification for milestones |
 | `report_usage` | Tier 2 only | MCP only | Token usage via APNs, on-device accounting |
 
-**`create_project` is an on-device tool.** The relay intercepts the call and delegates to the phone via WebSocket. The phone scaffolds a project folder from `.neo/templates/`, creating README.md, docs/, and progress/. This runs early in the guided flow so that context files (specs, mockups) have a folder to live in.
+**`create_project` is an on-device tool.** The relay intercepts the call and delegates to the phone via WebSocket. The phone scaffolds a project folder from `.templates/projects/`, creating README.md, docs/, and progress/. This runs early in the guided flow so that context files (specs, mockups) have a folder to live in.
 
 **`create_task` is a relay-orchestrated tool.** The relay intercepts it, delegates GitHub work to the phone (repo creation, file upload, issue creation via `/github/` proxy), then activates the project server-side (secrets, MCP token, @copilot, build).
 
@@ -142,7 +142,7 @@ Two tools work together:
 
 ### create_project (on-device)
 
-The agent reads `.neo/templates/{name}/README.md` on the device (via intercepted `read_file`), follows it to gather info, then calls `create_project`. The phone scaffolds a project folder locally.
+The agent reads `.templates/projects/{name}/README.md` on the device (via intercepted `read_file`), follows it to gather info, then calls `create_project`. The phone scaffolds a project folder locally.
 
 ### create_task (relay-orchestrated)
 
@@ -179,7 +179,7 @@ The Tier 1 agent MUST follow this process before calling `create_task`:
 - What problem does the app solve?
 - Who is the target user?
 - Similar apps?
-- Agent reads `.neo/templates/` to pick template
+- Agent reads `.templates/projects/` to pick template
 - Agent calls `create_project` to scaffold local folder
 
 ### Step 2: Define Features
@@ -250,9 +250,12 @@ GitHub Copilot [hooks](https://docs.github.com/en/copilot/reference/hooks-config
 
 Scripts authenticate via `$PROJECT_TOKEN` env var and call the relay's MCP endpoint (`tools/call` JSON-RPC).
 
-### Template Sync
+### Templates
 
-Templates are managed locally in `neox/workspace/.neo/templates/` and auto-synced to GitHub via `.github/workflows/sync-templates.yml` on push to main.
+Templates are managed locally in `neox/workspace/.templates/`:
+
+- **`coding-agent-infra/`** — Agent lifecycle files (builder.agent.md, copilot-mcp.json, hooks, auto-review.yml). Always merged into new repos.
+- **`projects/`** — Project type templates (expo-app, general). Framework-specific files.
 
 **On repo creation**, `create_task` customizes:
 - `app.json`: name, slug, bundleIdentifier

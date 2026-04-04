@@ -146,7 +146,7 @@ final class AgentCoordinator: ObservableObject {
             RegisteredTool(name: "memory_write_section", description: "Write/replace memory markdown sections"),
             RegisteredTool(name: "memory_log_session", description: "Create session notes in .neo/reports/sessions"),
             RegisteredTool(name: "memory_list", description: "List memory files under .neo"),
-            RegisteredTool(name: "create_project", description: "Scaffold a new project from .neo/templates/"),
+            RegisteredTool(name: "create_project", description: "Scaffold a new project from .templates/projects/"),
             RegisteredTool(name: "create_plan", description: "Create a scheduled plan from chat"),
             RegisteredTool(name: "stripe_checkout", description: "Generate external Stripe checkout link when requested"),
         ]
@@ -253,6 +253,7 @@ final class AgentCoordinator: ObservableObject {
                 onAskUser: { _ in "" }
             )),
             inputModes: chatInputModes,
+            workspaceURL: workspaceURL,
             notificationFilter: { [weak self] type in
                 guard let self else { return true }
                 switch type {
