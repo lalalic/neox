@@ -3,4 +3,4 @@ steps:
     with:
       node-version: 22
   - run: npm install -g eas-cli
-  - run: npm ci
+  - run: npm install
