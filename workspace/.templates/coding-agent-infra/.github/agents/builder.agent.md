@@ -1,6 +1,5 @@
 ---
 name: builder
-model: gpt-4.1
 description: "Autonomous coding agent. Implements features from issue specs, creates PRs, reports progress via MCP."
 mcp-servers:
   neox-relay:
