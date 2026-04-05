@@ -19,6 +19,13 @@ targets:
       - Neox
     entitlements:
       path: Neox/Neox.entitlements
+    preBuildScripts:
+      - name: Rebuild workspace.zip
+        script: |
+          cd "${PROJECT_DIR}/workspace"
+          zip -r "${PROJECT_DIR}/copilot-ios/CopilotSDK/Sources/Resources/workspace.zip" . -x "*.DS_Store" > /dev/null 2>&1
+          echo "workspace.zip rebuilt from neox/workspace"
+        basedOnDependencyAnalysis: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.neox.app
