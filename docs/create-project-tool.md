@@ -81,7 +81,7 @@ workspace/
 
 ### package.json
 
-Saved locally during `create_task` (after repo creation). Contains:
+Saved locally during `start_coding_task` (after repo creation). Contains:
 
 ```json
 {
@@ -130,19 +130,19 @@ Step 1: Discover → agent calls create_project after understanding what user wa
 Step 2: Define → agent writes docs/spec.md, user uploads mockups to docs/designs/
 Step 3: Design → agent writes docs/screens.md
 Step 4: Confirm → user reviews
-Step 5: Create → agent calls create_task (pushes to GitHub, activates coding agent)
+Step 5: Create → agent calls start_coding_task (pushes to GitHub, activates coding agent)
 ```
 
-## Relationship to create_task
+## Relationship to start_coding_task
 
 | Tool | Where | What |
 |------|-------|------|
 | `create_project` | On-device | Scaffolds local project folder from template |
 | `stage_file` | On-device | Writes a file into the project folder |
-| `create_task` | Relay → device → relay | Pushes project to GitHub, saves package.json locally, activates coding agent |
+| `start_coding_task` | Relay → device → relay | Pushes project to GitHub, saves package.json locally, activates coding agent |
 | Delete (swipe) | On-device | Removes local dir, archives GitHub repo via /github/ proxy |
 
-The local project folder becomes the source for `create_task` — files from `docs/` get uploaded to the GitHub repo.
+The local project folder becomes the source for `start_coding_task` — files from `docs/` get uploaded to the GitHub repo.
 
 ## On-Device Implementation
 

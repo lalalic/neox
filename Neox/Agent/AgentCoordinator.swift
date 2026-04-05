@@ -174,26 +174,6 @@ final class AgentCoordinator: ObservableObject {
         workspaceURL
     }
     
-    func buildSystemPrompt() -> String {
-        var prompt = """
-        You are Neox, an autonomous AI assistant on iPhone.
-        You can browse the web, take photos, speak to the user, and listen.
-        Use the browser to operate websites like GitHub, Vercel, etc.
-        You have file tools (read_file, write_file, list_files, create_project) to manage files in the on-device workspace.
-        You have memory tools to manage long-term notes under .neo/ (memory_read, memory_append, memory_write_section, memory_log_session, memory_list).
-        You have a create_plan tool to create scheduled plans directly from chat. Users can say "create a plan for X" and you create it.
-        
-        You have a manage_todo_list tool — use it for multi-step tasks to track progress.
-        The todo list is displayed above the chat input in the app.
-        """
-        
-        if webToolProvider != nil {
-            prompt += "\n\n" + WebAgentToolProvider.skillPrompt
-        }
-        
-        return prompt
-    }
-    
     /// Check if a notification type should be shown in the chat UI.
     func shouldShowNotificationInChat(type: String) -> Bool {
         switch type {
@@ -230,10 +210,8 @@ final class AgentCoordinator: ObservableObject {
     func createChatViewModel() -> ChatViewModel {
         normalizeInputSettings()
         let tools = buildTools()
-        let hasProfileSections = !(agentProfile?.sections.isEmpty ?? true)
-        let profileInstructions = agentProfile?.preambleBody?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let instructions = profileInstructions?.isEmpty == false ? profileInstructions! : buildSystemPrompt()
-        let sections = hasProfileSections ? agentProfile?.sections : nil
+        let instructions = agentProfile?.preambleBody?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let sections = (agentProfile?.sections.isEmpty ?? true) ? nil : agentProfile?.sections
         let model = selectedModel
         
         let transport = WebSocketTransport(

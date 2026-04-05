@@ -53,7 +53,7 @@ graph TD
 | **Where** | Relay server, copilot CLI session | GitHub cloud VM |
 | **Triggered by** | User chat message | Issue assignment |
 | **Role** | Discover requirements, design, dispatch | Implement code, create PRs, build |
-| **Tools** | `create_project`, `create_task`, `send_response`, `ask_user` | `send_response`, `report_progress`, `report_usage` (via relay MCP) |
+| **Tools** | `create_project`, `start_coding_task`, `send_response`, `ask_user` | `send_response`, `report_progress`, `report_usage` (via relay MCP) |
 | **Lifetime** | Persistent (session pool) | Per-issue (disposable VM) |
 
 ---
@@ -76,7 +76,7 @@ graph LR
     R -->|"create_project"| Phone[User Phone]
     R -->|"send_response"| Phone
     R -->|"ask_user"| Phone
-    R -->|"create_task"| Phone
+    R -->|"start_coding_task"| Phone
     Phone -->|"GitHub ops via /github/ proxy"| GH[GitHub API]
     R -->|"activate"| GH
 
@@ -94,17 +94,17 @@ graph LR
 | `create_project` | Tier 1 only | Agent tool (intercepted) | On-device scaffold from `.templates/projects/` ([design](create-project-tool.md)) |
 | `send_response` | Tier 1 + Tier 2 | Agent tool + MCP | Delivers chat message to phone |
 | `ask_user` | Tier 1 only | Agent tool | Asks question, holds session for answer |
-| `create_task` | Tier 1 only | Agent tool (intercepted) | Relay-orchestrated: phone does GitHub, relay activates ([design](../../copilot-relay/docs/create-task-pipeline.md)) |
+| `start_coding_task` | Tier 1 only | Agent tool (intercepted) | Relay-orchestrated: phone does GitHub, relay activates ([design](../../copilot-relay/docs/create-task-pipeline.md)) |
 | `report_progress` | Tier 2 only | MCP only | Push notification for milestones |
 | `report_usage` | Tier 2 only | MCP only | Token usage via APNs, on-device accounting |
 
 **`create_project` is an on-device tool.** The relay intercepts the call and delegates to the phone via WebSocket. The phone scaffolds a project folder from `.templates/projects/`, creating README.md, docs/, and progress/. This runs early in the guided flow so that context files (specs, mockups) have a folder to live in.
 
-**`create_task` is a relay-orchestrated tool.** The relay intercepts it, delegates GitHub work to the phone (repo creation, file upload, issue creation via `/github/` proxy), then activates the project server-side (secrets, MCP token, @copilot, build).
+**`start_coding_task` is a relay-orchestrated tool.** The relay intercepts it, delegates GitHub work to the phone (repo creation, file upload, issue creation via `/github/` proxy), then activates the project server-side (secrets, MCP token, @copilot, build).
 
 **`report_progress` and `report_usage` are MCP-only tools.** The Tier 1 agent doesn't need them — the user sees everything in real-time chat, and Tier 1 usage is tracked by the relay directly. The Tier 2 coding agent runs asynchronously and uses these to report milestones and token consumption.
 
-### Why the agent calls `create_task` (not user/API directly)
+### Why the agent calls `start_coding_task` (not user/API directly)
 
 ```mermaid
 sequenceDiagram
@@ -118,7 +118,7 @@ sequenceDiagram
     Note over A: Step 1-4: Discover, Define,<br/>Design, Confirm
     A->>U: "Here's the spec. Say 'go' to build."
     U->>A: "go"
-    A->>R: create_task(appName, taskDescription)
+    A->>R: start_coding_task(appName, taskDescription)
     R->>GH: Create repo from template
     R->>GH: Set 4 secrets (EXPO_TOKEN, ASC keys)
     R->>EAS: Create EAS project
@@ -130,7 +130,7 @@ sequenceDiagram
     A->>U: "Project created! Coding agent starting..."
 ```
 
-The agent controls *when* to call it — only after the 5-step guided flow and explicit user confirmation. It composes a structured `taskDescription` from the conversation (not raw user text). And it continues working after `create_task` returns (monitoring progress, responding to updates).
+The agent controls *when* to call it — only after the 5-step guided flow and explicit user confirmation. It composes a structured `taskDescription` from the conversation (not raw user text). And it continues working after `start_coding_task` returns (monitoring progress, responding to updates).
 
 ---
 
@@ -138,15 +138,15 @@ The agent controls *when* to call it — only after the 5-step guided flow and e
 
 Two tools work together:
 - **`create_project`** — on-device scaffold from templates ([design](create-project-tool.md))
-- **`create_task`** — relay-orchestrated GitHub + activation ([design](../../copilot-relay/docs/create-task-pipeline.md))
+- **`start_coding_task`** — relay-orchestrated GitHub + activation ([design](../../copilot-relay/docs/create-task-pipeline.md))
 
 ### create_project (on-device)
 
 The agent reads `.templates/projects/{name}/README.md` on the device (via intercepted `read_file`), follows it to gather info, then calls `create_project`. The phone scaffolds a project folder locally.
 
-### create_task (relay-orchestrated)
+### start_coding_task (relay-orchestrated)
 
-When the Tier 1 agent calls `create_task`, the relay orchestrates:
+When the Tier 1 agent calls `start_coding_task`, the relay orchestrates:
 
 ```mermaid
 flowchart TD
@@ -173,7 +173,7 @@ flowchart TD
 
 ## 5. Agent Guided Flow
 
-The Tier 1 agent MUST follow this process before calling `create_task`:
+The Tier 1 agent MUST follow this process before calling `start_coding_task`:
 
 ### Step 1: Discover + Create Project
 - What problem does the app solve?
@@ -204,7 +204,7 @@ Screens: Home → Detail → Settings
 Ask: "Say 'go' to start building."
 
 ### Step 5: Create Task
-Only after explicit user approval → call `create_task`.
+Only after explicit user approval → call `start_coding_task`.
 Phone uploads project files to GitHub, relay activates.
 
 ---
@@ -257,7 +257,7 @@ Templates are managed locally in `neox/workspace/.templates/`:
 - **`coding-agent-infra/`** — Agent lifecycle files (builder.agent.md, copilot-mcp.json, hooks, auto-review.yml). Always merged into new repos.
 - **`projects/`** — Project type templates (expo-app, general). Framework-specific files.
 
-**On repo creation**, `create_task` customizes:
+**On repo creation**, `start_coding_task` customizes:
 - `app.json`: name, slug, bundleIdentifier
 - `copilot-mcp.json`: project-specific MCP token
 
@@ -371,7 +371,7 @@ User tests app → "Tab icons are too small"
 |-----------|--------|
 | Relay server + session pooling | ✅ Deployed |
 | Agent loop (send_response + ask_user) | ✅ Working |
-| create_task pipeline (delegation) | ✅ Working — phone creates repo/issue, relay activates |
+| start_coding_task pipeline (delegation) | ✅ Working — phone creates repo/issue, relay activates |
 | /github/* proxy | ✅ Working — transparent proxy, 6 tests pass |
 | Secret injection (libsodium) | ✅ Working |
 | Template repo | ✅ Created (neos-apps/expo-app-template) |

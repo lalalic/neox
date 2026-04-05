@@ -33,7 +33,7 @@ User (Neox app)
     ▼
 Agent (relay session, Tier 1 — on-device)
     │
-    ├── 1. create_task("weather app with hourly forecasts")
+    ├── 1. start_coding_task("weather app with hourly forecasts")
     │      → creates repo: neos/weather-abc123 (from template)
     │      → creates issue #1: "App scaffold with tab navigation"
     │      → assigns custom coding agent
@@ -63,7 +63,7 @@ Agent (relay session, Tier 1 — on-device)
     │   └─────────────────────────────────────────────────────────┘
     │
     └── User installs from TestFlight → tests → feedback
-        → agent calls create_task(feedback) → iterate
+        → agent calls start_coding_task(feedback) → iterate
 ```
 
 **Key insight**: The custom coding agent stays alive through the entire cycle — from coding to TestFlight. It communicates with the user via relay MCP, and triggers/monitors EAS Build via CLI. No self-hosted runner or manual signing needed.
@@ -239,9 +239,9 @@ Same pattern as `copilot-ios/.github/workflows/auto-merge.yml`:
 | Tool | Description |
 |------|-------------|
 | `create_project` | Create a local project on device (any kind, not GitHub-specific) |
-| `create_task` | Full pipeline: create repo (if needed) → create issue with spec → assign coding agent |
+| `start_coding_task` | Full pipeline: create repo (if needed) → create issue with spec → assign coding agent |
 
-`create_task` handles:
+`start_coding_task` handles:
 1. Check if project has a repo; if not, create from template + replace variables + `eas init`
 2. Create GitHub issue with spec
 3. Assign to the custom coding agent
@@ -356,7 +356,7 @@ User: "I want to build a recipe sharing app"
 Agent (on phone):
   1. Asks clarifying questions via chat
   2. Decomposes into phases
-  3. Calls create_task → creates repo neos/recipe-7f3a2b from template
+  3. Calls start_coding_task → creates repo neos/recipe-7f3a2b from template
   4. Creates Issue #1: "App scaffold with tab navigation"
   5. Reports: "Created your project! Coding agent starting..."
 ```
@@ -495,7 +495,7 @@ For MVP, free tiers are sufficient (30 EAS builds/month, ubuntu CI runners, Copi
 
 ### Phase 2: Relay Integration
 
-5. Add `create_task` handler to relay-server.js (GitHub API: create repo, issue)
+5. Add `start_coding_task` handler to relay-server.js (GitHub API: create repo, issue)
 6. Add MCP endpoint to relay for coding agent communication
 7. Add `projects.json` registry
 
