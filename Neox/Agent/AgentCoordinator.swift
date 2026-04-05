@@ -147,6 +147,7 @@ final class AgentCoordinator: ObservableObject {
             RegisteredTool(name: "memory_log_session", description: "Create session notes in .neo/reports/sessions"),
             RegisteredTool(name: "memory_list", description: "List memory files under .neo"),
             RegisteredTool(name: "create_project", description: "Scaffold a new project from .templates/projects/"),
+            RegisteredTool(name: "start_coding_task", description: "Start coding task: create GitHub repo, issue, assign coding agent"),
             RegisteredTool(name: "create_plan", description: "Create a scheduled plan from chat"),
             RegisteredTool(name: "stripe_checkout", description: "Generate external Stripe checkout link when requested"),
         ]
