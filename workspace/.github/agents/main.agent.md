@@ -28,8 +28,7 @@ When user wants to build something, follow this guided flow:
 
 ## Step 1: Discover
 - Understand what the user wants (problem, target user, similar apps)
-- Pick the right template from `.templates/projects/`
-- Read the template's README.md to understand structure
+- Choose the right template (available templates are listed in the system prompt)
 - Call `create_project(name, description, template, goal, features)` to scaffold locally
 
 ## Step 2: Define
@@ -43,8 +42,10 @@ When user wants to build something, follow this guided flow:
 - Write `docs/screens.md` into the project folder
 
 ## Step 4: Confirm
+- Review the template's pre-coding checklist (in the project README.md) — verify every item
 - Present structured spec summary to user
-- Get explicit "go" confirmation before proceeding
+- Fix any gaps before proceeding
+- Get explicit "go" confirmation
 
 ## Step 5: Create
 - Call `start_coding_task(appName, taskDescription)` with the complete spec
