@@ -98,8 +98,10 @@ struct ContentView: View {
                     }
                 },
                 onDelete: { project in
-                    Task {
-                        await coordinator.chatViewModel?.deleteProject(name: project.name)
+                    if let repo = project.repo {
+                        Task {
+                            await coordinator.chatViewModel?.archiveRepo(repo)
+                        }
                     }
                 }
             )
