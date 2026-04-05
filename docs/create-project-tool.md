@@ -73,10 +73,28 @@ Given `create_project(name: "Fitness Tracker", description: "Track daily workout
 ```
 workspace/
 ├── FitnessTracker/           # slugified name
+│   ├── package.json          # project metadata (name, repo, bundleId, etc.)
 │   ├── README.md             # filled from template + tool params
 │   ├── docs/                 # empty, ready for specs/designs
 │   └── progress/             # empty, ready for plans/todos
 ```
+
+### package.json
+
+Saved locally during `create_task` (after repo creation). Contains:
+
+```json
+{
+  "name": "fitness-tracker-a1b2c3",
+  "displayName": "Fitness Tracker",
+  "description": "Track daily workouts and visualize progress",
+  "repo": "neos-apps/fitness-tracker-a1b2c3",
+  "bundleId": "com.neos.fitnesstrackera1b2c3",
+  "projectType": "expo-app"
+}
+```
+
+This is the source of truth for project metadata on-device. Used by `ProjectsView` to display project names/descriptions and by the delete flow to archive the GitHub repo.
 
 ### README.md Content
 
@@ -121,7 +139,8 @@ Step 5: Create → agent calls create_task (pushes to GitHub, activates coding a
 |------|-------|------|
 | `create_project` | On-device | Scaffolds local project folder from template |
 | `stage_file` | On-device | Writes a file into the project folder |
-| `create_task` | Relay → device → relay | Pushes project to GitHub, activates coding agent |
+| `create_task` | Relay → device → relay | Pushes project to GitHub, saves package.json locally, activates coding agent |
+| Delete (swipe) | On-device | Removes local dir, archives GitHub repo via /github/ proxy |
 
 The local project folder becomes the source for `create_task` — files from `docs/` get uploaded to the GitHub repo.
 
