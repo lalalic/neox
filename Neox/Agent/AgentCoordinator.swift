@@ -208,11 +208,102 @@ final class AgentCoordinator: ObservableObject {
         return tools
     }
     
+    /// Build a tree string of the workspace folder structure (3 levels deep).
+    /// Excludes node_modules, .git, build artifacts.
+    private func buildWorkspaceTree() -> String {
+        let fm = FileManager.default
+        let excludes: Set<String> = ["node_modules", ".git", "build", "build-sim", "build-device", ".build"]
+        
+        func listDir(_ url: URL, prefix: String, depth: Int) -> String {
+            guard depth > 0 else { return "" }
+            guard let contents = try? fm.contentsOfDirectory(
+                at: url, includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ).filter({ !excludes.contains($0.lastPathComponent) })
+            .sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) else { return "" }
+            
+            // Also include dotfiles we care about
+            let dotContents = (try? fm.contentsOfDirectory(
+                at: url, includingPropertiesForKeys: [.isDirectoryKey], options: []
+            ).filter({ $0.lastPathComponent.hasPrefix(".") && !excludes.contains($0.lastPathComponent) })
+            .sorted(by: { $0.lastPathComponent < $1.lastPathComponent })) ?? []
+            
+            let allItems = (dotContents + contents).sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+            // Deduplicate
+            var seen = Set<String>()
+            let unique = allItems.filter { seen.insert($0.lastPathComponent).inserted }
+            
+            var result = ""
+            for item in unique {
+                let name = item.lastPathComponent
+                let isDir = (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                result += "\(prefix)\(name)\(isDir ? "/" : "")\n"
+                if isDir {
+                    result += listDir(item, prefix: prefix + "  ", depth: depth - 1)
+                }
+            }
+            return result
+        }
+        
+        return listDir(workspaceURL, prefix: "", depth: 3)
+    }
+    
+    /// Build a description of available project templates from .templates/projects/.
+    /// Reads each template's README.md for frontmatter name/description.
+    private func buildTemplateInfo() -> String {
+        let fm = FileManager.default
+        let templatesDir = workspaceURL
+            .appendingPathComponent(".templates", isDirectory: true)
+            .appendingPathComponent("projects", isDirectory: true)
+        
+        guard let templates = try? fm.contentsOfDirectory(
+            at: templatesDir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]
+        ).filter({
+            (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+        }).sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) else {
+            return ""
+        }
+        
+        var lines: [String] = ["## project templates", "Read the template's README.md before creating a new project.", ""]
+        lines.append("| Template | Description |")
+        lines.append("|----------|-------------|")
+        
+        for template in templates {
+            let name = template.lastPathComponent
+            let readmeURL = template.appendingPathComponent("README.md")
+            var description = ""
+            if let content = try? String(contentsOf: readmeURL, encoding: .utf8) {
+                // Extract first # goal section content
+                let lines = content.components(separatedBy: "\n")
+                for (i, line) in lines.enumerated() {
+                    if line.lowercased().hasPrefix("# goal") && i + 1 < lines.count {
+                        description = lines[i + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+                        break
+                    }
+                }
+            }
+            if description.isEmpty { description = name }
+            lines.append("| `\(name)` | \(description) |")
+        }
+        
+        return lines.joined(separator: "\n")
+    }
+
     /// Create the shared CopilotChat view model configured for agent mode.
     func createChatViewModel() -> ChatViewModel {
         normalizeInputSettings()
         let tools = buildTools()
-        let instructions = agentProfile?.preambleBody?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var instructions = agentProfile?.preambleBody?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        
+        // Inject dynamic workspace context
+        let tree = buildWorkspaceTree()
+        if !tree.isEmpty {
+            instructions += "\n\n## current workspace files\n```\n\(tree)```"
+        }
+        let templateInfo = buildTemplateInfo()
+        if !templateInfo.isEmpty {
+            instructions += "\n\n\(templateInfo)"
+        }
         let sections = (agentProfile?.sections.isEmpty ?? true) ? nil : agentProfile?.sections
         let model = selectedModel
         
