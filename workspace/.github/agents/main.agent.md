@@ -40,6 +40,7 @@ workspace/                       # monorepo root
 │
 ├── ProjectA/                    # Project root
 │   ├── README.md
+│   ├── package.json
 │   ├── docs/
 │   ├── ...
 │   └── progress/
