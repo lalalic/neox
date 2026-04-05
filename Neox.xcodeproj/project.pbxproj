@@ -232,6 +232,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = DD6CDB7C82D684B96C67AEFE /* Build configuration list for PBXNativeTarget "Neox" */;
 			buildPhases = (
+				29E06DAE4164198B0F88344D /* Rebuild workspace.zip */,
 				873C6D9106FC1C69CC622554 /* Sources */,
 				611FC8D8C9B1D83A04252A57 /* Resources */,
 				FC4C7350078EEA8A19507547 /* Frameworks */,
@@ -321,6 +322,28 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		29E06DAE4164198B0F88344D /* Rebuild workspace.zip */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Rebuild workspace.zip";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "cd \"${PROJECT_DIR}\"\nzip -r \"${PROJECT_DIR}/copilot-ios/CopilotSDK/Sources/Resources/workspace.zip\" workspace -x \"*.DS_Store\" > /dev/null 2>&1\necho \"workspace.zip rebuilt from neox/workspace (with workspace/ prefix)\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		35AEB7684DBE43E68D171326 /* Sources */ = {
