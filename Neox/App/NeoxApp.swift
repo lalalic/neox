@@ -193,7 +193,13 @@ struct NeoxApp: App {
                             // Wait for chatViewModel to be ready and connected
                             for attempt in 0..<15 {
                                 if let vm = coordinator.chatViewModel, vm.chatState == .idle {
-                                    await vm.setDeviceToken(token)
+                                    let env: String
+                                    #if DEBUG
+                                    env = "sandbox"
+                                    #else
+                                    env = "production"
+                                    #endif
+                                    await vm.setDeviceToken(token, apnsEnv: env, userId: "default")
                                     print("[NeoxApp] Device token sent to relay (attempt \(attempt))")
                                     return
                                 }
@@ -201,7 +207,13 @@ struct NeoxApp: App {
                             }
                             // Last resort: try anyway
                             if let vm = coordinator.chatViewModel {
-                                await vm.setDeviceToken(token)
+                                let env: String
+                                #if DEBUG
+                                env = "sandbox"
+                                #else
+                                env = "production"
+                                #endif
+                                await vm.setDeviceToken(token, apnsEnv: env, userId: "default")
                                 print("[NeoxApp] Device token sent (final attempt)")
                             } else {
                                 print("[NeoxApp] Failed to send device token — chatViewModel not ready")

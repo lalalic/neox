@@ -249,6 +249,14 @@ final class AgentCoordinator: ObservableObject {
                 sections: sections,
                 tools: tools,
                 deviceToken: UserDefaults.standard.string(forKey: "apnsDeviceToken"),
+                apnsEnv: {
+                    #if DEBUG
+                    return "sandbox"
+                    #else
+                    return "production"
+                    #endif
+                }(),
+                userId: "default",
                 onResponse: { _ in },
                 onAskUser: { _ in "" }
             )),
