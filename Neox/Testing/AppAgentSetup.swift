@@ -98,23 +98,6 @@ final class AppAgentSetup {
         bridgeHandlers["get_messages"] = getMessagesHandler
         bridgeToolList.append(["name": "get_messages", "description": "Get all chat messages", "inputSchema": ["type": "object"]])
         
-        let clearMessagesHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] _ in
-            await MainActor.run {
-                self?.coordinator?.chatViewModel?.messages.removeAll()
-                self?.coordinator?.chatViewModel?.toolCalls.removeAll()
-            }
-            return "Chat cleared"
-        }
-        
-        server.register(
-            name: "clear_messages",
-            description: "Clear all chat messages from the display.",
-            inputSchema: ["type": "object", "properties": [String: Any]()],
-            handler: clearMessagesHandler
-        )
-        bridgeHandlers["clear_messages"] = clearMessagesHandler
-        bridgeToolList.append(["name": "clear_messages", "description": "Clear chat messages", "inputSchema": ["type": "object"]])
-        
         let getStatusHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] _ in
             guard let self else { return "Error: setup deallocated" }
             let status = await MainActor.run { [weak self] () -> String in
@@ -149,37 +132,6 @@ final class AppAgentSetup {
         )
         bridgeHandlers["get_status"] = getStatusHandler
         bridgeToolList.append(["name": "get_status", "description": "Get app status", "inputSchema": ["type": "object"]])
-
-        // reconnect tool: apply relay selection & reconnect
-        let reconnectHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] args in
-            guard let self else { return "Error: setup deallocated" }
-            await MainActor.run {
-                guard let coord = self.coordinator else { return }
-                // Apply useLocalRelay if specified
-                if case .object(let dict) = args,
-                   case .bool(let useLocal) = dict["useLocal"] {
-                    coord.useLocalRelay = useLocal
-                }
-                coord.applyRelaySelection()
-                coord.saveRelaySettings()
-                coord.reconnect()
-            }
-            return "reconnecting to \(await MainActor.run { self.coordinator?.relayHost ?? "?" }):\(await MainActor.run { self.coordinator?.relayPort ?? 0 })"
-        }
-
-        server.register(
-            name: "reconnect",
-            description: "Apply relay settings and reconnect. Optionally set useLocal=true/false.",
-            inputSchema: [
-                "type": "object",
-                "properties": [
-                    "useLocal": ["type": "boolean", "description": "Set to true for local relay, false for VPS relay"]
-                ]
-            ],
-            handler: reconnectHandler
-        )
-        bridgeHandlers["reconnect"] = reconnectHandler
-        bridgeToolList.append(["name": "reconnect", "description": "Reconnect to relay", "inputSchema": ["type": "object"]])
     }
     
     // MARK: - Reverse MCP Bridge

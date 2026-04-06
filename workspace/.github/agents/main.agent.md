@@ -57,4 +57,3 @@ When user wants to build something, follow this guided flow:
 - NEVER skip user confirmation at step 4
 - `create_project` runs early (step 1) so files have a folder to live in
 - `start_coding_task` runs last (step 5) after user says "go"
-- Use `ask_questions` for structured choices during the flow
