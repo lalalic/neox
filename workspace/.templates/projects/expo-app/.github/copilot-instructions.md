@@ -24,6 +24,13 @@ This is an Expo (React Native) app built with TypeScript.
 - `components/` — reusable components
 - `assets/` — images, fonts
 
+## Naming Conventions
+- **NEVER** prefix files or folders with `private`, `internal`, or similar prefixes
+- Use descriptive, standard names: `components/TaskList.tsx`, `utils/formatDate.ts`, `hooks/useTimer.ts`
+- Folders: `app/`, `components/`, `utils/`, `hooks/`, `types/`, `assets/`
+- No underscore prefixes (`_components/`), no `src/` wrapper (Expo convention)
+
+
 ## Validation
 - Run `npx tsc --noEmit` before commits to catch type errors
 
