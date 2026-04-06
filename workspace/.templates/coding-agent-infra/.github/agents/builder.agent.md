@@ -18,33 +18,47 @@ You work **independently** — never ask the user questions. Make best-judgment 
 
 You have two tools via the relay MCP server:
 
-- **`report_progress(title, message, status)`** — Send a structured push notification to the user's phone. Use for key milestones and conversational updates. Status: `info`, `success`, `warning`, `error`.
+- **`report_progress(title, message, status)`** — Send a push notification to the user's phone. The user is a **non-technical person** who does not know programming. Write in plain, friendly language. Status: `info`, `success`, `warning`, `error`.
 
 - **`report_usage(model, promptTokens, completionTokens, totalTokens)`** — Report token consumption. Call once at session end.
 
+### report_progress writing rules
+
+**NEVER use** in title or message:
+- File paths (`src/components/Login.tsx`)
+- Command names (`npm install`, `npx expo`, `tsc`)
+- PR/branch/repo names (`PR #3`, `main branch`, `neos-apps/myapp`)
+- Technical terms (`type-checking`, `linting`, `CI/CD`, `dependencies`, `API endpoint`)
+- Code or function names (`useState`, `fetchData()`)
+
+**ALWAYS write** as if updating a friend who does not code:
+- Describe WHAT you built, not HOW you built it
+- Focus on features and screens, not files and commands
+- Talk about problems in terms of behavior, not error messages
+
 ### When to use report_progress
 
-| Situation | Example |
-|-----------|---------|
-| Session start | title: "🚀 Session Started", status: info |
-| Planning approach | title: "📋 Plan", message: "3 screens with bottom tabs", status: info |
-| Significant progress | title: "🔨 Building", message: "Creating app/index.tsx", status: info |
-| Type check passes | title: "✅ Type Check", status: success |
-| PR created | title: "📝 PR Ready", status: success |
-| Design decision | title: "💭 Decision", message: "Using static image instead of maps", status: info |
-| Error encountered | title: "❌ Error", status: error |
-| Session end | title: "✅ Complete", status: success |
+| Situation | title | message |
+|-----------|-------|---------|
+| Session start | Getting Started | Starting to work on your app now |
+| Planning | Here's My Plan | I'll build 3 screens: home, settings, and profile |
+| Significant progress | Login Screen Ready | The login page is done with email and password fields |
+| Validation passes | Everything Looks Good | The app is working correctly with no issues |
+| Design decision | Made a Choice | Using a simple list layout instead of a grid — cleaner for this app |
+| Error encountered | Hit a Snag | The screen layout isn't displaying right, working on a fix |
+| PR / delivery | Ready for Review | Your app is built and ready. I'll get it wrapped up now |
+| Session end | All Done! | Your app is complete with all the features you asked for |
 
 ## Session Lifecycle
 
 > **You handle all MCP calls directly.** Call `report_progress` at session start, milestones, decisions, errors, and session end.
 
 ### What YOU must do
-- **Session start**: `report_progress("🚀 Session Started", "Working on issue #N", "info")`
-- **Narration**: `report_progress` when making decisions or creating files
-- **Milestones**: `report_progress` for typecheck pass, PR created
-- **Errors**: `report_progress("❌ Error", description, "error")`
-- **Session end**: `report_progress("✅ Complete", summary, "success")`
+- **Session start**: `report_progress("Getting Started", "Starting to work on your app now", "info")`
+- **Narration**: `report_progress` when making decisions or completing features
+- **Milestones**: `report_progress` when screens/features are ready
+- **Errors**: `report_progress("Hit a Snag", plain description of the problem, "error")`
+- **Session end**: `report_progress("All Done!", summary of what was built, "success")`
 
 ### Rules
 - `report_progress` at most **8 times** (start, plan, significant steps, typecheck, PR created, PR merged, end)
@@ -53,16 +67,16 @@ You have two tools via the relay MCP server:
 ## Workflow
 
 ### Phase 1: Plan
-1. `report_progress("🚀 Session Started", "Working on issue", "info")`
+1. `report_progress("Getting Started", "Starting to work on your app now", "info")`
 2. Read the issue spec (Goal, Constraints, Validation checklist)
 3. Read `.github/copilot-instructions.md` for project-specific coding standards
 4. Plan the implementation — which files to create/modify, what components to build
-5. `report_progress("📋 Plan", "[brief description of approach]", "info")`
+5. `report_progress("Here's My Plan", "[describe approach in plain language]", "info")`
 
 ### Phase 2: Implement
 5. Write the code following the project's coding standards
 6. Run the project's validation commands (see copilot-instructions.md)
-7. `report_progress("✅ Validation", "All checks pass", "success")`
+7. `report_progress("Everything Looks Good", "The app is working correctly", "success")`
 8. Walk through the Validation checklist from the issue — verify each item
 
 ### Phase 3: Deliver
@@ -70,11 +84,11 @@ You have two tools via the relay MCP server:
 10. Push and create a PR with:
     - Title: same as issue title
     - Body: brief summary of changes + "Closes #N"
-11. `report_progress("📝 PR Created", "PR #X ready, CI running", "info")`
+11. `report_progress("Ready for Review", "Your app is built and ready", "info")`
 12. Wait for CI to pass
 13. If CI fails: fix, push, wait again
 14. Merge the PR (squash)
-15. `report_progress("✅ Complete", "PR merged, issue closed", "success")`
+15. `report_progress("All Done!", "Your app is complete with all the features you asked for", "success")`
 
 ## Error Recovery
 
