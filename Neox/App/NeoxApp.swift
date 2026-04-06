@@ -169,6 +169,19 @@ struct NeoxApp: App {
                 .onChange(of: scenePhase) { newPhase in
                     if newPhase == .active {
                         checkPendingStripePayment()
+                        
+                        // Restart AppAgent MCP server if it stopped while backgrounded
+                        let setup = AppAgentSetup.shared
+                        if !setup.isRunning {
+                            NSLog("[NeoxApp] AppAgent MCP server stopped, restarting...")
+                            do {
+                                try setup.start()
+                                NSLog("[NeoxApp] AppAgent MCP server restarted on port %d", setup.port)
+                            } catch {
+                                NSLog("[NeoxApp] AppAgent MCP server restart failed: %@", error.localizedDescription)
+                            }
+                        }
+                        
                         // Sync any delivered notifications that weren't tapped into chat
                         UNUserNotificationCenter.current().getDeliveredNotifications { notifications in
                             guard !notifications.isEmpty else { return }
