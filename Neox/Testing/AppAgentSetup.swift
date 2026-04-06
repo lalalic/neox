@@ -98,6 +98,23 @@ final class AppAgentSetup {
         bridgeHandlers["get_messages"] = getMessagesHandler
         bridgeToolList.append(["name": "get_messages", "description": "Get all chat messages", "inputSchema": ["type": "object"]])
         
+        let clearMessagesHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] _ in
+            await MainActor.run {
+                self?.coordinator?.chatViewModel?.messages.removeAll()
+                self?.coordinator?.chatViewModel?.toolCalls.removeAll()
+            }
+            return "Chat cleared"
+        }
+        
+        server.register(
+            name: "clear_messages",
+            description: "Clear all chat messages from the display.",
+            inputSchema: ["type": "object", "properties": [String: Any]()],
+            handler: clearMessagesHandler
+        )
+        bridgeHandlers["clear_messages"] = clearMessagesHandler
+        bridgeToolList.append(["name": "clear_messages", "description": "Clear chat messages", "inputSchema": ["type": "object"]])
+        
         let getStatusHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] _ in
             guard let self else { return "Error: setup deallocated" }
             let status = await MainActor.run { [weak self] () -> String in
