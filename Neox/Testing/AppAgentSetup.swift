@@ -72,36 +72,6 @@ final class AppAgentSetup {
     // MARK: - Chat Tools
     
     private func registerChatTools(server: MCPServer) {
-        let sendMessageHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] args in
-            let text: String
-            if case .object(let dict) = args, case .string(let t) = dict["text"] {
-                text = t
-            } else {
-                return "Error: 'text' parameter required"
-            }
-            
-            guard let vm = await MainActor.run(body: { self?.coordinator?.chatViewModel }) else {
-                return "Error: no chatViewModel"
-            }
-            
-            return await vm.sendToRelay(text)
-        }
-        
-        server.register(
-            name: "send_message",
-            description: "Send a chat message as the user. Triggers the agent pipeline.",
-            inputSchema: [
-                "type": "object",
-                "properties": [
-                    "text": ["type": "string", "description": "The message text to send"]
-                ],
-                "required": ["text"]
-            ],
-            handler: sendMessageHandler
-        )
-        bridgeHandlers["send_message"] = sendMessageHandler
-        bridgeToolList.append(["name": "send_message", "description": "Send a chat message", "inputSchema": ["type": "object"]])
-        
         let getMessagesHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] _ in
             let messages = await MainActor.run { [weak self] () -> [String] in
                 guard let chatVM = self?.coordinator?.chatViewModel else { return [] }
