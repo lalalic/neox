@@ -104,4 +104,8 @@ style: |
 
 ## Output
 
-Save the slide markdown as `slides.md` or `presentation.md` in the project folder. The file can be rendered into HTML/PDF/PPTX using Marp CLI on a computer.
+Save the slide markdown as `slides.md` or `presentation.md` in the project folder.
+
+**On-device preview:** Open the saved `.md` file — Marp syntax renders natively in the markdown viewer as formatted slide content (headings, bullets, images). Each `---` separator marks a new slide.
+
+**For full slide rendering (PDF/PPTX/HTML):** Use the `make-app` skill to create a project with Marp CLI, or share the `.md` file to a computer and run `npx @marp-team/marp-cli slides.md --pdf`.

@@ -16,38 +16,33 @@ Ask the user:
 - Any specific features? (camera, maps, payments, etc.)
 
 ### 2. Create the Project
-Use the `create_task` tool:
-```
-create_task(appName: "MyApp", taskDescription: "A fitness tracker that...")
-```
+Use the relay MCP tool `create_task`:
+- `appName`: short name for the app
+- `taskDescription`: detailed description of what to build
 
-This will:
+The relay server will:
 - Create a GitHub repo under neos-apps org
 - Set up build secrets
 - Create an issue with the task description
-- Assign copilot-swe-agent to build it
+- Assign a coding agent to build it
 
 ### 3. Monitor Progress
-The coding agent will:
-- Read the task description
-- Generate code (React Native / Expo)
-- Create a PR when done
-- Send progress notifications via push
-
-Monitor via `report_progress` notifications.
+The coding agent will work on the repo and send progress updates via push notifications to your phone. You'll receive messages as the agent works.
 
 ### 4. Review & Merge
 When the coding agent creates a PR:
-- Review the changes
-- Auto-merge triggers if configured
-- Build queue notifies BullX desktop companion
+- You'll be notified
+- Review the changes if needed
+- Auto-merge triggers when configured
 
 ### 5. Build & Install
-After PR merge:
-- BullX picks up the build job
-- Builds the app locally on Mac
-- Installs directly to user's iPhone via USB
+After PR merge, if you have a Mac paired via BullX:
+- BullX picks up the build job automatically
+- Builds the app on your Mac
+- Installs directly to your iPhone via USB
 - Push notification sent when complete
+
+If no Mac paired, the relay can trigger a cloud build via EAS.
 
 ## Tips
 - Keep task descriptions specific and actionable

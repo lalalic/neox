@@ -5,28 +5,28 @@ description: Automate WeChat tasks — auto-reply to messages, extract contact d
 
 # WeChat Assistant
 
-Automate WeChat interactions via web.wechat.com or WeChat desktop using WebKitAgent.
+Automate WeChat interactions via WeChat Web using WebKitAgent.
 
 ## Prerequisites
-- WeChat Web must be logged in (scan QR code)
-- Use `web_agent` to navigate to `https://wx.qq.com`
+- WeChat Web must be logged in (user scans QR code with phone)
+- Navigate to `https://wx.qq.com` and take a snapshot to check login status
 
 ## Capabilities
 
 ### 1. Auto-Reply
 Monitor incoming messages and reply automatically:
 - Navigate to wx.qq.com
-- Watch for new message indicators
-- Read message content
-- Generate contextual reply
-- Send via input field
+- Snapshot to find new message indicators (look for unread badges)
+- Click on conversations with new messages
+- Snapshot to read message content
+- Type reply into input field and click send
 
 ### 2. Get Contacts & Data
 Extract contact information:
 - Navigate to contacts list
-- Scroll through and collect names
-- Extract group member lists
-- Export to structured format
+- Snapshot to read contact names
+- Click through contacts to get details
+- Record data in session memory
 
 ### 3. Monitor Conversations
 Track specific conversations:
@@ -37,7 +37,7 @@ Track specific conversations:
 ### 4. Reminders
 Set reminders based on messages:
 - Parse dates/times from messages
-- Create reminder notes
+- Create reminder notes in memory
 - Alert user at specified time
 
 ### 5. Message Management
@@ -50,25 +50,39 @@ Organize and search messages:
 
 Navigate to WeChat Web:
 ```
-web_agent navigate "https://wx.qq.com"
+web_agent command=navigate url=https://wx.qq.com
 ```
 
-Check login status:
+Check login status (snapshot returns page text + clickable refs):
 ```
-web_agent snapshot
+web_agent command=snapshot
 ```
 
 If QR code shown, ask user to scan with phone.
 
-Read messages:
+Click on a conversation (use ref from snapshot):
 ```
-web_agent eval "document.querySelectorAll('.chat_item')"
+web_agent command=click ref=r3
 ```
 
-Send message:
+Read messages (snapshot after clicking conversation):
 ```
-web_agent fill ".edit_area" "Hello!"
-web_agent click ".btn_send"
+web_agent command=snapshot
+```
+
+Type a reply:
+```
+web_agent command=type ref=r12 text=Hello!
+```
+
+Click send button:
+```
+web_agent command=click ref=r15
+```
+
+Run JavaScript to gather data:
+```
+web_agent command=evaluate script=document.querySelectorAll('.chat_item').length
 ```
 
 ## Known Issues
@@ -79,7 +93,7 @@ web_agent click ".btn_send"
 - File sharing has size limits on web
 
 ## Tips
-- Always verify login status before operations
+- Always snapshot before and after each action to verify state
 - Don't auto-reply to group chats without user consent
 - Keep auto-reply responses natural and varied
 - Log all automated actions for user review

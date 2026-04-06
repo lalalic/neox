@@ -18,7 +18,13 @@ flowchart LR
 ```
 ````
 
-Save diagrams in markdown files in the project.
+Save diagrams in markdown files in the project. Mermaid code blocks render as visual diagrams in the chat and in markdown preview.
+
+**Live preview:** You can also render diagrams in the browser via web_agent:
+```
+web_agent command=navigate url=https://mermaid.live
+```
+Paste your Mermaid code in the editor to see it visually and export as PNG/SVG.
 
 ## Common Diagram Types
 
