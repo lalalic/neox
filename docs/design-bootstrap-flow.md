@@ -27,34 +27,39 @@ flowchart TD
     G --> D
 ```
 
-**Welcome Screen** (shown once on first launch):
-- "Hi, I'm Neo" — brief identity
-- 3 cards showing top capabilities:
-  1. "Build an app" — tap to start guided app creation
-  2. "Browse the web" — tap to demo web_agent
-  3. "Plan my day" — tap to start morning planning
-- "Or just chat" — dismiss to free chat
+## Implementation (Shipped)
 
-**Implementation**: `UserDefaults.hasCompletedOnboarding` flag. Show a SwiftUI sheet on first `ContentView` appear.
+### Approach: Hidden Message + boarding.md
 
-### Phase 2: Smart First Message
+Instead of a SwiftUI welcome screen, onboarding is entirely agent-driven:
 
-When the user first enters chat, the agent should proactively introduce itself:
+1. On first launch, app sends a **hidden user message** (not visible in chat)
+2. The message tells the agent to follow `.github/boarding.md`
+3. `boarding.md` contains onboarding instructions (greet, show capabilities, ask name, save to profile)
+4. `UserDefaults.hasCompletedOnboarding` flag ensures it only runs once
 
+```mermaid
+sequenceDiagram
+    participant App as NeoxApp
+    participant VM as ChatViewModel
+    participant Agent as AI Agent
+    participant FS as boarding.md
+
+    App->>App: Check hasCompletedOnboarding
+    alt First Launch
+        App->>VM: sendHidden("Follow .github/boarding.md...")
+        VM->>Agent: Start agent with hidden prompt
+        Agent->>FS: Read .github/boarding.md
+        Agent->>Agent: Greet user, show capabilities
+        Agent->>Agent: Ask name, save to user-profile.md
+        App->>App: Set hasCompletedOnboarding = true
+    end
 ```
-Welcome! I'm Neo — your AI companion that lives on your phone.
 
-Here's what I can help with:
-• 🏗️ Build apps — describe an idea, I'll create it
-• 🌐 Browse the web — I can search, read, and interact with websites
-• 📱 Manage social media — post, monitor, reply automatically
-• 📋 Plan your day — morning planning with priorities
-• 💬 Chat about anything — I'm a general assistant
-
-What would you like to try first?
-```
-
-**Implementation**: In `main.agent.md`, add a first-message instruction that triggers when chat history is empty.
+**Files:**
+- `workspace/.github/boarding.md` — onboarding instructions for the agent
+- `CopilotChat/ChatViewModel.swift` — `sendHidden()` method
+- `Neox/App/NeoxApp.swift` — first-launch check + hidden message trigger
 
 ### Phase 3: Guided App Creation
 
@@ -102,7 +107,6 @@ After the first conversation, save key user info:
 
 ## Implementation Priority
 
-1. **Smart first message** in `main.agent.md` (no code change needed)
-2. **Welcome sheet** in ContentView (SwiftUI, minimal)
-3. **Skill suggestions** in agent instructions (prompt engineering)
-4. **Memory bootstrap** (save user preferences after first conversation)
+1. ~~**Hidden message + boarding.md**~~ ✅ Shipped
+2. **Skill suggestions** in agent instructions (prompt engineering)
+3. **Memory bootstrap** (save user preferences after first conversation)
