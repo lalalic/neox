@@ -1,139 +1,161 @@
-# Agent Context Awareness Design
+# Neox Agent Context Awareness Design
 
-## Overview
+## Problem
 
-How the Neox agent builds awareness of its context — workspace files, user identity, past sessions, and available capabilities. Context awareness is layered: some context is injected at session start, some is loaded on demand via tools.
+The agent doesn't know enough about its environment to act smartly. It doesn't know:
+- What device it's running on (iPhone model, screen size)
+- What apps are installed
+- Current time, location, timezone
+- What the user is doing (foreground/background)
+- Network status (WiFi, cellular, offline)
+- Battery level
+- Which projects exist and their status
 
-## Awareness Layers
-
-```mermaid
-flowchart TB
-    subgraph "Layer 1: Session Start (injected)"
-        A[Agent Instructions<br/>main.agent.md]
-        B[Workspace File Tree]
-        C[Project Templates]
-    end
-
-    subgraph "Layer 2: On-Demand (tools)"
-        D[User Profile<br/>memory_read]
-        E[Yesterday Context<br/>memory_get_yesterday]
-        F[Topic Notes<br/>memory_read / memory_search]
-        G[Project Files<br/>file_read]
-    end
-
-    subgraph "Layer 3: Background (plans)"
-        H[Daily Report<br/>memory sub-agent]
-        I[Weekly/Monthly/Yearly]
-    end
-
-    A --> Agent
-    B --> Agent
-    C --> Agent
-    D --> Agent
-    E --> Agent
-    F --> Agent
-    G --> Agent
-    H --> D
-    I --> D
-```
-
-## Layer 1: Session Start
-
-Injected into the system prompt when `createChatViewModel()` runs. The agent always has this context.
-
-| Content | Source | Injected By |
-|---------|--------|-------------|
-| Agent personality & rules | `.github/agents/main.agent.md` | `AgentProfileLoader` |
-| Workspace file tree | Recursive scan of workspace | `buildWorkspaceTree()` |
-| Available templates | `.templates/projects/*/README.md` | `buildTemplateInfo()` |
-| Agent sections | Frontmatter sections from agent.md | `AgentProfileLoader` |
-
-### What's NOT injected at start
-
-- User profile (too large, may not be needed)
-- Yesterday's summary (costs a tool call; not always relevant)
-- Memory notes (agent pulls when needed)
-
-## Layer 2: On-Demand (Tools)
-
-The agent calls tools when context is needed. This keeps the system prompt small and costs low.
-
-| Context | Tool | When to Use |
-|---------|------|-------------|
-| User profile | `memory_read .neo/memory/user-profile.md` | Personalization, first interaction |
-| Yesterday's work | `memory_get_yesterday` | User references past work, session continuity |
-| Topic notes | `memory_read .neo/memory/topics/{topic}.md` | Recurring subject matter |
-| Project history | `memory_read .neo/memory/projects/{project}.md` | Resuming project work |
-| Search memory | `memory_search` | Finding relevant past context by keyword |
-| File contents | `file_read` | Reading workspace files |
-
-### Agent Instructions for On-Demand Loading
-
-The main.agent.md tells the agent:
-- Read user profile when personalizing responses
-- Call `memory_get_yesterday` when prior context would help
-- Search memory when user references unfamiliar topics
-
-The agent decides when to load context — no forced injection.
-
-## Layer 3: Background (Plans)
-
-The "Memory Reports" plan runs daily via PlanExecutor and generates structured summaries. These become the on-demand context for Layer 2.
+## Design: Context Injection Layers
 
 ```mermaid
 flowchart LR
-    Sessions[Session Logs<br/>JSONL] -->|daily plan| Daily[Daily Report]
-    Daily -->|Monday| Weekly[Weekly Report]
-    Weekly -->|1st of month| Monthly[Monthly Report]
-    Monthly -->|Jan 1st| Yearly[Yearly Report]
-```
-
-## Content Flow
-
-```mermaid
-sequenceDiagram
-    participant App as Neox App
-    participant Agent as Main Agent
-    participant Tools as Memory Tools
-    participant Files as .neo/
-
-    Note over App: Session Start
-    App->>Agent: system prompt (instructions + file tree + templates)
-    
-    Note over Agent: User sends first message
-    Agent->>Agent: Do I need prior context?
-    
-    alt Returning user / references past work
-        Agent->>Tools: memory_get_yesterday
-        Tools->>Files: read daily report
-        Files-->>Tools: summary
-        Tools-->>Agent: yesterday's context
+    subgraph "Static Context"
+        A[Device Info]
+        B[User Profile]
+        C[Skills Catalog]
     end
     
-    alt Personalization needed
-        Agent->>Tools: memory_read user-profile.md
-        Tools->>Files: read profile
-        Files-->>Agent: user preferences
+    subgraph "Session Context"
+        D[Yesterday Summary]
+        E[Current Projects]
+        F[Pending Tasks]
     end
     
-    Agent->>Agent: Respond with full awareness
+    subgraph "Real-Time Context"
+        G[Time & Date]
+        H[Network Status]
+        I[Battery Level]
+        J[Active App/Screen]
+    end
+    
+    A & B & C --> K[System Prompt]
+    D & E & F --> K
+    G & H & I & J --> L[Context Tool]
 ```
 
-## Implementation Components
+### Layer 1: Static Context (injected into system prompt)
 
-| Component | File | Role |
-|-----------|------|------|
-| AgentProfileLoader | CopilotSDK | Loads main.agent.md |
-| AgentCoordinator | Neox | Builds system prompt, injects tree + templates |
-| MemoryToolProvider | CopilotSDK | 8 memory tools for on-demand reading |
-| SubAgentToolProvider | CopilotSDK | Delegates to memory sub-agent |
-| PlanExecutor | CopilotSDK | Runs daily report plan via BGTask |
-| PlanStore | CopilotSDK | Seeds the memory-reports plan |
+Loaded once at session start, rarely changes:
 
-## Design Principles
+```markdown
+## device
+- Model: iPhone 12 mini
+- OS: iOS 18.2
+- Screen: 375x812pt
+- Storage: 12GB free / 64GB total
 
-1. **Small system prompt** — only inject what's always needed (identity, file tree, templates)
-2. **On-demand context** — agent pulls memory/profile via tools when relevant
-3. **No auto-injection** — no yesterday summary or profile in system prompt
-4. **Background generation** — plans create structured reports for future retrieval
-5. **Agent autonomy** — the agent decides what context to load based on conversation
+## user
+- Name: {from user-profile.md}
+- Language: {detected}
+- Timezone: Asia/Shanghai
+
+## skills
+- 15 skills available (list names)
+```
+
+**Implementation**: Extend `AgentCoordinator` to gather `UIDevice` info and inject into preamble.
+
+### Layer 2: Session Context (injected at session start)
+
+Changes daily:
+
+```markdown
+## yesterday
+{daily summary}
+
+## active projects
+- timer-app (PR #3 pending)
+- fitness-tracker (coding in progress)
+
+## pending tasks
+- Follow up on freelance inquiry
+- Post to 小红书 about new app
+```
+
+**Implementation**: Read from `.neo/reports/daily/`, `.neo/memory/projects/`, and pending items from JSONL.
+
+### Layer 3: Real-Time Context (available via tool)
+
+Changes frequently, accessible on-demand:
+
+| Signal | Source | Use Case |
+|--------|--------|----------|
+| Current time | `Date()` | Time-appropriate greetings, scheduling |
+| Network type | `NWPathMonitor` | Skip web tasks if offline |
+| Battery level | `UIDevice.current.batteryLevel` | Warn before heavy tasks |
+| Foreground/background | `UIApplication.shared.applicationState` | Adjust notification behavior |
+| Location (if permitted) | `CLLocationManager` | Local recommendations |
+
+**Implementation**: Add a `get_context` tool that returns current device state.
+
+## Smart Behaviors from Context
+
+### Time-Aware
+- Morning (6-10am) → Suggest morning planning
+- Work hours (10am-6pm) → Focus on projects and tasks
+- Evening (6-10pm) → Social media, content review
+- Late night (10pm-6am) → Light tasks, reading, tomorrow's plan
+
+### Network-Aware
+- WiFi → Allow web browsing, downloads, media processing
+- Cellular → Warn about data usage for heavy tasks
+- Offline → File-only operations, local memory, drafting
+
+### Project-Aware
+- Know which projects exist and their current state
+- Suggest next actions based on project status
+- "Your timer app PR was merged yesterday — want to start the next feature?"
+
+### Mood-Aware (inferred)
+- Short messages → user is busy, be concise
+- Detailed messages → user has time, go deep
+- Repeated topics → user is stuck, offer alternative approaches
+- No messages for a while → don't spam notifications
+
+## Implementation Priority
+
+1. **Device info in system prompt** — `UIDevice` basics (model, OS, screen)
+2. **Time injection** — Current date/time in preamble
+3. **Yesterday context** — Daily summary (from memory design)
+4. **get_context tool** — On-demand battery, network, time
+5. **Project status** — List active projects with current state
+6. **Smart suggestions** — Time-based skill recommendations
+
+## Tool Definition
+
+```json
+{
+  "name": "get_context",
+  "description": "Get current device context — time, battery, network, location",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "include": {
+        "type": "array",
+        "items": { "type": "string", "enum": ["time", "battery", "network", "location", "projects"] },
+        "description": "Which context signals to include"
+      }
+    }
+  }
+}
+```
+
+Response:
+```json
+{
+  "time": "2026-07-15T14:30:00+0800",
+  "dayOfWeek": "Tuesday",
+  "timeOfDay": "afternoon",
+  "battery": { "level": 0.72, "charging": false },
+  "network": { "type": "wifi", "connected": true },
+  "projects": [
+    { "name": "timer-app", "status": "PR pending", "lastActivity": "2h ago" }
+  ]
+}
+```
