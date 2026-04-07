@@ -70,6 +70,7 @@ final class AgentCoordinator: ObservableObject {
     private let workspaceURL: URL
     private let fileToolProvider: FileToolProvider
     private let memoryToolProvider: MemoryToolProvider
+    private let subAgentToolProvider: SubAgentToolProvider
     #if canImport(MediaKit)
     private let ffmpegToolProvider: FFmpegToolProvider
     #endif
@@ -104,6 +105,21 @@ final class AgentCoordinator: ObservableObject {
         self.weChatService = WeChatService(workspaceURL: resolvedWorkspace)
         self.fileToolProvider = FileToolProvider(baseDirectory: resolvedWorkspace)
         self.memoryToolProvider = MemoryToolProvider(baseDirectory: resolvedWorkspace)
+        let memProvider = self.memoryToolProvider
+        let fileProvider = self.fileToolProvider
+        let savedPort = UserDefaults.standard.integer(forKey: "relayPort")
+        self.subAgentToolProvider = SubAgentToolProvider(
+            workspaceURL: resolvedWorkspace,
+            relayHost: UserDefaults.standard.string(forKey: "relayHost") ?? "relay.ai.qili2.com",
+            relayPort: savedPort > 0 ? UInt16(savedPort) : 443,
+            userId: UserDefaults.standard.string(forKey: "neoxUserId"),
+            toolsBuilder: {
+                var tools: [ToolDefinition] = []
+                tools.append(contentsOf: fileProvider.tools)
+                tools.append(contentsOf: memProvider.tools)
+                return tools
+            }
+        )
         #if canImport(MediaKit)
         self.ffmpegToolProvider = FFmpegToolProvider(baseDirectory: resolvedWorkspace)
         #endif
@@ -161,6 +177,7 @@ final class AgentCoordinator: ObservableObject {
             RegisteredTool(name: "send_response", description: "Send a response message to the user"),
             RegisteredTool(name: "create_plan", description: "Create a scheduled plan from chat"),
             RegisteredTool(name: "stripe_checkout", description: "Generate external Stripe checkout link when requested"),
+            RegisteredTool(name: "run_sub_agent", description: "Run a named sub-agent in a separate session"),
         ]
         #if canImport(MediaKit)
         registeredTools.append(contentsOf: [
@@ -209,6 +226,9 @@ final class AgentCoordinator: ObservableObject {
 
         // Memory tools (.neo/* memory lifecycle)
         tools.append(contentsOf: memoryToolProvider.tools)
+
+        // Sub-agent tools (run_sub_agent)
+        tools.append(contentsOf: subAgentToolProvider.tools)
 
         // Media tools (ffmpeg, ffprobe)
         #if canImport(MediaKit)
