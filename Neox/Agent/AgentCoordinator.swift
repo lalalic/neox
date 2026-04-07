@@ -198,6 +198,16 @@ final class AgentCoordinator: ObservableObject {
     
     func setupWebKitAgent(manager: WebViewManager) {
         webToolProvider = WebAgentToolProvider(manager: manager)
+
+        // Wire file converter to ChatViewModel for convert_to_markdown
+        if let webProvider = webToolProvider {
+            chatViewModel?.fileConverter = { @Sendable [weak webProvider] filePath, format in
+                guard let provider = webProvider else {
+                    throw NSError(domain: "AgentCoordinator", code: 1, userInfo: [NSLocalizedDescriptionKey: "Web agent not available"])
+                }
+                return try await provider.convertFile(filePath: filePath, outputFormat: format)
+            }
+        }
     }
 
     var mainAgentFileURL: URL {
