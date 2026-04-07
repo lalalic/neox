@@ -147,10 +147,19 @@ struct NeoxApp: App {
                     NSLog("[NeoxApp] ChatViewModel created, connecting...")
                     
                     // Configure PlanExecutor with relay settings and plan store
+                    let memProvider = coordinator.memoryTools
+                    let fileProvider = coordinator.fileTools
                     PlanExecutor.shared.configure(
                         planStore: vm.planStore,
                         relayHost: coordinator.relayHost,
-                        relayPort: coordinator.relayPort
+                        relayPort: coordinator.relayPort,
+                        userId: UserDefaults.standard.string(forKey: "neoxUserId"),
+                        toolsBuilder: {
+                            var tools: [ToolDefinition] = []
+                            tools.append(contentsOf: memProvider.tools)
+                            tools.append(contentsOf: fileProvider.tools)
+                            return tools
+                        }
                     )
                     PlanExecutor.shared.scheduleNextCheck()
                     

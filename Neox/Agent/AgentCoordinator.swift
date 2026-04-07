@@ -70,8 +70,9 @@ final class AgentCoordinator: ObservableObject {
     private let workspaceURL: URL
     private let fileToolProvider: FileToolProvider
     private let memoryToolProvider: MemoryToolProvider
+    var memoryTools: MemoryToolProvider { memoryToolProvider }
+    var fileTools: FileToolProvider { fileToolProvider }
     private let subAgentToolProvider: SubAgentToolProvider
-    private let reportScheduler: ReportScheduler
     #if canImport(MediaKit)
     private let ffmpegToolProvider: FFmpegToolProvider
     #endif
@@ -120,10 +121,6 @@ final class AgentCoordinator: ObservableObject {
                 tools.append(contentsOf: memProvider.tools)
                 return tools
             }
-        )
-        self.reportScheduler = ReportScheduler(
-            workspaceURL: resolvedWorkspace,
-            subAgentProvider: self.subAgentToolProvider
         )
         #if canImport(MediaKit)
         self.ffmpegToolProvider = FFmpegToolProvider(baseDirectory: resolvedWorkspace)
@@ -382,7 +379,6 @@ final class AgentCoordinator: ObservableObject {
         self.chatViewModel = vm
         self.paymentManager = PaymentManager(usageTracker: vm.usageTracker)
         Task { await vm.connect() }
-        reportScheduler.checkAndRun()
         return vm
     }
     
