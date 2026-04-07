@@ -132,6 +132,57 @@ final class AppAgentSetup {
         )
         bridgeHandlers["get_status"] = getStatusHandler
         bridgeToolList.append(["name": "get_status", "description": "Get app status", "inputSchema": ["type": "object"]])
+        
+        // send_message: direct send through ChatViewModel using sendToRelay (awaits response)
+        let sendMessageHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] args in
+            guard let self else { return "Error: setup deallocated" }
+            let text: String
+            if case .object(let dict) = args, case .string(let t) = dict["text"] {
+                text = t
+            } else {
+                return "Error: missing 'text' parameter"
+            }
+            // First gather diagnostics on MainActor
+            let diag = await MainActor.run { [weak self] () -> String in
+                guard let chatVM = self?.coordinator?.chatViewModel else {
+                    return "DIAG: no chatViewModel"
+                }
+                let hasAgent = chatVM.hasAgentForDiag
+                let hasSession = chatVM.hasSessionForDiag
+                let chatState = String(describing: chatVM.chatState)
+                let msgCount = chatVM.messages.count
+                return "DIAG: agent=\(hasAgent) session=\(hasSession) chatState=\(chatState) msgs=\(msgCount)"
+            }
+            // Use sendToRelay which awaits the response (180s timeout)
+            let response = await MainActor.run { [weak self] () -> String? in
+                guard let chatVM = self?.coordinator?.chatViewModel else { return nil }
+                // sendToRelay is async, we need to bridge to a Task
+                return nil  // placeholder
+            }
+            // Actually call sendToRelay via a MainActor Task
+            let result: String = await withCheckedContinuation { continuation in
+                Task { @MainActor [weak self] in
+                    guard let chatVM = self?.coordinator?.chatViewModel else {
+                        continuation.resume(returning: "\(diag)\nError: no chatViewModel")
+                        return
+                    }
+                    let reply = await chatVM.sendToRelay(text)
+                    let afterState = String(describing: chatVM.chatState)
+                    let afterMsgs = chatVM.messages.count
+                    let assistantMsgs = chatVM.messages.filter { $0.role == .assistant }.count
+                    continuation.resume(returning: "\(diag)\nreply: \(reply)\nafterState: \(afterState) afterMsgs: \(afterMsgs) assistantMsgs: \(assistantMsgs)")
+                }
+            }
+            return result
+        }
+        server.register(
+            name: "send_message",
+            description: "Send a message directly through ChatViewModel and await response (180s timeout).",
+            inputSchema: ["type": "object", "properties": ["text": ["type": "string", "description": "Message to send"]], "required": ["text"]],
+            handler: sendMessageHandler
+        )
+        bridgeHandlers["send_message"] = sendMessageHandler
+        bridgeToolList.append(["name": "send_message", "description": "Send message directly", "inputSchema": ["type": "object", "properties": ["text": ["type": "string"]], "required": ["text"]]])
     }
     
     // MARK: - Reverse MCP Bridge
