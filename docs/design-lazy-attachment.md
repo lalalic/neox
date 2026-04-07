@@ -1,8 +1,8 @@
 # Design: Lazy Attachment Loading
 
-> **Status:** Refined — user confirmed auto-resize approach, ready for review  
+> **Status:** Revised — `view` tool (image-only) replaces `get_attachment`  
 > **Priority:** P2  
-> **Date:** 2025-07-17 (refined 2025-07-17)
+> **Date:** 2025-07-17 (revised 2025-07-18)
 
 ---
 
@@ -15,7 +15,7 @@ Current attachment flow sends file data **eagerly** — the full base64-encoded 
 - Large files (videos, PDFs) bloat the context window even if the model just needs metadata
 - Model might want to **process files sequentially** rather than receiving all at once
 
-**Proposed:** Send only **file paths/metadata** with the message. The model calls a `get_attachment` tool when it actually needs file content.
+**Proposed:** Send only **file paths/metadata** with the message. The model calls a `view` tool to see image content on demand. Non-image files (text, code) are included inline in the prompt.
 
 ---
 
@@ -48,17 +48,17 @@ User: "Here are 5 photos, pick the best one for a thumbnail"
   + [photo1.jpg] [photo2.jpg] [photo3.jpg] [photo4.jpg] [photo5.jpg]
 
 session.send({
-  prompt: "Here are 5 photos, pick the best one for a thumbnail\n\nAttached files:\n1. photo1.jpg (2.0 MB, image/jpeg)\n2. photo2.jpg (1.8 MB, image/jpeg)\n3. photo3.jpg (2.1 MB, image/jpeg)\n4. photo4.jpg (1.5 MB, image/jpeg)\n5. photo5.jpg (1.9 MB, image/jpeg)\n\nUse the get_attachment tool to view any file.",
+  prompt: "Here are 5 photos, pick the best one for a thumbnail\n\nAttached images:\n1. photo1.jpg (2.0 MB)\n2. photo2.jpg (1.8 MB)\n3. photo3.jpg (2.1 MB)\n4. photo4.jpg (1.5 MB)\n5. photo5.jpg (1.9 MB)\n\nUse the view tool to see any image.",
   attachments: []  // No inline data!
 })
 
-Model: get_attachment({ name: "photo1.jpg" })  → receives base64 of photo1 only
-Model: get_attachment({ name: "photo3.jpg" })  → receives base64 of photo3 only
+Model: view({ path: "photo1.jpg" })  → receives resized base64 of photo1
+Model: view({ path: "photo3.jpg" })  → receives resized base64 of photo3
 Model: "photo3.jpg has the best composition for a thumbnail."
   
 → Only 2 images fetched (~5.5MB vs 13MB)
-→ Model sees file list in prompt, decides what to fetch
-→ Works with any file type (images, videos, documents)
+→ Model sees image list in prompt, views on demand
+→ Image-only — text/code files are included inline
 ```
 
 ---
@@ -81,12 +81,14 @@ Model: "photo3.jpg has the best composition for a thumbnail."
 │       │                                      │
 │       ▼                                      │
 │  ChatViewModel.send()                        │
-│  → Prompt includes file list (names + sizes) │
-│  → NO inline attachment data                 │
+│  → Images: listed by name/size (lazy)        │
+│  → Text/code: included inline in prompt      │
+│  → NO inline image data                      │
 │                                              │
-│  get_attachment tool (registered per session) │
-│  → Reads from AttachmentStore by name        │
-│  → Returns base64 data to model              │
+│  view tool (registered per session)           │
+│  → Reads image from AttachmentStore by name  │
+│  → Auto-resizes to 1024px max                │
+│  → Returns base64 for vision model           │
 │                                              │
 │  save_to_workspace tool (existing)           │
 │  → Model can also copy files to workspace    │
@@ -137,11 +139,11 @@ public class AttachmentStore: ObservableObject {
             lines.append("\(i + 1). \(entry.displayName) (\(sizeStr), \(entry.mimeType))")
         }
         lines.append("")
-        lines.append("Use the get_attachment tool to view/read any file content.")
+        lines.append("Use the `view` tool to see any image.")
         return lines.joined(separator: "\n")
     }
     
-    /// Load file data by name (called by get_attachment tool handler)
+    /// Load file data by name (called by view tool handler)
     func loadData(name: String) throws -> (Data, String) {
         guard let entry = entries.first(where: { $0.displayName == name }) else {
             throw AttachmentError.notFound(name)
@@ -152,52 +154,41 @@ public class AttachmentStore: ObservableObject {
 }
 ```
 
-### 5.2 get_attachment Tool
+### 5.2 view Tool (Image Only)
+
+The `view` tool replaces `get_attachment`. It only handles images — text/code files are included inline in the prompt.
 
 ```swift
-/// Tool registered on each session for lazy attachment loading.
-func makeGetAttachmentTool(store: AttachmentStore) -> ToolDefinition {
+func makeViewTool(store: AttachmentStore) -> ToolDefinition {
     ToolDefinition(
-        name: "get_attachment",
-        description: "Get the content of an attached file by name. Returns base64-encoded data for binary files, or text content for text files.",
+        name: "view",
+        description: "View an image by name or path. Returns auto-resized base64 image data for vision. Only works with image files.",
         parameters: .object([
             "type": .string("object"),
             "properties": .object([
-                "name": .object([
+                "path": .object([
                     "type": .string("string"),
-                    "description": .string("The filename of the attachment to retrieve")
+                    "description": .string("Image filename from the attached files list, or a workspace file path")
                 ]),
             ]),
-            "required": .array([.string("name")])
+            "required": .array([.string("path")])
         ]),
         handler: { args in
             guard case .object(let dict) = args,
-                  case .string(let name) = dict["name"] else {
-                return "Error: 'name' parameter is required"
+                  case .string(let path) = dict["path"] else {
+                return "Error: 'path' parameter is required"
             }
             
             do {
-                let (data, mimeType) = try await MainActor.run {
-                    try store.loadData(name: name)
-                }
-                
-                if mimeType.hasPrefix("text/") || isTextFile(name) {
-                    // Return text content directly
-                    return String(data: data, encoding: .utf8) ?? "Error: Unable to decode text"
-                } else if mimeType.hasPrefix("image/") {
-                    // Return as base64 with mime type prefix for vision models
-                    let base64 = data.base64EncodedString()
-                    return "data:\(mimeType);base64,\(base64)"
-                } else {
-                    // Binary file — return base64
-                    let base64 = data.base64EncodedString()
-                    return "[\(name)] base64:\(base64)"
-                }
+                let result = try await store.loadSmart(name: path)
+                return result.modelDescription
             } catch {
                 return "Error: \(error.localizedDescription)"
             }
         }
     )
+}
+```
 }
 ```
 
@@ -276,7 +267,7 @@ The `sendWithImage` method still exists for single-image quick-send (camera capt
 | Method | When | Data Flow |
 |--------|------|-----------|
 | `sendWithImage()` | Camera capture, single image | Inline base64 (eager) |
-| `send()` + `AttachmentStore` | File picker, multi-file | Lazy via get_attachment tool |
+| `send()` + `AttachmentStore` | File picker, multi-file | Images lazy via `view` tool, text inline |
 
 ---
 
@@ -295,10 +286,10 @@ The `sendWithImage` method still exists for single-image quick-send (camera capt
 ## 9. Implementation Phases
 
 ### Phase 1: Core Tool + Store
-1. **CopilotChat**: `AttachmentStore` class
-2. **CopilotChat**: `get_attachment` tool definition
-3. **ChatViewModel**: Modified send flow (prompt includes file list)
-4. **ChatViewModel**: Register `get_attachment` tool on session creation
+1. **CopilotChat**: `AttachmentStore` class ✅ (already exists)
+2. **CopilotChat**: `view` tool definition (image-only)
+3. **ChatViewModel**: Modified send flow (images listed, text inline)
+4. **ChatViewModel**: Register `view` tool on session creation
 
 ### Phase 2: Multi-Select UI
 5. **AttachmentPicker**: Multi-select photo picker (`selectionLimit: 10`)
@@ -308,15 +299,15 @@ The `sendWithImage` method still exists for single-image quick-send (camera capt
 
 ### Phase 3: Smart Loading
 9. **AttachmentStore**: Thumbnail generation for image previews in chat
-10. **get_attachment**: Smart sizing — return downscaled image if model doesn't need full res
-11. **get_attachment**: Text extraction from PDFs (use PDFKit)
-12. **get_attachment**: Video metadata (duration, resolution) without full content
+10. **view**: Smart sizing — return downscaled image if model doesn't need full res ✅ (loadSmart already does this)
+11. ~~**get_attachment**: Text extraction from PDFs~~ (not needed — text files inline)
+12. ~~**get_attachment**: Video metadata~~ (not needed — view is image-only)
 
 ---
 
 ## 10. Open Questions
 
-1. **Image quality**: Should `get_attachment` for images auto-resize to reasonable dims (e.g., 1024px max) to save tokens? Or respect original?
-2. **File retention**: Should files be copied to workspace on attach (persistent) or kept as temp references (transient)?
-3. **Video handling**: For video files, should `get_attachment` return a screenshot/thumbnail, or metadata, or refuse?
-4. **Mixed mode**: Should users be able to choose eager vs lazy per-attachment?
+1. **Image quality**: `view` auto-resizes to 1024px max ✅ (handled by loadSmart)
+2. **File retention**: Files kept as temp references (transient) — cleared on session end
+3. ~~**Video handling**: Not applicable — `view` is image-only~~
+4. ~~**Mixed mode**: Not applicable — images lazy, text inline~~
