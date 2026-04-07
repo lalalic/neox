@@ -48,6 +48,16 @@ final class AgentCoordinator: ObservableObject {
     @Published var showProgressInChat: Bool = UserDefaults.standard.object(forKey: "showProgressInChat") == nil ? true : UserDefaults.standard.bool(forKey: "showProgressInChat")
     @Published var showBuildInChat: Bool = UserDefaults.standard.object(forKey: "showBuildInChat") == nil ? true : UserDefaults.standard.bool(forKey: "showBuildInChat")
 
+    /// Unique device identifier for relay routing. Generated on first launch.
+    @Published var neoxUserId: String = {
+        if let saved = UserDefaults.standard.string(forKey: "neoxUserId"), !saved.isEmpty {
+            return saved
+        }
+        let id = UUID().uuidString.prefix(8).lowercased()
+        UserDefaults.standard.set(String(id), forKey: "neoxUserId")
+        return String(id)
+    }()
+
     /// Selected LLM model.
     @Published var selectedModel: String = UserDefaults.standard.string(forKey: "selectedModel") ?? "gpt-4.1"
     
@@ -327,7 +337,7 @@ final class AgentCoordinator: ObservableObject {
                     return "production"
                     #endif
                 }(),
-                userId: "default",
+                userId: neoxUserId,
                 onResponse: { _ in },
                 onAskUser: { _ in "" }
             )),

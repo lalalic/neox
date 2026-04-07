@@ -212,8 +212,8 @@ struct NeoxApp: App {
                                     #else
                                     env = "production"
                                     #endif
-                                    await vm.setDeviceToken(token, apnsEnv: env, userId: "default")
-                                    print("[NeoxApp] Device token sent to relay (attempt \(attempt))")
+                                    await vm.setDeviceToken(token, apnsEnv: env, userId: coordinator.neoxUserId)
+                                    print("[NeoxApp] Device token sent to relay (attempt \(attempt)), userId: \(coordinator.neoxUserId)")
                                     return
                                 }
                                 try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -226,8 +226,8 @@ struct NeoxApp: App {
                                 #else
                                 env = "production"
                                 #endif
-                                await vm.setDeviceToken(token, apnsEnv: env, userId: "default")
-                                print("[NeoxApp] Device token sent (final attempt)")
+                                await vm.setDeviceToken(token, apnsEnv: env, userId: coordinator.neoxUserId)
+                                print("[NeoxApp] Device token sent (final attempt), userId: \(coordinator.neoxUserId)")
                             } else {
                                 print("[NeoxApp] Failed to send device token — chatViewModel not ready")
                             }

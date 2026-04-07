@@ -198,6 +198,14 @@ struct RelaySettingsView: View {
         NavigationStack {
             Form {
                 Section("Relay Server") {
+                    HStack {
+                        Text("Device ID")
+                        Spacer()
+                        Text(coordinator.neoxUserId)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+
                     Toggle("Use local relay server", isOn: $coordinator.useLocalRelay)
 
                     TextField("http://10.0.0.111:8765", text: $coordinator.localRelayURL)
