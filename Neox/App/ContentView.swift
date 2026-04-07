@@ -197,6 +197,103 @@ struct RelaySettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Agent Profile") {
+                    NavigationLink {
+                        ModelPickerView(
+                            selectedModelId: $coordinator.selectedModel,
+                            onModelChanged: { _ in
+                                coordinator.saveRelaySettings()
+                            }
+                        )
+                    } label: {
+                        HStack {
+                            Text("Model")
+                            Spacer()
+                            Text(ModelCatalog.model(for: coordinator.selectedModel)?.name ?? coordinator.selectedModel)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    NavigationLink("Edit main.agent.md") {
+                        MarkdownH1FileEditorView(
+                            fileURL: coordinator.mainAgentFileURL,
+                            navigationTitleText: "Edit main.agent.md",
+                            loadingText: "Loading main.agent.md...",
+                            availableTools: Array(Set(coordinator.allTools.map(\.name))).sorted()
+                        )
+                    }
+                }
+
+                Section("Credits") {
+                    if let chatVM = coordinator.chatViewModel,
+                       let pm = coordinator.paymentManager {
+                        NavigationLink {
+                            PaymentView(paymentManager: pm, usageTracker: chatVM.usageTracker)
+                        } label: {
+                            HStack {
+                                Label("Buy Credits", systemImage: "creditcard.fill")
+                                Spacer()
+                                Text(String(format: "$%.2f", chatVM.usageTracker.balance))
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                            }
+                        }
+                    }
+                }
+
+                Section("Plans") {
+                    NavigationLink {
+                        PlanManagerView(
+                            store: coordinator.chatViewModel?.planStore ?? PlanStore(),
+                            onRunPlan: { plan in
+                                if let chatVM = coordinator.chatViewModel {
+                                    Task {
+                                        await chatVM.runPlan(plan)
+                                    }
+                                }
+                            }
+                        )
+                    } label: {
+                        Label("Manage Plans", systemImage: "calendar.badge.clock")
+                    }
+                }
+
+                Section("Workspace") {
+                    NavigationLink {
+                        FileExplorerView(
+                            rootURL: coordinator.workspaceRootURL,
+                            title: "Workspace"
+                        )
+                    } label: {
+                        Label("File Explorer", systemImage: "folder")
+                    }
+                }
+
+                Section("Chat Input") {
+                    Toggle("Text", isOn: $coordinator.enableTextInput)
+                    Toggle("Speech", isOn: $coordinator.enableSpeechInput)
+                    Toggle("Attachment", isOn: $coordinator.enableAttachmentInput)
+                }
+
+                Section("Chat Notifications") {
+                    Toggle("Usage/Cost", isOn: $coordinator.showUsageInChat)
+                    Toggle("Agent Progress", isOn: $coordinator.showProgressInChat)
+                    Toggle("Build Status", isOn: $coordinator.showBuildInChat)
+                }
+
+                // MARK: WeChat Channel
+                Section("WeChat Channel") {
+                    Toggle("Enable WeChat", isOn: Binding(
+                        get: { weChatService.config.enabled },
+                        set: { newValue in
+                            if newValue {
+                                weChatService.enable()
+                            } else {
+                                weChatService.disable()
+                            }
+                        }
+                    ))
+                }
+
                 Section("Relay Server") {
                     HStack {
                         Text("Device ID")
@@ -235,103 +332,6 @@ struct RelaySettingsView: View {
                     }
                 }
 
-                Section("Chat Input") {
-                    Toggle("Text", isOn: $coordinator.enableTextInput)
-                    Toggle("Speech", isOn: $coordinator.enableSpeechInput)
-                    Toggle("Attachment", isOn: $coordinator.enableAttachmentInput)
-                }
-
-                Section("Chat Notifications") {
-                    Toggle("Usage/Cost", isOn: $coordinator.showUsageInChat)
-                    Toggle("Agent Progress", isOn: $coordinator.showProgressInChat)
-                    Toggle("Build Status", isOn: $coordinator.showBuildInChat)
-                }
-
-                // MARK: WeChat Channel
-                Section("WeChat Channel") {
-                    Toggle("Enable WeChat", isOn: Binding(
-                        get: { weChatService.config.enabled },
-                        set: { newValue in
-                            if newValue {
-                                weChatService.enable()
-                            } else {
-                                weChatService.disable()
-                            }
-                        }
-                    ))
-                }
-
-                Section("Agent Profile") {
-                    NavigationLink("Edit main.agent.md") {
-                        MarkdownH1FileEditorView(
-                            fileURL: coordinator.mainAgentFileURL,
-                            navigationTitleText: "Edit main.agent.md",
-                            loadingText: "Loading main.agent.md...",
-                            availableTools: Array(Set(coordinator.allTools.map(\.name))).sorted()
-                        )
-                    }
-                    NavigationLink {
-                        ModelPickerView(
-                            selectedModelId: $coordinator.selectedModel,
-                            onModelChanged: { _ in
-                                coordinator.saveRelaySettings()
-                            }
-                        )
-                    } label: {
-                        HStack {
-                            Text("Model")
-                            Spacer()
-                            Text(ModelCatalog.model(for: coordinator.selectedModel)?.name ?? coordinator.selectedModel)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                Section("Plans") {
-                    NavigationLink {
-                        PlanManagerView(
-                            store: coordinator.chatViewModel?.planStore ?? PlanStore(),
-                            onRunPlan: { plan in
-                                if let chatVM = coordinator.chatViewModel {
-                                    Task {
-                                        await chatVM.runPlan(plan)
-                                    }
-                                }
-                            }
-                        )
-                    } label: {
-                        Label("Manage Plans", systemImage: "calendar.badge.clock")
-                    }
-                }
-
-                Section("Credits") {
-                    if let chatVM = coordinator.chatViewModel,
-                       let pm = coordinator.paymentManager {
-                        NavigationLink {
-                            PaymentView(paymentManager: pm, usageTracker: chatVM.usageTracker)
-                        } label: {
-                            HStack {
-                                Label("Buy Credits", systemImage: "creditcard.fill")
-                                Spacer()
-                                Text(String(format: "$%.2f", chatVM.usageTracker.balance))
-                                    .foregroundStyle(.secondary)
-                                    .monospacedDigit()
-                            }
-                        }
-                    }
-                }
-
-                Section("Workspace") {
-                    NavigationLink {
-                        FileExplorerView(
-                            rootURL: coordinator.workspaceRootURL,
-                            title: "Workspace"
-                        )
-                    } label: {
-                        Label("File Explorer", systemImage: "folder")
-                    }
-                }
-                
                 Section {
                     Button("Apply & Reconnect") {
                         applySettings()
