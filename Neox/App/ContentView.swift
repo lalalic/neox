@@ -213,7 +213,7 @@ struct RelaySettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    NavigationLink("Edit main.agent.md") {
+                    NavigationLink("Agent Profile") {
                         MarkdownH1FileEditorView(
                             fileURL: coordinator.mainAgentFileURL,
                             navigationTitleText: "Edit main.agent.md",
