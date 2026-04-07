@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import CopilotSDK
 import CopilotChat
 import WebKitAgent
@@ -73,6 +74,7 @@ final class AgentCoordinator: ObservableObject {
     var memoryTools: MemoryToolProvider { memoryToolProvider }
     var fileTools: FileToolProvider { fileToolProvider }
     private let subAgentToolProvider: SubAgentToolProvider
+    private let contextToolProvider: ContextToolProvider
     #if canImport(MediaKit)
     private let ffmpegToolProvider: FFmpegToolProvider
     #endif
@@ -122,6 +124,7 @@ final class AgentCoordinator: ObservableObject {
                 return tools
             }
         )
+        self.contextToolProvider = ContextToolProvider(workspaceURL: resolvedWorkspace)
         #if canImport(MediaKit)
         self.ffmpegToolProvider = FFmpegToolProvider(baseDirectory: resolvedWorkspace)
         #endif
@@ -180,6 +183,10 @@ final class AgentCoordinator: ObservableObject {
             RegisteredTool(name: "create_plan", description: "Create a scheduled plan from chat"),
             RegisteredTool(name: "stripe_checkout", description: "Generate external Stripe checkout link when requested"),
             RegisteredTool(name: "run_sub_agent", description: "Run a named sub-agent in a separate session"),
+            RegisteredTool(name: "get_context", description: "Get device context: time, battery, network, projects"),
+            RegisteredTool(name: "memory_search", description: "Search across memory files by keyword"),
+            RegisteredTool(name: "memory_delete", description: "Delete a memory file or section"),
+            RegisteredTool(name: "memory_get_yesterday", description: "Get yesterday's daily summary"),
         ]
         #if canImport(MediaKit)
         registeredTools.append(contentsOf: [
@@ -232,6 +239,9 @@ final class AgentCoordinator: ObservableObject {
         // Sub-agent tools (run_sub_agent)
         tools.append(contentsOf: subAgentToolProvider.tools)
 
+        // Context tools (get_context)
+        tools.append(contentsOf: contextToolProvider.tools)
+
         // Media tools (ffmpeg, ffprobe)
         #if canImport(MediaKit)
         tools.append(contentsOf: ffmpegToolProvider.tools)
@@ -242,6 +252,49 @@ final class AgentCoordinator: ObservableObject {
     
     /// Build a tree string of the workspace folder structure (3 levels deep).
     /// Excludes node_modules, .git, build artifacts.
+    private func buildDeviceContext() -> String {
+        let device = UIDevice.current
+        let screen = UIScreen.main
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd HH:mm:ss ZZZZZ"
+        let now = Date()
+        let cal = Calendar.current
+        let hour = cal.component(.hour, from: now)
+        let timeOfDay: String
+        switch hour {
+        case 6..<10: timeOfDay = "morning"
+        case 10..<14: timeOfDay = "midday"
+        case 14..<18: timeOfDay = "afternoon"
+        case 18..<22: timeOfDay = "evening"
+        default: timeOfDay = "night"
+        }
+        let weekdayFmt = DateFormatter()
+        weekdayFmt.dateFormat = "EEEE"
+
+        device.isBatteryMonitoringEnabled = true
+        let batteryLevel = device.batteryLevel >= 0 ? "\(Int(device.batteryLevel * 100))%" : "unknown"
+        let batteryState: String
+        switch device.batteryState {
+        case .charging: batteryState = "charging"
+        case .full: batteryState = "full"
+        case .unplugged: batteryState = "unplugged"
+        default: batteryState = "unknown"
+        }
+
+        return """
+        ## device
+        - Model: \(device.model) (\(device.name))
+        - OS: \(device.systemName) \(device.systemVersion)
+        - Screen: \(Int(screen.bounds.width))x\(Int(screen.bounds.height))pt @\(Int(screen.scale))x
+        - Battery: \(batteryLevel) (\(batteryState))
+
+        ## current time
+        - \(fmt.string(from: now))
+        - \(weekdayFmt.string(from: now)), \(timeOfDay)
+        - Timezone: \(TimeZone.current.identifier)
+        """
+    }
+
     private func buildWorkspaceTree() -> String {
         let fm = FileManager.default
         let excludes: Set<String> = ["node_modules", ".git", "build", "build-sim", "build-device", ".build"]
@@ -327,6 +380,9 @@ final class AgentCoordinator: ObservableObject {
         let tools = buildTools()
         var instructions = agentProfile?.preambleBody?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         
+        // Inject device context
+        instructions += "\n\n\(buildDeviceContext())"
+
         // Inject dynamic workspace context
         let tree = buildWorkspaceTree()
         if !tree.isEmpty {
