@@ -24,6 +24,31 @@ struct ContentView: View {
             WebAgentView(manager: webManager)
                 .allowsHitTesting(showWebView)
                 .opacity(showWebView ? 1 : 0)
+                .overlay(alignment: .top) {
+                    if showWebView {
+                        HStack {
+                            Button(action: { showWebView = false }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.title2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(webManager.pageTitle.isEmpty ? (webManager.currentURL?.host ?? "Browser") : webManager.pageTitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            Spacer()
+                            Button(action: { webManager.webView.reload() }) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.body)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial)
+                    }
+                }
             
             if !showWebView {
                 if let chatVM = coordinator.chatViewModel {
