@@ -171,6 +171,30 @@ For non-image files (PDFs, documents, text), the agent calls `convert_to_markdow
 
 **Together**: `view` for images, `convert_to_markdown` for everything else.
 
+### 5.4 Convertio Site Adapter
+
+For formats not handled natively (docx, xlsx, pptx, etc.), `convert_to_markdown` delegates to convertio.co via a site adapter:
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant Tool as convert_to_markdown
+    participant Native as PDFKit / Direct
+    participant Convertio as convertio.co
+
+    Agent->>Tool: convert_to_markdown(path: "report.docx")
+    Tool->>Native: Check if natively supported
+    Native-->>Tool: Not supported (docx)
+    Tool->>Convertio: fileConverter("report.docx", "txt")
+    Convertio->>Convertio: Navigate, upload, convert, download
+    Convertio-->>Tool: Converted text
+    Tool-->>Agent: Markdown content
+```
+
+- `WebAgentToolProvider.convertFile()` orchestrates the browser flow
+- ChatViewModel's `fileConverter` closure bridges CopilotChat → WebKitAgent
+- Fallback chain: native (PDF, text) → convertio (everything else)
+
 ```swift
 func makeViewTool(store: AttachmentStore) -> ToolDefinition {
     ToolDefinition(
