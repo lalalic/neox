@@ -36,6 +36,7 @@
 		B9C4D42D30A315C5AE7040F3 /* PlanSubAgentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A6B5B3BC17B5ADA9013CC0F /* PlanSubAgentTests.swift */; };
 		BD16622516E56FFB6CA685DF /* TaskQueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97DB23F6143C0A626A2709C0 /* TaskQueueView.swift */; };
 		BF78FC93BD0B659A80ED1597 /* LazyAttachmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ADB57427AF2CE79D505496C /* LazyAttachmentTests.swift */; };
+		CE9345C44FA9962802D710FC /* commandDictionary.plist in Resources */ = {isa = PBXBuildFile; fileRef = 08C583158CC04826F71F633F /* commandDictionary.plist */; };
 		D67818723B954E1882521830 /* WeChatStatusIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16940B046D021DBFE959F0F0 /* WeChatStatusIndicator.swift */; };
 		DAD78552513ADB5ACA4ACDC6 /* AppAgent in Frameworks */ = {isa = PBXBuildFile; productRef = 0735BD6B8E5889534FBA4187 /* AppAgent */; };
 		E1E71D36F2CA57FBE4B94EB4 /* ContextAwarenessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFE53E5DDF54865DC6DB572A /* ContextAwarenessTests.swift */; };
@@ -55,6 +56,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		08C583158CC04826F71F633F /* commandDictionary.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = commandDictionary.plist; sourceTree = "<group>"; };
 		0A5755693105CB1BAFB43BEE /* copilot-ios */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "copilot-ios"; path = "copilot-ios"; sourceTree = SOURCE_ROOT; };
 		0C0896E9C5D7BB8138151B5E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		0EA7D7D797F83218D5477B37 /* CopilotIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CopilotIntegrationTests.swift; sourceTree = "<group>"; };
@@ -188,6 +190,7 @@
 				42A154701E8F1587C35E779C /* App */,
 				1B2897D8FF4911DF1A260117 /* Browser */,
 				10629035F1497BD5530A9DF3 /* Config */,
+				D146F769067A4851222E7074 /* Resources */,
 				FF52CE58EF2F85F0A59CA241 /* Services */,
 				558E0F7CC7D03BF864AAD270 /* Tasks */,
 				710C319BF113CF9A62AD9D8E /* Testing */,
@@ -228,6 +231,14 @@
 				0A5755693105CB1BAFB43BEE /* copilot-ios */,
 			);
 			name = Packages;
+			sourceTree = "<group>";
+		};
+		D146F769067A4851222E7074 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				08C583158CC04826F71F633F /* commandDictionary.plist */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 		FCF82DA0EA953F1EB7FCBCDE /* Views */ = {
@@ -342,6 +353,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				9D745037123904342BCD4551 /* Neox.storekit in Resources */,
+				CE9345C44FA9962802D710FC /* commandDictionary.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

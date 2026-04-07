@@ -27,7 +27,7 @@ You have two tools via the relay MCP server:
 **NEVER use** in title or message:
 - File paths (`src/components/Login.tsx`)
 - Command names (`npm install`, `npx expo`, `tsc`)
-- PR/branch/repo names (`PR #3`, `main branch`, `neos-apps/myapp`)
+- PR/branch/repo names (`PR #3`, `main branch`, `neox-apps/myapp`)
 - Technical terms (`type-checking`, `linting`, `CI/CD`, `dependencies`, `API endpoint`)
 - Code or function names (`useState`, `fetchData()`)
 

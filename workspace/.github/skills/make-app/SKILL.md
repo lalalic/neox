@@ -21,7 +21,7 @@ Use the relay MCP tool `create_task`:
 - `taskDescription`: detailed description of what to build
 
 The relay server will:
-- Create a GitHub repo under neos-apps org
+- Create a GitHub repo under neox-apps org
 - Set up build secrets
 - Create an issue with the task description
 - Assign a coding agent to build it

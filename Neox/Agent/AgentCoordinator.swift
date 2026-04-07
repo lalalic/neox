@@ -75,6 +75,8 @@ final class AgentCoordinator: ObservableObject {
     var fileTools: FileToolProvider { fileToolProvider }
     private let subAgentToolProvider: SubAgentToolProvider
     private let contextToolProvider: ContextToolProvider
+    private let terminalToolProvider: TerminalToolProvider
+    private let scriptToolProvider: ScriptToolProvider
     #if canImport(MediaKit)
     private let ffmpegToolProvider: FFmpegToolProvider
     #endif
@@ -112,6 +114,8 @@ final class AgentCoordinator: ObservableObject {
         let memProvider = self.memoryToolProvider
         let fileProvider = self.fileToolProvider
         let savedPort = UserDefaults.standard.integer(forKey: "relayPort")
+        let terminalProvider = TerminalToolProvider(workspaceURL: resolvedWorkspace)
+        self.terminalToolProvider = terminalProvider
         self.subAgentToolProvider = SubAgentToolProvider(
             workspaceURL: resolvedWorkspace,
             relayHost: UserDefaults.standard.string(forKey: "relayHost") ?? "relay.ai.qili2.com",
@@ -121,10 +125,12 @@ final class AgentCoordinator: ObservableObject {
                 var tools: [ToolDefinition] = []
                 tools.append(contentsOf: fileProvider.tools)
                 tools.append(contentsOf: memProvider.tools)
+                tools.append(contentsOf: terminalProvider.tools)
                 return tools
             }
         )
         self.contextToolProvider = ContextToolProvider(workspaceURL: resolvedWorkspace)
+        self.scriptToolProvider = ScriptToolProvider(workspaceURL: resolvedWorkspace, terminalProvider: terminalProvider)
         #if canImport(MediaKit)
         self.ffmpegToolProvider = FFmpegToolProvider(baseDirectory: resolvedWorkspace)
         #endif
@@ -178,6 +184,8 @@ final class AgentCoordinator: ObservableObject {
             RegisteredTool(name: "memory_log_session", description: "Create session notes in .neo/reports/sessions"),
             RegisteredTool(name: "memory_list", description: "List memory files under .neo"),
             RegisteredTool(name: "create_project", description: "Scaffold a new project from .templates/projects/"),
+            RegisteredTool(name: "run_in_terminal", description: "Execute shell commands on device (ls, grep, curl, etc.)"),
+            RegisteredTool(name: "run_script", description: "Execute JavaScript code on device (loops, JSON, data processing)"),
             RegisteredTool(name: "start_coding_task", description: "Start coding task: create GitHub repo, issue, assign coding agent"),
             RegisteredTool(name: "send_response", description: "Send a response message to the user"),
             RegisteredTool(name: "create_plan", description: "Create a scheduled plan from chat"),
@@ -251,6 +259,12 @@ final class AgentCoordinator: ObservableObject {
 
         // Context tools (get_context)
         tools.append(contentsOf: contextToolProvider.tools)
+
+        // Terminal tools (run_in_terminal via ios_system)
+        tools.append(contentsOf: terminalToolProvider.tools)
+
+        // Script tools (run_script via JavaScriptCore)
+        tools.append(contentsOf: scriptToolProvider.tools)
 
         // Media tools (ffmpeg, ffprobe)
         #if canImport(MediaKit)

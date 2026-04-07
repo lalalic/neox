@@ -23,6 +23,8 @@ final class AppAgentSetup {
     private init() {}
     
     func start(port: UInt16 = 9223) throws {
+        // Prevent double-start race: if we already have a server, don't recreate
+        if server != nil { return }
         self.port = port
         self.serverState = "starting"
         let server = MCPServer(name: "neox", port: port)

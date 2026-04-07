@@ -11,7 +11,7 @@ MSG="${2:-Update template}"
 # Map template dirs to GitHub repos
 get_repo() {
   case "$1" in
-    expo-app-template) echo "neos-apps/expo-app-template" ;;
+    expo-app-template) echo "neox-apps/expo-app-template" ;;
     *) echo "" ;;
   esac
 }
