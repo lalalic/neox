@@ -158,6 +158,19 @@ public class AttachmentStore: ObservableObject {
 
 The `view` tool replaces `get_attachment`. It only handles images — text/code files are included inline in the prompt.
 
+### 5.3 convert_to_markdown Tool
+
+For non-image files (PDFs, documents, text), the agent calls `convert_to_markdown` to extract readable text content.
+
+| Format | Behavior |
+|--------|----------|
+| PDF | Extract text via PDFKit (first 10 pages) |
+| Text/code | Return content as-is |
+| Video | Return metadata (resolution, duration) |
+| Image | Error — use `view` instead |
+
+**Together**: `view` for images, `convert_to_markdown` for everything else.
+
 ```swift
 func makeViewTool(store: AttachmentStore) -> ToolDefinition {
     ToolDefinition(
