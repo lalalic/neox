@@ -164,6 +164,19 @@ struct NeoxApp: App {
                     PlanExecutor.shared.scheduleNextCheck()
                     
                     startAppAgent(coordinator: coordinator)
+                    
+                    // Onboarding: send hidden message on first launch
+                    if !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
+                        UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+                        // Wait for connection to be ready
+                        for _ in 0..<50 {
+                            if vm.chatState == .idle { break }
+                            try? await Task.sleep(nanoseconds: 200_000_000)
+                        }
+                        if vm.chatState == .idle {
+                            await vm.sendHidden("This is my first time seeing you. Follow .github/boarding.md to welcome me.")
+                        }
+                    }
                 }
                 .onOpenURL { url in
                     print("[NeoxApp] onOpenURL: \(url)")
