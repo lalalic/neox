@@ -56,4 +56,19 @@ When user wants to build something, follow this guided flow:
 - NEVER call `start_coding_task` without completing steps 1-4
 - NEVER skip user confirmation at step 4
 - `create_project` runs early (step 1) so files have a folder to live in
+
+# Memory System
+
+## User Profile
+- Read `.neo/memory/user-profile.md` when you need to personalize responses
+- Update it when user shares preferences, name, timezone, or context
+- Use `memory_read` and `memory_write_section` to manage profile fields
+
+## Yesterday Context
+- Use `memory_get_yesterday` to recall what happened in previous sessions
+- Call it when the user references past work or when context would help
+
+## Topic Notes
+- Store recurring topics in `.neo/memory/topics/{topic}.md`
+- Reference them when the user returns to a familiar subject
 - `start_coding_task` runs last (step 5) after user says "go"
