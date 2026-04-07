@@ -36,13 +36,12 @@ struct AgentCoordinatorTests {
         #expect(coordinator.allTools.count > 0)
     }
     
-    @Test("System prompt includes skill prompt")
-    func systemPrompt() {
+    @Test("Build tools includes registered tools")
+    func buildToolsNotEmpty() {
         let coordinator = AgentCoordinator()
-        let prompt = coordinator.buildSystemPrompt()
-        
-        #expect(prompt.contains("Neox"))
-        #expect(prompt.contains("web"))
+        coordinator.registerDefaultTools()
+        let tools = coordinator.buildTools()
+        #expect(!tools.isEmpty)
     }
     
     @Test("Initial agent is not running")

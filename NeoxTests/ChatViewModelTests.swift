@@ -186,10 +186,11 @@ struct ChatViewModelTests {
 
     // MARK: - Plan Store
 
-    @Test("Plan store starts empty")
+    @Test("Plan store has seeded memory-reports plan")
     func planStoreInitial() {
         let vm = makeTestVM()
-        #expect(vm.planStore.plans.isEmpty)
+        // PlanStore seeds a "memory-reports" plan by default
+        #expect(vm.planStore.plans.contains(where: { $0.id == "memory-reports" }))
     }
 
     // MARK: - Ask Questions
