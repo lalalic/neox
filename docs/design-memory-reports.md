@@ -120,9 +120,7 @@ Each auto-summary costs one LLM call. A typical day (~5KB JSONL) costs ~$0.01 us
 
 ## Yesterday Context
 
-The key missing piece: the agent should know what happened yesterday without the user re-explaining.
-
-On session start, `AgentCoordinator` checks for yesterday's daily summary. If it exists, it's injected into the system prompt. If missing, the memory sub-agent generates one first.
+The agent can retrieve yesterday's context on demand via `memory_get_yesterday`. No automatic injection into the system prompt — the agent calls the tool when it needs prior context.
 
 ## Memory Tools
 
@@ -133,6 +131,9 @@ On session start, `AgentCoordinator` checks for yesterday's daily summary. If it
 | `memory_write_section` | Write/replace markdown section | implemented |
 | `memory_log_session` | Log session report | implemented |
 | `memory_list` | List memory files | implemented |
+| `memory_search` | Search across memory files by keyword | implemented |
+| `memory_delete` | Delete file or section | implemented |
+| `memory_get_yesterday` | Get yesterday's daily summary or session log | implemented |
 | `run_sub_agent` | Delegate to memory agent for reports | implemented |
 
 ## Memory Sub-Agent
@@ -158,8 +159,9 @@ The memory agent handles:
 
 ## Implementation Priority
 
-1. **Yesterday context injection** — read daily summary, inject into system prompt
-2. **Daily auto-summary** — memory sub-agent generates on first message of new day
-3. **Structured memory directories** — create `memory/topics/`, `memory/projects/`
-4. **User profile** — create and maintain `user-profile.md`
-5. **Weekly/monthly summaries** — aggregate from daily summaries
+1. ~~**Yesterday context injection**~~ — done: `memory_get_yesterday` tool (on-demand, no auto-injection)
+2. ~~**Structured memory directories**~~ — done: `ensureNeoDirectories()` creates full layout
+3. ~~**Memory search & delete**~~ — done: `memory_search`, `memory_delete` tools
+4. **Daily auto-summary** — memory sub-agent generates on first message of new day
+5. **User profile** — create and maintain `user-profile.md`
+6. **Weekly/monthly summaries** — aggregate from daily summaries
