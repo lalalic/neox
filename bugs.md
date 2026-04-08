@@ -14,14 +14,9 @@ Updated: 2026-04-09
 
 ## Open
 
-### Bug #6: Chat agent gets stuck in "working" state
+### Bug #6: Chat agent gets stuck in "working" state — FIXED
 
-**File:** Likely in ChatViewModel or agent pipeline
-**Severity:** Medium — blocks testing after ~5 messages
-
-After accumulating several messages with tool results (especially large HN story lists), the chat agent gets stuck in "working" state (`agentRunning: false` but `chatState: working`). Possibly caused by context window overflow or LLM timeout.
-
-**Not an adapter bug** — this is a chat pipeline issue.
+Three fixes: (1) steer error in `send()` now resets chatState to .idle, (2) agent steer error in `sendPrompt()` resets too, (3) 180s timeout safety net forces .idle if stuck. Commit `b0bb83a`.
 
 ### Bug #7: AccessibilityScanner compile error — FIXED
 
