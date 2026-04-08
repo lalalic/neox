@@ -22,7 +22,7 @@ Save diagrams in markdown files in the project. Mermaid code blocks render as vi
 
 **Live preview:** You can also render diagrams in the browser via web_agent:
 ```
-web_agent command=navigate url=https://mermaid.live
+web_navigate url=https://mermaid.live
 ```
 Paste your Mermaid code in the editor to see it visually and export as PNG/SVG.
 

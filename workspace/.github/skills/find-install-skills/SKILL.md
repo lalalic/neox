@@ -10,20 +10,20 @@ Search the ClawHub skill registry (clawhub.ai) to discover and install new capab
 ## Browse Skills
 
 ```
-web_agent command=navigate url=https://clawhub.ai
-web_agent command=snapshot
+web_navigate url=https://clawhub.ai
+web_snapshot
 # Browse featured and popular skills
 ```
 
 ## Search for a Skill
 
 ```
-web_agent command=navigate url=https://clawhub.ai/search?q=YOUR+SEARCH+TERM
-web_agent command=snapshot
+web_navigate url=https://clawhub.ai/search?q=YOUR+SEARCH+TERM
+web_snapshot
 # Read search results
 # Click on a skill to see details
-web_agent command=click ref=rN
-web_agent command=snapshot
+web_click ref=rN
+web_snapshot
 ```
 
 ## Evaluate a Skill
@@ -36,7 +36,7 @@ Before installing, check:
 
 ```
 # On a skill page, read the full description
-web_agent command=snapshot
+web_snapshot
 # Look for SKILL.md or documentation sections
 ```
 

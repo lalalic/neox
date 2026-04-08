@@ -25,17 +25,17 @@ You have a `web_agent` tool that controls a built-in web browser. Use it to visi
 
 ```
 1. Navigate to a page:
-   web_agent command=navigate url=https://example.com
+   web_navigate url=https://example.com
 
 2. Read the page:
-   web_agent command=snapshot
+   web_snapshot
    → Returns page text + refs like r0, r1, r2 for clickable elements
 
 3. Click something:
-   web_agent command=click ref=r3
+   web_click ref=r3
 
 4. Type into a field:
-   web_agent command=type ref=r1 text=Hello World
+   web_type ref=r1 text=Hello World
 
 5. Snapshot again after any action to see what changed
 ```
@@ -52,29 +52,29 @@ You have a `web_agent` tool that controls a built-in web browser. Use it to visi
 Snapshot gives you formatted text. For more content:
 
 ```
-web_agent command=evaluate script=document.body.innerText
+web_evaluate script=document.body.innerText
 ```
 
 For structured data:
 
 ```
-web_agent command=evaluate script=JSON.stringify({title:document.title,text:document.querySelector('article')?.innerText})
+web_evaluate script=JSON.stringify({title:document.title,text:document.querySelector('article')?.innerText})
 ```
 
 ## Downloading Files
 
 ```
 # By clicking a download link
-web_agent command=download ref=r7
+web_download ref=r7
 
 # By direct URL
-web_agent command=download url=https://example.com/file.pdf filename=report.pdf
+web_download url=https://example.com/file.pdf filename=report.pdf
 ```
 
 ## Taking Screenshots
 
 ```
-web_agent command=screenshot
+web_screenshot
 ```
 
 Returns a base64 image you can describe or analyze.

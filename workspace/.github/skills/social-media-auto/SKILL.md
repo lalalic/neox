@@ -57,27 +57,27 @@ After posting, periodically check:
 
 Navigate to platform:
 ```
-web_agent command=navigate url=https://creator.xiaohongshu.com
+web_navigate url=https://creator.xiaohongshu.com
 ```
 
 Take snapshot to understand page (returns text + refs like r0, r1, r2...):
 ```
-web_agent command=snapshot
+web_snapshot
 ```
 
 Type into a field:
 ```
-web_agent command=type ref=r3 text=Your content here
+web_type ref=r3 text=Your content here
 ```
 
 Click buttons:
 ```
-web_agent command=click ref=r5
+web_click ref=r5
 ```
 
 Upload files:
 ```
-web_agent command=upload ref=r7 filePath=/path/to/file
+web_upload ref=r7 filePath=/path/to/file
 ```
 
 ## Tips

@@ -50,39 +50,39 @@ Organize and search messages:
 
 Navigate to WeChat Web:
 ```
-web_agent command=navigate url=https://wx.qq.com
+web_navigate url=https://wx.qq.com
 ```
 
 Check login status (snapshot returns page text + clickable refs):
 ```
-web_agent command=snapshot
+web_snapshot
 ```
 
 If QR code shown, ask user to scan with phone.
 
 Click on a conversation (use ref from snapshot):
 ```
-web_agent command=click ref=r3
+web_click ref=r3
 ```
 
 Read messages (snapshot after clicking conversation):
 ```
-web_agent command=snapshot
+web_snapshot
 ```
 
 Type a reply:
 ```
-web_agent command=type ref=r12 text=Hello!
+web_type ref=r12 text=Hello!
 ```
 
 Click send button:
 ```
-web_agent command=click ref=r15
+web_click ref=r15
 ```
 
 Run JavaScript to gather data:
 ```
-web_agent command=evaluate script=document.querySelectorAll('.chat_item').length
+web_evaluate script=document.querySelectorAll('.chat_item').length
 ```
 
 ## Known Issues

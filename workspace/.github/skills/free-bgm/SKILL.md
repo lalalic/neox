@@ -22,36 +22,36 @@ Find and download royalty-free music using the web browser.
 
 **Pixabay (easiest, no login):**
 ```
-web_agent command=navigate url=https://pixabay.com/music/search/YOUR%20SEARCH%20TERM/
-web_agent command=snapshot
+web_navigate url=https://pixabay.com/music/search/YOUR%20SEARCH%20TERM/
+web_snapshot
 # Browse results, click a track to preview
-web_agent command=click ref=rN
-web_agent command=snapshot
+web_click ref=rN
+web_snapshot
 # Find download button
-web_agent command=click ref=rN
+web_click ref=rN
 ```
 
 **YouTube Audio Library (best selection, needs login):**
 ```
-web_agent command=navigate url=https://studio.youtube.com/channel/UC/music
-web_agent command=snapshot
+web_navigate url=https://studio.youtube.com/channel/UC/music
+web_snapshot
 # Use filters to search by genre, mood, duration
 ```
 
 **Bensound:**
 ```
-web_agent command=navigate url=https://www.bensound.com/free-music-for-videos
-web_agent command=snapshot
+web_navigate url=https://www.bensound.com/free-music-for-videos
+web_snapshot
 ```
 
 ### 2. Download
 
 ```
 # Download from a link
-web_agent command=download ref=rN filename=bgm-track-name.mp3
+web_download ref=rN filename=bgm-track-name.mp3
 
 # Or from direct URL
-web_agent command=download url=https://example.com/track.mp3 filename=bgm-gentle-piano.mp3
+web_download url=https://example.com/track.mp3 filename=bgm-gentle-piano.mp3
 ```
 
 ### 3. Save Metadata
