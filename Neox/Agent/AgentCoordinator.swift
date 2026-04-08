@@ -323,12 +323,17 @@ final class AgentCoordinator: ObservableObject {
         default: batteryState = "unknown"
         }
 
+        let preferredLang = Locale.preferredLanguages.first ?? "en"
+        let regionCode = Locale.current.region?.identifier ?? "unknown"
+
         return """
         ## device
         - Model: \(device.model) (\(device.name))
         - OS: \(device.systemName) \(device.systemVersion)
         - Screen: \(Int(screen.bounds.width))x\(Int(screen.bounds.height))pt @\(Int(screen.scale))x
         - Battery: \(batteryLevel) (\(batteryState))
+        - Language: \(preferredLang)
+        - Region: \(regionCode)
 
         ## current time
         - \(fmt.string(from: now))
