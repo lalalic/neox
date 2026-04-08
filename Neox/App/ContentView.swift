@@ -55,7 +55,6 @@ struct ContentView: View {
                 if let chatVM = coordinator.chatViewModel {
                     NavigationStack {
                         CopilotChat.ChatView(viewModel: chatVM, inputModes: coordinator.chatInputModes)
-                            .navigationTitle(currentProjectDisplay ?? "Neo")
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
                                 ToolbarItem(placement: .topBarLeading) {
@@ -64,11 +63,13 @@ struct ContentView: View {
                                             currentProject: currentProjectDisplay,
                                             action: { showProjects = true }
                                         )
-                                        if webManager.currentURL != nil {
-                                            Button(action: { showWebView.toggle() }) {
-                                                Image(systemName: "globe")
-                                            }
-                                        }
+                                    }
+                                }
+                                ToolbarItem(placement: .principal) {
+                                    Button(action: { showSettings = true }) {
+                                        Text(currentProjectDisplay ?? "Neo")
+                                            .font(.headline)
+                                            .foregroundStyle(coordinator.isConnected ? .green : .secondary)
                                     }
                                 }
                                 ToolbarItem(placement: .topBarTrailing) {
@@ -80,9 +81,10 @@ struct ContentView: View {
                                                 onLongPress: { showContactSelector = true }
                                             )
                                         }
-                                        Button(action: { showSettings = true }) {
-                                            Image(systemName: "gearshape.fill")
-                                                .foregroundStyle(statusColor)
+                                        if webManager.currentURL != nil {
+                                            Button(action: { showWebView.toggle() }) {
+                                                Image(systemName: "globe")
+                                            }
                                         }
                                     }
                                 }
