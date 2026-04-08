@@ -66,11 +66,9 @@ struct ContentView: View {
                                     }
                                 }
                                 ToolbarItem(placement: .principal) {
-                                    Button(action: { showSettings = true }) {
-                                        Text(currentProjectDisplay ?? "Neo")
-                                            .font(.headline)
-                                            .foregroundStyle(coordinator.isConnected ? .green : .secondary)
-                                    }
+                                    Text(currentProjectDisplay ?? "Neo")
+                                        .font(.headline)
+                                        .foregroundStyle(coordinator.isConnected ? .green : .secondary)
                                 }
                                 ToolbarItem(placement: .topBarTrailing) {
                                     HStack(spacing: 8) {
@@ -85,6 +83,10 @@ struct ContentView: View {
                                             Button(action: { showWebView.toggle() }) {
                                                 Image(systemName: "globe")
                                             }
+                                        }
+                                        Button(action: { showSettings = true }) {
+                                            Image(systemName: "gearshape.fill")
+                                                .foregroundStyle(.secondary)
                                         }
                                     }
                                 }
