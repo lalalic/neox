@@ -66,9 +66,10 @@ struct ContentView: View {
                                     }
                                 }
                                 ToolbarItem(placement: .principal) {
-                                    Text(currentProjectDisplay ?? "Neo")
-                                        .font(.headline)
-                                        .foregroundStyle(coordinator.isConnected ? .green : .secondary)
+                                    ConnectionTitleView(
+                                        title: currentProjectDisplay ?? "Neo",
+                                        viewModel: chatVM
+                                    )
                                 }
                                 ToolbarItem(placement: .topBarTrailing) {
                                     HStack(spacing: 8) {
@@ -217,6 +218,21 @@ struct ContentView: View {
     private var statusColor: Color {
         let setup = AppAgentSetup.shared
         return (setup.isRunning || setup.bridgeState == "connected") ? .green : .gray
+    }
+}
+
+// MARK: - Connection Title
+
+/// Observes ChatViewModel.chatState to show connection status in title color.
+private struct ConnectionTitleView: View {
+    let title: String
+    @ObservedObject var viewModel: ChatViewModel
+
+    var body: some View {
+        let connected = viewModel.chatState != .disconnected && viewModel.chatState != .connecting
+        Text(title)
+            .font(.headline)
+            .foregroundStyle(connected ? .green : .secondary)
     }
 }
 

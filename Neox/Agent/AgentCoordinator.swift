@@ -21,7 +21,10 @@ struct RegisteredTool: Identifiable, Equatable {
 final class AgentCoordinator: ObservableObject {
     let connectionManager = ConnectionManager()
     @Published var currentSession: String? = nil
-    var isConnected: Bool { connectionManager.state == .connected }
+    var isConnected: Bool {
+        guard let state = chatViewModel?.chatState else { return false }
+        return state != .disconnected && state != .connecting
+    }
     @Published var registeredTools: [RegisteredTool] = []
     @Published var isAgentRunning: Bool = false
     
