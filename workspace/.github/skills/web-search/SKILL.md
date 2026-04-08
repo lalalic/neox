@@ -7,10 +7,12 @@ description: Search the web and fetch page content using web_agent tool. Use whe
 
 Use your `web_agent` tool to search the web and read page content.
 
-## Quick Search (Google)
+**IMPORTANT**: Google and Bing are blocked from this server. Always use **Baidu** or **DuckDuckGo** for search.
+
+## Quick Search (Baidu — default, works for all queries)
 
 ```
-web-agent navigate url=https://www.google.com/search?q=YOUR+SEARCH+QUERY
+web-agent navigate url=https://www.baidu.com/s?wd=YOUR+SEARCH+QUERY
 web-agent snapshot
 # Read search results from the snapshot
 # Click on a result ref to read the full page
@@ -18,10 +20,10 @@ web-agent click ref=rN
 web-agent snapshot
 ```
 
-## Quick Search (Baidu — for Chinese queries)
+## Quick Search (DuckDuckGo — English alternative)
 
 ```
-web-agent navigate url=https://www.baidu.com/s?wd=你的搜索词
+web-agent navigate url=https://html.duckduckgo.com/html/?q=YOUR+SEARCH+QUERY
 web-agent snapshot
 web-agent click ref=rN
 web-agent snapshot
@@ -54,7 +56,7 @@ web-agent evaluate script=JSON.stringify({title:document.title,text:document.que
 1. **Always snapshot after navigate** — this gives you the page content and clickable refs
 2. **Click search results** — use the ref from snapshot (e.g., `r3`) to open a result
 3. **Snapshot again** after clicking to read the destination page
-4. **Use Google for English**, **Baidu for Chinese** queries
+4. **Use Baidu as default search engine**, **DuckDuckGo as alternative** — Google/Bing are blocked
 5. **Extract text** with `evaluate` if the snapshot is too cluttered
 6. **Take screenshots** with `web-agent screenshot` if you need to see visual layout
 
