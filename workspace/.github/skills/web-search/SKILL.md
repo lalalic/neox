@@ -10,28 +10,28 @@ Use your `web_agent` tool to search the web and read page content.
 ## Quick Search (Google)
 
 ```
-web_navigate url=https://www.google.com/search?q=YOUR+SEARCH+QUERY
-web_snapshot
+web-agent navigate url=https://www.google.com/search?q=YOUR+SEARCH+QUERY
+web-agent snapshot
 # Read search results from the snapshot
 # Click on a result ref to read the full page
-web_click ref=rN
-web_snapshot
+web-agent click ref=rN
+web-agent snapshot
 ```
 
 ## Quick Search (Baidu — for Chinese queries)
 
 ```
-web_navigate url=https://www.baidu.com/s?wd=你的搜索词
-web_snapshot
-web_click ref=rN
-web_snapshot
+web-agent navigate url=https://www.baidu.com/s?wd=你的搜索词
+web-agent snapshot
+web-agent click ref=rN
+web-agent snapshot
 ```
 
 ## Fetch a Specific Page
 
 ```
-web_navigate url=https://example.com/article
-web_snapshot
+web-agent navigate url=https://example.com/article
+web-agent snapshot
 # snapshot gives you the page text and interactive elements
 ```
 
@@ -40,13 +40,13 @@ web_snapshot
 When snapshot doesn't capture enough text, use evaluate to extract content:
 
 ```
-web_evaluate script=document.body.innerText
+web-agent evaluate script=document.body.innerText
 ```
 
 Or extract structured data:
 
 ```
-web_evaluate script=JSON.stringify({title:document.title,text:document.querySelector('article')?.innerText||document.body.innerText})
+web-agent evaluate script=JSON.stringify({title:document.title,text:document.querySelector('article')?.innerText||document.body.innerText})
 ```
 
 ## Workflow Tips
@@ -56,7 +56,7 @@ web_evaluate script=JSON.stringify({title:document.title,text:document.querySele
 3. **Snapshot again** after clicking to read the destination page
 4. **Use Google for English**, **Baidu for Chinese** queries
 5. **Extract text** with `evaluate` if the snapshot is too cluttered
-6. **Take screenshots** with `web_screenshot` if you need to see visual layout
+6. **Take screenshots** with `web-agent screenshot` if you need to see visual layout
 
 ## Common Patterns
 
@@ -73,5 +73,5 @@ web_evaluate script=JSON.stringify({title:document.title,text:document.querySele
 
 ### Download a file from the web
 ```
-web_download url=https://example.com/file.pdf
+web-agent download url=https://example.com/file.pdf
 ```

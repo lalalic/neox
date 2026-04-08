@@ -168,7 +168,7 @@ final class AgentCoordinator: ObservableObject {
     var allTools: [RegisteredTool] {
         var tools = registeredTools
         if webToolProvider != nil {
-            tools.append(RegisteredTool(name: "web_agent", description: "Browser automation"))
+            tools.append(RegisteredTool(name: "web-agent", description: "Browser automation CLI (via run_in_terminal)"))
         }
         return tools
     }
@@ -209,8 +209,14 @@ final class AgentCoordinator: ObservableObject {
     func setupWebKitAgent(manager: WebViewManager) {
         webToolProvider = WebAgentToolProvider(manager: manager)
 
-        // Wire file converter to ChatViewModel for convert_to_markdown
+        // Register web-agent as a CLI command in terminal
         if let webProvider = webToolProvider {
+            terminalToolProvider.registerCommand(name: "web-agent") { [weak webProvider] command in
+                guard let provider = webProvider else { return "Error: web-agent not available" }
+                return try await provider.handleCLI(command)
+            }
+
+            // Wire file converter to ChatViewModel for convert_to_markdown
             chatViewModel?.fileConverter = { @Sendable [weak webProvider] filePath, format in
                 guard let provider = webProvider else {
                     throw NSError(domain: "AgentCoordinator", code: 1, userInfo: [NSLocalizedDescriptionKey: "Web agent not available"])
@@ -244,11 +250,6 @@ final class AgentCoordinator: ObservableObject {
     
     func buildTools() -> [CopilotSDK.ToolDefinition] {
         var tools: [CopilotSDK.ToolDefinition] = []
-        
-        // Web agent tools
-        if let webTools = webToolProvider?.tools {
-            tools.append(contentsOf: webTools)
-        }
         
         // File tools (read_file, write_file, list_files)
         tools.append(contentsOf: fileToolProvider.tools)

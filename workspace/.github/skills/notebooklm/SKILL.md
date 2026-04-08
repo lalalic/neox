@@ -10,8 +10,8 @@ Use Google NotebookLM (notebooklm.google.com) through the web browser to analyze
 ## Getting Started
 
 ```
-web_navigate url=https://notebooklm.google.com
-web_snapshot
+web-agent navigate url=https://notebooklm.google.com
+web-agent snapshot
 ```
 
 If not logged in, you'll need to sign in with Google first.
@@ -19,10 +19,10 @@ If not logged in, you'll need to sign in with Google first.
 ## Create a Notebook
 
 ```
-web_snapshot
+web-agent snapshot
 # Find "New notebook" or "+" button
-web_click ref=rN
-web_snapshot
+web-agent click ref=rN
+web-agent snapshot
 ```
 
 ## Add Sources
@@ -31,16 +31,16 @@ NotebookLM works by analyzing sources you add:
 
 ```
 # After creating or opening a notebook:
-web_snapshot
+web-agent snapshot
 # Find "Add source" button
-web_click ref=rN
-web_snapshot
+web-agent click ref=rN
+web-agent snapshot
 
 # Options: paste a URL, upload a file, or paste text
 # For URL:
-web_click ref=rN  # "Website" option
-web_type ref=rN text=https://example.com/article
-web_click ref=rN  # Submit/Add button
+web-agent click ref=rN  # "Website" option
+web-agent type ref=rN text=https://example.com/article
+web-agent click ref=rN  # Submit/Add button
 ```
 
 ## Ask Questions
@@ -48,11 +48,11 @@ web_click ref=rN  # Submit/Add button
 Once sources are added, use the chat to ask questions:
 
 ```
-web_snapshot
+web-agent snapshot
 # Find the chat input
-web_type ref=rN text=What are the key findings?
-web_click ref=rN  # Send button
-web_snapshot
+web-agent type ref=rN text=What are the key findings?
+web-agent click ref=rN  # Send button
+web-agent snapshot
 # Read the AI response
 ```
 
@@ -61,13 +61,13 @@ web_snapshot
 NotebookLM can create AI podcast-style audio summaries:
 
 ```
-web_snapshot
+web-agent snapshot
 # Find "Audio Overview" or "Studio" section
-web_click ref=rN
+web-agent click ref=rN
 # Click "Generate" or similar
-web_click ref=rN
+web-agent click ref=rN
 # Wait for generation (may take a few minutes)
-web_snapshot
+web-agent snapshot
 ```
 
 ## Tips

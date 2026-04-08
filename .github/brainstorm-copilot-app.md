@@ -108,9 +108,9 @@ The app registers custom tools so the agent can:
 | Tool | Purpose |
 |------|---------|
 | `browse_web` | Navigate WebKitAgent to URL, get DOM snapshot |
-| `web_click` | Click element on web page |
-| `web_type` | Type into web form field |
-| `web_screenshot` | Screenshot current page for analysis |
+| `web-agent click` | Click element on web page |
+| `web-agent type` | Type into web form field |
+| `web-agent screenshot` | Screenshot current page for analysis |
 | `show_preview` | Render HTML/web content in browser panel |
 | `notify_user` | Push notification for long-running tasks |
 | `speak` | Read response aloud |

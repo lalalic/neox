@@ -10,8 +10,8 @@ Search and browse YouTube videos through the web browser.
 ## Search for Videos
 
 ```
-web_navigate url=https://www.youtube.com/results?search_query=YOUR+SEARCH+TERMS
-web_snapshot
+web-agent navigate url=https://www.youtube.com/results?search_query=YOUR+SEARCH+TERMS
+web-agent snapshot
 # Read video titles, channels, and view counts from results
 ```
 
@@ -23,16 +23,16 @@ Add filter params to narrow results:
 - Sort by view count: append `&sp=CAMSAhAB`
 
 ```
-web_navigate url=https://www.youtube.com/results?search_query=react+tutorial&sp=CAI%253D
-web_snapshot
+web-agent navigate url=https://www.youtube.com/results?search_query=react+tutorial&sp=CAI%253D
+web-agent snapshot
 ```
 
 ## Get Video Details
 
 ```
 # Click on a video from search results
-web_click ref=rN
-web_snapshot
+web-agent click ref=rN
+web-agent snapshot
 # Read title, channel, description, view count, publish date
 ```
 
@@ -40,25 +40,25 @@ web_snapshot
 
 ```
 # On a video page, expand the description
-web_snapshot
+web-agent snapshot
 # Find "...more" or description expand button
-web_click ref=rN
-web_snapshot
+web-agent click ref=rN
+web-agent snapshot
 ```
 
 ## Browse Channel Content
 
 ```
-web_navigate url=https://www.youtube.com/@CHANNEL_NAME/videos
-web_snapshot
+web-agent navigate url=https://www.youtube.com/@CHANNEL_NAME/videos
+web-agent snapshot
 # See recent uploads from a channel
 ```
 
 ## Get Trending Videos
 
 ```
-web_navigate url=https://www.youtube.com/feed/trending
-web_snapshot
+web-agent navigate url=https://www.youtube.com/feed/trending
+web-agent snapshot
 ```
 
 ## Tips
