@@ -6,7 +6,7 @@ import CopilotSDK
 
 struct ContentView: View {
     @EnvironmentObject var coordinator: AgentCoordinator
-    @State private var webManager = WebViewManager()
+    @StateObject private var webManager = WebViewManager()
     @State private var showWebView = false
     @State private var showSettings = false
     @State private var showProjects = false
@@ -64,8 +64,10 @@ struct ContentView: View {
                                             currentProject: currentProjectDisplay,
                                             action: { showProjects = true }
                                         )
-                                        Button(action: { showWebView.toggle() }) {
-                                            Image(systemName: "globe")
+                                        if webManager.currentURL != nil {
+                                            Button(action: { showWebView.toggle() }) {
+                                                Image(systemName: "globe")
+                                            }
                                         }
                                     }
                                 }
