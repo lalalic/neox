@@ -456,12 +456,12 @@ final class AgentCoordinator: ObservableObject {
             instructions += "\n\n\(skillSection)"
         }
         var sections = agentProfile?.sections ?? [:]
+        // Inject device/environment context into the proper section
+        sections["environment_context"] = .replace(content: buildDeviceContext())
         // Enforce concise responses for mobile context
         let mobileTone = "You are on a mobile device with a small screen. Keep responses concise — 1-3 sentences for simple answers. Use bullet points for lists. Avoid unnecessary introductions, conclusions, and filler. Do not repeat the user's question back."
         if let existing = sections["tone"] {
-           Inject device/environment context into the proper section
-        sections["environment_context"] = .replace(content: buildDeviceContext())
-        //  if case .replace(content: let content) = existing {
+            if case .replace(content: let content) = existing {
                 sections["tone"] = .replace(content: content + "\n" + mobileTone)
             } else {
                 sections["tone"] = .append(content: mobileTone)
