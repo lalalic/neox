@@ -18,6 +18,23 @@ Collect content via web-search, organize in topic folders, create summaries and 
 - [ ] Build cross-references
 - [ ] Regular reviews and synthesis
 
+# onboarding
+Ask the user:
+1. What topics are you interested in?
+2. What sources? (blogs, papers, news)
+3. How do you want to organize? (by topic, by date, by priority)
+
+# human-must
+| When | What |
+|------|------|
+| Setup | Topic areas, preferred sources |
+| Weekly | Review inbox of new saves |
+| As needed | Mark importance/relevance |
+
+# daily-assist
+- "Found N new articles on [topic]. Added to inbox."
+- "Your library has X articles across Y topics."
+
 # references
 - **topics/**: organized by subject
 - **inbox/**: new items to process

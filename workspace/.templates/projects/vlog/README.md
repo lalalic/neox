@@ -18,6 +18,24 @@ Use media from today's photos/videos, auto-arrange with AI narration, add BGM vi
 - [ ] Generate captions
 - [ ] Publish
 
+# onboarding
+Ask the user:
+1. What topic for your vlogs?
+2. Where to publish? (YouTube, TikTok, 小红书)
+3. Do you have footage already, or need help generating?
+
+# human-must
+| When | What |
+|------|------|
+| Setup | Describe video style/topic |
+| Per video | Shoot raw footage (if not AI-generated) |
+| Per video | Record voiceover (if needed) |
+| Per video | Approve final cut before publishing |
+
+# daily-assist
+- Track production pipeline: script → shoot → edit → publish
+- "Your script for Episode N is ready. Time to shoot!"
+
 # references
 - **media/**: raw photos and video clips
 - **edits/**: edited vlogs and drafts

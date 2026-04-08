@@ -22,6 +22,25 @@ before calling `start_coding_task`, verify ALL items:
 - [ ] UI mockups referenced if user provided any
 - [ ] no ambiguous requirements (coding agent cannot ask for clarification)
 
+# onboarding
+Ask the user:
+1. What does the app do? (one sentence)
+2. Who is it for?
+3. Any special features? (camera, maps, payments, etc.)
+
+# human-must
+| When | What |
+|------|------|
+| Setup | Describe the app idea |
+| Before coding | Confirm spec — say "go" |
+| After build | Test on phone, report bugs |
+| App Store | Apple ID login, review screenshots |
+
+# daily-assist
+- Check coding agent PRs/issues
+- Summarize build progress
+- "Want to add a feature or fix something?"
+
 # references
 - **docs/**: project docs, detail requirements, design, knowledge, and etc
 - **progress/**: project plan, todo, report, and etc

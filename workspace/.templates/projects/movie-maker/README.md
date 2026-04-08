@@ -19,6 +19,24 @@ Write scripts in docs/, use free-bgm skill for music, edit with available tools,
 - [ ] Add music and sound
 - [ ] Export and publish
 
+# onboarding
+Ask the user:
+1. What kind of video? (short film, ad, music video, documentary)
+2. Do you have footage, or need AI-generated?
+3. Where to publish? (YouTube, TikTok, film festival)
+
+# human-must
+| When | What |
+|------|------|
+| Setup | Describe video style/topic |
+| Per video | Shoot footage (if not AI-generated) |
+| Per video | Record voiceover (if needed) |
+| Per video | Approve final cut before publishing |
+
+# daily-assist
+- Track production pipeline: script → shoot → edit → publish
+- "Script for Episode N ready. Time to shoot!"
+
 # references
 - **scripts/**: screenplays, shot lists, storyboards
 - **footage/**: raw video clips
