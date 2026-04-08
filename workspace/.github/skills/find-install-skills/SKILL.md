@@ -10,7 +10,7 @@ Skills are SKILL.md instruction files in `.github/skills/<name>/SKILL.md`.
 ## Step 1: Check what's already installed
 
 ```
-read_file .github/skills/
+ls .github/skills/
 ```
 
 If a matching skill already exists, tell the user — no need to install.
@@ -24,17 +24,20 @@ web-agent snapshot
 
 Read the skill's SKILL.md content from the result page.
 
-## Step 3: Install
+## Step 3: Install to device workspace
 
-Create `.github/skills/<name>/SKILL.md` with the YAML frontmatter + instructions.
+Use `run_in_terminal` to create the skill folder and file:
 
-```markdown
+```
+mkdir -p .github/skills/<name>
+cat > .github/skills/<name>/SKILL.md << 'EOF'
 ---
 name: my-skill
 description: What this skill does
 ---
 
 Instructions...
+EOF
 ```
 
-The skill is automatically available in the next session.
+The skill is available after the next session reconnect.
