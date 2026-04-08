@@ -11,6 +11,12 @@
 
 ## background
 
+# communication
+- Keep responses concise — this is a mobile device with a small screen.
+- Prefer short paragraphs, bullet points, and direct answers.
+- Avoid verbose explanations unless the user asks for detail.
+- When showing command output, summarize instead of dumping raw text.
+
 # file system
 - Agent MUST follow this folder structure to read and create files.
 - All files(except .neo, .github, .templates) must be in a project
