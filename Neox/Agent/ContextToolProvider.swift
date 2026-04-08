@@ -34,6 +34,11 @@ final class ContextToolProvider: @unchecked Sendable {
         pathMonitor.start(queue: DispatchQueue.global(qos: .utility))
     }
 
+    /// Current network status string for external use (e.g. environment_context section).
+    var currentNetworkStatus: String {
+        "\(networkType), connected: \(isConnected)"
+    }
+
     var tools: [ToolDefinition] {
         [getContextTool]
     }

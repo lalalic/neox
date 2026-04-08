@@ -3,6 +3,7 @@ import UIKit
 import CopilotSDK
 import CopilotChat
 import WebKitAgent
+import Network
 #if canImport(MediaKit)
 import MediaKit
 #endif
@@ -326,19 +327,32 @@ final class AgentCoordinator: ObservableObject {
         let preferredLang = Locale.preferredLanguages.first ?? "en"
         let regionCode = Locale.current.region?.identifier ?? "unknown"
 
-        return """
-        ## device
-        - Model: \(device.model) (\(device.name))
-        - OS: \(device.systemName) \(device.systemVersion)
-        - Screen: \(Int(screen.bounds.width))x\(Int(screen.bounds.height))pt @\(Int(screen.scale))x
-        - Battery: \(batteryLevel) (\(batteryState))
-        - Language: \(preferredLang)
-        - Region: \(regionCode)
+        // Storage info
+        let storage: String
+        if let attrs = try? FileManager.default.attributesOfFileSystem(forPath: NSHomeDirectory()),
+           let freeBytes = attrs[.systemFreeSize] as? Int64,
+           let totalBytes = attrs[.systemSize] as? Int64 {
+            let freeGB = Double(freeBytes) / 1_073_741_824
+            let totalGB = Double(totalBytes) / 1_073_741_824
+            storage = String(format: "%.1fGB free / %.0fGB total", freeGB, totalGB)
+        } else {
+            storage = "unknown"
+        }
 
-        ## current time
-        - \(fmt.string(from: now))
-        - \(weekdayFmt.string(from: now)), \(timeOfDay)
-        - Timezone: \(TimeZone.current.identifier)
+        // Network status from contextToolProvider
+        let network = contextToolProvider.currentNetworkStatus
+
+        return """
+        * Device: \(device.model) (\(device.name))
+        * OS: \(device.systemName) \(device.systemVersion)
+        * Screen: \(Int(screen.bounds.width))x\(Int(screen.bounds.height))pt @\(Int(screen.scale))x
+        * Storage: \(storage)
+        * Battery: \(batteryLevel) (\(batteryState))
+        * Network: \(network)
+        * Language: \(preferredLang), Region: \(regionCode)
+        * Time: \(fmt.string(from: now))
+        * Day: \(weekdayFmt.string(from: now)), \(timeOfDay)
+        * Timezone: \(TimeZone.current.identifier)
         """
     }
 
@@ -426,9 +440,6 @@ final class AgentCoordinator: ObservableObject {
         normalizeInputSettings()
         let tools = buildTools()
         var instructions = agentProfile?.preambleBody?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        
-        // Inject device context
-        instructions += "\n\n\(buildDeviceContext())"
 
         // Inject dynamic workspace context
         let tree = buildWorkspaceTree()
@@ -448,7 +459,9 @@ final class AgentCoordinator: ObservableObject {
         // Enforce concise responses for mobile context
         let mobileTone = "You are on a mobile device with a small screen. Keep responses concise — 1-3 sentences for simple answers. Use bullet points for lists. Avoid unnecessary introductions, conclusions, and filler. Do not repeat the user's question back."
         if let existing = sections["tone"] {
-            if case .replace(content: let content) = existing {
+           Inject device/environment context into the proper section
+        sections["environment_context"] = .replace(content: buildDeviceContext())
+        //  if case .replace(content: let content) = existing {
                 sections["tone"] = .replace(content: content + "\n" + mobileTone)
             } else {
                 sections["tone"] = .append(content: mobileTone)
