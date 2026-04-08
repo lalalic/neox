@@ -249,12 +249,12 @@ final class WeChatService: ObservableObject {
     }
 
     /// Forward a message to all bound contacts for the given context.
-    func forward(message: String, project: String?) async {
+    func forward(message: String, project: String?, watermark: Bool = true) async {
         guard config.enabled, isOnline else { return }
         let bindings = getBindings(for: project)
         guard bindings.routingActive else { return }
         for contact in bindings.contacts {
-            _ = await channel?.sendMessage(to: contact.id, content: message)
+            _ = await channel?.sendMessage(to: contact.id, content: message, watermark: watermark)
         }
     }
 

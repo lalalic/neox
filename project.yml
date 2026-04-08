@@ -17,6 +17,9 @@ targets:
     platform: iOS
     sources:
       - Neox
+      - path: Neox/Resources/wechat-bro.js
+        type: file
+        buildPhase: resources
     entitlements:
       path: Neox/Neox.entitlements
     preBuildScripts:
