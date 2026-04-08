@@ -444,7 +444,19 @@ final class AgentCoordinator: ObservableObject {
            let skillSection = SkillDiscovery.buildPromptSection(from: skills) {
             instructions += "\n\n\(skillSection)"
         }
-        let sections = (agentProfile?.sections.isEmpty ?? true) ? nil : agentProfile?.sections
+        var sections = agentProfile?.sections ?? [:]
+        // Enforce concise responses for mobile context
+        let mobileTone = "You are on a mobile device with a small screen. Keep responses concise — 1-3 sentences for simple answers. Use bullet points for lists. Avoid unnecessary introductions, conclusions, and filler. Do not repeat the user's question back."
+        if let existing = sections["tone"] {
+            if case .replace(content: let content) = existing {
+                sections["tone"] = .replace(content: content + "\n" + mobileTone)
+            } else {
+                sections["tone"] = .append(content: mobileTone)
+            }
+        } else {
+            sections["tone"] = .append(content: mobileTone)
+        }
+        let finalSections: [String: SystemMessageSectionAction]? = sections.isEmpty ? nil : sections
         let model = selectedModel
         
         let transport = WebSocketTransport(
@@ -457,7 +469,7 @@ final class AgentCoordinator: ObservableObject {
             mode: .agent(AgentConfig(
                 model: model,
                 instructions: instructions,
-                sections: sections,
+                sections: finalSections,
                 tools: tools,
                 deviceToken: UserDefaults.standard.string(forKey: "apnsDeviceToken"),
                 apnsEnv: {
