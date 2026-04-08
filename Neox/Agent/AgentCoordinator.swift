@@ -77,6 +77,7 @@ final class AgentCoordinator: ObservableObject {
     private let contextToolProvider: ContextToolProvider
     private let terminalToolProvider: TerminalToolProvider
     private let scriptToolProvider: ScriptToolProvider
+    private let downloadToolProvider: DownloadToolProvider
     #if canImport(MediaKit)
     private let ffmpegToolProvider: FFmpegToolProvider
     #endif
@@ -131,6 +132,7 @@ final class AgentCoordinator: ObservableObject {
         )
         self.contextToolProvider = ContextToolProvider(workspaceURL: resolvedWorkspace)
         self.scriptToolProvider = ScriptToolProvider(workspaceURL: resolvedWorkspace, terminalProvider: terminalProvider)
+        self.downloadToolProvider = DownloadToolProvider(baseDirectory: resolvedWorkspace)
         #if canImport(MediaKit)
         self.ffmpegToolProvider = FFmpegToolProvider(baseDirectory: resolvedWorkspace)
         #endif
@@ -265,6 +267,9 @@ final class AgentCoordinator: ObservableObject {
 
         // Script tools (run_script via JavaScriptCore)
         tools.append(contentsOf: scriptToolProvider.tools)
+
+        // Download tools (download_file via URLSession)
+        tools.append(contentsOf: downloadToolProvider.tools)
 
         // Media tools (ffmpeg, ffprobe)
         #if canImport(MediaKit)
