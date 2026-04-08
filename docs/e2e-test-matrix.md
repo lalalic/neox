@@ -2,12 +2,16 @@
 
 Tests verify `sendToRelay` behavior across all combinations of main session mode (direct vs loop) and sub-agent usage.
 
+> **Architecture (post unified ask_questions refactor, 2026-04-08):**  
+> All models use the same `SHARED_TOOLS` containing only `ask_questions` (with `message` field).  
+> `send_response` tool has been removed. See [design doc](design-unified-ask-questions.md).
+
 ## Session Modes
 
 ```mermaid
 graph TD
     A[sendToRelay called] --> B{chatState?}
-    B -->|idle / working| C[session.send - Direct path]
+    B -->|idle / working| C[session.send - New turn]
     B -->|waitingForQuestions| D[submitAskQuestions - Answer pending question]
     B -->|waitingForUser| E[resume askUserContinuation]
     C --> F[Wait for chatState to leave .working]
@@ -16,9 +20,11 @@ graph TD
     F --> G[Collect new assistant messages]
 ```
 
-**Direct mode** (GPT-4.1, GPT-4.1-mini): relay sends prompt directly to CLI, returns response. `chatState` goes idle → working → idle.
+**Direct mode** (GPT-4.1, GPT-4.1-mini): relay sends prompt directly to CLI. Model responds via `ask_questions` with `message` field. `chatState` goes idle → working → waitingForQuestions.
 
-**Loop mode** (GPT-4o → claude-sonnet on CLI): model runs in a tool-use loop with `send_response` + `ask_questions`. `chatState` goes idle → working → waitingForQuestions. Subsequent messages answer the pending `ask_questions` instead of calling `session.send()`.
+**Loop mode** (GPT-4o → claude-sonnet on CLI): model runs in a tool-use loop. Uses `ask_questions` with `message` field for responses and follow-up questions. `chatState` goes idle → working → waitingForQuestions. Subsequent messages answer the pending `ask_questions`.
+
+**Sub-agents**: Always use direct sessions via `sendAndWait`. No tool handlers registered. The `handleToolCall` method responds with "Tool not available" for any unrecognized tool calls, preventing CLI hangs.
 
 ## Test Cases
 
@@ -28,8 +34,8 @@ graph TD
 |-------|-------|
 | Main model | GPT-4.1 |
 | Input | "What is 5+3? Reply with just the number." |
-| Expected | Reply "8", afterState: idle |
-| Verifies | Basic direct mode round-trip |
+| Expected | Reply "8", afterState: waitingForQuestions |
+| Verifies | Direct mode round-trip via unified ask_questions |
 
 ### 2. Main Loop — Simple Message
 
@@ -38,7 +44,7 @@ graph TD
 | Main model | GPT-4o |
 | Input | "What is 4+7? Reply with just the number." |
 | Expected | Reply "11", afterState: waitingForQuestions |
-| Verifies | Loop mode round-trip, send_response delivery, ask_questions blocking |
+| Verifies | Loop mode round-trip, ask_questions message delivery |
 
 ### 3. Sub-agent Direct (from main direct)
 
@@ -46,19 +52,19 @@ graph TD
 |-------|-------|
 | Main model | GPT-4.1 |
 | Sub-agent model | GPT-4.1-mini (default) |
-| Input | "What is 2+2? Reply with just the number." (via run_sub_agent) |
+| Input | "What is 2+2?" (via run_sub_agent) |
 | Expected | Reply "4", sub-agent session created and destroyed |
-| Verifies | Sub-agent lifecycle, session isolation, send_response not injected for direct sub-agents |
+| Verifies | Sub-agent lifecycle, session isolation, sendAndWait captures response |
 
-### 4. Sub-agent Loop (sub-agent uses loop model)
+### 4. Sub-agent with Unrecognized Tool Call
 
 | Field | Value |
 |-------|-------|
 | Main model | GPT-4.1 |
-| Sub-agent model | GPT-4o (explicitly requested) |
-| Input | "What is 7+3? Reply with just the number." (via run_sub_agent) |
-| Expected | Reply "10", SubAgentResultCapture intercepts send_response |
-| Verifies | Loop-mode sub-agent, send_response capture, ask_questions auto-answer ("User not available.") |
+| Sub-agent model | GPT-4.1-mini |
+| Scenario | Sub-agent model calls `ask_questions` (injected by relay SHARED_TOOLS) |
+| Expected | handleToolCall responds "Tool not available", model retries without it |
+| Verifies | handleToolCall error response prevents CLI hang (was a timeout bug before fix) |
 
 ### 5. Main Direct + Sub-agent Trigger
 
@@ -104,8 +110,8 @@ The response includes diagnostics:
 ## Key Implementation Details
 
 - **DIRECT_MODELS** on relay: `gpt-4.1`, `gpt-4o-mini`, `gpt-4.1-mini` (defined in `config.js`)
-- Models not in DIRECT_MODELS get loop treatment: `send_response` + `ask_questions` tools injected, system message modified
+- All models get `SHARED_TOOLS` (just `ask_questions`). Loop vs direct differs only in system message injection
 - GPT-4o maps to `claude-sonnet-4.6` on the CLI side
 - Sub-agent sessions use `sessionId: "subagent-{UUID}"` for isolation
-- `SubAgentResultCapture` actor captures `send_response` content for loop-mode sub-agents
-- Sub-agent registers `ask_questions` handler that auto-returns "User not available."
+- Sub-agents use `sendAndWait` directly — no tool handler registrations needed
+- `handleToolCall` responds with "Tool not available" for any unregistered tool (prevents CLI hang)
