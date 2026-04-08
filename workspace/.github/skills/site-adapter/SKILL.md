@@ -1,94 +1,27 @@
 ---
 name: site-adapter
-description: Use built-in site adapters for fast, reliable access to popular websites. Adapters are pre-built scripts that extract data from sites like Hacker News, Xiaohongshu, and WeChat without manual navigation. Use when the user asks about trending content, social media, news, or wants to interact with a known site. Triggers include "hacker news", "trending", "xiaohongshu", "小红书", "wechat", "微信", or names of supported sites.
+description: Fast access to popular websites via site CLI. Use when user mentions a known site like Hacker News, Xiaohongshu, WeChat.
 ---
 
-# Site Adapters
+# site CLI
 
-Site adapters let you interact with popular websites instantly — no manual clicking needed.
-
-## List Available Adapters
+Structured access to known websites via `run_in_terminal`.
 
 ```
-site list
+site list                            # show all adapters
+site sessions                        # check login status
+site <name> <action> [params]        # run an action
+site <name> login                    # open login page
+site <name> auth_check               # verify login
 ```
 
-This shows all registered sites and their actions.
-
-## Using an Adapter
-
+Examples:
 ```
-site SITE_NAME ACTION_NAME
-```
-
-### Hacker News (no login required)
-
-```
-# Top stories
-site hackernews top limit=10
-
-# Newest stories
-site hackernews new limit=10
-
-# Best stories
-site hackernews best limit=10
-```
-
-### Xiaohongshu / 小红书 (login required)
-
-```
-# Browse trending notes
+site hackernews top limit=5
 site xiaohongshu explore limit=10
-
-# Search for notes
-site xiaohongshu search query=咖啡推荐 limit=10
-
-# View your profile
-site xiaohongshu profile
-
-# Open note creation page
-site xiaohongshu post
-```
-
-### WeChat Web / 微信 (login required)
-
-```
-# Check login status
-site wechat status
-
-# List recent chats
 site wechat chats
-
-# Read messages from a contact
-site wechat messages contact=联系人名字
-
-# Send a message
-site wechat send contact=联系人名字 message=你好
 ```
 
-## Login Flow
+If a site needs login: `site <name> login` → user logs in → `site <name> auth_check`.
 
-Some sites require login. If an adapter says "Not logged in":
-
-1. **Open login page**: `site SITE_NAME login`
-2. **User logs in manually** in the browser view
-3. **Verify**: `site SITE_NAME auth_check`
-4. **Use the adapter** — cookies persist, so login is one-time
-
-Check all login sessions:
-```
-site sessions
-```
-
-## When to Use Adapters vs Manual Navigation
-
-| Situation | Use |
-|-----------|-----|
-| Get Hacker News top stories | `site` adapter (fast, structured data) |
-| Browse Xiaohongshu trending | `site` adapter |
-| Read a specific article URL | `navigate` + `snapshot` |
-| Fill out a form | `navigate` + `snapshot` + `type` + `click` |
-| Search Google/Baidu | `navigate` (use web-search skill) |
-
-**Prefer adapters** when available — they are faster and return clean, structured data.
-**Fall back to navigate + snapshot** for sites without adapters or custom actions.
+Use `site` for known sites. Fall back to `web-agent` for everything else.
