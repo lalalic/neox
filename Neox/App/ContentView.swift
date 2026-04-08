@@ -12,6 +12,7 @@ struct ContentView: View {
     @State private var showProjects = false
     @State private var showModelPicker = false
     @State private var currentProject: String? = nil
+    @State private var currentProjectDisplay: String? = nil
     @State private var stripeCheckoutURL: URL? = nil
     @State private var showCreditToast = false
     @State private var creditToastText = ""
@@ -54,13 +55,13 @@ struct ContentView: View {
                 if let chatVM = coordinator.chatViewModel {
                     NavigationStack {
                         CopilotChat.ChatView(viewModel: chatVM, inputModes: coordinator.chatInputModes)
-                            .navigationTitle(currentProject ?? "Neo")
+                            .navigationTitle(currentProjectDisplay ?? "Neo")
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
                                 ToolbarItem(placement: .topBarLeading) {
                                     HStack(spacing: 4) {
                                         ProjectBadgeView(
-                                            currentProject: currentProject,
+                                            currentProject: currentProjectDisplay,
                                             action: { showProjects = true }
                                         )
                                         Button(action: { showWebView.toggle() }) {
@@ -118,6 +119,7 @@ struct ContentView: View {
                 currentProject: currentProject,
                 onSelect: { project in
                     currentProject = project?.name
+                    currentProjectDisplay = project?.displayName
                     if let chatVM = coordinator.chatViewModel {
                         chatVM.projectScope = project?.name
                     }
