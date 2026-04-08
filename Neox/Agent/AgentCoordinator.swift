@@ -434,6 +434,11 @@ final class AgentCoordinator: ObservableObject {
         if !templateInfo.isEmpty {
             instructions += "\n\n\(templateInfo)"
         }
+        // Inject discovered on-device skills into the system prompt
+        if let skills = agentProfile?.skills,
+           let skillSection = SkillDiscovery.buildPromptSection(from: skills) {
+            instructions += "\n\n\(skillSection)"
+        }
         let sections = (agentProfile?.sections.isEmpty ?? true) ? nil : agentProfile?.sections
         let model = selectedModel
         
