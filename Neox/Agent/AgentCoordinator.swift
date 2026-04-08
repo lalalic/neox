@@ -169,6 +169,7 @@ final class AgentCoordinator: ObservableObject {
         var tools = registeredTools
         if webToolProvider != nil {
             tools.append(RegisteredTool(name: "web-agent", description: "Browser automation CLI (via run_in_terminal)"))
+            tools.append(RegisteredTool(name: "site", description: "Site adapter CLI (via run_in_terminal)"))
         }
         return tools
     }
@@ -214,6 +215,14 @@ final class AgentCoordinator: ObservableObject {
             terminalToolProvider.registerCommand(name: "web-agent") { [weak webProvider] command in
                 guard let provider = webProvider else { return "Error: web-agent not available" }
                 return try await provider.handleCLI(command)
+            }
+
+            // Register site as a standalone CLI command for site adapters
+            terminalToolProvider.registerCommand(name: "site") { [weak webProvider] command in
+                guard let provider = webProvider else { return "Error: site adapters not available" }
+                // Strip "site " prefix — handleSiteCLI expects "<site> <action> [key=val ...]"
+                let args = command.drop(while: { !$0.isWhitespace }).drop(while: { $0.isWhitespace })
+                return try await provider.handleSiteCLI(String(args))
             }
 
             // Wire file converter to ChatViewModel for convert_to_markdown

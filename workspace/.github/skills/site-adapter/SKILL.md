@@ -10,7 +10,7 @@ Site adapters let you interact with popular websites instantly — no manual cli
 ## List Available Adapters
 
 ```
-web-agent site action=list
+site list
 ```
 
 This shows all registered sites and their actions.
@@ -18,66 +18,66 @@ This shows all registered sites and their actions.
 ## Using an Adapter
 
 ```
-web-agent site site=SITE_NAME action=ACTION_NAME
+site SITE_NAME ACTION_NAME
 ```
 
 ### Hacker News (no login required)
 
 ```
 # Top stories
-web-agent site site=hackernews action=top limit=10
+site hackernews top limit=10
 
 # Newest stories
-web-agent site site=hackernews action=new limit=10
+site hackernews new limit=10
 
 # Best stories
-web-agent site site=hackernews action=best limit=10
+site hackernews best limit=10
 ```
 
 ### Xiaohongshu / 小红书 (login required)
 
 ```
 # Browse trending notes
-web-agent site site=xiaohongshu action=explore limit=10
+site xiaohongshu explore limit=10
 
 # Search for notes
-web-agent site site=xiaohongshu action=search query=咖啡推荐 limit=10
+site xiaohongshu search query=咖啡推荐 limit=10
 
 # View your profile
-web-agent site site=xiaohongshu action=profile
+site xiaohongshu profile
 
 # Open note creation page
-web-agent site site=xiaohongshu action=post
+site xiaohongshu post
 ```
 
 ### WeChat Web / 微信 (login required)
 
 ```
 # Check login status
-web-agent site site=wechat action=status
+site wechat status
 
 # List recent chats
-web-agent site site=wechat action=chats
+site wechat chats
 
 # Read messages from a contact
-web-agent site site=wechat action=messages contact=联系人名字
+site wechat messages contact=联系人名字
 
 # Send a message
-web-agent site site=wechat action=send contact=联系人名字 message=你好
+site wechat send contact=联系人名字 message=你好
 ```
 
 ## Login Flow
 
 Some sites require login. If an adapter says "Not logged in":
 
-1. **Open login page**: `web-agent site site=SITE_NAME action=login`
+1. **Open login page**: `site SITE_NAME login`
 2. **User logs in manually** in the browser view
-3. **Verify**: `web-agent site site=SITE_NAME action=auth_check`
+3. **Verify**: `site SITE_NAME auth_check`
 4. **Use the adapter** — cookies persist, so login is one-time
 
 Check all login sessions:
 ```
-web-agent site action=sessions
+site sessions
 ```
 
 ## When to Use Adapters vs Manual Navigation
