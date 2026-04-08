@@ -1,5 +1,5 @@
 ---
-name: site-adapter
+name: site
 description: Fast access to popular websites via site CLI. Use when user mentions a known site like Hacker News, Xiaohongshu, WeChat.
 ---
 

@@ -1,5 +1,5 @@
 ---
-name: webkitagent
+name: web-agent
 description: Browser automation via web-agent CLI in run_in_terminal. For known sites, use the site-adapter skill instead.
 ---
 
