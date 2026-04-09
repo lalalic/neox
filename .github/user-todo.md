@@ -1,9 +1,10 @@
 # User Todo (Priority Order)
 
-1. **Research opencli** — Design site-specific CLI subcommands for WebKitAgent
+(No pending items — all tasks complete)
 
 ## Completed
-- Plan Management — PlanStore, PlanExecutor (BGTask), PlanManagerView, PlanHistoryView all in copilot-ios. Fixed corrupted AgentCoordinator.swift.
+- Research opencli / Site Adapters — 18 bundled adapters: HackerNews (3), WeChat (4), Xiaohongshu (4), GitHub (2), Reddit (3), ProductHunt (1), Convertio (1). Added `extract` pipeline step for nested JSON. 238 tests pass.
+- Plan Management — PlanStore, PlanExecutor (BGTask), PlanManagerView, PlanHistoryView all in copilot-ios. Fixed corrupted AgentCoordinator.swift. Removed duplicate neox files.
 - Context awareness — environment_context section with device/battery/network/storage/time
 - CookieRefreshManager — periodic background cookie refresh
 - Bug #6 fix — chat stuck in working state
@@ -15,4 +16,4 @@
 - All 4 MCP tools work on device: app_agent, send_message, get_messages, get_status
 - Full chat flow verified on device (send message → GPT-4.1 → response displayed)
 - Fixed ATS: added NSAllowsLocalNetworking for ws:// connections
-- 41 tests pass
+- 41 tests pass (neox) + 238 tests pass (WebKitAgent)

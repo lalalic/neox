@@ -29,22 +29,52 @@ final class AppAgentSetup {
         self.serverState = "starting"
         let server = MCPServer(name: "neox", port: port)
         let provider = AppAgentToolProvider()
-        
-        // Register tools and keep handlers for bridge
-        for tool in provider.tools {
-            server.register(tools: [tool])
-            bridgeHandlers[tool.name] = tool.handler
-            bridgeToolList.append([
-                "name": tool.name,
-                "description": tool.description ?? "",
-                "inputSchema": ["type": "object"]
-            ])
-        }
-        registerChatTools(server: server)
-        try server.start()
-        
-        self.server = server
         self.toolProvider = provider
+
+        // Single unified tool — UI automation only
+        let unifiedHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { args in
+            guard case .object(let dict) = args,
+                  case .string(let command) = dict["command"] else {
+                return "Error: 'command' parameter required"
+            }
+            return await MainActor.run {
+                provider.dispatch(command: command, args: dict)
+            }
+        }
+        server.register(
+            name: "app_agent",
+            description: AppAgentToolProvider.skillPrompt,
+            inputSchema: [
+                "type": "object",
+                "properties": [
+                    "command": [
+                        "type": "string",
+                        "enum": ["snapshot", "tap", "tap_xy", "type", "screenshot",
+                                 "swipe", "long_press", "find", "scroll_to", "pick"],
+                        "description": "The sub-command to execute"
+                    ] as [String: Any],
+                    "ref": ["type": "string", "description": "Element ref from snapshot, e.g. 'r5'"],
+                    "x": ["type": "number", "description": "X coordinate for tap_xy"],
+                    "y": ["type": "number", "description": "Y coordinate for tap_xy"],
+                    "text": ["type": "string", "description": "Text to type/search/send"],
+                    "clear": ["type": "boolean", "description": "Clear before typing. Default true."],
+                    "direction": ["type": "string", "enum": ["up", "down", "left", "right"]],
+                    "duration": ["type": "number", "description": "Long-press seconds. Default 1.0."],
+                    "component": ["type": "integer", "description": "Picker column index. Default 0."]
+                ] as [String: Any],
+                "required": ["command"]
+            ] as [String: Any],
+            handler: unifiedHandler
+        )
+        bridgeHandlers["app_agent"] = unifiedHandler
+        bridgeToolList.append([
+            "name": "app_agent",
+            "description": "Unified iOS app control — UI automation + chat",
+            "inputSchema": ["type": "object"]
+        ])
+
+        try server.start()
+        self.server = server
         
         // Monitor isRunning state changes
         Task { @MainActor in
@@ -69,122 +99,6 @@ final class AppAgentSetup {
     
     var isRunning: Bool {
         server?.isRunning ?? false
-    }
-    
-    // MARK: - Chat Tools
-    
-    private func registerChatTools(server: MCPServer) {
-        let getMessagesHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] _ in
-            let messages = await MainActor.run { [weak self] () -> [String] in
-                guard let chatVM = self?.coordinator?.chatViewModel else { return [] }
-                return chatVM.messages.map { msg in
-                    let role: String = switch msg.role {
-                    case .user: "user"
-                    case .assistant: "assistant"
-                    case .system: "system"
-                    case .tool: "tool"
-                    }
-                    return "\(role): \(msg.fullText)"
-                }
-            }
-            if messages.isEmpty { return "No messages yet." }
-            return messages.joined(separator: "\n")
-        }
-        
-        server.register(
-            name: "get_messages",
-            description: "Get all chat messages.",
-            inputSchema: ["type": "object", "properties": [String: Any]()],
-            handler: getMessagesHandler
-        )
-        bridgeHandlers["get_messages"] = getMessagesHandler
-        bridgeToolList.append(["name": "get_messages", "description": "Get all chat messages", "inputSchema": ["type": "object"]])
-        
-        let getStatusHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] _ in
-            guard let self else { return "Error: setup deallocated" }
-            let status = await MainActor.run { [weak self] () -> String in
-                guard let self else { return "Error: setup deallocated" }
-                let chatState = self.coordinator?.chatViewModel?.chatState ?? .disconnected
-                let connected: Bool
-                switch chatState {
-                case .idle, .working, .waitingForUser, .waitingForQuestions:
-                    connected = true
-                case .connecting, .error, .disconnected:
-                    connected = false
-                }
-                let agentRunning = self.coordinator?.isAgentRunning ?? false
-                let msgCount = self.coordinator?.chatViewModel?.messages.count ?? 0
-                return """
-                connected: \(connected)
-                agentRunning: \(agentRunning)
-                chatState: \(String(describing: chatState))
-                messageCount: \(msgCount)
-                mcpServerRunning: \(self.isRunning)
-                bridgeState: \(self.bridgeState)
-                """
-            }
-            return status
-        }
-        
-        server.register(
-            name: "get_status",
-            description: "Get current app status.",
-            inputSchema: ["type": "object", "properties": [String: Any]()],
-            handler: getStatusHandler
-        )
-        bridgeHandlers["get_status"] = getStatusHandler
-        bridgeToolList.append(["name": "get_status", "description": "Get app status", "inputSchema": ["type": "object"]])
-        
-        // send_message: direct send through ChatViewModel using sendToRelay (awaits response)
-        let sendMessageHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] args in
-            guard let self else { return "Error: setup deallocated" }
-            let text: String
-            if case .object(let dict) = args, case .string(let t) = dict["text"] {
-                text = t
-            } else {
-                return "Error: missing 'text' parameter"
-            }
-            // First gather diagnostics on MainActor
-            let diag = await MainActor.run { [weak self] () -> String in
-                guard let chatVM = self?.coordinator?.chatViewModel else {
-                    return "DIAG: no chatViewModel"
-                }
-                let hasAgent = chatVM.hasAgentForDiag
-                let hasSession = chatVM.hasSessionForDiag
-                let chatState = String(describing: chatVM.chatState)
-                let msgCount = chatVM.messages.count
-                return "DIAG: agent=\(hasAgent) session=\(hasSession) chatState=\(chatState) msgs=\(msgCount)"
-            }
-            // Use sendToRelay which awaits the response (180s timeout)
-            let response = await MainActor.run { [weak self] () -> String? in
-                guard let chatVM = self?.coordinator?.chatViewModel else { return nil }
-                // sendToRelay is async, we need to bridge to a Task
-                return nil  // placeholder
-            }
-            // Actually call sendToRelay via a MainActor Task
-            let result: String = await withCheckedContinuation { continuation in
-                Task { @MainActor [weak self] in
-                    guard let chatVM = self?.coordinator?.chatViewModel else {
-                        continuation.resume(returning: "\(diag)\nError: no chatViewModel")
-                        return
-                    }
-                    let reply = await chatVM.sendToRelay(text)
-                    let afterState = String(describing: chatVM.chatState)
-                    let afterMsgs = chatVM.messages.count
-                    let assistantMsgs = chatVM.messages.filter { $0.role == .assistant }.count
-                    continuation.resume(returning: "\(diag)\nreply: \(reply)\nafterState: \(afterState) afterMsgs: \(afterMsgs) assistantMsgs: \(assistantMsgs)")
-                }
-            }
-            return result
-        }
-        server.register(
-            name: "send_message",
-            description: "Send a message directly through ChatViewModel and await response (180s timeout).",
-            inputSchema: ["type": "object", "properties": ["text": ["type": "string", "description": "Message to send"]], "required": ["text"]],
-            handler: sendMessageHandler
-        )
-        bridgeHandlers["send_message"] = sendMessageHandler
-        bridgeToolList.append(["name": "send_message", "description": "Send message directly", "inputSchema": ["type": "object", "properties": ["text": ["type": "string"]], "required": ["text"]]])
     }
     
     // MARK: - Reverse MCP Bridge
