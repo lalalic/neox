@@ -21,7 +21,11 @@ Both build on the existing one-way bridge (agent → WeChat) by adding the **inc
 
 ### Concept
 
-A Neox project is wired to a WeChat group chat. Participants discuss with the AI agent entirely in WeChat — no Neox app needed for them. The project owner manages setup and can override/steer from Neox.
+A Neox project is wired to a WeChat conversation — either a **group room** or a **1:1 chat**. Participants discuss with each other and the AI agent through WeChat. The agent acts as a project assistant: recording decisions, providing suggestions, and executing tasks.
+
+**Room mode:** Multiple people discuss. Role-based: decision-makers steer the agent, observers provide context.
+
+**1:1 mode:** Owner and one other person discuss a project. The agent silently records the conversation and offers suggestions — only speaking when asked or when it has useful input (e.g., spotting a conflict, reminding of a deadline, summarizing action items).
 
 ### Setup Flow
 
@@ -31,16 +35,23 @@ sequenceDiagram
     participant Neox as Neox App
     participant WC as WeChat Bridge
 
-    Owner->>Neox: Open project → "Wire to Room"
-    Neox->>WC: Fetch room list
-    WC-->>Neox: Available rooms
-    Owner->>Neox: Pick room
-    Neox->>Neox: Show member list
-    Owner->>Neox: Assign roles (decision-maker / observer)
+    Owner->>Neox: Open project → "Wire to WeChat"
+    Neox->>WC: Fetch contact list (rooms + people)
+    WC-->>Neox: Available contacts
+    Owner->>Neox: Pick room OR person
+    alt Room selected
+        Neox->>Neox: Show member list
+        Owner->>Neox: Assign roles (decision-maker / observer)
+    else Person selected
+        Neox->>Neox: Auto-set: person = decision-maker
+        Neox->>Neox: Agent mode = silent assistant
+    end
     Neox->>Neox: Save binding, start listening
 ```
 
 ### Message Flow
+
+#### Room Mode (multi-party discussion)
 
 ```mermaid
 flowchart TB
@@ -71,6 +82,42 @@ flowchart TB
     S --> O
 ```
 
+#### 1:1 Mode (silent assistant)
+
+```mermaid
+flowchart TB
+    subgraph WeChat
+        M[Person sends message to owner]
+        M2[Owner sends message to person]
+    end
+
+    subgraph Neox["Neox (on owner's phone)"]
+        B[Bridge captures both sides]
+        L[Log to project conversation history]
+        AG{Agent has<br/>useful input?}
+        S[Agent sends suggestion]
+        SIL[Stay silent, keep recording]
+        MEN{Owner @mentions<br/>agent or asks?}
+        R[Agent responds to question]
+    end
+
+    subgraph WeChat2[WeChat]
+        O[Send to chat]
+    end
+
+    M --> B --> L --> AG
+    M2 --> B
+    AG -->|Yes, proactive| S --> O
+    AG -->|No| MEN
+    MEN -->|Yes| R --> O
+    MEN -->|No| SIL
+```
+
+In 1:1 mode, the agent is a **silent assistant** by default:
+- Records the full conversation as project context
+- Only speaks when directly asked (e.g., "@AI what do you think?") or when it detects something worth flagging
+- Proactive triggers: conflicting decisions, missed action items, relevant info from project context
+
 ### Roles
 
 | Role | Can do | Example |
@@ -88,18 +135,30 @@ flowchart TB
 │ 💬 Wired: Marketing Room    │
 │ 👥 3 decision-makers        │
 └─────────────────────────────┘
+
+┌─────────────────────────────┐
+│ 📱 Sales Proposal           │
+│ 💬 Wired: John Zhang (1:1)  │
+│ 🤫 Silent assistant mode    │
+└─────────────────────────────┘
 ```
 
-**Room wiring sheet (in project settings):**
+**Wiring sheet (in project settings):**
 ```
-┌─ Wire to WeChat Room ──────────┐
-│ Room: [Marketing Room ▼]       │
+┌─ Wire to WeChat ───────────────┐
+│ Contact: [Marketing Room ▼]    │
+│    or    [John Zhang ▼]        │
 │                                │
+│ If room selected:              │
 │ Members:                       │
 │ 🟢 John Zhang    [Decision ▼] │
 │ 🔵 Alice Wang    [Decision ▼] │
 │ ⚫ Bob Li        [Observer ▼] │
-│ ⚫ Carol Chen    [Observer ▼] │
+│                                │
+│ If person selected:            │
+│ Mode: 🤫 Silent Assistant      │
+│ ☑ Proactive suggestions        │
+│ ☐ Only reply when asked        │
 │                                │
 │ [Start Listening]  [Cancel]    │
 └────────────────────────────────┘
@@ -279,7 +338,7 @@ A contact can be bound to at most one project. A project can have multiple bound
       "contactName": "Marketing Room",
       "isRoom": true,
       "projectId": "proj-uuid-1",
-      "role": "discussion-room",
+      "mode": "discussion-room",
       "members": {
         "john-id": { "name": "John Zhang", "role": "decision-maker" },
         "alice-id": { "name": "Alice Wang", "role": "decision-maker" },
@@ -287,15 +346,28 @@ A contact can be bound to at most one project. A project can have multiple bound
       }
     },
     {
-      "contactId": "@friend123",
+      "contactId": "@colleague456",
       "contactName": "John Zhang",
       "isRoom": false,
+      "projectId": "proj-uuid-1",
+      "mode": "silent-assistant",
+      "proactive": true
+    },
+    {
+      "contactId": "@friend123",
+      "contactName": "Alice Wang",
+      "isRoom": false,
       "projectId": "proj-uuid-2",
-      "role": "auto-reply"
+      "mode": "auto-reply"
     }
   ]
 }
 ```
+
+Three binding modes:
+- `discussion-room` — Scenario 1 room: multi-party with roles, agent is active participant
+- `silent-assistant` — Scenario 1 person: 1:1, agent records and suggests, speaks when asked
+- `auto-reply` — Scenario 2: agent replies as the account owner
 
 ### What Needs Building
 
