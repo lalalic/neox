@@ -23,9 +23,9 @@ Both build on the existing one-way bridge (agent → WeChat) by adding the **inc
 
 A Neox project is wired to a WeChat conversation — either a **group room** or a **1:1 chat**. Participants discuss with each other and the AI agent through WeChat. The agent acts as a project assistant: recording decisions, providing suggestions, and executing tasks.
 
-**Room mode:** Multiple people discuss. Role-based: decision-makers steer the agent, observers provide context.
+**Room mode:** Multiple people discuss. Role-based: decision-makers steer the agent, observers provide context. The agent is an **active participant** — executing tasks, providing information, recording decisions, and driving the project forward.
 
-**1:1 mode:** Owner and one other person discuss a project. The agent silently records the conversation and offers suggestions — only speaking when asked or when it has useful input (e.g., spotting a conflict, reminding of a deadline, summarizing action items).
+**1:1 mode:** Owner and one other person discuss a project. The agent is a **project assistant** — recording the conversation, tracking action items, executing tasks when asked, and proactively offering relevant info from the project context.
 
 ### Setup Flow
 
@@ -82,7 +82,7 @@ flowchart TB
     S --> O
 ```
 
-#### 1:1 Mode (silent assistant)
+#### 1:1 Mode (project assistant)
 
 ```mermaid
 flowchart TB
@@ -94,29 +94,24 @@ flowchart TB
     subgraph Neox["Neox (on owner's phone)"]
         B[Bridge captures both sides]
         L[Log to project conversation history]
-        AG{Agent has<br/>useful input?}
-        S[Agent sends suggestion]
-        SIL[Stay silent, keep recording]
-        MEN{Owner @mentions<br/>agent or asks?}
-        R[Agent responds to question]
+        A[Route to project agent session]
+        S[Agent processes:<br/>execute task / answer question /<br/>record decision / suggest next step]
     end
 
     subgraph WeChat2[WeChat]
-        O[Send to chat]
+        O[Send response to chat]
     end
 
-    M --> B --> L --> AG
+    M --> B --> L --> A --> S --> O
     M2 --> B
-    AG -->|Yes, proactive| S --> O
-    AG -->|No| MEN
-    MEN -->|Yes| R --> O
-    MEN -->|No| SIL
 ```
 
-In 1:1 mode, the agent is a **silent assistant** by default:
+In 1:1 mode, the agent is a **project assistant**:
 - Records the full conversation as project context
-- Only speaks when directly asked (e.g., "@AI what do you think?") or when it detects something worth flagging
-- Proactive triggers: conflicting decisions, missed action items, relevant info from project context
+- Executes tasks when asked ("@AI create a doc for this")
+- Answers questions from project knowledge ("what was our deadline?")
+- Records decisions and action items
+- Proactively suggests next steps or flags issues
 
 ### Agent Identity in WeChat
 
