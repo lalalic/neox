@@ -21,11 +21,9 @@ Both build on the existing one-way bridge (agent → WeChat) by adding the **inc
 
 ### Concept
 
-A Neox project is wired to a WeChat conversation — either a **group room** or a **1:1 chat**. Participants discuss with each other and the AI agent through WeChat. The agent acts as a project assistant: recording decisions, providing suggestions, and executing tasks.
+A Neox project is wired to a WeChat conversation — either a **group room** or a **1:1 chat**. The agent's role is always the same: **project assistant** — executing tasks, answering questions, recording decisions, tracking action items, and driving the project forward.
 
-**Room mode:** Multiple people discuss. Role-based: decision-makers steer the agent, observers provide context. The agent is an **active participant** — executing tasks, providing information, recording decisions, and driving the project forward.
-
-**1:1 mode:** Owner and one other person discuss a project. The agent is a **project assistant** — recording the conversation, tracking action items, executing tasks when asked, and proactively offering relevant info from the project context.
+The workflow is identical regardless of room or 1:1. The only difference is **who carries decision weight**. In a room, each member has a weight that determines how much authority their input carries (approve tool calls, steer direction, resolve `ask_questions`). In 1:1, the other person is the sole counterpart with full weight.
 
 ### Setup Flow
 
@@ -41,17 +39,16 @@ sequenceDiagram
     Owner->>Neox: Pick room OR person
     alt Room selected
         Neox->>Neox: Show member list
-        Owner->>Neox: Assign roles (decision-maker / observer)
+        Owner->>Neox: Assign decision weight per member
     else Person selected
-        Neox->>Neox: Auto-set: person = decision-maker
-        Neox->>Neox: Agent mode = silent assistant
+        Neox->>Neox: Auto-set: person weight = 100
     end
     Neox->>Neox: Save binding, start listening
 ```
 
 ### Message Flow
 
-#### Room Mode (multi-party discussion)
+#### Room Mode (multi-party)
 
 ```mermaid
 flowchart TB
@@ -61,21 +58,21 @@ flowchart TB
 
     subgraph Neox["Neox (on owner's phone)"]
         B[WeChat Bridge captures message]
-        R{Is sender a<br/>decision-maker?}
+        W{Sender weight<br/>≥ 50?}
         Q{Pending<br/>ask_questions?}
         A[Route to project agent session]
         T[Resolve pending tool call]
         C[Add as context only]
-        S[Agent generates response]
+        S[Agent processes:<br/>execute task / answer question /<br/>record decision / suggest next step]
     end
 
     subgraph WeChat2[WeChat]
         O[Send response to room]
     end
 
-    M --> B --> R
-    R -->|Yes| Q
-    R -->|No| C
+    M --> B --> W
+    W -->|Yes, authoritative| Q
+    W -->|No, contributor| C
     Q -->|Yes| T --> S
     Q -->|No| A --> S
     C --> A
@@ -126,13 +123,28 @@ This applies to all three modes (discussion-room, silent-assistant, auto-reply).
 
 ---
 
-### Roles
+### Decision Weight
 
-| Role | Can do | Example |
-|------|--------|---------|
-| **Decision-maker** | Answer `ask_questions`, approve tool calls, steer agent direction | Project lead, product manager |
-| **Observer** | Messages become context for the agent, but don't resolve tool calls | Team members, stakeholders |
-| **Owner** | Everything above + manage roles, override from Neox | The Neox user |
+Every participant in a wired conversation has a **weight** (0–100) that determines their authority level:
+
+| Weight | Meaning | Capabilities |
+|--------|---------|-------------|
+| **100** | Full authority | Approve/reject tool calls, answer `ask_questions`, override agent direction |
+| **50–99** | Strong voice | Input treated as guidance, can answer `ask_questions` when no higher-weight member responds |
+| **1–49** | Contributor | Messages become context for the agent, don't resolve tool calls |
+| **0** | Muted | Messages ignored entirely |
+
+**Owner** always has weight 100 (from Neox app, not through WeChat).
+
+In **1:1 mode**, the other person defaults to weight 100 — equal authority with owner.
+
+In **room mode**, the project owner assigns weights when wiring. Example:
+- Product manager: 100 (decision-maker)
+- Lead engineer: 80 (strong voice)
+- Designer: 50 (can answer when PM is absent)
+- Intern: 20 (context contributor)
+
+When multiple people with weight ≥ 50 respond to an `ask_questions`, the agent uses the **highest-weight response**. If weights are equal, first response wins.
 
 ### UI Elements
 
@@ -141,13 +153,13 @@ This applies to all three modes (discussion-room, silent-assistant, auto-reply).
 ┌─────────────────────────────┐
 │ 📱 My App Project           │
 │ 💬 Wired: Marketing Room    │
-│ 👥 3 decision-makers        │
+│ 👥 3 members (2 decision)   │
 └─────────────────────────────┘
 
 ┌─────────────────────────────┐
 │ 📱 Sales Proposal           │
 │ 💬 Wired: John Zhang (1:1)  │
-│ 🤫 Silent assistant mode    │
+│ 🤝 Project assistant mode   │
 └─────────────────────────────┘
 ```
 
@@ -158,15 +170,14 @@ This applies to all three modes (discussion-room, silent-assistant, auto-reply).
 │    or    [John Zhang ▼]        │
 │                                │
 │ If room selected:              │
-│ Members:                       │
-│ 🟢 John Zhang    [Decision ▼] │
-│ 🔵 Alice Wang    [Decision ▼] │
-│ ⚫ Bob Li        [Observer ▼] │
+│ Members:               Weight  │
+│ 🟢 John Zhang    [━━━━━━ 100] │
+│ 🔵 Alice Wang    [━━━━━░░ 80] │
+│ ⚫ Bob Li        [━░░░░░░ 20] │
 │                                │
 │ If person selected:            │
-│ Mode: 🤫 Silent Assistant      │
-│ ☑ Proactive suggestions        │
-│ ☐ Only reply when asked        │
+│ John Zhang — weight 100        │
+│ (equal authority with you)     │
 │                                │
 │ [Start Listening]  [Cancel]    │
 └────────────────────────────────┘
@@ -326,14 +337,14 @@ erDiagram
     CONTACT_BINDING {
         string contactId FK
         string projectId FK
-        string role
+        int weight
         boolean autoReply
     }
     WECHAT_CONTACT ||--o{ CONTACT_BINDING : "bound to"
     PROJECT ||--o{ CONTACT_BINDING : "receives from"
 ```
 
-A contact can be bound to at most one project. A project can have multiple bound contacts. The binding includes the role (for Scenario 1) and auto-reply flag (for Scenario 2).
+A contact can be bound to at most one project. A project can have multiple bound contacts. The binding includes the weight (for Scenario 1) and auto-reply flag (for Scenario 2).
 
 ### Data Model
 
@@ -348,9 +359,9 @@ A contact can be bound to at most one project. A project can have multiple bound
       "projectId": "proj-uuid-1",
       "mode": "discussion-room",
       "members": {
-        "john-id": { "name": "John Zhang", "role": "decision-maker" },
-        "alice-id": { "name": "Alice Wang", "role": "decision-maker" },
-        "bob-id":   { "name": "Bob Li",     "role": "observer" }
+        "john-id": { "name": "John Zhang", "weight": 100 },
+        "alice-id": { "name": "Alice Wang", "weight": 80 },
+        "bob-id":   { "name": "Bob Li",     "weight": 20 }
       }
     },
     {
@@ -358,8 +369,8 @@ A contact can be bound to at most one project. A project can have multiple bound
       "contactName": "John Zhang",
       "isRoom": false,
       "projectId": "proj-uuid-1",
-      "mode": "silent-assistant",
-      "proactive": true
+      "mode": "project-assistant",
+      "weight": 100
     },
     {
       "contactId": "@friend123",
@@ -373,8 +384,8 @@ A contact can be bound to at most one project. A project can have multiple bound
 ```
 
 Three binding modes:
-- `discussion-room` — Scenario 1 room: multi-party with roles, agent is active participant
-- `silent-assistant` — Scenario 1 person: 1:1, agent records and suggests, speaks when asked
+- `discussion-room` — Scenario 1 room: multi-party with per-member weights, agent is project assistant
+- `project-assistant` — Scenario 1 person: 1:1, agent is project assistant with full access
 - `auto-reply` — Scenario 2: agent replies as the account owner
 
 ### What Needs Building
@@ -383,11 +394,11 @@ Three binding modes:
 |-----------|-------------|---------|
 | **WeChatRouter** | Routes incoming messages to correct agent session | New Swift file |
 | **WeChatService** (update) | Manage bidirectional bridge, routing config | Existing service |
-| **RoomWiringView** | Room selector + member role assignment UI | New SwiftUI view |
+| **RoomWiringView** | Room selector + member weight assignment UI | New SwiftUI view |
 | **AssistantSetupView** | Persona, rules, contact selector for auto-reply | New SwiftUI view |
 | **Contact binding persistence** | Load/save wechat-routing.json | New model |
 | **Agent session integration** | Map incoming message → session.send with sender context | Update AgentCoordinator |
-| **Decision-maker resolution** | Only decision-makers can answer ask_questions | Update tool call handling |
+| **Decision weight resolution** | Higher-weight members resolve ask_questions first | Update tool call handling |
 | **Owner approval flow** | Push notification + approve/edit/reject for sensitive replies | Update push handling |
 
 ### What Already Exists (no changes needed)
