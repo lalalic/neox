@@ -2,7 +2,7 @@
 
 > **Date**: 2026-04-10  
 > **Status**: Draft  
-> **Goal**: Two scenarios — wire project discussions to WeChat rooms, and auto-reply as account owner
+> **Goal**: Two scenarios — project assistant via WeChat, and auto-reply as account owner
 
 ---
 
@@ -10,14 +10,14 @@
 
 Two new WeChat integration modes for Neox:
 
-1. **Project Discussion Room** — Link a project to a WeChat group. Room members interact with the AI agent directly through WeChat.
+1. **Project Assistant** — Wire a project to a WeChat conversation (room or 1:1). The agent is a project assistant for everyone in the chat.
 2. **WeChat Assistant** — A template project type where the agent auto-replies to personal and group messages on behalf of the account owner.
 
 Both build on the existing one-way bridge (agent → WeChat) by adding the **incoming direction** (WeChat → agent).
 
 ---
 
-## Scenario 1: Project Discussion Room
+## Scenario 1: Project Assistant
 
 ### Concept
 
@@ -48,16 +48,16 @@ sequenceDiagram
 
 ### Message Flow
 
-#### Room Mode (multi-party)
-
 ```mermaid
 flowchart TB
     subgraph WeChat
-        M[Room member sends message]
+        M[Someone sends message in chat]
+        M2[Owner sends message in chat]
     end
 
     subgraph Neox["Neox (on owner's phone)"]
         B[WeChat Bridge captures message]
+        L[Log to project conversation history]
         W{Sender weight<br/>≥ 50?}
         Q{Pending<br/>ask_questions?}
         A[Route to project agent session]
@@ -67,10 +67,11 @@ flowchart TB
     end
 
     subgraph WeChat2[WeChat]
-        O[Send response to room]
+        O[Send 🤖 response to chat]
     end
 
-    M --> B --> W
+    M --> B --> L --> W
+    M2 --> B
     W -->|Yes, authoritative| Q
     W -->|No, contributor| C
     Q -->|Yes| T --> S
@@ -79,36 +80,7 @@ flowchart TB
     S --> O
 ```
 
-#### 1:1 Mode (project assistant)
-
-```mermaid
-flowchart TB
-    subgraph WeChat
-        M[Person sends message to owner]
-        M2[Owner sends message to person]
-    end
-
-    subgraph Neox["Neox (on owner's phone)"]
-        B[Bridge captures both sides]
-        L[Log to project conversation history]
-        A[Route to project agent session]
-        S[Agent processes:<br/>execute task / answer question /<br/>record decision / suggest next step]
-    end
-
-    subgraph WeChat2[WeChat]
-        O[Send response to chat]
-    end
-
-    M --> B --> L --> A --> S --> O
-    M2 --> B
-```
-
-In 1:1 mode, the agent is a **project assistant**:
-- Records the full conversation as project context
-- Executes tasks when asked ("@AI create a doc for this")
-- Answers questions from project knowledge ("what was our deadline?")
-- Records decisions and action items
-- Proactively suggests next steps or flags issues
+Same flow for rooms and 1:1 — every message is logged to conversation history first, then weight determines authority. In 1:1, the other person has weight 100 by default so all their messages are authoritative.
 
 ### Agent Identity in WeChat
 
@@ -119,7 +91,7 @@ WeChat has no bot accounts — the agent sends messages using the **owner's iden
 - The existing `wechat-bro.js` AI watermark (invisible Unicode marker) is also applied for programmatic detection via `isFromAI()`
 - Owner's own manual messages have no prefix
 
-This applies to all three modes (discussion-room, silent-assistant, auto-reply).
+This applies to both scenarios (project assistant and auto-reply).
 
 ---
 
