@@ -301,6 +301,12 @@ final class WeChatService: ObservableObject {
         }
     }
 
+    /// Send a message to a specific contact (used by bidirectional routing).
+    func sendToContact(_ contactId: String, message: String, watermark: Bool = true) async {
+        guard config.enabled, isOnline else { return }
+        _ = await channel?.sendMessage(to: contactId, content: message, watermark: watermark)
+    }
+
     // MARK: - Contact → Project Lookup
 
     /// In-memory map: contactId → projectId. Built from all project bindings.

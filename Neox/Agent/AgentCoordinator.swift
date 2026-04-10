@@ -94,6 +94,8 @@ final class AgentCoordinator: ObservableObject {
     @Published private(set) var chatViewModel: ChatViewModel?
     /// Payment manager for IAP credit purchases
     @Published private(set) var paymentManager: PaymentManager?
+    /// Per-project sessions for WeChat bidirectional integration (projectId → ChatViewModel).
+    private(set) var projectSessions: [String: ChatViewModel] = [:]
 
     init() {
         let bootstrapper = WorkspaceBootstrapper()
@@ -537,6 +539,86 @@ final class AgentCoordinator: ObservableObject {
     func stopAgent() {
         chatViewModel?.disconnect()
         isAgentRunning = false
+    }
+
+    // MARK: - Per-Project Sessions (WeChat Bidirectional)
+
+    /// Create a dedicated agent session for a wired project.
+    /// The session is headless — no chat UI. Messages come from WeChat, responses go back to WeChat.
+    func createProjectSession(projectId: String, onResponse: @escaping @Sendable (String) async -> Void) -> ChatViewModel {
+        if let existing = projectSessions[projectId] { return existing }
+
+        let transport = WebSocketTransport(host: relayHost, port: relayPort)
+
+        // Load project context (README.md, context.md) for instructions
+        let projectDir = workspaceURL.appendingPathComponent(projectId, isDirectory: true)
+        var projectContext = "You are a project assistant for '\(projectId)'.\n"
+        let readmePath = projectDir.appendingPathComponent("README.md")
+        let contextPath = projectDir.appendingPathComponent("context.md")
+        if let readme = try? String(contentsOf: readmePath, encoding: .utf8), !readme.isEmpty {
+            projectContext += "\n## Project README\n\(readme)\n"
+        }
+        if let ctx = try? String(contentsOf: contextPath, encoding: .utf8), !ctx.isEmpty {
+            projectContext += "\n## Context\n\(ctx)\n"
+        }
+
+        let projectType = readProjectType(projectId: projectId)
+        if projectType == "wechat-assistant" {
+            projectContext += "\nYou are acting as the account owner. Reply naturally in first person. Do not reveal you are an AI.\n"
+        } else {
+            projectContext += "\nYou are a project assistant. Be helpful and concise.\n"
+        }
+        projectContext += "\nKeep responses under 3 sentences unless the question requires a detailed answer. Match the language of the sender."
+
+        let tools = buildTools()
+        let model = selectedModel
+
+        let vm = ChatViewModel(
+            transport: transport,
+            mode: .agent(AgentConfig(
+                model: model,
+                instructions: projectContext,
+                tools: tools,
+                appId: "neox-wc-\(projectId)",
+                deviceToken: UserDefaults.standard.string(forKey: "apnsDeviceToken"),
+                apnsEnv: {
+                    #if DEBUG
+                    return "sandbox"
+                    #else
+                    return "production"
+                    #endif
+                }(),
+                userId: neoxUserId,
+                onResponse: onResponse,
+                onAskUser: { _ in "" }
+            )),
+            workspaceURL: workspaceURL
+        )
+
+        projectSessions[projectId] = vm
+        Task { await vm.connect() }
+        print("[AgentCoordinator] Created project session for '\(projectId)' (type: \(projectType ?? "unknown"))")
+        return vm
+    }
+
+    /// Destroy a project session (e.g., when unwiring from WeChat).
+    func destroyProjectSession(projectId: String) {
+        guard let vm = projectSessions.removeValue(forKey: projectId) else { return }
+        vm.disconnect()
+        print("[AgentCoordinator] Destroyed project session for '\(projectId)'")
+    }
+
+    /// Read the projectType from a project's package.json.
+    func readProjectType(projectId: String) -> String? {
+        let packageURL = workspaceURL
+            .appendingPathComponent(projectId, isDirectory: true)
+            .appendingPathComponent("package.json")
+        guard let data = try? Data(contentsOf: packageURL),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = json["projectType"] as? String else {
+            return nil
+        }
+        return type
     }
 
     private func normalizeInputSettings() {

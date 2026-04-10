@@ -1,13 +1,16 @@
 import Foundation
 import WebKitAgent
+import CopilotChat
 
-/// Routes incoming WeChat messages to the correct project session.
+/// Routes incoming WeChat messages to the correct project session
+/// and sends agent responses back to WeChat.
 ///
 /// Responsibilities:
 /// - Look up contactId → projectId via WeChatService bindings
 /// - Filter: only text messages, only bound contacts
 /// - Log messages to conversation history
-/// - Forward to project session (Slice 3 adds this)
+/// - Forward to per-project agent session
+/// - Route agent responses back to WeChat with correct prefix
 @MainActor
 final class WeChatMessageRouter {
 
@@ -16,6 +19,10 @@ final class WeChatMessageRouter {
 
     /// Conversation history per project (in-memory, recent messages only).
     private(set) var conversationHistory: [String: [ChatLogEntry]] = [:]
+
+    /// Tracks which contact last triggered a message for each project.
+    /// Used to route agent responses back to the correct WeChat conversation.
+    private var lastActiveContact: [String: String] = [:]
 
     private static let maxHistoryPerProject = 100
 
@@ -26,7 +33,7 @@ final class WeChatMessageRouter {
 
     /// Handle an incoming WeChat message. Called from WeChatService.onMessage.
     func route(_ message: WeChatMessage) {
-        guard let weChatService else { return }
+        guard let weChatService, let coordinator else { return }
 
         // v1: text only
         guard message.isText else { return }
@@ -43,7 +50,6 @@ final class WeChatMessageRouter {
         let senderId: String
         if message.isRoom {
             senderId = message.roomSenderUserName ?? "unknown"
-            // Try to resolve sender name from contact list
             senderName = weChatService.contacts
                 .first(where: { $0.userName == senderId })?.name ?? senderId
         } else {
@@ -74,10 +80,49 @@ final class WeChatMessageRouter {
         )
         appendToHistory(entry, projectId: projectId)
 
+        // Track which contact triggered this for response routing
+        lastActiveContact[projectId] = contactId
+
         print("[WeChatRouter] \(senderName) (w:\(weight)) → project '\(projectId)': \(cleanText.prefix(80))")
 
-        // TODO (Slice 3): Forward to project session
-        // coordinator?.forwardToProjectSession(projectId: projectId, entry: entry)
+        // Get or create per-project session, then forward the message
+        let vm = coordinator.createProjectSession(projectId: projectId) { [weak self] response in
+            await self?.handleProjectResponse(projectId: projectId, response: response)
+        }
+
+        // Format message with sender attribution
+        let roomLabel = message.isRoom ? " in \(message.fromContact?.name ?? contactId)" : ""
+        let prompt = "[WeChat message from \(senderName) (weight: \(weight))\(roomLabel)]\n\(cleanText)"
+
+        Task {
+            await vm.send(prompt, startAgent: true)
+        }
+    }
+
+    /// Handle an agent response from a project session — send back to WeChat.
+    private func handleProjectResponse(projectId: String, response: String) async {
+        guard let weChatService, let coordinator else { return }
+
+        let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        // Determine prefix based on project type
+        let projectType = coordinator.readProjectType(projectId: projectId)
+        let formatted: String
+        if projectType == "wechat-assistant" {
+            formatted = trimmed  // No prefix — acting as account owner
+        } else {
+            formatted = "🤖 \(trimmed)"  // Bot prefix for project-assistant
+        }
+
+        // Send to the contact that last triggered a message for this project
+        guard let contactId = lastActiveContact[projectId] else {
+            print("[WeChatRouter] No active contact for project '\(projectId)' — dropping response")
+            return
+        }
+
+        print("[WeChatRouter] Response → \(contactId): \(formatted.prefix(80))")
+        await weChatService.sendToContact(contactId, message: formatted, watermark: true)
     }
 
     private func appendToHistory(_ entry: ChatLogEntry, projectId: String) {
