@@ -15,10 +15,19 @@ struct WeChatContactBindings: Codable, Equatable {
     var routingActive: Bool = true
 
     struct BoundContact: Codable, Identifiable, Equatable {
-        let id: String        // contactUserName
+        let id: String        // contactUserName (e.g. @@abc123 for rooms, @user456 for 1:1)
         let name: String      // display name
         let isRoom: Bool
+        var weight: Int?      // 1:1 sender weight (default 50), nil for rooms
+        var autoReply: Bool?  // Scenario 2: auto-reply as owner
+        var members: [String: WeChatMember]?  // Room member weights (rooms only)
     }
+}
+
+/// A room member with a decision weight.
+struct WeChatMember: Codable, Equatable {
+    let name: String
+    var weight: Int    // 0–100
 }
 
 // MARK: - WeChatService
@@ -103,6 +112,9 @@ final class WeChatService: ObservableObject {
         }
         self.mainBindings = loaded.removeValue(forKey: "__main__") ?? WeChatContactBindings()
         self.projectBindings = loaded
+
+        // Build contact→project lookup
+        rebuildContactLookup()
 
         // Auto-start if previously enabled
         if config.enabled {
@@ -255,6 +267,7 @@ final class WeChatService: ObservableObject {
         } else {
             mainBindings = bindings
         }
+        rebuildContactLookup()
     }
 
     func toggleRouting(for project: String?) {
@@ -276,6 +289,43 @@ final class WeChatService: ObservableObject {
         for contact in bindings.contacts {
             _ = await channel?.sendMessage(to: contact.id, content: message, watermark: watermark)
         }
+    }
+
+    // MARK: - Contact → Project Lookup
+
+    /// In-memory map: contactId → projectId. Built from all project bindings.
+    private(set) var contactLookup: [String: String] = [:]
+
+    /// Rebuild the contact→project lookup from all project bindings.
+    /// Called on startup and when bindings change.
+    func rebuildContactLookup() {
+        var lookup: [String: String] = [:]
+        for (projectId, bindings) in projectBindings {
+            guard bindings.routingActive else { continue }
+            for contact in bindings.contacts {
+                lookup[contact.id] = projectId
+            }
+        }
+        contactLookup = lookup
+    }
+
+    /// Look up which project a contact is bound to (if any).
+    func projectForContact(_ contactId: String) -> String? {
+        contactLookup[contactId]
+    }
+
+    /// Get the sender weight for a contact in a project's bindings.
+    func senderWeight(contactId: String, senderId: String?, project: String?) -> Int {
+        let bindings = getBindings(for: project)
+        guard let contact = bindings.contacts.first(where: { $0.id == contactId }) else {
+            return 0
+        }
+        // Room: look up member weight
+        if contact.isRoom, let senderId, let members = contact.members {
+            return members[senderId]?.weight ?? 0
+        }
+        // 1:1: use contact weight (default 50)
+        return contact.weight ?? 50
     }
 
     // MARK: - Persistence
