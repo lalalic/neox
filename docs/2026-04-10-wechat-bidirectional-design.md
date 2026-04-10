@@ -275,10 +275,15 @@ Friendly but not too casual. Use English with Chinese contacts
 unless they write in Chinese first.
 
 ## Behavior Rules
+- Routine questions (directions, availability, greetings) → auto-reply
+- Match the other person's language
+- Keep replies under 3 sentences unless explaining something technical
+
+### Guardrails
 - Never schedule meetings or commit to deadlines on my behalf
 - Escalate anything about money, legal, or contracts
 - If unsure about my position on something, ask me first
-- Routine questions (directions, availability, greetings) → auto-reply
+- Don't share internal project details with external contacts
 
 ## Contacts
 
@@ -300,7 +305,7 @@ The user edits this file directly in Neox's markdown editor — no special UI ne
 
 ### Guardrails
 
-Guardrails are defined in the markdown file (behavior rules section). The routing sub-agent reads the rules and decides:
+Guardrails live as a `### Guardrails` sub-section under `## Behavior Rules`. The routing sub-agent treats these as hard boundaries that trigger escalation:
 
 | Sub-agent decision | Action |
 |-------------------|--------|
