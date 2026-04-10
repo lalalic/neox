@@ -78,9 +78,12 @@ struct ProjectsView: View {
     let currentProject: String?
     let onSelect: (ProjectItem?) -> Void
     let onDelete: (ProjectItem) -> Void
+    var weChatService: WeChatService?
+    var onSessionReset: ((String) -> Void)?  // projectId → destroy session
 
     @Environment(\.dismiss) private var dismiss
     @State private var projects: [ProjectItem] = []
+    @State private var wiringProject: ProjectItem?
 
     var body: some View {
         NavigationStack {
@@ -110,17 +113,47 @@ struct ProjectsView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(projects) { project in
+                            let wiredContact = weChatService?.getBindings(for: project.id).contacts.first
                             Button {
                                 onSelect(project)
                                 dismiss()
                             } label: {
                                 ProjectRowView(
                                     project: project,
-                                    isSelected: currentProject == project.name
+                                    isSelected: currentProject == project.name,
+                                    isWired: wiredContact != nil,
+                                    wiredContactName: wiredContact?.name
                                 )
                             }
                             .tint(.primary)
+                            .contextMenu {
+                                if weChatService != nil {
+                                    Button {
+                                        wiringProject = project
+                                    } label: {
+                                        Label(
+                                            wiredContact != nil ? "WeChat Settings" : "Wire to WeChat",
+                                            systemImage: "bubble.left.and.bubble.right"
+                                        )
+                                    }
+                                }
+                                if project.repo != nil {
+                                    Button(role: .destructive) {
+                                        onDelete(project)
+                                    } label: {
+                                        Label("Archive", systemImage: "archivebox")
+                                    }
+                                }
+                            }
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                if weChatService != nil {
+                                    Button {
+                                        wiringProject = project
+                                    } label: {
+                                        Label("WeChat", systemImage: "bubble.left.and.bubble.right")
+                                    }
+                                    .tint(.green)
+                                }
                                 if project.repo != nil {
                                     Button(role: .destructive) {
                                         onDelete(project)
@@ -142,6 +175,15 @@ struct ProjectsView: View {
             }
             .onAppear {
                 projects = ProjectItem.scan(root: rootURL)
+            }
+            .sheet(item: $wiringProject) { project in
+                if let wcs = weChatService {
+                    WeChatWiringSheet(
+                        weChatService: wcs,
+                        projectId: project.id,
+                        onSessionReset: { onSessionReset?(project.id) }
+                    )
+                }
             }
         }
     }

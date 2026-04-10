@@ -1,5 +1,6 @@
 import Foundation
 import CopilotSDK
+import UserNotifications
 
 /// Thread-safe container for the current contact ID (updated by router on each message).
 final class ContactIdRef: @unchecked Sendable {
@@ -52,6 +53,7 @@ final class WeChatGuardrails: ObservableObject {
         )
         pendingApprovals.append(approval)
         NSLog("[Guardrails] Approval requested for project '%@': %@", projectId, reason)
+        postApprovalNotification(approval)
         return approval.id
     }
 
@@ -112,5 +114,27 @@ final class WeChatGuardrails: ObservableObject {
                 return "Approval requested (id: \(approvalId)). Owner will review. Draft is held — do NOT send a direct reply."
             }
         )
+    }
+
+    // MARK: - Local Notification
+
+    private func postApprovalNotification(_ approval: PendingApproval) {
+        let content = UNMutableNotificationContent()
+        content.title = "WeChat: Approval Needed"
+        content.body = approval.reason
+        content.sound = .default
+        content.categoryIdentifier = "WECHAT_APPROVAL"
+        content.userInfo = ["approvalId": approval.id, "projectId": approval.projectId]
+
+        let request = UNNotificationRequest(
+            identifier: "guardrail-\(approval.id)",
+            content: content,
+            trigger: nil  // deliver immediately
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                NSLog("[Guardrails] Failed to post notification: %@", error.localizedDescription)
+            }
+        }
     }
 }

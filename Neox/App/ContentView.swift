@@ -79,15 +79,6 @@ struct ContentView: View {
                                                 project: currentProject,
                                                 onLongPress: { showContactSelector = true }
                                             )
-                                            // Debug: show/hide the WKWebView for QR scanning
-                                            if coordinator.weChatService.channelState != .ready {
-                                                Button(action: {
-                                                    coordinator.weChatService.toggleWebViewVisibility()
-                                                }) {
-                                                    Image(systemName: coordinator.weChatService.isWebViewVisible ? "eye.fill" : "eye.slash")
-                                                        .foregroundStyle(.orange)
-                                                }
-                                            }
                                         }
                                         if webManager.currentURL != nil {
                                             Button(action: { showWebView.toggle() }) {
@@ -146,6 +137,10 @@ struct ContentView: View {
                             await coordinator.chatViewModel?.archiveRepo(repo)
                         }
                     }
+                },
+                weChatService: coordinator.weChatService,
+                onSessionReset: { projectId in
+                    coordinator.destroyProjectSession(projectId: projectId)
                 }
             )
         }
