@@ -114,52 +114,31 @@ struct ProjectsView: View {
                     } else {
                         ForEach(projects) { project in
                             let wiredContact = weChatService?.getBindings(for: project.id).contacts.first
-                            Button {
-                                onSelect(project)
-                                dismiss()
-                            } label: {
-                                ProjectRowView(
-                                    project: project,
-                                    isSelected: currentProject == project.name,
-                                    isWired: wiredContact != nil,
-                                    wiredContactName: wiredContact?.name
-                                )
-                            }
-                            .tint(.primary)
-                            .contextMenu {
+                            HStack(spacing: 0) {
+                                Button {
+                                    onSelect(project)
+                                    dismiss()
+                                } label: {
+                                    ProjectRowView(
+                                        project: project,
+                                        isSelected: currentProject == project.name,
+                                        isWired: wiredContact != nil,
+                                        wiredContactName: wiredContact?.name
+                                    )
+                                }
+                                .tint(.primary)
+
                                 if weChatService != nil {
                                     Button {
                                         wiringProject = project
                                     } label: {
-                                        Label(
-                                            wiredContact != nil ? "WeChat Settings" : "Wire to WeChat",
-                                            systemImage: "bubble.left.and.bubble.right"
-                                        )
+                                        Image(systemName: "bubble.left.and.bubble.right")
+                                            .font(.body)
+                                            .foregroundStyle(wiredContact != nil ? .green : .secondary)
+                                            .frame(width: 44, height: 44)
                                     }
-                                }
-                                if project.repo != nil {
-                                    Button(role: .destructive) {
-                                        onDelete(project)
-                                    } label: {
-                                        Label("Archive", systemImage: "archivebox")
-                                    }
-                                }
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                if weChatService != nil {
-                                    Button {
-                                        wiringProject = project
-                                    } label: {
-                                        Label("WeChat", systemImage: "bubble.left.and.bubble.right")
-                                    }
-                                    .tint(.green)
-                                }
-                                if project.repo != nil {
-                                    Button(role: .destructive) {
-                                        onDelete(project)
-                                    } label: {
-                                        Label("Archive", systemImage: "archivebox")
-                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel(wiredContact != nil ? "WeChat Settings" : "Wire to WeChat")
                                 }
                             }
                         }

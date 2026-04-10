@@ -69,11 +69,31 @@ struct WeChatWiringSheet: View {
 
                 // Project type picker
                 Section("Project Type") {
-                    Picker("Type", selection: $projectType) {
-                        Text("Project Assistant").tag("project-assistant")
-                        Text("WeChat Assistant").tag("wechat-assistant")
+                    HStack(spacing: 8) {
+                        Button {
+                            projectType = "project-assistant"
+                        } label: {
+                            Text("Project Assistant")
+                                .font(.subheadline)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(projectType == "project-assistant" ? Color.blue : Color(.systemGray5), in: RoundedRectangle(cornerRadius: 8))
+                                .foregroundStyle(projectType == "project-assistant" ? .white : .primary)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            projectType = "wechat-assistant"
+                        } label: {
+                            Text("WeChat Assistant")
+                                .font(.subheadline)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(projectType == "wechat-assistant" ? Color.blue : Color(.systemGray5), in: RoundedRectangle(cornerRadius: 8))
+                                .foregroundStyle(projectType == "wechat-assistant" ? .white : .primary)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .pickerStyle(.segmented)
 
                     if projectType == "project-assistant" {
                         Text("Agent responds with 🤖 prefix. Acts as project helper.")
@@ -177,7 +197,7 @@ struct WeChatWiringSheet: View {
                 }
             }
             .searchable(text: $searchText, prompt: "Search contacts")
-            .navigationTitle("Wire to WeChat")
+            .navigationTitle(currentWired != nil ? "WeChat Settings" : "Wire to WeChat")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -188,14 +208,43 @@ struct WeChatWiringSheet: View {
                         wire()
                         dismiss()
                     }
-                    .disabled(selectedContact == nil)
+                    .disabled(selectedContact == nil && currentWired == nil)
                     .bold()
                 }
+            }
+            .onAppear {
+                loadExistingSettings()
             }
         }
     }
 
     // MARK: - Actions
+
+    private func loadExistingSettings() {
+        // Load saved project type from package.json
+        let packageURL = weChatService.workspaceURL
+            .appendingPathComponent(projectId, isDirectory: true)
+            .appendingPathComponent("package.json")
+        if let data = try? Data(contentsOf: packageURL),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let type = json["projectType"] as? String {
+            projectType = type
+        }
+
+        // Pre-populate from existing binding
+        if let current = currentWired {
+            // Find matching contact to pre-select
+            selectedContact = weChatService.contacts.first { $0.id == current.id }
+            ?? WeChatContact(id: current.id, name: current.name, userName: current.id, isRoom: current.isRoom)
+
+            // Load existing member weights
+            if let members = current.members {
+                for (id, member) in members {
+                    memberWeights[id] = member.weight
+                }
+            }
+        }
+    }
 
     private func selectContact(_ contact: WeChatContact) {
         if selectedContact?.id == contact.id {

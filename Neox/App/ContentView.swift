@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var creditToastText = ""
     @State private var showContactSelector = false
     @State private var showQRLogin = false
+    @State private var qrLoginDismissed = false  // Prevent re-show after user dismissal
     
     var body: some View {
         ZStack {
@@ -179,14 +180,19 @@ struct ContentView: View {
                 project: currentProject
             )
         }
-        .sheet(isPresented: $showQRLogin) {
+        .sheet(isPresented: $showQRLogin, onDismiss: {
+            qrLoginDismissed = true
+        }) {
             WeChatQRLoginView(weChatService: coordinator.weChatService)
         }
         .onReceive(coordinator.weChatService.$channelState) { newState in
-            if newState == .qrReady && !showQRLogin {
+            if newState == .qrReady && !showQRLogin && !qrLoginDismissed {
                 showQRLogin = true
             } else if newState == .ready || newState == .dead || newState == .disconnected {
                 showQRLogin = false
+                qrLoginDismissed = false  // Reset on channel restart
+            } else if newState == .loading {
+                qrLoginDismissed = false  // Reset when loading new QR
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .stripeCheckoutRequested)) { note in
