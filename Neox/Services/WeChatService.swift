@@ -140,6 +140,8 @@ final class WeChatService: ObservableObject {
             WKWebsiteDataTypeCookies,
             WKWebsiteDataTypeLocalStorage,
             WKWebsiteDataTypeSessionStorage,
+            WKWebsiteDataTypeDiskCache,
+            WKWebsiteDataTypeMemoryCache,
         ]
         dataStore.fetchDataRecords(ofTypes: types) { [weak self] records in
             let wechatRecords = records.filter { record in
@@ -218,6 +220,24 @@ final class WeChatService: ObservableObject {
         channelState = .disconnected
         hiddenWindow?.isHidden = true
         hiddenWindow = nil
+    }
+
+    // MARK: - Debug
+
+    /// Make the hidden WKWebView visible for debugging (e.g. to see the actual QR code on wx.qq.com).
+    @Published var isWebViewVisible: Bool = false
+
+    func toggleWebViewVisibility() {
+        isWebViewVisible.toggle()
+        if isWebViewVisible {
+            hiddenWindow?.alpha = 1.0
+            hiddenWindow?.windowLevel = .alert + 1
+            hiddenWindow?.isUserInteractionEnabled = true
+        } else {
+            hiddenWindow?.alpha = 0.01
+            hiddenWindow?.windowLevel = .init(rawValue: -1000)
+            hiddenWindow?.isUserInteractionEnabled = false
+        }
     }
 
     // MARK: - Routing
