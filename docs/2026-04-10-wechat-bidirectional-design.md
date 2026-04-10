@@ -216,12 +216,11 @@ sequenceDiagram
     participant WC as WeChat Bridge
 
     Owner->>Neox: Create project → "WeChat Assistant" template
-    Neox->>Neox: Prompt for persona/rules
-    Owner->>Neox: Configure persona + behavior rules
+    Neox->>Neox: Generate default context.md with template
+    Owner->>Neox: Edit context.md in markdown editor<br/>(persona, rules, per-contact instructions)
     Neox->>WC: Fetch contact list
     WC-->>Neox: Contacts + rooms
     Owner->>Neox: Select contacts to auto-reply
-    Owner->>Neox: Set per-contact rules (optional)
     Neox->>Neox: Start listening
 ```
 
@@ -259,50 +258,55 @@ flowchart TB
     AP -->|Reject| I
 ```
 
-### Agent Context
+### Agent Context (Markdown File)
 
-The WeChat Assistant agent session receives:
+Instead of a structured settings UI, the agent context is a **markdown file** that the user edits with Neox's existing markdown editor. This is the system prompt / instruction set for the assistant agent.
 
-- **Owner persona**: Role description, communication style, background
-- **Contact context**: Relationship to contact, conversation history
-- **Behavior rules**: What to commit to, what to escalate, tone preferences
-- **Owner's role in rooms**: Whether owner is an admin, member, what topics owner leads
+The file lives in the project workspace and is passed to the agent session as context. Sections are conventions, not enforced schema — the user can structure it however they want.
 
-### Configuration UI
+**Default template** (created when user picks "WeChat Assistant" project):
 
+```markdown
+# WeChat Assistant
+
+## My Persona
+Tech lead at ABC Corp. Keep replies brief and professional.
+Friendly but not too casual. Use English with Chinese contacts 
+unless they write in Chinese first.
+
+## Behavior Rules
+- Never schedule meetings or commit to deadlines on my behalf
+- Escalate anything about money, legal, or contracts
+- If unsure about my position on something, ask me first
+- Routine questions (directions, availability, greetings) → auto-reply
+
+## Contacts
+
+### John Zhang
+- Relationship: colleague, same team
+- Tone: casual, direct
+- He often asks about project status — answer from project context
+
+### Marketing Room
+- I'm the tech representative in this group
+- Only reply when someone asks a tech question
+- Don't volunteer information unless asked
+
+### Default
+- For anyone not listed: polite, brief, escalate if unsure
 ```
-┌─ WeChat Assistant Setup ───────┐
-│                                │
-│ Your Persona:                  │
-│ ┌──────────────────────────┐   │
-│ │ Tech lead at ABC Corp.   │   │
-│ │ Keep replies brief and   │   │
-│ │ professional.            │   │
-│ └──────────────────────────┘   │
-│                                │
-│ Behavior Rules:                │
-│ ☑ Never schedule meetings      │
-│ ☑ Don't commit to deadlines    │
-│ ☑ Escalate money topics        │
-│ ☐ Custom: ________________     │
-│                                │
-│ Auto-Reply Contacts:           │
-│ [✓] John Zhang                 │
-│ [✓] Marketing Room  (20 members) │
-│ [ ] Alice Wang                 │
-│                                │
-│ [Start Auto-Reply]             │
-└────────────────────────────────┘
-```
+
+The user edits this file directly in Neox's markdown editor — no special UI needed.
 
 ### Guardrails
 
-| Trigger | Action |
-|---------|--------|
-| Agent wants to make a promise or commitment | Push notification → owner approves/edits |
-| Agent unsure about owner's position | Push notification → owner provides input |
-| Contact asks about money, legal, scheduling | Escalate to owner |
-| Routine question matching owner's persona | Auto-reply directly |
+Guardrails are defined in the markdown file (behavior rules section). The routing sub-agent reads the rules and decides:
+
+| Sub-agent decision | Action |
+|-------------------|--------|
+| Safe to auto-reply (matches persona + rules) | Send reply as owner |
+| Needs owner review (escalation rule triggered) | Push notification → owner approves/edits/rejects |
+| Contact not in list and no default rule | Ignore |
 
 ---
 
@@ -411,7 +415,7 @@ Three binding modes:
 | **WeChatRouter** | Routes incoming messages to correct agent session | New Swift file |
 | **WeChatService** (update) | Manage bidirectional bridge, routing config | Existing service |
 | **RoomWiringView** | Room selector + member weight assignment UI | New SwiftUI view |
-| **AssistantSetupView** | Persona, rules, contact selector for auto-reply | New SwiftUI view |
+| **AssistantSetupView** | Contact selector + link to edit context.md | New SwiftUI view (lightweight) |
 | **Contact binding persistence** | Load/save wechat-routing.json | New model |
 | **Agent session integration** | Map incoming message → session.send with sender context | Update AgentCoordinator |
 | **Routing sub-agent** | Lightweight LLM call to classify incoming messages | New component |
