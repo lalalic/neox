@@ -23,7 +23,7 @@ Both build on the existing one-way bridge (agent → WeChat) by adding the **inc
 
 A Neox project is wired to a WeChat conversation — either a **group room** or a **1:1 chat**. The agent's role is always the same: **project assistant** — executing tasks, answering questions, recording decisions, tracking action items, and driving the project forward.
 
-The workflow is identical regardless of room or 1:1. The only difference is **who carries decision weight**. In a room, each member has a weight that determines how much authority their input carries (approve tool calls, steer direction, resolve `ask_questions`). In 1:1, the other person is the sole counterpart with full weight.
+The workflow is identical regardless of room or 1:1. The only difference is **who carries decision weight**. In a room, each member has a weight that determines how much authority their input carries (approve tool calls, steer direction, resolve `ask_questions`). In 1:1, the other person defaults to weight 50 — a strong voice but not full authority (owner retains final say from Neox).
 
 ### Setup Flow
 
@@ -41,7 +41,7 @@ sequenceDiagram
         Neox->>Neox: Show member list
         Owner->>Neox: Assign decision weight per member
     else Person selected
-        Neox->>Neox: Auto-set: person weight = 100
+        Neox->>Neox: Auto-set: person weight = 50
     end
     Neox->>Neox: Save binding, start listening
 ```
@@ -80,7 +80,7 @@ flowchart TB
     S --> O
 ```
 
-Same flow for rooms and 1:1 — every message is logged to conversation history first, then weight determines authority. In 1:1, the other person has weight 100 by default so all their messages are authoritative.
+Same flow for rooms and 1:1 — every message is logged to conversation history first, then weight determines authority. In 1:1, the other person has weight 50 by default (strong voice, can answer `ask_questions`).
 
 ### Agent Identity in WeChat
 
@@ -108,7 +108,7 @@ Every participant in a wired conversation has a **weight** (0–100) that determ
 
 **Owner** always has weight 100 (from Neox app, not through WeChat).
 
-In **1:1 mode**, the other person defaults to weight 100 — equal authority with owner.
+In **1:1 mode**, the other person defaults to weight 50 — strong voice, can answer `ask_questions` but owner has final authority.
 
 In **room mode**, the project owner assigns weights when wiring. Example:
 - Product manager: 100 (decision-maker)
@@ -148,8 +148,8 @@ When multiple people with weight ≥ 50 respond to an `ask_questions`, the agent
 │ ⚫ Bob Li        [━░░░░░░ 20] │
 │                                │
 │ If person selected:            │
-│ John Zhang — weight 100        │
-│ (equal authority with you)     │
+│ John Zhang — weight 50         │
+│ (strong voice, you keep final say)│
 │                                │
 │ [Start Listening]  [Cancel]    │
 └────────────────────────────────┘
@@ -342,7 +342,7 @@ A contact can be bound to at most one project. A project can have multiple bound
       "isRoom": false,
       "projectId": "proj-uuid-1",
       "mode": "project-assistant",
-      "weight": 100
+      "weight": 50
     },
     {
       "contactId": "@friend123",
