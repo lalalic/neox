@@ -14,6 +14,7 @@ struct WeChatStatusIndicator: View {
     @ObservedObject var weChatService: WeChatService
     let project: String?
     let onLongPress: () -> Void
+    var onQRTap: (() -> Void)?
 
     var body: some View {
         Button(action: {
@@ -23,8 +24,10 @@ struct WeChatStatusIndicator: View {
                 weChatService.restart()
             case .ready:
                 weChatService.toggleRouting(for: project)
+            case .qrReady:
+                onQRTap?()
             default:
-                break  // loading / extracting / qrReady / loggingIn — do nothing
+                break  // loading / extracting / loggingIn — do nothing
             }
         }) {
             ZStack {

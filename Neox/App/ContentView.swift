@@ -78,7 +78,11 @@ struct ContentView: View {
                                             WeChatStatusIndicator(
                                                 weChatService: coordinator.weChatService,
                                                 project: currentProject,
-                                                onLongPress: { showContactSelector = true }
+                                                onLongPress: { showContactSelector = true },
+                                                onQRTap: {
+                                                    qrLoginDismissed = false
+                                                    showQRLogin = true
+                                                }
                                             )
                                         }
                                         if webManager.currentURL != nil {
