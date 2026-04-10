@@ -22,7 +22,7 @@ struct WeChatQRLoginView: View {
                     .font(.title2.weight(.semibold))
 
                 if let qrURL = weChatService.qrCodeURL {
-                    if let image = WeChatChannel.generateQRCode(from: qrURL, size: 240) {
+                    if let image = WeChatBridge.generateQRCode(from: qrURL, size: 240) {
                         Image(uiImage: image)
                             .interpolation(.none)
                             .resizable()

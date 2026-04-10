@@ -156,7 +156,7 @@ final class AppAgentSetup {
         // WeChat webkit send (untracked — simulates incoming message for E2E test)
         let wechatWebkitHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] args in
             // Extract parameters and resolve contact on MainActor
-            let (targetId, contactName, channel): (String, String, WeChatChannel) = try await MainActor.run {
+            let (targetId, contactName, channel): (String, String, WeChatBridge) = try await MainActor.run {
                 guard let self, let coordinator = self.coordinator else { throw NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "not ready"]) }
                 let service = coordinator.weChatService
                 guard service.isOnline else { throw NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "WeChat not online"]) }

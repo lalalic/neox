@@ -19,12 +19,12 @@ struct WeChatChannelStatusView: View {
 
         // QR code for login
         if let qrURL = weChatService.qrCodeURL,
-           weChatService.channelState == .qrReady || weChatService.channelState == .extractingQR {
+           weChatService.channelState == .qrReady {
             VStack(spacing: 8) {
                 Text("Scan with WeChat to log in")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if let image = WeChatChannel.generateQRCode(from: qrURL, size: 200) {
+                if let image = WeChatBridge.generateQRCode(from: qrURL, size: 200) {
                     Image(uiImage: image)
                         .interpolation(.none)
                         .resizable()
@@ -77,7 +77,6 @@ struct WeChatChannelStatusView: View {
         switch weChatService.channelState {
         case .disconnected: return "Disconnected"
         case .loading: return "Loading…"
-        case .extractingQR: return "Extracting QR…"
         case .qrReady: return "Scan QR Code"
         case .loggingIn: return "Logging In…"
         case .ready: return "Online"
@@ -89,7 +88,7 @@ struct WeChatChannelStatusView: View {
         switch weChatService.channelState {
         case .ready: return .green
         case .dead: return .red
-        case .loading, .extractingQR, .qrReady, .loggingIn: return .orange
+        case .loading, .qrReady, .loggingIn: return .orange
         case .disconnected: return .secondary
         }
     }

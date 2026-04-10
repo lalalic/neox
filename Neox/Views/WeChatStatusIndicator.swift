@@ -61,7 +61,7 @@ struct WeChatStatusIndicator: View {
         switch weChatService.channelState {
         case .ready:
             return .green
-        case .loading, .extractingQR, .qrReady, .loggingIn:
+        case .loading, .qrReady, .loggingIn:
             return .gray  // still loading
         case .dead:
             return .orange  // kicked off — tap to re-login

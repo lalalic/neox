@@ -34,7 +34,7 @@ struct WeChatMember: Codable, Equatable {
 
 /// Manages the WeChat channel lifecycle, contact bindings, and message forwarding.
 ///
-/// Owns a `WeChatChannel` with its own private WKWebView — independent of the globe browser.
+/// Owns a `WeChatBridge` with its own private WKWebView — independent of the globe browser.
 @MainActor
 final class WeChatService: ObservableObject {
 
@@ -46,7 +46,7 @@ final class WeChatService: ObservableObject {
         didSet { saveConfig() }
     }
 
-    @Published private(set) var channel: WeChatChannel?
+    @Published private(set) var channel: WeChatBridge?
 
     /// Bindings for "main chat" (no project selected / all-projects).
     @Published var mainBindings: WeChatContactBindings {
@@ -139,7 +139,7 @@ final class WeChatService: ObservableObject {
 
     private func startChannel() {
         guard channel == nil else { return }
-        let ch = WeChatChannel()
+        let ch = WeChatBridge()
         ch.onStateChange = { [weak self] newState in
             Task { @MainActor in
                 self?.channelState = newState
