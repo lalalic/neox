@@ -90,6 +90,51 @@ The sub-agent outputs one of three actions:
 2. **New agent input** — message is a new instruction or request for the project agent
 3. **Context only** — store in history, no immediate action needed
 
+### Answer Construction for `ask_questions`
+
+When the agent has a pending `ask_questions`, multiple contacts may respond over time. A second sub-agent handles **answer construction** — two decisions:
+
+1. **Is the answer ready?** — Do we have enough input to construct a final answer, or should we wait for more responses?
+2. **What's the final answer?** — Synthesize responses from multiple contacts (with different weights) into one coherent answer.
+
+```mermaid
+flowchart TB
+    subgraph Pending["Pending ask_questions"]
+        Q["Agent asked:<br/>'Should we use React or Vue?'"]
+    end
+
+    subgraph Responses["Incoming responses over time"]
+        R1["PM (weight 100): 'React, we need SSR'"]
+        R2["Designer (weight 50): 'Vue is easier for prototyping'"]
+        R3["Intern (weight 20): 'I know React'"]
+    end
+
+    subgraph AnswerAgent["Answer Construction Sub-agent"]
+        READY{Is the answer<br/>ready to construct?}
+        WAIT[Wait for more input]
+        BUILD[Construct final answer<br/>considering weights +<br/>content + question context]
+        FINAL["Final answer:<br/>'React — PM decided SSR is priority.<br/>Designer prefers Vue but defers.<br/>Team has React experience.'"]
+    end
+
+    R1 --> READY
+    R2 --> READY
+    R3 --> READY
+    READY -->|"Not yet, key people haven't responded"| WAIT
+    READY -->|"Yes, sufficient input"| BUILD --> FINAL
+```
+
+**When is the answer "ready"?**
+- A weight-100 member gives a clear, direct answer → likely ready immediately
+- Multiple lower-weight members respond but no high-weight member yet → wait (with timeout)
+- The question is simple (yes/no) and anyone responded → likely ready
+- Timeout (configurable, e.g. 5 min) → construct best answer from available responses
+
+**How is the answer constructed?**
+- The sub-agent synthesizes all responses into a single answer for the `ask_questions` tool call
+- Higher-weight responses carry more influence but all input is included as context
+- Conflicting opinions are noted: "PM says X, Designer suggests Y — going with X per PM authority"
+- The constructed answer is what the project agent sees — it doesn't see individual WeChat messages directly
+
 ### Session Lifecycle for Wired Projects
 
 **Question: does the agent session stay alive on the relay backend to listen for WeChat messages?**
