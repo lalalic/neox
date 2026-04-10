@@ -52,8 +52,9 @@ flowchart TB
 
 **WeChat (primary input/output):**
 - Users send text messages in rooms or 1:1 chats
-- Agent responds with 🤖 prefixed messages via owner's account
-- No special WeChat UI — just regular messages
+- Scenario 1: Agent responds with 🤖 prefix (distinguishes from owner)
+- Scenario 2: Agent responds with no prefix (seamless as owner)
+- Invisible AI watermark applied in both scenarios
 
 **Neox App (monitoring + config):**
 - Status view: session state, message count, last activity per wired project
@@ -151,7 +152,8 @@ flowchart TB
 
 - [ ] Incoming WeChat message in a wired room → routed to correct project session
 - [ ] Incoming WeChat message from 1:1 contact → routed to correct project session
-- [ ] Agent response → sent to WeChat with 🤖 prefix
+- [ ] Scenario 1 agent response → sent to WeChat with 🤖 prefix
+- [ ] Scenario 2 agent response → sent to WeChat with no prefix (as owner)
 - [ ] Pending `ask_questions` + WeChat response → tool call resolved
 - [ ] Multiple responses to `ask_questions` → answer constructor synthesizes
 - [ ] Answer constructor timeout → best answer from available responses

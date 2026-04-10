@@ -19,8 +19,8 @@ Output: { success: boolean, error?: string }
 ```
 
 Messages sent through this skill are automatically:
-- Prefixed with 🤖 (configurable bot emoji)
 - Watermarked with invisible AI Unicode marker (for `isFromAI()` detection)
+- Optionally prefixed with 🤖 (Scenario 1 only — Scenario 2 sends without prefix)
 
 ### Get Contacts
 Fetch the list of available WeChat contacts (rooms + people).

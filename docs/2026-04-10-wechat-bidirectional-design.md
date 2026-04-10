@@ -183,14 +183,15 @@ The owner interacts with the project through WeChat like everyone else (with wei
 
 ### Agent Identity in WeChat
 
-WeChat has no bot accounts — the agent sends messages using the **owner's identity**. To distinguish agent messages from the owner's own messages:
+WeChat has no bot accounts — the agent sends messages using the **owner's identity**.
 
-- **Prefix all agent messages** with a bot emoji: `🤖 ` (configurable)
+**Scenario 1 (Project Assistant):** Prefix agent messages with `🤖 ` to distinguish from owner's own messages.
 - Example: `🤖 Based on the discussion, here are the action items...`
-- The existing `wechat-bro.js` AI watermark (invisible Unicode marker) is also applied for programmatic detection via `isFromAI()`
 - Owner's own manual messages have no prefix
 
-This applies to both scenarios (project assistant and auto-reply).
+**Scenario 2 (WeChat Assistant):** No prefix — the agent IS the owner. The whole point is seamless auto-reply as if the owner typed it themselves.
+
+Both scenarios apply the invisible `wechat-bro.js` AI watermark (Unicode marker) for programmatic detection via `isFromAI()` — but this is invisible to humans.
 
 ---
 

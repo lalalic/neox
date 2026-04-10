@@ -60,9 +60,11 @@ Log to conversation history. No relay call.
 ## Response Handling
 
 When the project agent responds:
-1. Prefix with 🤖
-2. Send to the correct WeChat contact via `wechat_send_message`
-3. Log the response in conversation history
+1. **Scenario 1 (Project Assistant):** Prefix with 🤖 — the agent is a visible participant
+2. **Scenario 2 (WeChat Assistant):** No prefix — the agent IS the owner, replies should be seamless
+3. Always apply invisible AI watermark (for programmatic `isFromAI()` detection)
+4. Send to the correct WeChat contact via `wechat_send_message`
+5. Log the response in conversation history
 
 ## Status Reporting
 
@@ -76,5 +78,6 @@ Use `report_progress` to update Neox UI:
 - Never respond to WeChat messages yourself — always route to the project agent
 - Always log every message to conversation history (even context_only)
 - Respect weight=0 (muted) — ignore entirely, don't even log
-- Prefix all outgoing agent messages with 🤖
+- Scenario 1: Prefix all outgoing agent messages with 🤖
+- Scenario 2: No prefix — agent replies as the owner seamlessly
 - When the project session doesn't exist yet, create it before sending
