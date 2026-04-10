@@ -456,7 +456,12 @@ The context.md file lives alongside package.json in the project workspace. Proje
 
 Each wired project gets its own **dedicated agent session** on the relay. This is separate from the main workspace session — one session per project, so WeChat conversations from different projects don't mix contexts.
 
-Session ID pattern: `appId-userId-projectId`
+The **client app constructs the session key** — the relay is key-agnostic, it just manages sessions by whatever ID the client provides. This gives the app freedom to decide session topology (shared, per-project, temporary, etc.)
+
+Client-side session key convention:
+- Main session: `appId-userId` 
+- Wired project: `appId-userId-projectId`
+- Temporary session: `appId-userId-tmp-{uuid}`
 
 ```mermaid
 flowchart TB
