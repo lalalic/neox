@@ -71,6 +71,8 @@ final class AgentCoordinator: ObservableObject {
     
     /// WeChat service for forwarding messages.
     let weChatService: WeChatService
+    /// Routes incoming WeChat messages to project sessions.
+    private(set) var messageRouter: WeChatMessageRouter?
     private let profileLoader: AgentProfileLoader
     private let workspaceURL: URL
     private let fileToolProvider: FileToolProvider
@@ -141,6 +143,13 @@ final class AgentCoordinator: ObservableObject {
         self.ffmpegToolProvider = FFmpegToolProvider(baseDirectory: resolvedWorkspace)
         #endif
         self.agentProfile = try? loader.load(from: resolvedWorkspace)
+
+        // Wire WeChat message router for bidirectional integration
+        let router = WeChatMessageRouter(weChatService: weChatService, coordinator: self)
+        self.messageRouter = router
+        weChatService.onIncomingMessage = { [weak router] message in
+            router?.route(message)
+        }
     }
     
     /// Save relay settings to UserDefaults.

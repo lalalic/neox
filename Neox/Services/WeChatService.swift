@@ -80,6 +80,9 @@ final class WeChatService: ObservableObject {
     /// Hidden window to host the WKWebView (required on-device).
     private var hiddenWindow: UIWindow?
 
+    /// Callback for incoming messages. Set by AgentCoordinator to wire the router.
+    var onIncomingMessage: ((WeChatMessage) -> Void)?
+
     private static let configKey = "wechat_service_config"
     private static let bindingsFileName = "wechat-bindings.json"
     private static let sessionDiedKey = "wechat_session_died"
@@ -187,6 +190,13 @@ final class WeChatService: ObservableObject {
             }
         }
         self.channel = ch
+
+        // Wire incoming message handler for bidirectional routing
+        ch.onMessage = { [weak self] message in
+            Task { @MainActor in
+                self?.onIncomingMessage?(message)
+            }
+        }
 
         // WKWebView must be in a UIWindow hierarchy to load content on-device.
         // On iOS 13+, windows must be associated with a UIWindowScene.
