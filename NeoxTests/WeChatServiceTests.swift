@@ -183,4 +183,63 @@ struct WeChatServiceTests {
         svc.enable()
         #expect(svc.channel === ch1) // Same instance
     }
+
+    // MARK: - Contact Lookup
+
+    @Test("rebuildContactLookup maps contacts to projects")
+    func contactLookupMapsProjects() {
+        let svc = makeService()
+        var b = WeChatContactBindings()
+        b.contacts = [.init(id: "room1", name: "Dev Room", isRoom: true)]
+        svc.setBindings(b, for: "proj-a")
+
+        #expect(svc.projectForContact("room1") == "proj-a")
+        #expect(svc.projectForContact("unknown") == nil)
+    }
+
+    @Test("Inactive routing excludes contacts from lookup")
+    func inactiveRoutingExcludesContacts() {
+        let svc = makeService()
+        var b = WeChatContactBindings()
+        b.contacts = [.init(id: "u1", name: "Alice", isRoom: false)]
+        svc.setBindings(b, for: "proj-b")
+        #expect(svc.projectForContact("u1") == "proj-b")
+
+        svc.toggleRouting(for: "proj-b")
+        #expect(svc.projectForContact("u1") == nil)
+    }
+
+    // MARK: - Sender Weight
+
+    @Test("senderWeight defaults to 50 for 1:1 contacts")
+    func senderWeightDefault() {
+        let svc = makeService()
+        var b = WeChatContactBindings()
+        b.contacts = [.init(id: "u1", name: "Alice", isRoom: false)]
+        svc.setBindings(b, for: "p1")
+        #expect(svc.senderWeight(contactId: "u1", senderId: nil, project: "p1") == 50)
+    }
+
+    @Test("senderWeight returns 0 for unbound contact")
+    func senderWeightUnbound() {
+        let svc = makeService()
+        #expect(svc.senderWeight(contactId: "u1", senderId: nil, project: nil) == 0)
+    }
+
+    @Test("senderWeight uses member weight for rooms")
+    func senderWeightRoomMember() {
+        let svc = makeService()
+        var b = WeChatContactBindings()
+        var contact = WeChatContactBindings.BoundContact(id: "room1", name: "Dev Room", isRoom: true)
+        contact.members = [
+            "alice": WeChatMember(name: "Alice", weight: 100),
+            "bob": WeChatMember(name: "Bob", weight: 30),
+        ]
+        b.contacts = [contact]
+        svc.setBindings(b, for: "p2")
+
+        #expect(svc.senderWeight(contactId: "room1", senderId: "alice", project: "p2") == 100)
+        #expect(svc.senderWeight(contactId: "room1", senderId: "bob", project: "p2") == 30)
+        #expect(svc.senderWeight(contactId: "room1", senderId: "unknown", project: "p2") == 0)
+    }
 }
