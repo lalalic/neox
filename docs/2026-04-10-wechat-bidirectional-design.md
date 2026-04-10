@@ -442,7 +442,19 @@ The context.md file lives alongside package.json in the project workspace. Proje
 
 ### Agent Session Integration Detail
 
-Each wired project maps to a **project session** on the relay. This is the same Copilot CLI session the project already uses — WeChat messages are just another input source.
+Each wired project gets its own **dedicated agent session** on the relay. This is separate from the main workspace session — one session per project, so WeChat conversations from different projects don't mix contexts.
+
+Session ID pattern: `appId-userId-projectId`
+
+```mermaid
+flowchart TB
+    subgraph Relay["Relay Server"]
+        S1["Main session<br/>appId-userId<br/>(Neox chat, general use)"]
+        S2["Project A session<br/>appId-userId-projA<br/>(wired to Marketing Room)"]
+        S3["Project B session<br/>appId-userId-projB<br/>(wired to John Zhang 1:1)"]
+        S4["WeChat Assistant session<br/>appId-userId-projC<br/>(auto-reply)"]
+    end
+```
 
 ```mermaid
 sequenceDiagram
@@ -458,9 +470,9 @@ sequenceDiagram
     RS-->>NX: Action: resolve_tool_call / new_input / context_only
 
     alt resolve_tool_call
-        NX->>RL: session.send<br/>toolCallId + answer
+        NX->>RL: session.send(projectSessionId)<br/>toolCallId + answer
     else new_input
-        NX->>RL: session.send<br/>message with sender context
+        NX->>RL: session.send(projectSessionId)<br/>message with sender context
     else context_only
         NX->>NX: Store in local history
     end
@@ -472,11 +484,12 @@ sequenceDiagram
 
 **Key points:**
 
-- The project session is the **same session** the project uses for coding tasks, file operations, etc. WeChat messages are additional input, not a separate session.
-- When the relay receives `session.send` with a WeChat message, it includes sender metadata: `{ sender: "John Zhang", weight: 80, source: "wechat", contactName: "Marketing Room" }`
-- The Copilot CLI sees this as a regular user message with context about who said it — it doesn't know about WeChat specifically.
-- The agent's response comes back through the normal relay event stream. Neox intercepts responses for wired projects and routes them to WeChat via `sendMessage()`.
-- If the project session doesn't exist yet (first message after app launch), Neox creates it via `session.create` before sending.
+- Each wired project has its **own session** (`appId-userId-projectId`) — separate from the main workspace session and from other projects
+- The project session is created when the project is first wired to WeChat, and persists across app restarts (relay resume)
+- When the relay receives `session.send` for a project session, it includes sender metadata: `{ sender: "John Zhang", weight: 80, source: "wechat", contactName: "Marketing Room" }`
+- The Copilot CLI sees this as a regular user message with context about who said it — it doesn't know about WeChat specifically
+- The agent's response comes back through the normal relay event stream. Neox intercepts responses for project sessions and routes them to WeChat via `sendMessage()`
+- The project's `context.md` and `package.json` are loaded into the session as workspace context
 | **Routing sub-agent** | Lightweight LLM call to classify incoming messages | New component |
 | **Decision weight resolution** | Sub-agent uses weight as signal for routing decisions | Part of routing sub-agent |
 | **Owner approval flow** | Push notification + approve/edit/reject for sensitive replies | Update push handling |
