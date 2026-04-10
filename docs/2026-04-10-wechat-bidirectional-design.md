@@ -90,6 +90,42 @@ The sub-agent outputs one of three actions:
 2. **New agent input** — message is a new instruction or request for the project agent
 3. **Context only** — store in history, no immediate action needed
 
+### Owner Steering from Neox
+
+The owner can also steer the system directly from the Neox app (not through WeChat). This creates two input channels:
+
+```mermaid
+flowchart LR
+    subgraph Inputs
+        WC[WeChat messages<br/>from participants]
+        NX[Neox app<br/>owner input]
+    end
+
+    subgraph Routing["What receives the input?"]
+        RS[Routing sub-agent]
+        PA[Project agent directly]
+    end
+
+    WC --> RS
+    NX -->|?| RS
+    NX -->|?| PA
+```
+
+**Open question:** When the owner types something in Neox, where does it go?
+
+| Option | Pros | Cons |
+|--------|------|------|
+| **A: Always to project agent** | Simple, owner has direct line to agent | Can't override routing sub-agent decisions |
+| **B: Always to routing sub-agent** | Unified pipeline, consistent | Extra latency for direct instructions |
+| **C: Context-dependent** | Best UX — Neox UI knows intent | More complex, needs UI signals |
+
+Option C might work naturally: if the owner is in the project chat view → goes to project agent. If they're reviewing a pending `ask_questions` notification → resolves the tool call. If they're in the wiring settings → configures routing.
+
+**Steering examples:**
+- Owner sees agent heading wrong direction in WeChat → types correction in Neox → goes to project agent as override
+- Owner gets push notification for pending `ask_questions` → taps to answer → resolves tool call
+- Owner wants to mute a member temporarily → adjusts weight in wiring settings → affects routing sub-agent
+
 ### Agent Identity in WeChat
 
 WeChat has no bot accounts — the agent sends messages using the **owner's identity**. To distinguish agent messages from the owner's own messages:
