@@ -27,6 +27,9 @@ final class WeChatMessageRouter {
     /// Used to route agent responses back to the correct WeChat conversation.
     private(set) var lastActiveContact: [String: String] = [:]
 
+    /// Tracks the last incoming message text per project (for response-level guardrails).
+    private(set) var lastIncomingText: [String: String] = [:]
+
     /// Debug log of recent response events (newest first, max 10).
     private(set) var responseLog: [String] = []
 
@@ -92,6 +95,7 @@ final class WeChatMessageRouter {
 
         // Track which contact triggered this for response routing
         lastActiveContact[projectId] = contactId
+        lastIncomingText[projectId] = cleanText
         // Update thread-safe ref for guardrails tool handler
         coordinator.contactIdRefs[projectId]?.value = contactId
 
@@ -196,7 +200,7 @@ final class WeChatMessageRouter {
     /// Handle an agent response from a project session — send back to WeChat.
     func handleProjectResponse(projectId: String, response: String) async {
         let ts = ISO8601DateFormatter().string(from: Date())
-        responseLog.insert("[\(ts)] project=\(projectId) len=\(response.count)", at: 0)
+        responseLog.insert("[\(ts)] project=\(projectId) len=\(response.count) text=\(String(response.prefix(100)))", at: 0)
         if responseLog.count > 10 { responseLog.removeLast() }
 
         guard let weChatService, let coordinator else {
@@ -215,6 +219,25 @@ final class WeChatMessageRouter {
         let formatted: String
         if projectType == "wechat-assistant" {
             formatted = trimmed
+
+            // Response-level guardrail: catch sensitive topics the agent should have held
+            let incomingText = lastIncomingText[projectId] ?? ""
+            let shouldHold = shouldHoldForApproval(response: trimmed, incoming: incomingText)
+            if let guardrails, shouldHold {
+                guard let contactId = lastActiveContact[projectId] else {
+                    responseLog[0] += " ERR:noContact(guardrail)"
+                    return
+                }
+                let approvalId = guardrails.requestApproval(
+                    projectId: projectId,
+                    contactId: contactId,
+                    draft: trimmed,
+                    reason: "Auto-detected sensitive content in response"
+                )
+                responseLog[0] += " HELD(approval:\(approvalId.prefix(8)))"
+                NSLog("[WeChatRouter] Response held for approval: %@", approvalId)
+                return
+            }
         } else {
             formatted = "🤖 \(trimmed)"
         }
@@ -227,6 +250,34 @@ final class WeChatMessageRouter {
         NSLog("[WeChatRouter] Response → %@: %@", contactId, String(formatted.prefix(80)))
         await weChatService.sendToContact(contactId, message: formatted, watermark: true)
         responseLog[0] += " → \(contactId) OK"
+    }
+
+    /// Check if a response should be held for owner approval.
+    /// Checks both the incoming message (sensitive topic?) and the response (sensitive commitment?).
+    private func shouldHoldForApproval(response: String, incoming: String) -> Bool {
+        let lowerResponse = response.lowercased()
+        let lowerIncoming = incoming.lowercased()
+
+        // Sensitive topic patterns — if the INCOMING message involves these, hold
+        let sensitiveTopics = [
+            "transfer", "转账", "汇款", "payment", "pay ", "bank account",
+            "银行", "money", "dollars", "dollar", "元", "块钱",
+            "schedule", "meeting", "appointment", "约", "见面",
+            "address", "phone number", "id number",
+            "地址", "电话", "身份证",
+            "contract", "agreement", "sign", "合同", "协议",
+        ]
+        let incomingIsSensitive = sensitiveTopics.contains { lowerIncoming.contains($0) }
+
+        // Response commitment patterns — if the RESPONSE agrees to something sensitive
+        let commitments = [
+            "i'll be there", "i will attend", "see you at", "confirmed",
+            "i can meet", "let's meet", "i agree", "i accept", "deal",
+            "sure, i'll", "ok, i will", "已确认", "没问题",
+        ]
+        let responseCommits = commitments.contains { lowerResponse.contains($0) }
+
+        return incomingIsSensitive || responseCommits
     }
 
     /// Handle answer constructor timeout — force resolve with best available answer.

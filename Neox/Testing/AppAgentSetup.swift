@@ -290,7 +290,22 @@ final class AppAgentSetup {
                 }
                 lines.append("Project sessions: \(coordinator.projectSessions.count)")
                 for (pid, vm) in coordinator.projectSessions {
-                    lines.append("  \(pid): state=\(vm.chatState)")
+                    let ptype = coordinator.readProjectType(projectId: pid) ?? "nil"
+                    lines.append("  \(pid): state=\(vm.chatState) type=\(ptype)")
+                }
+                // Show pending guardrail approvals
+                if let approvals = router?.guardrails?.pendingApprovals, !approvals.isEmpty {
+                    lines.append("Pending approvals: \(approvals.count)")
+                    for a in approvals {
+                        lines.append("  [\(a.id.prefix(8))] project=\(a.projectId) reason=\(a.reason)")
+                    }
+                }
+                // Debug: last incoming text per project
+                if let lastTexts = router?.lastIncomingText, !lastTexts.isEmpty {
+                    lines.append("Last incoming:")
+                    for (pid, text) in lastTexts {
+                        lines.append("  \(pid): \(String(text.prefix(60)))")
+                    }
                 }
                 return lines.joined(separator: "\n")
             }
@@ -490,6 +505,8 @@ final class AppAgentSetup {
                 routingActive: true
             )
             service.setBindings(binding, for: "test-room-assistant")
+            ensurePackageJSON(projectId: "test-room-assistant", projectType: "project-assistant", workspaceURL: service.workspaceURL)
+            coordinator.destroyProjectSession(projectId: "test-room-assistant")
             results.append("✅ Room '\(room.name)' (id: \(room.userName)) → project 'test-room-assistant'")
         } else {
             results.append("⚠️ Room '\(roomName)' not found")
@@ -512,6 +529,8 @@ final class AppAgentSetup {
                 routingActive: true
             )
             service.setBindings(binding, for: "test-direct-assistant")
+            ensurePackageJSON(projectId: "test-direct-assistant", projectType: "wechat-assistant", workspaceURL: service.workspaceURL)
+            coordinator.destroyProjectSession(projectId: "test-direct-assistant")
             results.append("✅ Contact '\(direct.name)' (id: \(direct.userName)) → project 'test-direct-assistant'")
         } else {
             results.append("⚠️ Contact '\(directName)' not found")
@@ -521,5 +540,29 @@ final class AppAgentSetup {
         }
 
         return results.joined(separator: "\n")
+    }
+
+    /// Ensure a project directory has a package.json with the correct projectType.
+    private func ensurePackageJSON(projectId: String, projectType: String, workspaceURL: URL) {
+        let projectDir = workspaceURL.appendingPathComponent(projectId, isDirectory: true)
+        let packageURL = projectDir.appendingPathComponent("package.json")
+        let manager = FileManager.default
+        // Skip if package.json already exists with correct type
+        if let data = try? Data(contentsOf: packageURL),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           json["projectType"] as? String == projectType {
+            return
+        }
+        // Create directory if needed
+        try? manager.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        let content: [String: Any] = [
+            "name": projectId,
+            "version": "0.1.0",
+            "projectType": projectType
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: content, options: [.prettyPrinted, .sortedKeys]) {
+            try? data.write(to: packageURL)
+            NSLog("[WeChatTest] Created package.json for %@ (type: %@)", projectId, projectType)
+        }
     }
 }

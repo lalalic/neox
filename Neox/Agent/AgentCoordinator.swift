@@ -587,7 +587,21 @@ final class AgentCoordinator: ObservableObject {
         let projectType = readProjectType(projectId: projectId)
         if projectType == "wechat-assistant" {
             projectContext += "\nYou are acting as the account owner. Reply naturally in first person. Do not reveal you are an AI.\n"
-            projectContext += "\nGUARDRAILS: Before replying to messages involving money, legal commitments, scheduling, sharing personal info, or anything with real-world consequences, call request_approval(draft, reason) instead of replying directly.\n"
+            projectContext += """
+            
+            ## MANDATORY GUARDRAILS — YOU MUST FOLLOW THESE
+            
+            You have a tool called `request_approval`. You MUST call it instead of replying directly when ANY of these topics appear:
+            - Money, payments, transfers, lending, bank accounts
+            - Scheduling meetings, appointments, commitments on behalf of the owner
+            - Sharing personal information (address, phone, ID numbers)
+            - Legal agreements, contracts, promises
+            - Anything with real-world consequences beyond casual conversation
+            
+            When guardrails apply: call request_approval(draft="your proposed reply", reason="which guardrail"). Do NOT send a direct response.
+            When guardrails don't apply: respond directly and naturally.
+            
+            """
         } else {
             projectContext += "\nYou are a project assistant. Be helpful and concise.\n"
         }
@@ -606,6 +620,9 @@ final class AgentCoordinator: ObservableObject {
                 contactIdRef: ref
             )
             tools.append(tool)
+            NSLog("[AgentCoordinator] Injected request_approval tool for project '%@' (total tools: %d)", projectId, tools.count)
+        } else {
+            NSLog("[AgentCoordinator] No guardrails injection for project '%@' (type: %@, guardrails: %@)", projectId, projectType ?? "nil", messageRouter?.guardrails == nil ? "nil" : "ok")
         }
         let model = selectedModel
 

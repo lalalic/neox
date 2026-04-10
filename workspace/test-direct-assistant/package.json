@@ -1,0 +1,6 @@
+{
+    "name": "test-direct-assistant",
+    "version": "0.1.0",
+    "description": "Test project for WeChat bidirectional messaging",
+    "projectType": "wechat-assistant"
+}
