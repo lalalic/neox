@@ -126,6 +126,40 @@ Option C might work naturally: if the owner is in the project chat view → goes
 - Owner gets push notification for pending `ask_questions` → taps to answer → resolves tool call
 - Owner wants to mute a member temporarily → adjusts weight in wiring settings → affects routing sub-agent
 
+### Session Lifecycle for Wired Projects
+
+**Question: does the agent session stay alive on the relay backend to listen for WeChat messages?**
+
+Current relay architecture: sessions are on-demand (created when client connects, go on-hold or available when client disconnects). But wired projects need to respond to incoming WeChat messages at any time.
+
+```mermaid
+flowchart LR
+    subgraph Phone["Owner's Phone"]
+        WC[WeChat Bridge<br/>always listening]
+        NX[Neox App<br/>may be backgrounded]
+    end
+
+    subgraph Relay["Relay Backend"]
+        S[Agent Session<br/>needs to be alive?]
+    end
+
+    WC -->|incoming msg| NX -->|forward| S
+    S -->|response| NX -->|send| WC
+```
+
+**The phone is the bottleneck, not the relay.** WeChat Bridge runs inside WKWebView on the phone — if the phone sleeps or Neox is killed, the bridge stops. So the relay session doesn't need to be "always alive" independently — it only needs to be alive when the phone is awake and the bridge is running.
+
+**Proposed lifecycle:**
+1. When Neox launches and WeChat bridge connects → create/resume agent sessions for all wired projects
+2. Sessions stay alive as long as the phone is active
+3. When phone sleeps / Neox backgrounds → sessions go on-hold (relay keeps the CLI process, stashes incoming tool calls)
+4. When phone wakes → sessions resume, replay stashed state
+5. If a WeChat message arrives while session is on-hold → stash it, process when session resumes
+
+This aligns with the existing on-hold/resume mechanism. No need for a persistent always-on session — the phone's WeChat Bridge is the constraint.
+
+**Open question:** Could the bridge be moved server-side (run WeChat in headless browser on VPS)? This would enable true 24/7 listening but adds significant complexity and WeChat detection risk. Parked for v2.
+
 ### Agent Identity in WeChat
 
 WeChat has no bot accounts — the agent sends messages using the **owner's identity**. To distinguish agent messages from the owner's own messages:
