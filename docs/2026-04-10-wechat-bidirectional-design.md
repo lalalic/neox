@@ -124,6 +124,18 @@ This aligns with the existing on-hold/resume mechanism. No need for a persistent
 
 **Open question:** Could the bridge be moved server-side (run WeChat in headless browser on VPS)? This would enable true 24/7 listening but adds significant complexity and WeChat detection risk. Parked for v2.
 
+### No Chat UI for Wired Projects
+
+Wired projects have **no chat interface** in the Neox app. WeChat is the only input channel — there is no owner steering from Neox (removed for v1 simplicity).
+
+In Neox, a wired project shows:
+- **Status view** — session state, message count, last activity
+- **Config view** — wechat.json contacts, weight assignments
+- **History view** (read-only) — conversation log from WeChat
+- **context.md editor** — for Scenario 2 (WeChat Assistant) persona/rules
+
+The owner interacts with the project through WeChat like everyone else (with weight 100).
+
 ### Agent Identity in WeChat
 
 WeChat has no bot accounts — the agent sends messages using the **owner's identity**. To distinguish agent messages from the owner's own messages:
