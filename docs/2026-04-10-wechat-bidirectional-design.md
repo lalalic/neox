@@ -58,29 +58,37 @@ flowchart TB
     subgraph Neox["Neox (on owner's phone)"]
         B[WeChat Bridge captures message]
         L[Log to project conversation history]
-        W{Sender weight<br/>≥ 50?}
-        Q{Pending<br/>ask_questions?}
-        A[Route to project agent session]
-        T[Resolve pending tool call]
-        C[Add as context only]
-        S[Agent processes:<br/>execute task / answer question /<br/>record decision / suggest next step]
+        R[Routing sub-agent evaluates:<br/>sender weight + message content +<br/>conversation state + pending tool calls]
+        D{Sub-agent<br/>decision}
+        T[Resolve pending ask_questions]
+        A[Send to project agent as new input]
+        C[Store as context, no action]
+        S[Project agent processes]
     end
 
     subgraph WeChat2[WeChat]
         O[Send 🤖 response to chat]
     end
 
-    M --> B --> L --> W
+    M --> B --> L --> R --> D
     M2 --> B
-    W -->|Yes, authoritative| Q
-    W -->|No, contributor| C
-    Q -->|Yes| T --> S
-    Q -->|No| A --> S
-    C --> A
+    D -->|"Answer pending question"| T --> S
+    D -->|"New instruction/request"| A --> S
+    D -->|"Context only"| C
     S --> O
 ```
 
-Same flow for rooms and 1:1 — every message is logged to conversation history first, then weight determines authority. In 1:1, the other person has weight 50 by default (strong voice, can answer `ask_questions`).
+A lightweight **routing sub-agent** decides how to handle each incoming message, instead of hard-coded threshold rules. It considers:
+
+- **Sender weight** — who said it (PM vs intern)
+- **Message content** — is it a question, instruction, casual chat, or answer to a pending question?
+- **Conversation state** — is there a pending `ask_questions`? What was the agent working on?
+- **Project context** — does this message change direction or just add info?
+
+The sub-agent outputs one of three actions:
+1. **Resolve pending tool call** — message answers a pending `ask_questions`  
+2. **New agent input** — message is a new instruction or request for the project agent
+3. **Context only** — store in history, no immediate action needed
 
 ### Agent Identity in WeChat
 
@@ -97,26 +105,26 @@ This applies to both scenarios (project assistant and auto-reply).
 
 ### Decision Weight
 
-Every participant in a wired conversation has a **weight** (0–100) that determines their authority level:
+Weight is a **signal** the routing sub-agent uses, not a hard threshold. Every participant has a weight (0–100) set by the project owner:
 
-| Weight | Meaning | Capabilities |
-|--------|---------|-------------|
-| **100** | Full authority | Approve/reject tool calls, answer `ask_questions`, override agent direction |
-| **50–99** | Strong voice | Input treated as guidance, can answer `ask_questions` when no higher-weight member responds |
-| **1–49** | Contributor | Messages become context for the agent, don't resolve tool calls |
-| **0** | Muted | Messages ignored entirely |
+| Weight | Signal to sub-agent |
+|--------|---------------------|
+| **100** | Treat as authoritative — likely resolves questions, approves actions |
+| **50–99** | Strong voice — worth acting on, especially if no higher-weight response |
+| **1–49** | Contributor — valuable context, unlikely to be the final word |
+| **0** | Muted — ignore entirely (only hard rule) |
 
 **Owner** always has weight 100 (from Neox app, not through WeChat).
 
-In **1:1 mode**, the other person defaults to weight 50 — strong voice, can answer `ask_questions` but owner has final authority.
+In **1:1 mode**, the other person defaults to weight 50.
 
 In **room mode**, the project owner assigns weights when wiring. Example:
 - Product manager: 100 (decision-maker)
-- Lead engineer: 80 (strong voice)
-- Designer: 50 (can answer when PM is absent)
+- Lead engineer: 80 (strong voice)  
+- Designer: 50 (can contribute meaningfully)
 - Intern: 20 (context contributor)
 
-When multiple people with weight ≥ 50 respond to an `ask_questions`, the agent uses the **highest-weight response**. If weights are equal, first response wins.
+The sub-agent uses weight alongside message content to make routing decisions. A weight-20 intern saying "the server is down" is still actionable. A weight-100 PM saying "lol nice" is just context. The AI handles nuance better than code thresholds.
 
 ### UI Elements
 
@@ -370,7 +378,8 @@ Three binding modes:
 | **AssistantSetupView** | Persona, rules, contact selector for auto-reply | New SwiftUI view |
 | **Contact binding persistence** | Load/save wechat-routing.json | New model |
 | **Agent session integration** | Map incoming message → session.send with sender context | Update AgentCoordinator |
-| **Decision weight resolution** | Higher-weight members resolve ask_questions first | Update tool call handling |
+| **Routing sub-agent** | Lightweight LLM call to classify incoming messages | New component |
+| **Decision weight resolution** | Sub-agent uses weight as signal for routing decisions | Part of routing sub-agent |
 | **Owner approval flow** | Push notification + approve/edit/reject for sensitive replies | Update push handling |
 
 ### What Already Exists (no changes needed)
