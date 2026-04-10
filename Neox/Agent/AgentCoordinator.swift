@@ -495,6 +495,7 @@ final class AgentCoordinator: ObservableObject {
                 instructions: instructions,
                 sections: finalSections,
                 tools: tools,
+                appId: "neox",
                 deviceToken: UserDefaults.standard.string(forKey: "apnsDeviceToken"),
                 apnsEnv: {
                     #if DEBUG

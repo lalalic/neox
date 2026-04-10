@@ -108,6 +108,50 @@ final class AppAgentSetup {
             "inputSchema": ["type": "object"]
         ])
 
+        // WeChat send message tool
+        let wechatSendHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] args in
+            return await MainActor.run {
+                guard let self, let coordinator = self.coordinator else { return "Error: not ready" }
+                let service = coordinator.weChatService
+                guard service.isOnline else { return "Error: WeChat not online" }
+
+                guard case .object(let dict) = args,
+                      case .string(let to) = dict["to"],
+                      case .string(let message) = dict["message"] else {
+                    return "Error: 'to' and 'message' are required"
+                }
+
+                // Resolve contact name → userName
+                let contacts = service.contacts
+                let contact = contacts.first(where: { $0.name == to || $0.userName == to || $0.remarkName == to })
+                let targetId = contact?.userName ?? to
+
+                Task {
+                    await service.sendToContact(targetId, message: message, watermark: false)
+                }
+                return "Sent to \(contact?.name ?? to) (id: \(targetId))"
+            }
+        }
+        server.register(
+            name: "wechat_send",
+            description: "Send a WeChat message to a contact or room.",
+            inputSchema: [
+                "type": "object",
+                "properties": [
+                    "to": ["type": "string", "description": "Contact name, remark name, or UserName to send to"],
+                    "message": ["type": "string", "description": "Message text to send"],
+                ] as [String: Any],
+                "required": ["to", "message"]
+            ] as [String: Any],
+            handler: wechatSendHandler
+        )
+        bridgeHandlers["wechat_send"] = wechatSendHandler
+        bridgeToolList.append([
+            "name": "wechat_send",
+            "description": "Send a WeChat message",
+            "inputSchema": ["type": "object"]
+        ])
+
         try server.start()
         self.server = server
         
