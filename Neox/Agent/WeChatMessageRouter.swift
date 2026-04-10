@@ -41,7 +41,6 @@ final class WeChatMessageRouter {
         // Look up which project this contact is bound to
         let contactId = message.routingContactId
         guard let projectId = weChatService.projectForContact(contactId) else {
-            // Unbound contact — ignore
             return
         }
 
@@ -83,7 +82,7 @@ final class WeChatMessageRouter {
         // Track which contact triggered this for response routing
         lastActiveContact[projectId] = contactId
 
-        print("[WeChatRouter] \(senderName) (w:\(weight)) → project '\(projectId)': \(cleanText.prefix(80))")
+        NSLog("[WeChatRouter] %@ (w:%d) → project '%@': %@", senderName, weight, projectId, String(cleanText.prefix(80)))
 
         // Get or create per-project session, then forward the message
         let vm = coordinator.createProjectSession(projectId: projectId) { [weak self] response in
@@ -95,7 +94,19 @@ final class WeChatMessageRouter {
         let prompt = "[WeChat message from \(senderName) (weight: \(weight))\(roomLabel)]\n\(cleanText)"
 
         Task {
-            await vm.send(prompt, startAgent: true)
+            let state = vm.chatState
+            NSLog("[WeChatRouter] Session state: %@", String(describing: state))
+            switch state {
+            case .waitingForQuestions, .waitingForUser:
+                NSLog("[WeChatRouter] Answering pending question")
+                _ = await vm.sendToRelay(prompt)
+            case .working:
+                NSLog("[WeChatRouter] Agent busy — steering with new message")
+                await vm.send(prompt, startAgent: false)
+            default:
+                NSLog("[WeChatRouter] Starting/sending to agent")
+                await vm.send(prompt, startAgent: true)
+            }
         }
     }
 
@@ -110,18 +121,17 @@ final class WeChatMessageRouter {
         let projectType = coordinator.readProjectType(projectId: projectId)
         let formatted: String
         if projectType == "wechat-assistant" {
-            formatted = trimmed  // No prefix — acting as account owner
+            formatted = trimmed
         } else {
-            formatted = "🤖 \(trimmed)"  // Bot prefix for project-assistant
+            formatted = "🤖 \(trimmed)"
         }
 
-        // Send to the contact that last triggered a message for this project
         guard let contactId = lastActiveContact[projectId] else {
-            print("[WeChatRouter] No active contact for project '\(projectId)' — dropping response")
+            NSLog("[WeChatRouter] No active contact for project '%@' — dropping response", projectId)
             return
         }
 
-        print("[WeChatRouter] Response → \(contactId): \(formatted.prefix(80))")
+        NSLog("[WeChatRouter] Response → %@: %@", contactId, String(formatted.prefix(80)))
         await weChatService.sendToContact(contactId, message: formatted, watermark: true)
     }
 

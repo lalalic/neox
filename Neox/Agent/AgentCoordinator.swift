@@ -597,7 +597,7 @@ final class AgentCoordinator: ObservableObject {
 
         projectSessions[projectId] = vm
         Task { await vm.connect() }
-        print("[AgentCoordinator] Created project session for '\(projectId)' (type: \(projectType ?? "unknown"))")
+        NSLog("[AgentCoordinator] Created project session for '%@' (type: %@, appId: neox-wc-%@)", projectId, projectType ?? "unknown", projectId)
         return vm
     }
 
