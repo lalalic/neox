@@ -118,6 +118,19 @@ In 1:1 mode, the agent is a **silent assistant** by default:
 - Only speaks when directly asked (e.g., "@AI what do you think?") or when it detects something worth flagging
 - Proactive triggers: conflicting decisions, missed action items, relevant info from project context
 
+### Agent Identity in WeChat
+
+WeChat has no bot accounts — the agent sends messages using the **owner's identity**. To distinguish agent messages from the owner's own messages:
+
+- **Prefix all agent messages** with a bot emoji: `🤖 ` (configurable)
+- Example: `🤖 Based on the discussion, here are the action items...`
+- The existing `wechat-bro.js` AI watermark (invisible Unicode marker) is also applied for programmatic detection via `isFromAI()`
+- Owner's own manual messages have no prefix
+
+This applies to all three modes (discussion-room, silent-assistant, auto-reply).
+
+---
+
 ### Roles
 
 | Role | Can do | Example |
