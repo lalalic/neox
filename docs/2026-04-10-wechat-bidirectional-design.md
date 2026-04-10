@@ -468,6 +468,9 @@ flowchart TB
     end
 ```
 
+> **Side note — main session and non-wired projects:**
+> Non-wired projects share the **main session** (`appId-userId`). The user doesn't formally "switch" projects — when they select a project in Neox and start chatting, the conversation history naturally provides context about which project is being discussed. The agent sees the project's workspace files (package.json, README, etc.) and infers the context. No explicit project switching mechanism needed — the chat history is the context.
+
 ```mermaid
 sequenceDiagram
     participant WC as WeChat Bridge
