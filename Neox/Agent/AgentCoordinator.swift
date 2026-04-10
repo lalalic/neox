@@ -570,6 +570,7 @@ final class AgentCoordinator: ObservableObject {
             projectContext += "\nYou are a project assistant. Be helpful and concise.\n"
         }
         projectContext += "\nKeep responses under 3 sentences unless the question requires a detailed answer. Match the language of the sender."
+        projectContext += "\nIMPORTANT: This is a headless session with no interactive user. Do NOT call ask_questions. Just provide your best response directly."
 
         let tools = buildTools()
         let model = selectedModel
@@ -597,6 +598,7 @@ final class AgentCoordinator: ObservableObject {
         )
 
         projectSessions[projectId] = vm
+        vm.skipPendingRestore = true
         Task { await vm.connect() }
         NSLog("[AgentCoordinator] Created project session for '%@' (type: %@, appId: neox-wc-%@)", projectId, projectType ?? "unknown", projectId)
         return vm

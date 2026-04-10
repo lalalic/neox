@@ -2,6 +2,7 @@ import SwiftUI
 import AppAgent
 import CopilotChat
 import CopilotSDK
+import WebKitAgent
 import Observation
 
 @Observable
@@ -149,6 +150,161 @@ final class AppAgentSetup {
         bridgeToolList.append([
             "name": "wechat_send",
             "description": "Send a WeChat message",
+            "inputSchema": ["type": "object"]
+        ])
+
+        // WeChat webkit send (untracked — simulates incoming message for E2E test)
+        let wechatWebkitHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] args in
+            // Extract parameters and resolve contact on MainActor
+            let (targetId, contactName, channel): (String, String, WeChatChannel) = try await MainActor.run {
+                guard let self, let coordinator = self.coordinator else { throw NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "not ready"]) }
+                let service = coordinator.weChatService
+                guard service.isOnline else { throw NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "WeChat not online"]) }
+
+                guard case .object(let dict) = args,
+                      case .string(let to) = dict["to"],
+                      case .string(let message) = dict["message"] else {
+                    throw NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "'to' and 'message' are required"])
+                }
+                _ = message // used below
+
+                let contacts = service.contacts
+                let contact = contacts.first(where: { $0.name == to || $0.userName == to || $0.remarkName == to })
+                let tid = contact?.userName ?? to
+                guard let ch = service.channel else { throw NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "WeChat channel not available"]) }
+                return (tid, contact?.name ?? to, ch)
+            }
+            // Extract message from args again (can't capture from MainActor block easily)
+            guard case .object(let dict) = args, case .string(let message) = dict["message"] else {
+                return "Error: 'message' required"
+            }
+            // Send untracked (async, calls evaluateJavaScript on MainActor internally)
+            let result = await channel.sendUntracked(to: targetId, content: message)
+            if result.ok {
+                return "Sent (untracked) to \(contactName) — bridge will treat as incoming. msgId: \(result.msgId ?? "unknown")"
+            } else {
+                return "Error: send failed"
+            }
+        }
+        server.register(
+            name: "wechat_webkit_send",
+            description: "Send a WeChat message bypassing sent-by-us tracking. The bridge will treat this as an incoming message, triggering the routing pipeline. For E2E testing.",
+            inputSchema: [
+                "type": "object",
+                "properties": [
+                    "to": ["type": "string", "description": "Contact name, remark name, or UserName to send to"],
+                    "message": ["type": "string", "description": "Message text to send"],
+                ] as [String: Any],
+                "required": ["to", "message"]
+            ] as [String: Any],
+            handler: wechatWebkitHandler
+        )
+        bridgeHandlers["wechat_webkit_send"] = wechatWebkitHandler
+        bridgeToolList.append([
+            "name": "wechat_webkit_send",
+            "description": "Send WeChat message (untracked — simulates incoming)",
+            "inputSchema": ["type": "object"]
+        ])
+
+        // Simulate incoming WeChat message (inject directly into router)
+        let wechatSimHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] args in
+            return await MainActor.run {
+                guard let self, let coordinator = self.coordinator else { return "Error: not ready" }
+                let service = coordinator.weChatService
+                guard service.isOnline else { return "Error: WeChat not online" }
+
+                guard case .object(let dict) = args,
+                      case .string(let from) = dict["from"],
+                      case .string(let message) = dict["message"] else {
+                    return "Error: 'from' and 'message' are required"
+                }
+
+                // Resolve contact name → userName
+                let contacts = service.contacts
+                let contact = contacts.first(where: { $0.name == from || $0.userName == from || $0.remarkName == from })
+                let fromId = contact?.userName ?? from
+                let isRoom = fromId.hasPrefix("@@")
+
+                // Build content: for rooms, prefix with a fake sender
+                let content: String
+                if isRoom {
+                    if case .string(let sender) = dict["sender"] {
+                        // Resolve sender name to userName
+                        let senderContact = contacts.first(where: { $0.name == sender || $0.userName == sender })
+                        let senderUserName = senderContact?.userName ?? sender
+                        content = "\(senderUserName):\n\(message)"
+                    } else {
+                        content = "fake-sender:\n\(message)"
+                    }
+                } else {
+                    content = message
+                }
+
+                let fakeMsg = WeChatMessage(
+                    msgId: "sim-\(Int(Date().timeIntervalSince1970 * 1000))",
+                    msgType: 1,
+                    content: content,
+                    fromUserName: fromId,
+                    toUserName: "self",
+                    fromContact: contact,
+                    isRoom: isRoom
+                )
+
+                // Route directly through the message router
+                coordinator.messageRouter?.route(fakeMsg)
+                return "Simulated incoming message from \(contact?.name ?? from) (id: \(fromId), room: \(isRoom)): \(message)"
+            }
+        }
+        server.register(
+            name: "wechat_simulate_incoming",
+            description: "Simulate a WeChat incoming message for E2E testing. Injects a fake message directly into the routing pipeline.",
+            inputSchema: [
+                "type": "object",
+                "properties": [
+                    "from": ["type": "string", "description": "Contact/room name or UserName the message is 'from'"],
+                    "message": ["type": "string", "description": "Message text"],
+                    "sender": ["type": "string", "description": "(Rooms only) Name of the sender within the room"],
+                ] as [String: Any],
+                "required": ["from", "message"]
+            ] as [String: Any],
+            handler: wechatSimHandler
+        )
+        bridgeHandlers["wechat_simulate_incoming"] = wechatSimHandler
+        bridgeToolList.append([
+            "name": "wechat_simulate_incoming",
+            "description": "Simulate incoming WeChat message for E2E testing",
+            "inputSchema": ["type": "object"]
+        ])
+
+        // ── wechat_router_status: diagnostic tool ──
+        let routerStatusHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak coordinator] _ in
+            return await MainActor.run {
+                guard let coordinator else { return "Error: coordinator gone" }
+                var lines: [String] = []
+                let router = coordinator.messageRouter
+                lines.append("Response log:")
+                if let log = router?.responseLog, !log.isEmpty {
+                    for entry in log { lines.append("  \(entry)") }
+                } else {
+                    lines.append("  (empty)")
+                }
+                lines.append("Project sessions: \(coordinator.projectSessions.count)")
+                for (pid, vm) in coordinator.projectSessions {
+                    lines.append("  \(pid): state=\(vm.chatState)")
+                }
+                return lines.joined(separator: "\n")
+            }
+        }
+        server.register(
+            name: "wechat_router_status",
+            description: "Show router response log and project session states",
+            inputSchema: ["type": "object"] as [String: Any],
+            handler: routerStatusHandler
+        )
+        bridgeHandlers["wechat_router_status"] = routerStatusHandler
+        bridgeToolList.append([
+            "name": "wechat_router_status",
+            "description": "Show router response log and project session states",
             "inputSchema": ["type": "object"]
         ])
 

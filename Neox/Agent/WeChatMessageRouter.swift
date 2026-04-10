@@ -24,6 +24,9 @@ final class WeChatMessageRouter {
     /// Used to route agent responses back to the correct WeChat conversation.
     private var lastActiveContact: [String: String] = [:]
 
+    /// Debug log of recent response events (newest first, max 10).
+    private(set) var responseLog: [String] = []
+
     private static let maxHistoryPerProject = 100
 
     init(weChatService: WeChatService, coordinator: AgentCoordinator) {
@@ -94,17 +97,20 @@ final class WeChatMessageRouter {
         let prompt = "[WeChat message from \(senderName) (weight: \(weight))\(roomLabel)]\n\(cleanText)"
 
         Task {
+            // Wait for session to be connected before dispatching
+            let ready = await vm.waitForReady(timeout: 15)
+            guard ready else {
+                NSLog("[WeChatRouter] Session failed to connect for project '%@' — dropping message", projectId)
+                return
+            }
+
             let state = vm.chatState
-            NSLog("[WeChatRouter] Session state: %@", String(describing: state))
             switch state {
             case .waitingForQuestions, .waitingForUser:
-                NSLog("[WeChatRouter] Answering pending question")
                 _ = await vm.sendToRelay(prompt)
             case .working:
-                NSLog("[WeChatRouter] Agent busy — steering with new message")
                 await vm.send(prompt, startAgent: false)
             default:
-                NSLog("[WeChatRouter] Starting/sending to agent")
                 await vm.send(prompt, startAgent: true)
             }
         }
@@ -112,10 +118,20 @@ final class WeChatMessageRouter {
 
     /// Handle an agent response from a project session — send back to WeChat.
     private func handleProjectResponse(projectId: String, response: String) async {
-        guard let weChatService, let coordinator else { return }
+        let ts = ISO8601DateFormatter().string(from: Date())
+        responseLog.insert("[\(ts)] project=\(projectId) len=\(response.count)", at: 0)
+        if responseLog.count > 10 { responseLog.removeLast() }
+
+        guard let weChatService, let coordinator else {
+            responseLog[0] += " ERR:nilRefs"
+            return
+        }
 
         let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else {
+            responseLog[0] += " ERR:empty"
+            return
+        }
 
         // Determine prefix based on project type
         let projectType = coordinator.readProjectType(projectId: projectId)
@@ -127,12 +143,13 @@ final class WeChatMessageRouter {
         }
 
         guard let contactId = lastActiveContact[projectId] else {
-            NSLog("[WeChatRouter] No active contact for project '%@' — dropping response", projectId)
+            responseLog[0] += " ERR:noContact"
             return
         }
 
         NSLog("[WeChatRouter] Response → %@: %@", contactId, String(formatted.prefix(80)))
         await weChatService.sendToContact(contactId, message: formatted, watermark: true)
+        responseLog[0] += " → \(contactId) OK"
     }
 
     private func appendToHistory(_ entry: ChatLogEntry, projectId: String) {
