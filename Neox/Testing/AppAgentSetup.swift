@@ -73,6 +73,41 @@ final class AppAgentSetup {
             "inputSchema": ["type": "object"]
         ])
 
+        // WeChat test setup tool
+        let wechatSetupHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] args in
+            return await MainActor.run {
+                guard let self else { return "Error: setup deallocated" }
+                let roomName: String
+                let directName: String
+                if case .object(let dict) = args {
+                    if case .string(let r) = dict["room"] { roomName = r } else { roomName = "3人组" }
+                    if case .string(let d) = dict["direct"] { directName = d } else { directName = "文件传输助手" }
+                } else {
+                    roomName = "3人组"
+                    directName = "文件传输助手"
+                }
+                return self.setupWeChatTest(roomName: roomName, directName: directName)
+            }
+        }
+        server.register(
+            name: "wechat_test_setup",
+            description: "Set up WeChat test bindings for E2E testing. Finds contacts and creates project bindings.",
+            inputSchema: [
+                "type": "object",
+                "properties": [
+                    "room": ["type": "string", "description": "Room name to bind (default: 3人组)"],
+                    "direct": ["type": "string", "description": "1:1 contact name to bind (default: 文件传输助手)"],
+                ] as [String: Any]
+            ] as [String: Any],
+            handler: wechatSetupHandler
+        )
+        bridgeHandlers["wechat_test_setup"] = wechatSetupHandler
+        bridgeToolList.append([
+            "name": "wechat_test_setup",
+            "description": "Set up WeChat test bindings",
+            "inputSchema": ["type": "object"]
+        ])
+
         try server.start()
         self.server = server
         
@@ -215,5 +250,76 @@ final class AppAgentSetup {
         default:
             return ["jsonrpc": "2.0", "id": id as Any, "error": ["code": -32601, "message": "Method not found: \(method)"] as [String: Any]]
         }
+    }
+
+    // MARK: - WeChat Test Setup
+
+    /// Set up test bindings for WeChat bidirectional E2E testing.
+    /// Finds target contacts in the WeChat bridge and creates project bindings.
+    /// - Parameters:
+    ///   - roomName: Name of the room to bind (e.g. "3人组")
+    ///   - directName: Name of the 1:1 contact to bind (e.g. "文件传输助手")
+    /// - Returns: Status message with created bindings and contact IDs.
+    func setupWeChatTest(roomName: String = "3人组", directName: String = "文件传输助手") -> String {
+        guard let coordinator else { return "Error: coordinator not set" }
+        let service = coordinator.weChatService
+        guard service.isOnline else { return "Error: WeChat not online" }
+
+        let contacts = service.contacts
+        if contacts.isEmpty { return "Error: no contacts loaded" }
+
+        var results: [String] = []
+        results.append("Available contacts: \(contacts.count)")
+
+        // Find room contact
+        let room = contacts.first(where: { $0.name == roomName || $0.userName.hasPrefix("@@") && $0.name.contains(roomName) })
+        // Find 1:1 contact
+        let direct = contacts.first(where: { $0.name == directName })
+
+        // Create project-assistant binding for the room
+        if let room {
+            let binding = WeChatContactBindings(
+                contacts: [WeChatContactBindings.BoundContact(
+                    id: room.userName,
+                    name: room.name,
+                    isRoom: true,
+                    weight: nil,
+                    autoReply: nil,
+                    members: nil  // No member weights for now — all messages pass through
+                )],
+                routingActive: true
+            )
+            service.setBindings(binding, for: "test-room-assistant")
+            results.append("✅ Room '\(room.name)' (id: \(room.userName)) → project 'test-room-assistant'")
+        } else {
+            results.append("⚠️ Room '\(roomName)' not found")
+            // List available rooms
+            let rooms = contacts.filter { $0.userName.hasPrefix("@@") }
+            results.append("Available rooms: \(rooms.map { "\($0.name) (\($0.userName.prefix(12))...)" }.joined(separator: ", "))")
+        }
+
+        // Create wechat-assistant binding for the direct contact
+        if let direct {
+            let binding = WeChatContactBindings(
+                contacts: [WeChatContactBindings.BoundContact(
+                    id: direct.userName,
+                    name: direct.name,
+                    isRoom: false,
+                    weight: 50,
+                    autoReply: true,
+                    members: nil
+                )],
+                routingActive: true
+            )
+            service.setBindings(binding, for: "test-direct-assistant")
+            results.append("✅ Contact '\(direct.name)' (id: \(direct.userName)) → project 'test-direct-assistant'")
+        } else {
+            results.append("⚠️ Contact '\(directName)' not found")
+            // List some contacts
+            let people = contacts.filter { !$0.userName.hasPrefix("@@") }.prefix(10)
+            results.append("Available contacts (first 10): \(people.map { $0.name }.joined(separator: ", "))")
+        }
+
+        return results.joined(separator: "\n")
     }
 }
