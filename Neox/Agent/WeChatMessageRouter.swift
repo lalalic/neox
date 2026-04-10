@@ -16,13 +16,16 @@ final class WeChatMessageRouter {
 
     private weak var weChatService: WeChatService?
     private weak var coordinator: AgentCoordinator?
+    private var routingAgent: WeChatRoutingAgent?
+    private var answerConstructor: WeChatAnswerConstructor?
+    private(set) var guardrails: WeChatGuardrails?
 
     /// Conversation history per project (in-memory, recent messages only).
     private(set) var conversationHistory: [String: [ChatLogEntry]] = [:]
 
     /// Tracks which contact last triggered a message for each project.
     /// Used to route agent responses back to the correct WeChat conversation.
-    private var lastActiveContact: [String: String] = [:]
+    private(set) var lastActiveContact: [String: String] = [:]
 
     /// Debug log of recent response events (newest first, max 10).
     private(set) var responseLog: [String] = []
@@ -32,6 +35,11 @@ final class WeChatMessageRouter {
     init(weChatService: WeChatService, coordinator: AgentCoordinator) {
         self.weChatService = weChatService
         self.coordinator = coordinator
+        self.routingAgent = WeChatRoutingAgent(coordinator: coordinator)
+        self.answerConstructor = WeChatAnswerConstructor(coordinator: coordinator) { [weak self] projectId, answer in
+            await self?.handleTimeoutAnswer(projectId: projectId, answer: answer)
+        }
+        self.guardrails = WeChatGuardrails(weChatService: weChatService)
     }
 
     /// Handle an incoming WeChat message. Called from WeChatService.onMessage.
@@ -84,6 +92,8 @@ final class WeChatMessageRouter {
 
         // Track which contact triggered this for response routing
         lastActiveContact[projectId] = contactId
+        // Update thread-safe ref for guardrails tool handler
+        coordinator.contactIdRefs[projectId]?.value = contactId
 
         NSLog("[WeChatRouter] %@ (w:%d) → project '%@': %@", senderName, weight, projectId, String(cleanText.prefix(80)))
 
@@ -96,6 +106,9 @@ final class WeChatMessageRouter {
         let roomLabel = message.isRoom ? " in \(message.fromContact?.name ?? contactId)" : ""
         let prompt = "[WeChat message from \(senderName) (weight: \(weight))\(roomLabel)]\n\(cleanText)"
 
+        let history = recentHistory(for: projectId)
+        let contactName = message.fromContact?.name ?? contactId
+
         Task {
             // Wait for session to be connected before dispatching
             let ready = await vm.waitForReady(timeout: 15)
@@ -104,20 +117,84 @@ final class WeChatMessageRouter {
                 return
             }
 
-            let state = vm.chatState
-            switch state {
-            case .waitingForQuestions, .waitingForUser:
-                _ = await vm.sendToRelay(prompt)
-            case .working:
-                await vm.send(prompt, startAgent: false)
-            default:
-                await vm.send(prompt, startAgent: true)
+            // Get pending question (if any) for routing classification
+            let pendingQuestion: String?
+            if case .waitingForQuestions(let questions) = vm.chatState {
+                pendingQuestion = questions.map(\.question).joined(separator: "; ")
+            } else {
+                pendingQuestion = nil
+            }
+
+            let agentState: String
+            switch vm.chatState {
+            case .idle: agentState = "idle"
+            case .working: agentState = "working"
+            case .waitingForQuestions: agentState = "waiting_for_answers"
+            case .waitingForUser: agentState = "waiting_for_user"
+            default: agentState = "other"
+            }
+
+            // Classify the message using routing sub-agent
+            let action = await routingAgent?.classify(
+                message: cleanText,
+                sender: senderName,
+                weight: weight,
+                contactName: contactName,
+                pendingQuestion: pendingQuestion,
+                recentHistory: history,
+                agentState: agentState
+            ) ?? .newInput
+
+            NSLog("[WeChatRouter] Classified as %@ for project '%@'", action.rawValue, projectId)
+
+            switch action {
+            case .contextOnly:
+                // Store only — already logged to history above
+                break
+
+            case .resolveToolCall:
+                // Message answers a pending ask_questions
+                // In rooms: collect via answer constructor; in 1:1: resolve immediately
+                if message.isRoom, let constructor = self.answerConstructor {
+                    // Start collecting if not already
+                    if !constructor.hasPending(for: projectId),
+                       case .waitingForQuestions(let qs) = vm.chatState {
+                        let qText = qs.map(\.question).joined(separator: "; ")
+                        constructor.startCollecting(projectId: projectId, question: qText)
+                    }
+                    let result = await constructor.addResponse(
+                        projectId: projectId,
+                        sender: senderName,
+                        weight: weight,
+                        text: cleanText,
+                        isRoom: true
+                    )
+                    if case .ready(let answer) = result {
+                        let formatted = "[Synthesized answer from WeChat]\n\(answer)"
+                        _ = await vm.sendToRelay(formatted)
+                    }
+                    // .waiting → do nothing, wait for more responses or timeout
+                } else {
+                    _ = await vm.sendToRelay(prompt)
+                }
+
+            case .newInput:
+                // New instruction/request for the agent
+                let state = vm.chatState
+                switch state {
+                case .waitingForQuestions, .waitingForUser:
+                    _ = await vm.sendToRelay(prompt)
+                case .working:
+                    await vm.send(prompt, startAgent: false)
+                default:
+                    await vm.send(prompt, startAgent: true)
+                }
             }
         }
     }
 
     /// Handle an agent response from a project session — send back to WeChat.
-    private func handleProjectResponse(projectId: String, response: String) async {
+    func handleProjectResponse(projectId: String, response: String) async {
         let ts = ISO8601DateFormatter().string(from: Date())
         responseLog.insert("[\(ts)] project=\(projectId) len=\(response.count)", at: 0)
         if responseLog.count > 10 { responseLog.removeLast() }
@@ -150,6 +227,15 @@ final class WeChatMessageRouter {
         NSLog("[WeChatRouter] Response → %@: %@", contactId, String(formatted.prefix(80)))
         await weChatService.sendToContact(contactId, message: formatted, watermark: true)
         responseLog[0] += " → \(contactId) OK"
+    }
+
+    /// Handle answer constructor timeout — force resolve with best available answer.
+    private func handleTimeoutAnswer(projectId: String, answer: String) async {
+        guard let coordinator else { return }
+        guard let vm = coordinator.projectSessions[projectId] else { return }
+
+        let formatted = "[Synthesized answer from WeChat (timeout)]\n\(answer)"
+        _ = await vm.sendToRelay(formatted)
     }
 
     private func appendToHistory(_ entry: ChatLogEntry, projectId: String) {

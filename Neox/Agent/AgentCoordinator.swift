@@ -96,6 +96,8 @@ final class AgentCoordinator: ObservableObject {
     @Published private(set) var paymentManager: PaymentManager?
     /// Per-project sessions for WeChat bidirectional integration (projectId → ChatViewModel).
     private(set) var projectSessions: [String: ChatViewModel] = [:]
+    /// Thread-safe contact ID refs for guardrails tool handlers.
+    private(set) var contactIdRefs: [String: ContactIdRef] = [:]
 
     init() {
         let bootstrapper = WorkspaceBootstrapper()
@@ -151,6 +153,25 @@ final class AgentCoordinator: ObservableObject {
         self.messageRouter = router
         weChatService.onIncomingMessage = { [weak router] message in
             router?.route(message)
+        }
+
+        // When WeChat channel is ready, create sessions for all wired projects
+        weChatService.onReady = { [weak self] in
+            self?.startWiredProjectSessions()
+        }
+    }
+
+    /// Create agent sessions for all projects that have active WeChat bindings.
+    /// Called when the WeChat channel becomes ready (logged in).
+    private func startWiredProjectSessions() {
+        let bindings = weChatService.projectBindings
+        for (projectId, binding) in bindings {
+            guard binding.routingActive, !binding.contacts.isEmpty else { continue }
+            guard projectSessions[projectId] == nil else { continue }
+            _ = createProjectSession(projectId: projectId) { [weak self] response in
+                await self?.messageRouter?.handleProjectResponse(projectId: projectId, response: response)
+            }
+            NSLog("[SessionLifecycle] Auto-created session for wired project '%@'", projectId)
         }
     }
     
@@ -566,13 +587,26 @@ final class AgentCoordinator: ObservableObject {
         let projectType = readProjectType(projectId: projectId)
         if projectType == "wechat-assistant" {
             projectContext += "\nYou are acting as the account owner. Reply naturally in first person. Do not reveal you are an AI.\n"
+            projectContext += "\nGUARDRAILS: Before replying to messages involving money, legal commitments, scheduling, sharing personal info, or anything with real-world consequences, call request_approval(draft, reason) instead of replying directly.\n"
         } else {
             projectContext += "\nYou are a project assistant. Be helpful and concise.\n"
         }
         projectContext += "\nKeep responses under 3 sentences unless the question requires a detailed answer. Match the language of the sender."
         projectContext += "\nIMPORTANT: This is a headless session with no interactive user. Do NOT call ask_questions. Just provide your best response directly."
 
-        let tools = buildTools()
+        var tools = buildTools()
+        // Inject request_approval tool for wechat-assistant projects
+        if projectType == "wechat-assistant", let guardrails = messageRouter?.guardrails {
+            let pid = projectId
+            let ref = ContactIdRef()
+            contactIdRefs[pid] = ref
+            let tool = WeChatGuardrails.buildTool(
+                guardrails: guardrails,
+                projectId: pid,
+                contactIdRef: ref
+            )
+            tools.append(tool)
+        }
         let model = selectedModel
 
         let vm = ChatViewModel(
@@ -622,6 +656,12 @@ final class AgentCoordinator: ObservableObject {
             return nil
         }
         return type
+    }
+
+    /// Run a named sub-agent (from .github/agents/) programmatically.
+    /// Used by WeChatRoutingAgent and WeChatAnswerConstructor.
+    func runSubAgent(name: String, task: String, model: String? = nil) async -> String {
+        return await subAgentToolProvider.runAgent(name: name, task: task, model: model)
     }
 
     private func normalizeInputSettings() {

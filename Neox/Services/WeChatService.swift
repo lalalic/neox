@@ -38,6 +38,8 @@ struct WeChatMember: Codable, Equatable {
 @MainActor
 final class WeChatService: ObservableObject {
 
+    let workspaceURL: URL
+
     // MARK: - Published State
 
     @Published var config: WeChatServiceConfig {
@@ -83,6 +85,9 @@ final class WeChatService: ObservableObject {
     /// Callback for incoming messages. Set by AgentCoordinator to wire the router.
     var onIncomingMessage: ((WeChatMessage) -> Void)?
 
+    /// Callback when WeChat channel becomes ready. Used to create/resume wired project sessions.
+    var onReady: (() -> Void)?
+
     private static let configKey = "wechat_service_config"
     private static let bindingsFileName = "wechat-bindings.json"
     private static let sessionDiedKey = "wechat_session_died"
@@ -93,6 +98,7 @@ final class WeChatService: ObservableObject {
     // MARK: - Init
 
     init(workspaceURL: URL, defaults: UserDefaults = .standard) {
+        self.workspaceURL = workspaceURL
         self.defaults = defaults
         self.bindingsFileURL = workspaceURL
             .appendingPathComponent(".neo", isDirectory: true)
@@ -186,6 +192,10 @@ final class WeChatService: ObservableObject {
                 // Track if session died so cookies can be cleared on next start
                 if newState == .dead {
                     self?.defaults.set(true, forKey: WeChatService.sessionDiedKey)
+                }
+                // Notify coordinator when channel is fully ready
+                if newState == .ready {
+                    self?.onReady?()
                 }
             }
         }

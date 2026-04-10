@@ -152,6 +152,8 @@ struct ProjectsView: View {
 private struct ProjectRowView: View {
     let project: ProjectItem
     let isSelected: Bool
+    var isWired: Bool = false
+    var wiredContactName: String? = nil
 
     var body: some View {
         HStack {
@@ -165,13 +167,23 @@ private struct ProjectRowView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
-                if let type = project.projectType {
-                    Text(type)
-                        .font(.caption2)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(.blue.opacity(0.1), in: Capsule())
-                        .foregroundStyle(.blue)
+                HStack(spacing: 4) {
+                    if let type = project.projectType {
+                        Text(type)
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.blue.opacity(0.1), in: Capsule())
+                            .foregroundStyle(.blue)
+                    }
+                    if isWired, let name = wiredContactName {
+                        Label(name, systemImage: "bubble.left.and.bubble.right.fill")
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.green.opacity(0.1), in: Capsule())
+                            .foregroundStyle(.green)
+                    }
                 }
             }
             Spacer()
