@@ -369,49 +369,65 @@ erDiagram
     PROJECT ||--o{ CONTACT_BINDING : "receives from"
 ```
 
-A contact can be bound to at most one project. A project can have multiple bound contacts. The binding includes the weight (for Scenario 1) and auto-reply flag (for Scenario 2).
+A contact can be bound to at most one project. A project can have multiple bound contacts. The binding config lives in each project's `wechat.json`.
 
 ### Data Model
 
-```
-~/.neo/wechat-routing.json
+Routing config lives **inside each project workspace**, alongside other project files like `package.json`. The message router scans all projects at startup to build a contact→project lookup.
+
+**Scenario 1** — `<project>/wechat.json`:
+
+```json
 {
-  "bindings": [
-    {
-      "contactId": "@@abc123",
-      "contactName": "Marketing Room",
-      "isRoom": true,
-      "projectId": "proj-uuid-1",
-      "mode": "discussion-room",
-      "members": {
-        "john-id": { "name": "John Zhang", "weight": 100 },
-        "alice-id": { "name": "Alice Wang", "weight": 80 },
-        "bob-id":   { "name": "Bob Li",     "weight": 20 }
+  "wechat": {
+    "contacts": [
+      {
+        "contactId": "@@abc123",
+        "contactName": "Marketing Room",
+        "isRoom": true,
+        "members": {
+          "john-id": { "name": "John Zhang", "weight": 100 },
+          "alice-id": { "name": "Alice Wang", "weight": 80 },
+          "bob-id":   { "name": "Bob Li",     "weight": 20 }
+        }
+      },
+      {
+        "contactId": "@colleague456",
+        "contactName": "John Zhang",
+        "isRoom": false,
+        "weight": 50
       }
-    },
-    {
-      "contactId": "@colleague456",
-      "contactName": "John Zhang",
-      "isRoom": false,
-      "projectId": "proj-uuid-1",
-      "mode": "project-assistant",
-      "weight": 50
-    },
-    {
-      "contactId": "@friend123",
-      "contactName": "Alice Wang",
-      "isRoom": false,
-      "projectId": "proj-uuid-2",
-      "mode": "auto-reply"
-    }
-  ]
+    ]
+  }
 }
 ```
 
-Three binding modes:
-- `discussion-room` — Scenario 1 room: multi-party with per-member weights, agent is project assistant
-- `project-assistant` — Scenario 1 person: 1:1, agent is project assistant with full access
-- `auto-reply` — Scenario 2: agent replies as the account owner
+**Scenario 2** — `<project>/wechat.json`:
+
+```json
+{
+  "wechat": {
+    "contacts": [
+      {
+        "contactId": "@friend123",
+        "contactName": "Alice Wang",
+        "isRoom": false,
+        "autoReply": true
+      },
+      {
+        "contactId": "@@marketing",
+        "contactName": "Marketing Room",
+        "isRoom": true,
+        "autoReply": true
+      }
+    ]
+  }
+}
+```
+
+The context.md file lives alongside wechat.json in the project workspace. Project type (project-assistant vs auto-reply) is determined by the project template.
+
+**Message Router lookup:** On startup and when config changes, the router builds an in-memory map: `contactId → projectId`. Since a contact can only be bound to one project, conflicts are detected at wiring time.
 
 ### What Needs Building
 
@@ -421,7 +437,7 @@ Three binding modes:
 | **WeChatService** (update) | Manage bidirectional bridge, routing config | Existing service |
 | **RoomWiringView** | Room selector + member weight assignment UI | New SwiftUI view |
 | **AssistantSetupView** | Contact selector + link to edit context.md | New SwiftUI view (lightweight) |
-| **Contact binding persistence** | Load/save wechat-routing.json | New model |
+| **Contact binding persistence** | Load/save per-project wechat.json | New model |
 | **Agent session integration** | Map incoming message → session.send with sender context | Update AgentCoordinator |
 | **Routing sub-agent** | Lightweight LLM call to classify incoming messages | New component |
 | **Decision weight resolution** | Sub-agent uses weight as signal for routing decisions | Part of routing sub-agent |
