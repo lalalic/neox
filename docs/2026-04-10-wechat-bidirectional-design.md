@@ -369,16 +369,17 @@ erDiagram
     PROJECT ||--o{ CONTACT_BINDING : "receives from"
 ```
 
-A contact can be bound to at most one project. A project can have multiple bound contacts. The binding config lives in each project's `wechat.json`.
+A contact can be bound to at most one project. A project can have multiple bound contacts. The binding config lives in each project's `package.json` under the `wechat` key.
 
 ### Data Model
 
-Routing config lives **inside each project workspace**, alongside other project files like `package.json`. The message router scans all projects at startup to build a contact→project lookup.
+Routing config lives **inside the project's `package.json`** under a `wechat` key, alongside other project config. The message router scans all projects at startup to build a contact→project lookup.
 
-**Scenario 1** — `<project>/wechat.json`:
+**Scenario 1** — `<project>/package.json`:
 
 ```json
 {
+  "name": "my-app-project",
   "wechat": {
     "contacts": [
       {
@@ -402,10 +403,11 @@ Routing config lives **inside each project workspace**, alongside other project 
 }
 ```
 
-**Scenario 2** — `<project>/wechat.json`:
+**Scenario 2** — `<project>/package.json`:
 
 ```json
 {
+  "name": "wechat-assistant",
   "wechat": {
     "contacts": [
       {
@@ -425,7 +427,7 @@ Routing config lives **inside each project workspace**, alongside other project 
 }
 ```
 
-The context.md file lives alongside wechat.json in the project workspace. Project type (project-assistant vs auto-reply) is determined by the project template.
+The context.md file lives alongside package.json in the project workspace. Project type (project-assistant vs auto-reply) is determined by the project template.
 
 **Message Router lookup:** On startup and when config changes, the router builds an in-memory map: `contactId → projectId`. Since a contact can only be bound to one project, conflicts are detected at wiring time.
 
@@ -437,7 +439,7 @@ The context.md file lives alongside wechat.json in the project workspace. Projec
 | **WeChatService** (update) | Manage bidirectional bridge, routing config | Existing service |
 | **RoomWiringView** | Room selector + member weight assignment UI | New SwiftUI view |
 | **AssistantSetupView** | Contact selector + link to edit context.md | New SwiftUI view (lightweight) |
-| **Contact binding persistence** | Load/save per-project wechat.json | New model |
+| **Contact binding persistence** | Read/write `wechat` key in project package.json | New model |
 | **Agent session integration** | Map incoming message → session.send with sender context | Update AgentCoordinator |
 | **Routing sub-agent** | Lightweight LLM call to classify incoming messages | New component |
 | **Decision weight resolution** | Sub-agent uses weight as signal for routing decisions | Part of routing sub-agent |
