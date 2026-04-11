@@ -59,18 +59,16 @@ struct ContentView: View {
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
                                 ToolbarItem(placement: .topBarLeading) {
-                                    HStack(spacing: 4) {
+                                    HStack(spacing: 8) {
+                                        ConnectionTitleView(
+                                            title: "Neo",
+                                            viewModel: chatVM
+                                        )
                                         ProjectBadgeView(
                                             currentProject: currentProjectDisplay,
                                             action: { showProjects = true }
                                         )
                                     }
-                                }
-                                ToolbarItem(placement: .principal) {
-                                    ConnectionTitleView(
-                                        title: currentProjectDisplay ?? "Neo",
-                                        viewModel: chatVM
-                                    )
                                 }
                                 ToolbarItem(placement: .topBarTrailing) {
                                     HStack(spacing: 8) {
@@ -92,6 +90,7 @@ struct ContentView: View {
                                         }
                                         Button(action: { showSettings = true }) {
                                             Image(systemName: "gearshape.fill")
+                                                .foregroundStyle(.primary)
                                         }
                                     }
                                 }

@@ -15,10 +15,12 @@ struct ProjectBadgeView: View {
                     Text(name)
                         .font(.caption.weight(.medium))
                         .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
+            .frame(maxWidth: 120)
             .background(
                 currentProject != nil
                     ? Color.blue.opacity(0.12)
