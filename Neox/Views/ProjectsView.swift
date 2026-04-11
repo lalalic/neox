@@ -132,31 +132,54 @@ struct ProjectsView: View {
                                 }
                                 .tint(.primary)
 
-                                // Only one channel per project: Discord OR WeChat
-                                if discordService != nil && wiredContact == nil {
-                                    Button {
-                                        discordWiringProject = project
-                                    } label: {
-                                        Image(systemName: "number")
-                                            .font(.body)
-                                            .foregroundStyle(discordBinding != nil ? .indigo : .secondary)
-                                            .frame(width: 44, height: 44)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .accessibilityLabel(discordBinding != nil ? "Discord Channel" : "Wire to Discord")
-                                }
-
-                                if weChatService != nil && discordBinding == nil {
+                                // Single channel button — opens the active channel type
+                                if wiredContact != nil {
+                                    // WeChat is wired — show WeChat button
                                     Button {
                                         wiringProject = project
                                     } label: {
                                         Image(systemName: "bubble.left.and.bubble.right")
                                             .font(.body)
-                                            .foregroundStyle(wiredContact != nil ? .green : .secondary)
+                                            .foregroundStyle(.green)
                                             .frame(width: 44, height: 44)
                                     }
                                     .buttonStyle(.plain)
-                                    .accessibilityLabel(wiredContact != nil ? "WeChat Settings" : "Wire to WeChat")
+                                    .accessibilityLabel("WeChat Settings")
+                                } else if discordBinding != nil {
+                                    // Discord is wired — show Discord button
+                                    Button {
+                                        discordWiringProject = project
+                                    } label: {
+                                        Image(systemName: "number")
+                                            .font(.body)
+                                            .foregroundStyle(.indigo)
+                                            .frame(width: 44, height: 44)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("Discord Channel")
+                                } else {
+                                    // Nothing wired — show channel picker
+                                    Menu {
+                                        if discordService != nil {
+                                            Button {
+                                                discordWiringProject = project
+                                            } label: {
+                                                Label("Discord", systemImage: "number")
+                                            }
+                                        }
+                                        if weChatService != nil {
+                                            Button {
+                                                wiringProject = project
+                                            } label: {
+                                                Label("WeChat", systemImage: "bubble.left.and.bubble.right")
+                                            }
+                                        }
+                                    } label: {
+                                        Image(systemName: "link.badge.plus")
+                                            .font(.body)
+                                            .foregroundStyle(.secondary)
+                                            .frame(width: 44, height: 44)
+                                    }
                                 }
                             }
                         }
