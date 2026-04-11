@@ -282,9 +282,9 @@ final class AppAgentSetup {
         ])
 
         // ── wechat_router_status: diagnostic tool ──
-        let routerStatusHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak coordinator] _ in
+        let routerStatusHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] _ in
             return await MainActor.run {
-                guard let coordinator else { return "Error: coordinator gone" }
+                guard let self, let coordinator = self.coordinator else { return "Error: coordinator gone" }
                 var lines: [String] = []
                 let router = coordinator.messageRouter
                 lines.append("Response log:")
