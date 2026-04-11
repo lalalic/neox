@@ -19,6 +19,7 @@ final class WeChatMessageRouter {
     private var routingAgent: WeChatRoutingAgent?
     private var answerConstructor: WeChatAnswerConstructor?
     private(set) var guardrails: WeChatGuardrails?
+    private let speechTranscriber = SpeechTranscriber()
 
     /// Conversation history per project (in-memory, recent messages only).
     private(set) var conversationHistory: [String: [ChatLogEntry]] = [:]
@@ -63,12 +64,35 @@ final class WeChatMessageRouter {
         case 1:
             messageText = message.content
         case 34:
-            // Voice message
+            // Voice message — save and transcribe
             let duration = message.voiceLength.map { "\($0)s" } ?? "unknown duration"
             if let base64 = message.voiceBase64, !base64.isEmpty {
                 let path = saveMedia(base64: base64, ext: "mp3", projectId: projectId)
                 savedMediaPath = path
-                messageText = "[Voice message (\(duration)) — saved to \(path ?? "failed")]"
+                if let path {
+                    // Kick off async transcription — will update message after transcription completes
+                    let fileURL = coordinator.workspaceRootURL.appendingPathComponent(path)
+                    let transcriber = self.speechTranscriber
+                    Task {
+                        let transcription = await transcriber.transcribe(fileURL: fileURL)
+                        if let transcription, !transcription.isEmpty {
+                            NSLog("[WeChatRouter] Voice transcribed: %@", String(transcription.prefix(80)))
+                            // Re-route with transcribed text
+                            let updatedText = "[Voice message (\(duration)): \"\(transcription)\"]"
+                            self.updateLastIncoming(projectId: projectId, text: updatedText)
+                            // Send transcription to the active session
+                            if let vm = self.coordinator?.projectSessions[projectId] {
+                                let prompt = "[Voice transcription from \(message.fromContact?.name ?? message.fromUserName)]\n\(transcription)"
+                                await vm.send(prompt, startAgent: true)
+                            }
+                        } else {
+                            NSLog("[WeChatRouter] Voice transcription failed for %@", path)
+                        }
+                    }
+                    messageText = "[Voice message (\(duration)) — transcribing...]"
+                } else {
+                    messageText = "[Voice message (\(duration)) — save failed]"
+                }
             } else {
                 messageText = "[Voice message (\(duration))]"
             }
@@ -382,6 +406,11 @@ final class WeChatMessageRouter {
             NSLog("[WeChatRouter] Failed to save media: %@", error.localizedDescription)
             return nil
         }
+    }
+
+    /// Update the last incoming text for a project (used when voice transcription completes async).
+    private func updateLastIncoming(projectId: String, text: String) {
+        lastIncomingText[projectId] = text
     }
 
     /// Format an app message (msgType 49) with extracted title/desc/url.
