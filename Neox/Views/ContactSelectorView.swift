@@ -113,20 +113,34 @@ private struct ContactRow: View {
     let contact: any Identifiable & ContactDisplayable
     let isBound: Bool
 
+    /// Strip angle-bracket wrapper from display names (e.g. "<Name>" → "Name").
+    private var cleanName: String {
+        var n = contact.displayName
+        if n.hasPrefix("<") && n.hasSuffix(">") {
+            n = String(n.dropFirst().dropLast())
+        }
+        return n
+    }
+
     var body: some View {
         HStack {
-            if contact.isRoom {
-                Image(systemName: "person.3.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
+            if let url = contact.avatarURL {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable()
+                            .scaledToFill()
+                            .frame(width: 32, height: 32)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    default:
+                        placeholderIcon
+                    }
+                }
+                .frame(width: 32, height: 32)
             } else {
-                Image(systemName: "person.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
+                placeholderIcon
             }
-            Text(contact.displayName)
+            Text(cleanName)
                 .lineLimit(1)
             Spacer()
             if isBound {
@@ -136,18 +150,40 @@ private struct ContactRow: View {
         }
         .contentShape(Rectangle())
     }
+
+    @ViewBuilder
+    private var placeholderIcon: some View {
+        if contact.isRoom {
+            Image(systemName: "person.3.fill")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 32, height: 32)
+        } else {
+            Image(systemName: "person.circle.fill")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+                .frame(width: 32, height: 32)
+        }
+    }
 }
 
 /// Protocol to unify display across WeChatContact and BoundContact.
 protocol ContactDisplayable {
     var displayName: String { get }
     var isRoom: Bool { get }
+    var avatarURL: URL? { get }
 }
 
 extension WeChatContact: ContactDisplayable {
     var displayName: String { remarkName ?? nickName ?? name }
+    var avatarURL: URL? {
+        guard let url = headImgUrl, !url.isEmpty else { return nil }
+        if url.hasPrefix("http") { return URL(string: url) }
+        return URL(string: "https://wx.qq.com\(url)")
+    }
 }
 
 extension WeChatContactBindings.BoundContact: ContactDisplayable {
     var displayName: String { name }
+    var avatarURL: URL? { nil }
 }

@@ -68,7 +68,7 @@ struct WeChatWiringSheet: View {
                 }
 
                 // Project type picker
-                Section("Project Type") {
+                Section {
                     HStack(spacing: 8) {
                         Button {
                             projectType = "project-assistant"
@@ -127,12 +127,30 @@ struct WeChatWiringSheet: View {
                                 selectContact(contact)
                             } label: {
                                 HStack {
-                                    Image(systemName: contact.isRoom ? "person.3.fill" : "person.circle.fill")
-                                        .font(.caption)
-                                        .foregroundStyle(isOtherBound ? .gray.opacity(0.3) : .secondary)
-                                        .frame(width: 28, height: 28)
+                                    if let url = contact.avatarURL {
+                                        AsyncImage(url: url) { phase in
+                                            switch phase {
+                                            case .success(let image):
+                                                image.resizable()
+                                                    .scaledToFill()
+                                                    .frame(width: 32, height: 32)
+                                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                            default:
+                                                Image(systemName: contact.isRoom ? "person.3.fill" : "person.circle.fill")
+                                                    .font(.caption)
+                                                    .foregroundStyle(isOtherBound ? .gray.opacity(0.3) : .secondary)
+                                                    .frame(width: 32, height: 32)
+                                            }
+                                        }
+                                        .frame(width: 32, height: 32)
+                                    } else {
+                                        Image(systemName: contact.isRoom ? "person.3.fill" : "person.circle.fill")
+                                            .font(.caption)
+                                            .foregroundStyle(isOtherBound ? .gray.opacity(0.3) : .secondary)
+                                            .frame(width: 32, height: 32)
+                                    }
                                     VStack(alignment: .leading) {
-                                        Text(contact.remarkName ?? contact.nickName ?? contact.name)
+                                        Text(contact.displayName)
                                             .foregroundStyle(isOtherBound ? .gray.opacity(0.3) : .primary)
                                             .lineLimit(1)
                                         if isOtherBound {
