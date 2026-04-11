@@ -313,6 +313,7 @@
             HeadImgUrl: c.HeadImgUrl,
             isRoomContact: isRoom,
             isRoomOwner: isRoom && c.ChatRoomOwner === selfUserName,
+            memberCount: isRoom && c.MemberList ? c.MemberList.length : 0,
             VerifyFlag: c.VerifyFlag || 0,
             ContactFlag: c.ContactFlag || 0,
             StarFriend: c.StarFriend || 0,

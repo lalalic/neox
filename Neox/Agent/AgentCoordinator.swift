@@ -681,15 +681,18 @@ final class AgentCoordinator: ObservableObject {
     }
 
     /// Build project tag for prompt prefix.
-    /// e.g. "wechat room(devteam, weight:80)" or "wechat individual(Claire, weight:50)"
+    /// e.g. "wechat room(devteam, 80 members, weight:80)" or "wechat individual(Claire, weight:50)"
     /// Returns nil if project has no WeChat wiring.
     func buildProjectTag(projectId: String) -> String? {
         let bindings = weChatService.getBindings(for: projectId)
         guard let first = bindings.contacts.first else { return nil }
-        var tag = "wechat \(first.isRoom ? "room" : "individual")(\(first.name)"
-        if let w = first.weight { tag += ", weight:\(w)" }
-        tag += ")"
-        return tag
+        var parts = [first.name]
+        // Add member count for rooms
+        if first.isRoom, let contact = weChatService.contacts.first(where: { $0.userName == first.id }), contact.memberCount > 0 {
+            parts.append("\(contact.memberCount) members")
+        }
+        if let w = first.weight { parts.append("weight:\(w)") }
+        return "wechat \(first.isRoom ? "room" : "individual")(\(parts.joined(separator: ", ")))"
     }
 
     /// Build a lightweight steer message for when user switches to a project.
