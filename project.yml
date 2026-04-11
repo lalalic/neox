@@ -34,6 +34,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.neox.app
         INFOPLIST_FILE: Neox/Info.plist
         CODE_SIGN_ENTITLEMENTS: Neox/Neox.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         DEVELOPMENT_TEAM: "JABNLDLN8G"
