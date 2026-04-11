@@ -1263,108 +1263,62 @@
   }
 
   // ==========================================================================
-  // Contacts-ready detection — reactive via contactChangeFlag property trap
+  // Contacts-ready detection — poll every 5s for 2 minutes after login
   // ==========================================================================
   var _contactsReadyTimer = null
-  var _contactsReadyCleanups = []
 
   function waitForContactsReady() {
-    // Cancel any previous wait
-    _contactsReadyCleanups.forEach(function (fn) { try { fn() } catch (e) {} })
-    _contactsReadyCleanups.length = 0
-    if (_contactsReadyTimer) { clearTimeout(_contactsReadyTimer); _contactsReadyTimer = null }
+    if (_contactsReadyTimer) { clearInterval(_contactsReadyTimer); _contactsReadyTimer = null }
     WechatyBro.vars.contactsReady = false
 
+    var lastPinyinCount = 0
     var startTime = Date.now()
 
-    function checkAndEmit() {
-      if (!WechatyBro.vars.loginState) return false  // logged out during wait
-      if (WechatyBro.vars.contactsReady) return true  // already emitted
+    function check() {
+      if (!WechatyBro.vars.loginState) {
+        // Logged out — stop polling
+        if (_contactsReadyTimer) { clearInterval(_contactsReadyTimer); _contactsReadyTimer = null }
+        return
+      }
 
       try {
         var contactFactory = WechatyBro.glue.contactFactory
-        if (!contactFactory) return false
+        if (!contactFactory) return
 
         var all = contactFactory.getAllContacts()
         var contacts = Object.values(all)
-        var personal = contacts.filter(function (c) {
-          return c.UserName && !c.UserName.startsWith('@@') && c.ContactFlag > 0
-        })
-        var withPinyin = personal.filter(function (c) {
-          return c.PYQuanPin && c.PYQuanPin.length > 0
+        var withPinyin = contacts.filter(function (c) {
+          return c.UserName && !c.UserName.startsWith('@@') && c.PYQuanPin && c.PYQuanPin.length > 0
         })
 
-        if (personal.length > 0 && withPinyin.length >= personal.length * 0.8) {
-          var elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
+        if (withPinyin.length > lastPinyinCount) {
+          lastPinyinCount = withPinyin.length
           WechatyBro.vars.contactsReady = true
           WechatyBro._buildIdMaps()
-          log('CONTACTS READY in ' + elapsed + 's: ' + personal.length + ' personal, ' +
-              withPinyin.length + ' with PYQuanPin')
+          log('CONTACTS READY: ' + contacts.length + ' total, ' + withPinyin.length + ' with PYQuanPin')
           WechatyBro.emit('contacts-ready', {
             total: contacts.length,
-            personal: personal.length,
             withPinyin: withPinyin.length,
             elapsedMs: Date.now() - startTime,
           })
-          return true
         }
       } catch (e) {
         log('contacts-ready check error:', e.message)
       }
-      return false
-    }
 
-    // Strategy 1: Watch contactFactory.contactChangeFlag via property trap
-    try {
-      var contactFactory = WechatyBro.glue.contactFactory
-      if (contactFactory && 'contactChangeFlag' in contactFactory) {
-        var _origFlag = contactFactory.contactChangeFlag
-        Object.defineProperty(contactFactory, 'contactChangeFlag', {
-          get: function () { return _origFlag },
-          set: function (v) {
-            _origFlag = v
-            log('contactChangeFlag changed to:', v)
-            checkAndEmit()
-          },
-          configurable: true,
-          enumerable: true,
-        })
-        _contactsReadyCleanups.push(function () {
-          try {
-            Object.defineProperty(contactFactory, 'contactChangeFlag', {
-              value: _origFlag,
-              writable: true,
-              configurable: true,
-              enumerable: true,
-            })
-          } catch (e) {}
-        })
-        log('contactChangeFlag property trap installed')
+      // Stop after 2 minutes
+      if (Date.now() - startTime > 120000) {
+        log('contacts-ready polling complete after 2 minutes')
+        if (_contactsReadyTimer) { clearInterval(_contactsReadyTimer); _contactsReadyTimer = null }
       }
-    } catch (e) {
-      log('contactChangeFlag trap failed:', e.message)
     }
 
-    // Strategy 2: Fallback timer — check at 1s, then every 2s up to 60s
-    function fallbackCheck() {
-      if (checkAndEmit()) return
-      var elapsed = Date.now() - startTime
-      if (elapsed > 60000) {
-        log('contacts-ready timeout after 60s — emitting with partial data')
-        WechatyBro.vars.contactsReady = true
-        WechatyBro.emit('contacts-ready', { partial: true, elapsedMs: elapsed })
-        return
-      }
-      _contactsReadyTimer = setTimeout(fallbackCheck, 2000)
-    }
+    _contactsReadyTimer = setInterval(check, 5000)
+    // Also check immediately
+    check()
 
-    _contactsReadyTimer = setTimeout(fallbackCheck, 1000)
-    _contactsReadyCleanups.push(function () {
-      if (_contactsReadyTimer) { clearTimeout(_contactsReadyTimer); _contactsReadyTimer = null }
-    })
     addCleanup(function () {
-      _contactsReadyCleanups.forEach(function (fn) { try { fn() } catch (e) {} })
-      _contactsReadyCleanups.length = 0
+      if (_contactsReadyTimer) { clearInterval(_contactsReadyTimer); _contactsReadyTimer = null }
     })
   }
 
@@ -1376,7 +1330,7 @@
 
     _loginPending = false
     if (_contactsReadyTimer) {
-      clearTimeout(_contactsReadyTimer)
+      clearInterval(_contactsReadyTimer)
       _contactsReadyTimer = null
     }
     WechatyBro.vars.contactsReady = false
