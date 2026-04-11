@@ -99,6 +99,8 @@ final class AgentCoordinator: ObservableObject {
     @Published private(set) var paymentManager: PaymentManager?
     /// Per-project sessions for WeChat bidirectional integration (projectId → ChatViewModel).
     private(set) var projectSessions: [String: ChatViewModel] = [:]
+    /// Mutable response handlers per project — allows swapping callbacks without recreating sessions.
+    private var projectResponseHandlers: [String: @Sendable (String) async -> Void] = [:]
 
     /// Number of active background watcher sessions.
     var activeWatcherCount: Int { projectSessions.count }
@@ -206,12 +208,14 @@ final class AgentCoordinator: ObservableObject {
             NSLog("[Discord] Message with no projectId — ignoring")
             return
         }
+        NSLog("[Discord] Incoming from %@ in #%@: %@", message.senderName, message.channelName ?? message.channelId, String(message.text.prefix(60)))
 
         let sourceLabel = "🎮 #\(message.channelName ?? message.channelId) · \(message.senderName)"
         let prompt = "[Discord message in #\(message.channelName ?? message.channelId)]\nFrom: \(message.senderName)\n---\n\(message.text)"
 
+        let channelId = message.channelId
         let vm = createProjectSession(projectId: projectId) { [weak self] response in
-            await self?.handleDiscordResponse(projectId: projectId, channelId: message.channelId, response: response)
+            await self?.handleDiscordResponse(projectId: projectId, channelId: channelId, response: response)
         }
 
         Task {
@@ -630,6 +634,8 @@ final class AgentCoordinator: ObservableObject {
     /// Create a dedicated agent session for a wired project.
     /// The session is headless — no chat UI. Messages come from WeChat, responses go back to WeChat.
     func createProjectSession(projectId: String, onResponse: @escaping @Sendable (String) async -> Void) -> ChatViewModel {
+        // Always update the response handler — even for existing sessions.
+        projectResponseHandlers[projectId] = onResponse
         if let existing = projectSessions[projectId] { return existing }
 
         let transport = WebSocketTransport(host: relayHost, port: relayPort)
@@ -714,7 +720,11 @@ final class AgentCoordinator: ObservableObject {
                     #endif
                 }(),
                 userId: neoxUserId,
-                onResponse: onResponse,
+                onResponse: { [weak self] response in
+                    // Trampoline: look up the current handler so it can be swapped at runtime.
+                    let handler = await MainActor.run { self?.projectResponseHandlers[projectId] }
+                    await handler?(response)
+                },
                 onAskUser: { _ in "" }
             )),
             workspaceURL: workspaceURL
@@ -730,6 +740,7 @@ final class AgentCoordinator: ObservableObject {
     /// Destroy a project session (e.g., when unwiring from WeChat).
     func destroyProjectSession(projectId: String) {
         guard let vm = projectSessions.removeValue(forKey: projectId) else { return }
+        projectResponseHandlers.removeValue(forKey: projectId)
         vm.disconnect()
         print("[AgentCoordinator] Destroyed project session for '\(projectId)'")
     }

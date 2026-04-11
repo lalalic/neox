@@ -158,27 +158,29 @@ struct ProjectsView: View {
                                     .buttonStyle(.plain)
                                     .accessibilityLabel("Discord Channel")
                                 } else {
-                                    // Nothing wired — show channel picker
-                                    Menu {
-                                        if discordService != nil {
-                                            Button {
-                                                discordWiringProject = project
-                                            } label: {
-                                                Label("Discord", systemImage: "number")
-                                            }
+                                    // Nothing wired — direct button for the active channel type
+                                    if discordService != nil {
+                                        Button {
+                                            discordWiringProject = project
+                                        } label: {
+                                            Image(systemName: "number")
+                                                .font(.body)
+                                                .foregroundStyle(.secondary)
+                                                .frame(width: 44, height: 44)
                                         }
-                                        if weChatService != nil {
-                                            Button {
-                                                wiringProject = project
-                                            } label: {
-                                                Label("WeChat", systemImage: "bubble.left.and.bubble.right")
-                                            }
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel("Wire to Discord")
+                                    } else if weChatService != nil {
+                                        Button {
+                                            wiringProject = project
+                                        } label: {
+                                            Image(systemName: "bubble.left.and.bubble.right")
+                                                .font(.body)
+                                                .foregroundStyle(.secondary)
+                                                .frame(width: 44, height: 44)
                                         }
-                                    } label: {
-                                        Image(systemName: "link.badge.plus")
-                                            .font(.body)
-                                            .foregroundStyle(.secondary)
-                                            .frame(width: 44, height: 44)
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel("Wire to WeChat")
                                     }
                                 }
                             }
