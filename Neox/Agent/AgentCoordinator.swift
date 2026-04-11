@@ -177,8 +177,10 @@ final class AgentCoordinator: ObservableObject {
         discordService.onIncomingMessage = { [weak self] message in
             self?.handleDiscordMessage(message)
         }
-        // Connect Discord if there are persisted channel bindings
-        if !discordService.registeredChannels.isEmpty {
+        // Connect Discord if channel type is discord and server ID is configured
+        if channelType == "discord" && !discordService.guildId.isEmpty {
+            let parsed = parseLocalRelayURL()
+            discordService.updateRelay(host: parsed.host, port: parsed.port)
             Task { await discordService.connect() }
         }
     }
