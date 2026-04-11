@@ -310,7 +310,7 @@
             || (c.RemarkPYQuanPin || c.PYQuanPin || c.UserName)
           return {
             id: stableId,
-            name: c.RemarkName || c.NickName,
+            name: c.RemarkName || c.NickName || c.DisplayName || c.UserName || '(unknown)',
             UserName: c.UserName,
             NickName: c.NickName,
             RemarkName: c.RemarkName,
