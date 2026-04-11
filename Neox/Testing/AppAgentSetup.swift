@@ -224,16 +224,22 @@ final class AppAgentSetup {
                 let fromId = contact?.userName ?? from
                 let isRoom = fromId.hasPrefix("@@")
 
-                // Build content: for rooms, prefix with a fake sender
+                // Build content and sender contact for rooms
                 let content: String
+                var senderContact: WeChatContact? = nil
                 if isRoom {
                     if case .string(let sender) = dict["sender"] {
                         // Resolve sender name to userName
-                        let senderContact = contacts.first(where: { $0.name == sender || $0.userName == sender })
-                        let senderUserName = senderContact?.userName ?? sender
+                        let resolved = contacts.first(where: { $0.name == sender || $0.userName == sender })
+                        let senderUserName = resolved?.userName ?? sender
                         content = "\(senderUserName):\n\(message)"
+                        // Create sender contact for proper routing
+                        senderContact = resolved ?? WeChatContact(
+                            id: sender, name: sender, userName: senderUserName
+                        )
                     } else {
                         content = "fake-sender:\n\(message)"
+                        senderContact = WeChatContact(id: "fake-sender", name: "Unknown", userName: "fake-sender")
                     }
                 } else {
                     content = message
@@ -251,7 +257,8 @@ final class AppAgentSetup {
                     fromUserName: fromId,
                     toUserName: "self",
                     fromContact: contact,
-                    isRoom: isRoom
+                    isRoom: isRoom,
+                    senderContact: senderContact
                 )
 
                 // Route directly through the message router
@@ -528,7 +535,11 @@ final class AppAgentSetup {
     func setupWeChatTest(roomName: String = "3人组", directName: String = "文件传输助手") -> String {
         guard let coordinator else { return "Error: coordinator not set" }
         let service = coordinator.weChatService
-        guard service.isOnline else { return "Error: WeChat not online" }
+
+        // Offline mode: create bindings with raw IDs for simulate_incoming
+        guard service.isOnline else {
+            return setupWeChatTestOffline(service: service, coordinator: coordinator)
+        }
 
         let contacts = service.contacts
         if contacts.isEmpty { return "Error: no contacts loaded" }
@@ -590,6 +601,42 @@ final class AppAgentSetup {
             results.append("Available contacts (\(people.count)): " + people.map { $0.name }.joined(separator: ", "))
         }
 
+        return results.joined(separator: "\n")
+    }
+
+    /// Offline test setup — creates bindings with raw IDs used by wechat_simulate_incoming.
+    private func setupWeChatTestOffline(service: WeChatService, coordinator: AgentCoordinator) -> String {
+        var results: [String] = ["⚡ Offline mode (WeChat not logged in)"]
+
+        // Room binding: use @@test-room as the contact ID
+        let roomId = "@@test-room"
+        let roomBinding = WeChatContactBindings(
+            contacts: [WeChatContactBindings.BoundContact(
+                id: roomId, name: "Test Room", isRoom: true,
+                weight: nil, autoReply: nil, members: nil
+            )],
+            routingActive: true
+        )
+        service.setBindings(roomBinding, for: "test-room-assistant")
+        ensurePackageJSON(projectId: "test-room-assistant", projectType: "project-assistant", workspaceURL: service.workspaceURL)
+        coordinator.destroyProjectSession(projectId: "test-room-assistant")
+        results.append("✅ '@@test-room' → project 'test-room-assistant' (project-assistant)")
+
+        // Direct binding: use test-direct as the contact ID
+        let directId = "test-direct"
+        let directBinding = WeChatContactBindings(
+            contacts: [WeChatContactBindings.BoundContact(
+                id: directId, name: "Test Direct", isRoom: false,
+                weight: 50, autoReply: true, members: nil
+            )],
+            routingActive: true
+        )
+        service.setBindings(directBinding, for: "test-direct-assistant")
+        ensurePackageJSON(projectId: "test-direct-assistant", projectType: "wechat-assistant", workspaceURL: service.workspaceURL)
+        coordinator.destroyProjectSession(projectId: "test-direct-assistant")
+        results.append("✅ 'test-direct' → project 'test-direct-assistant' (wechat-assistant)")
+
+        results.append("Use: simulate_incoming from='@@test-room' sender='Alice' or from='test-direct'")
         return results.joined(separator: "\n")
     }
 
