@@ -250,6 +250,32 @@ final class AppAgentSetup {
                 else if case .double(let t) = dict["msgType"] { msgType = Int(t) }
                 else { msgType = 1 }
 
+                // Optional media payloads
+                let imageBase64: String?
+                if case .string(let img) = dict["imageBase64"] { imageBase64 = img }
+                else { imageBase64 = nil }
+
+                let voiceBase64: String?
+                if case .string(let voice) = dict["voiceBase64"] { voiceBase64 = voice }
+                else { voiceBase64 = nil }
+
+                let voiceLength: Int?
+                if case .int(let vl) = dict["voiceLength"] { voiceLength = vl }
+                else if case .double(let vl) = dict["voiceLength"] { voiceLength = Int(vl) }
+                else { voiceLength = nil }
+
+                // App message fields
+                let appTitle: String?
+                if case .string(let t) = dict["appTitle"] { appTitle = t } else { appTitle = nil }
+                let appDesc: String?
+                if case .string(let d) = dict["appDesc"] { appDesc = d } else { appDesc = nil }
+                let appUrl: String?
+                if case .string(let u) = dict["appUrl"] { appUrl = u } else { appUrl = nil }
+                let appType: Int?
+                if case .int(let at) = dict["appType"] { appType = at }
+                else if case .double(let at) = dict["appType"] { appType = Int(at) }
+                else { appType = nil }
+
                 let fakeMsg = WeChatMessage(
                     msgId: "sim-\(Int(Date().timeIntervalSince1970 * 1000))",
                     msgType: msgType,
@@ -258,6 +284,13 @@ final class AppAgentSetup {
                     toUserName: "self",
                     fromContact: contact,
                     isRoom: isRoom,
+                    voiceBase64: voiceBase64,
+                    voiceLength: voiceLength,
+                    imageBase64: imageBase64,
+                    appTitle: appTitle,
+                    appDesc: appDesc,
+                    appUrl: appUrl,
+                    appType: appType,
                     senderContact: senderContact
                 )
 
@@ -276,6 +309,13 @@ final class AppAgentSetup {
                     "message": ["type": "string", "description": "Message text"],
                     "sender": ["type": "string", "description": "(Rooms only) Name of the sender within the room"],
                     "msgType": ["type": "number", "description": "Message type: 1=text, 34=voice, 3=image, 49=app (default: 1)"],
+                    "imageBase64": ["type": "string", "description": "Base64-encoded image data (for msgType 3)"],
+                    "voiceBase64": ["type": "string", "description": "Base64-encoded voice data (for msgType 34)"],
+                    "voiceLength": ["type": "number", "description": "Voice duration in seconds (for msgType 34)"],
+                    "appTitle": ["type": "string", "description": "App message title (for msgType 49)"],
+                    "appDesc": ["type": "string", "description": "App message description (for msgType 49)"],
+                    "appUrl": ["type": "string", "description": "App message URL (for msgType 49)"],
+                    "appType": ["type": "number", "description": "App message type: 5=link, 6=file, 33=mini-program (for msgType 49)"],
                 ] as [String: Any],
                 "required": ["from", "message"]
             ] as [String: Any],
