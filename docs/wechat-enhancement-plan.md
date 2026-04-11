@@ -43,6 +43,8 @@ flowchart LR
 
 ### P1: Room Intelligence
 
+The agent makes all content decisions — @mentions, emoji, whether to reply, tone, format. Swift's job is only to parse the rich context from wechat-bro.js and pass it to the agent session.
+
 #### P1.1 — Parse `sender`, `mentions`, `mentionMe`
 
 wechat-bro.js already provides these fields on room messages. Swift ignores them and re-parses the sender from the content prefix.
@@ -55,29 +57,44 @@ wechat-bro.js already provides these fields on room messages. Swift ignores them
 
 **WeChatMessageRouter.swift** (neox):
 - Replace manual sender resolution (~10 lines) with `message.senderContact?.name` / `.userName`
-- Use `message.cleanContent` → just use `message.content` directly (JS provides clean content)
 
-#### P1.2 — Room context in agent prompt
+#### P1.2 — Rich room context in agent prompt
+
+Pass all parsed fields to the agent as structured context. The agent decides what to do.
 
 **WeChatMessageRouter.swift**:
-- If `message.mentionMe`, append `(mentioned you)` to the prompt line
-- If `message.mentions` non-empty, include mentioned names as context
+- Format prompt with full room metadata:
+  ```
+  [WeChat message in <room name>]
+  From: <sender name> (weight: <N>)
+  @mentioned you: yes/no
+  Also mentioned: <names>
+  ---
+  <message content>
+  ```
+- For 1:1 messages, simpler format (no room/mention fields)
 
-#### P1.3 — @mention in room replies
+#### P1.3 — @mention capability for agent responses
+
+Provide the `at()` function so the agent's reply can @mention people. The agent decides when to use it — no auto-prepend in Swift.
 
 **WeChatBridge.swift** (copilot-ios):
 - Add: `func buildAtMention(userId: String, roomId: String) async -> String`
 - Calls `WechatyBro.at(userId, roomId)` → returns `"@Name\u2005"`
 
-**WeChatMessageRouter.swift**:
-- In `handleProjectResponse`, if lastActiveContact is a room and we have the sender's userId, prepend @mention to the reply
+The agent can call this to build @mention strings, or the agent can just write `@Name` and let it go through (less reliable but simpler for v1).
 
-#### P1.4 — Emoji list for agent
+#### P1.4 — Emoji + capabilities in session context
+
+Include available capabilities in the agent's session instructions.
 
 **WeChatBridge.swift**:
-- Add: `func getSupportedEmojis() async -> [String]`
-- Cache result (static list of 209 shortcodes)
-- Include in agent system prompt or tool description so AI can use `[微笑]` etc.
+- Add: `func getSupportedEmojis() async -> [String]` (cached)
+
+**Session setup**:
+- Include emoji list (or a subset) in the session's system prompt
+- Include note: "You can use WeChat emoji codes like [微笑], [呲牙], etc. in your replies"
+- Include note: "Use @Name to mention someone in room messages"
 
 ---
 
