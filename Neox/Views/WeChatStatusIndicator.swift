@@ -32,14 +32,14 @@ struct WeChatStatusIndicator: View {
         }) {
             ZStack {
                 Image(systemName: iconName)
-                    .font(.body)
+                    .font(.caption)
                     .foregroundStyle(iconColor)
                     .contentTransition(.symbolEffect(.replace))
 
                 // Slash overlay when online but routing off
                 if showSlash {
                     Image(systemName: "line.diagonal")
-                        .font(.caption2.weight(.bold))
+                        .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(.green)
                         .rotationEffect(.degrees(45))
                 }

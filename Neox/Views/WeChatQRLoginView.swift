@@ -10,11 +10,6 @@ struct WeChatQRLoginView: View {
         NavigationStack {
             VStack(spacing: 24) {
                 Spacer()
-
-                Image(systemName: "ellipsis.bubble.fill")
-                    .font(.system(size: 48))
-                    .foregroundStyle(.green)
-
                 Text("WeChat Login")
                     .font(.title2.weight(.semibold))
 
