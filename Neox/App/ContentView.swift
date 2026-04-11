@@ -365,6 +365,9 @@ struct RelaySettingsView: View {
                     ))
                 }
 
+                // MARK: Discord Channel
+                DiscordChannelView(discord: coordinator.discordService)
+
                 Section("Relay Server") {
                     HStack {
                         Text("Device ID")

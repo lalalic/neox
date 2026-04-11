@@ -194,6 +194,64 @@ final class DiscordService: ObservableObject {
         registeredChannels.first { $0.channelId == channelId }?.projectId
     }
 
+    // MARK: - Guild/Channel Discovery
+
+    struct GuildInfo: Identifiable {
+        var id: String { guildId }
+        let guildId: String
+        let guildName: String
+        var channels: [ChannelInfo]
+    }
+
+    struct ChannelInfo: Identifiable {
+        var id: String { channelId }
+        let channelId: String
+        let channelName: String
+        let type: Int // 0 = text, 2 = voice, 4 = category
+    }
+
+    func fetchGuilds() async throws -> [GuildInfo] {
+        guard let task = webSocketTask else { throw DiscordError.notConnected }
+
+        rpcId += 1
+        let id = rpcId
+        let jsonStr = "{\"jsonrpc\":\"2.0\",\"id\":\(id),\"method\":\"discord.guilds\",\"params\":{}}"
+        let jsonData = Data(jsonStr.utf8)
+        let header = "Content-Length: \(jsonData.count)\r\n\r\n"
+        var framed = Data(header.utf8)
+        framed.append(jsonData)
+        try await task.send(.data(framed))
+
+        // Wait for raw JSON response
+        for _ in 0..<300 {
+            try await Task.sleep(for: .milliseconds(100))
+            if let raw = pendingRawResponses[id] {
+                pendingRawResponses.removeValue(forKey: id)
+                return parseGuilds(from: raw)
+            }
+        }
+        throw DiscordError.timeout
+    }
+
+    private var pendingRawResponses: [Int: [String: Any]] = [:]
+
+    private func parseGuilds(from json: [String: Any]) -> [GuildInfo] {
+        guard let result = json["result"] as? [String: Any],
+              let guildsArr = result["guilds"] as? [[String: Any]] else { return [] }
+        return guildsArr.compactMap { g in
+            guard let gid = g["guildId"] as? String,
+                  let name = g["guildName"] as? String,
+                  let channels = g["channels"] as? [[String: Any]] else { return nil }
+            let chInfos = channels.compactMap { c -> ChannelInfo? in
+                guard let cid = c["id"] as? String,
+                      let cname = c["name"] as? String,
+                      let ctype = c["type"] as? Int else { return nil }
+                return ChannelInfo(channelId: cid, channelName: cname, type: ctype)
+            }
+            return GuildInfo(guildId: gid, guildName: name, channels: chInfos)
+        }
+    }
+
     // MARK: - WebSocket I/O
 
     /// Simple JSON-RPC response value for Discord bridge operations.
@@ -285,6 +343,9 @@ final class DiscordService: ObservableObject {
 
         // RPC response (has "id" and "result"/"error")
         if let id = json["id"] as? Int {
+            // Store raw response for complex queries (fetchGuilds)
+            pendingRawResponses[id] = json
+
             var result = RPCResult()
             if let resultObj = json["result"] as? [String: Any] {
                 result.ok = resultObj["ok"] as? Bool ?? true

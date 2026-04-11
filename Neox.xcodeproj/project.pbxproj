@@ -47,6 +47,7 @@
 		BCA44133C0A708A5823FEFB1 /* WeChatRoutingAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1027B9A1E2D539C2F59FB47B /* WeChatRoutingAgent.swift */; };
 		BD16622516E56FFB6CA685DF /* TaskQueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97DB23F6143C0A626A2709C0 /* TaskQueueView.swift */; };
 		BF78FC93BD0B659A80ED1597 /* LazyAttachmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ADB57427AF2CE79D505496C /* LazyAttachmentTests.swift */; };
+		CAEB0A73C5CEC849D7453DD3 /* DiscordChannelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A949542C3D651ADF20C28BB4 /* DiscordChannelView.swift */; };
 		CE9345C44FA9962802D710FC /* commandDictionary.plist in Resources */ = {isa = PBXBuildFile; fileRef = 08C583158CC04826F71F633F /* commandDictionary.plist */; };
 		D000C16057BA0DA28C173EF2 /* WeChatAnswerConstructor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A29DB933943279B558184D2A /* WeChatAnswerConstructor.swift */; };
 		D67818723B954E1882521830 /* WeChatStatusIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16940B046D021DBFE959F0F0 /* WeChatStatusIndicator.swift */; };
@@ -95,6 +96,7 @@
 		9F915465E2183A7BA38D31DA /* ProjectBadgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectBadgeView.swift; sourceTree = "<group>"; };
 		A173604E9E40B9BBA6D2C1C7 /* WeChatProjectStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatProjectStatusView.swift; sourceTree = "<group>"; };
 		A29DB933943279B558184D2A /* WeChatAnswerConstructor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatAnswerConstructor.swift; sourceTree = "<group>"; };
+		A949542C3D651ADF20C28BB4 /* DiscordChannelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscordChannelView.swift; sourceTree = "<group>"; };
 		AF917B10E40AEAC4AC63DD9D /* WeChatApprovalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatApprovalView.swift; sourceTree = "<group>"; };
 		B0FB09E85C77555917883E6A /* WeChatQRLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatQRLoginView.swift; sourceTree = "<group>"; };
 		B37B4665FD704C52F25C6474 /* ContactSelectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactSelectorView.swift; sourceTree = "<group>"; };
@@ -276,6 +278,7 @@
 			isa = PBXGroup;
 			children = (
 				B37B4665FD704C52F25C6474 /* ContactSelectorView.swift */,
+				A949542C3D651ADF20C28BB4 /* DiscordChannelView.swift */,
 				9F915465E2183A7BA38D31DA /* ProjectBadgeView.swift */,
 				CB793BE6D0402C8A58D3A152 /* ProjectsView.swift */,
 				F74E68AF045E3A655F2BC039 /* WatcherBadge.swift */,
@@ -453,6 +456,7 @@
 				1AC5F429CB828D70CFA3163E /* ContactSelectorView.swift in Sources */,
 				37ED3AA65F2A53E8859421E6 /* ContentView.swift in Sources */,
 				0BD93D35DA7D9B7BCCBCBA6A /* ContextToolProvider.swift in Sources */,
+				CAEB0A73C5CEC849D7453DD3 /* DiscordChannelView.swift in Sources */,
 				3B68438E7193D7F12FDA7CDE /* DiscordService.swift in Sources */,
 				8F48A0C1FB3A677868DA3DEB /* NeoxApp.swift in Sources */,
 				21170637C43671BBB0DE0711 /* ProjectBadgeView.swift in Sources */,
