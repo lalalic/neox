@@ -96,6 +96,9 @@ final class AgentCoordinator: ObservableObject {
     @Published private(set) var paymentManager: PaymentManager?
     /// Per-project sessions for WeChat bidirectional integration (projectId → ChatViewModel).
     private(set) var projectSessions: [String: ChatViewModel] = [:]
+
+    /// Number of active background watcher sessions.
+    var activeWatcherCount: Int { projectSessions.count }
     /// Thread-safe contact ID refs for guardrails tool handlers.
     private(set) var contactIdRefs: [String: ContactIdRef] = [:]
 

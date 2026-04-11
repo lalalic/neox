@@ -68,6 +68,9 @@ struct ContentView: View {
                                             currentProject: currentProjectDisplay,
                                             action: { showProjects = true }
                                         )
+                                        if coordinator.activeWatcherCount > 0 {
+                                            WatcherBadge(count: coordinator.activeWatcherCount)
+                                        }
                                     }
                                 }
                                 ToolbarItem(placement: .topBarTrailing) {
