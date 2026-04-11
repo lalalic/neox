@@ -151,8 +151,8 @@ struct ContentView: View {
                         }
                     }
                 },
-                weChatService: coordinator.weChatService,
-                discordService: coordinator.discordService,
+                weChatService: coordinator.channelType == "wechat" ? coordinator.weChatService : nil,
+                discordService: coordinator.channelType == "discord" ? coordinator.discordService : nil,
                 onSessionReset: { projectId in
                     coordinator.destroyProjectSession(projectId: projectId)
                 }
@@ -352,22 +352,32 @@ struct RelaySettingsView: View {
                     Toggle("Build Status", isOn: $coordinator.showBuildInChat)
                 }
 
-                // MARK: WeChat Channel
-                Section("WeChat Channel") {
-                    Toggle("Enable WeChat", isOn: Binding(
-                        get: { weChatService.config.enabled },
-                        set: { newValue in
-                            if newValue {
-                                weChatService.enable()
-                            } else {
-                                weChatService.disable()
-                            }
-                        }
-                    ))
+                // MARK: Channel
+                Section("Channel") {
+                    Picker("Type", selection: $coordinator.channelType) {
+                        Text("Discord").tag("discord")
+                        Text("WeChat").tag("wechat")
+                    }
+                    .pickerStyle(.segmented)
                 }
 
-                // MARK: Discord Channel
-                DiscordChannelView(discord: coordinator.discordService)
+                if coordinator.channelType == "wechat" {
+                    Section("WeChat Channel") {
+                        Toggle("Enable WeChat", isOn: Binding(
+                            get: { weChatService.config.enabled },
+                            set: { newValue in
+                                if newValue {
+                                    weChatService.enable()
+                                } else {
+                                    weChatService.disable()
+                                }
+                            }
+                        ))
+                    }
+                } else {
+                    // MARK: Discord Channel
+                    DiscordChannelView(discord: coordinator.discordService)
+                }
 
                 Section("Relay Server") {
                     HStack {

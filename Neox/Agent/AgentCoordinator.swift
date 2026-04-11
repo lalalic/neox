@@ -47,6 +47,7 @@ final class AgentCoordinator: ObservableObject {
     @Published var enableTextInput: Bool = UserDefaults.standard.object(forKey: "enableTextInput") == nil ? true : UserDefaults.standard.bool(forKey: "enableTextInput")
     @Published var enableSpeechInput: Bool = UserDefaults.standard.object(forKey: "enableSpeechInput") == nil ? true : UserDefaults.standard.bool(forKey: "enableSpeechInput")
     @Published var enableAttachmentInput: Bool = UserDefaults.standard.object(forKey: "enableAttachmentInput") == nil ? true : UserDefaults.standard.bool(forKey: "enableAttachmentInput")
+    @Published var channelType: String = UserDefaults.standard.string(forKey: "channelType") ?? "discord"
 
     /// Notification visibility in chat (which notification types show as messages).
     @Published var showUsageInChat: Bool = UserDefaults.standard.object(forKey: "showUsageInChat") == nil ? false : UserDefaults.standard.bool(forKey: "showUsageInChat")
@@ -249,6 +250,7 @@ final class AgentCoordinator: ObservableObject {
         UserDefaults.standard.set(showUsageInChat, forKey: "showUsageInChat")
         UserDefaults.standard.set(showProgressInChat, forKey: "showProgressInChat")
         UserDefaults.standard.set(showBuildInChat, forKey: "showBuildInChat")
+        UserDefaults.standard.set(channelType, forKey: "channelType")
     }
 
     var chatInputModes: InputMode {
