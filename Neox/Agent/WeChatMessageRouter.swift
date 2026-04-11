@@ -164,8 +164,10 @@ final class WeChatMessageRouter {
 
         // Format message with rich context for the agent
         let prompt: String
+        let sourceLabel: String
         if message.isRoom {
             let roomName = message.fromContact?.name ?? contactId
+            sourceLabel = "💬 \(roomName) · \(senderName)"
             var lines = ["[WeChat message in \(roomName)]"]
             lines.append("From: \(senderName) (weight: \(weight))")
             if message.mentionMe {
@@ -179,6 +181,7 @@ final class WeChatMessageRouter {
             lines.append(messageText)
             prompt = lines.joined(separator: "\n")
         } else {
+            sourceLabel = "💬 \(senderName)"
             prompt = "[WeChat message from \(senderName) (weight: \(weight))]\n\(messageText)"
         }
 
@@ -247,11 +250,11 @@ final class WeChatMessageRouter {
                     )
                     if case .ready(let answer) = result {
                         let formatted = "[Synthesized answer from WeChat]\n\(answer)"
-                        _ = await vm.sendToRelay(formatted)
+                        _ = await vm.sendToRelay(formatted, source: sourceLabel)
                     }
                     // .waiting → do nothing, wait for more responses or timeout
                 } else {
-                    _ = await vm.sendToRelay(prompt)
+                    _ = await vm.sendToRelay(prompt, source: sourceLabel)
                 }
 
             case .newInput:
@@ -259,11 +262,11 @@ final class WeChatMessageRouter {
                 let state = vm.chatState
                 switch state {
                 case .waitingForQuestions, .waitingForUser:
-                    _ = await vm.sendToRelay(prompt)
+                    _ = await vm.sendToRelay(prompt, source: sourceLabel)
                 case .working:
-                    await vm.send(prompt, startAgent: false)
+                    await vm.send(prompt, startAgent: false, source: sourceLabel)
                 default:
-                    await vm.send(prompt, startAgent: true)
+                    await vm.send(prompt, startAgent: true, source: sourceLabel)
                 }
             }
         }

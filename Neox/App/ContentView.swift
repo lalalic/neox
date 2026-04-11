@@ -136,13 +136,11 @@ struct ContentView: View {
                     if let chatVM = coordinator.chatViewModel {
                         chatVM.projectScope = project?.name
                         if let pid = project?.id {
-                            chatVM.projectTag = coordinator.buildProjectTag(projectId: pid)
                             if let steer = coordinator.buildProjectSwitchSteer(projectId: pid) {
-                                Task { try? await chatVM.steerWithContext(steer) }
+                                Task { await chatVM.sendHidden(steer) }
                             }
                         } else {
-                            chatVM.projectTag = nil
-                            Task { try? await chatVM.steerWithContext("User left project context. No specific project is selected.") }
+                            Task { await chatVM.sendHidden("User left project context. No specific project is selected.") }
                         }
                     }
                 },
