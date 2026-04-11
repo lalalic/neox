@@ -132,6 +132,11 @@ struct ContentView: View {
                     currentProjectDisplay = project?.displayName
                     if let chatVM = coordinator.chatViewModel {
                         chatVM.projectScope = project?.name
+                        chatVM.projectType = project?.projectType ?? project.flatMap { coordinator.readProjectType(projectId: $0.id) }
+                        // Lightweight steer: tell the agent about the project switch
+                        if let pid = project?.id, let steer = coordinator.buildProjectSwitchSteer(projectId: pid) {
+                            Task { try? await chatVM.steerWithContext(steer) }
+                        }
                     }
                 },
                 onDelete: { project in

@@ -689,6 +689,39 @@ final class AgentCoordinator: ObservableObject {
         return type
     }
 
+    /// Build a lightweight steer message for when user switches to a project.
+    /// The agent should self-discover project details by reading files.
+    func buildProjectSwitchSteer(projectId: String) -> String? {
+        let projectDir = workspaceURL.appendingPathComponent(projectId, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: projectDir.path) else { return nil }
+
+        let projectType = readProjectType(projectId: projectId)
+        var lines: [String] = []
+        lines.append("User switched to project '\(projectId)'\(projectType.map { " (\($0))" } ?? "").")
+
+        // Description from package.json
+        let packageURL = projectDir.appendingPathComponent("package.json")
+        if let data = try? Data(contentsOf: packageURL),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let desc = json["description"] as? String, !desc.isEmpty {
+            lines.append("Description: \(desc)")
+        }
+
+        // Wired WeChat contact info
+        let bindings = weChatService.getBindings(for: projectId)
+        if !bindings.contacts.isEmpty {
+            for contact in bindings.contacts {
+                var info = "Wired to WeChat \(contact.isRoom ? "room" : "contact") '\(contact.name)'"
+                if let w = contact.weight { info += " (weight: \(w))" }
+                if contact.autoReply == true { info += " [auto-reply]" }
+                lines.append(info)
+            }
+        }
+
+        lines.append("Read the project's README.md for full context.")
+        return lines.joined(separator: "\n")
+    }
+
     /// Run a named sub-agent (from .github/agents/) programmatically.
     /// Used by WeChatRoutingAgent and WeChatAnswerConstructor.
     func runSubAgent(name: String, task: String, model: String? = nil) async -> String {
