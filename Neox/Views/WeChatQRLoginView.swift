@@ -10,10 +10,11 @@ struct WeChatQRLoginView: View {
         NavigationStack {
             VStack(spacing: 24) {
                 Spacer()
-                Text("WeChat Login")
-                    .font(.title2.weight(.semibold))
-
+            
                 if let qrURL = weChatService.qrCodeURL {
+                    Text("WeChat Login")
+                        .font(.title2.weight(.semibold))
+
                     if let image = WeChatBridge.generateQRCode(from: qrURL, size: 240) {
                         Image(uiImage: image)
                             .interpolation(.none)

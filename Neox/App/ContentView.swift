@@ -92,7 +92,6 @@ struct ContentView: View {
                                         }
                                         Button(action: { showSettings = true }) {
                                             Image(systemName: "gearshape.fill")
-                                                .foregroundStyle(.secondary)
                                         }
                                     }
                                 }
