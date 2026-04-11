@@ -572,16 +572,20 @@ final class AgentCoordinator: ObservableObject {
 
         let transport = WebSocketTransport(host: relayHost, port: relayPort)
 
-        // Load project context (README.md, context.md) for instructions
+        // Load project context (README.md, context.md, memory.md) for instructions
         let projectDir = workspaceURL.appendingPathComponent(projectId, isDirectory: true)
         var projectContext = "You are a project assistant for '\(projectId)'.\n"
         let readmePath = projectDir.appendingPathComponent("README.md")
         let contextPath = projectDir.appendingPathComponent("context.md")
+        let memoryPath = projectDir.appendingPathComponent("memory.md")
         if let readme = try? String(contentsOf: readmePath, encoding: .utf8), !readme.isEmpty {
             projectContext += "\n## Project README\n\(readme)\n"
         }
         if let ctx = try? String(contentsOf: contextPath, encoding: .utf8), !ctx.isEmpty {
             projectContext += "\n## Context\n\(ctx)\n"
+        }
+        if let memory = try? String(contentsOf: memoryPath, encoding: .utf8), !memory.isEmpty {
+            projectContext += "\n## Project Memory\n\(memory)\n"
         }
 
         let projectType = readProjectType(projectId: projectId)
@@ -611,6 +615,7 @@ final class AgentCoordinator: ObservableObject {
             projectContext += "\nYou are a project assistant. Be helpful and concise.\n"
         }
         projectContext += "\nKeep responses under 3 sentences unless the question requires a detailed answer. Match the language of the sender."
+        projectContext += "\nUse memory tools with path '\(projectId)/memory.md' to remember project-specific info (contacts, preferences, key facts). Read it at session start."
         projectContext += "\nIMPORTANT: This is a headless session with no interactive user. Do NOT call ask_questions. Just provide your best response directly."
 
         var tools = buildTools()
