@@ -49,8 +49,24 @@ final class WeChatMessageRouter {
     func route(_ message: WeChatMessage) {
         guard let weChatService, let coordinator else { return }
 
-        // v1: text only
-        guard message.isText else { return }
+        // Supported message types: text (1), voice (34), image (3)
+        let messageText: String
+        switch message.msgType {
+        case 1:
+            messageText = message.content
+        case 34:
+            // Voice message — note for agent (transcription TBD)
+            let duration = message.voiceLength.map { "\($0)s" } ?? "unknown duration"
+            messageText = "[Voice message (\(duration))]"
+        case 3:
+            messageText = "[Image received]"
+        case 49:
+            // App message (file, link, mini-program)
+            messageText = "[Shared link or file]"
+        default:
+            // Unsupported type — skip silently
+            return
+        }
 
         // Look up which project this contact is bound to
         let contactId = message.routingContactId
@@ -69,7 +85,6 @@ final class WeChatMessageRouter {
             senderName = message.fromContact?.name ?? senderId
         }
 
-        let messageText = message.content
         let weight = weChatService.senderWeight(
             contactId: contactId,
             senderId: message.isRoom ? senderId : nil,
