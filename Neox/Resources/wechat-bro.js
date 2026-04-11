@@ -284,10 +284,8 @@
           || (contact.RemarkPYQuanPin || contact.PYQuanPin || contact.UserName)
         return {
           id: stableId,
-          name: contact.RemarkName || contact.NickName,
+          name: cleanName(contact.RemarkName) || cleanName(contact.NickName),
           UserName: contact.UserName,
-          NickName: contact.NickName,
-          RemarkName: contact.RemarkName,
           HeadImgUrl: contact.HeadImgUrl,
           Sex: contact.Sex,
           isRoomContact: !!(contact.UserName && contact.UserName.startsWith('@@')),
@@ -310,10 +308,8 @@
             || (c.RemarkPYQuanPin || c.PYQuanPin || c.UserName)
           return {
             id: stableId,
-            name: c.RemarkName || c.NickName || c.DisplayName || c.UserName || '(unknown)',
+            name: cleanName(c.RemarkName) || cleanName(c.NickName),
             UserName: c.UserName,
-            NickName: c.NickName,
-            RemarkName: c.RemarkName,
             HeadImgUrl: c.HeadImgUrl,
             isRoomContact: isRoom,
             isRoomOwner: isRoom && c.ChatRoomOwner === selfUserName,
@@ -522,6 +518,89 @@
       var content = (typeof msgOrContent === 'object' && msgOrContent !== null)
         ? (msgOrContent.Content || msgOrContent.content || '') : (msgOrContent || '')
       return content.indexOf(AI_WATERMARK) !== -1
+    },
+
+    /**
+     * Simulate an incoming message for testing.
+     * Builds processed message data and emits directly (bypasses Angular events).
+     * @param {string} from - Contact/room id or UserName
+     * @param {string} content - Message text (clean, without sender prefix)
+     * @param {string} [sender] - Actual sender id/UserName (for room messages)
+     * @param {number} [msgType=1] - WeChat MsgType (1=text, 3=image, etc.)
+     * @returns {object} The processed message data
+     */
+    simulateMessage: function (from, content, sender, msgType) {
+      var fromUN = WechatyBro._resolveUserName(from) || from
+      var senderUN = sender ? (WechatyBro._resolveUserName(sender) || sender) : null
+      var isRoom = fromUN && fromUN.startsWith('@@')
+
+      var data = {
+        FromUserName: fromUN,
+        ToUserName: getUserName(),
+        Content: content,
+        MsgType: msgType || 1,
+        MsgId: 'sim_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+        from: WechatyBro.getContact(fromUN),
+        to: WechatyBro.getContact(getUserName()),
+      }
+
+      // Room messages: resolve sender and parse @mentions
+      if (isRoom && senderUN) {
+        data.sender = WechatyBro.getContact(senderUN)
+      }
+
+      if (isRoom && content) {
+        var mentionRe = /@([^\u2005@]+)\u2005/g
+        var mentionMatch
+        var mentionNames = []
+        while ((mentionMatch = mentionRe.exec(content)) !== null) {
+          mentionNames.push(mentionMatch[1])
+        }
+        if (mentionNames.length) {
+          try {
+            var injector = angular.element(document).injector()
+            var contactFactory = injector.get('contactFactory')
+            var room = contactFactory.getContact(fromUN)
+            var selfUserName = getUserName()
+            var selfNickName = ''
+            try {
+              var selfContact = contactFactory.getContact(selfUserName)
+              selfNickName = cleanName(selfContact && selfContact.NickName) || ''
+            } catch (e) {}
+            data.mentions = []
+            data.mentionMe = false
+            var members = (room && room.MemberList) || []
+            for (var mi = 0; mi < mentionNames.length; mi++) {
+              var mName = mentionNames[mi]
+              if (selfNickName && mName === selfNickName) {
+                data.mentionMe = true
+                data.mentions.push(WechatyBro._resolveId(selfUserName) || selfUserName)
+                continue
+              }
+              var found = false
+              for (var ri = 0; ri < members.length; ri++) {
+                var dn = cleanName(members[ri].DisplayName)
+                var nn = cleanName(members[ri].NickName)
+                if ((dn && dn === mName) || (nn && nn === mName)) {
+                  var mUN = members[ri].UserName
+                  if (mUN === selfUserName) data.mentionMe = true
+                  data.mentions.push(WechatyBro._resolveId(mUN) || mUN)
+                  found = true
+                  break
+                }
+              }
+            }
+          } catch (e) {
+            log('simulateMessage mention parse error:', e.message)
+          }
+        }
+      }
+
+      // Emit directly (bypass Angular — no risk of interfering with WeChat)
+      var typeName = MSG_TYPE_NAMES[data.MsgType] || 'unknown'
+      WechatyBro.emit('message', data)
+      WechatyBro.emit('message:' + typeName, data)
+      return data
     },
 
     send: function (to, content, watermark) {
@@ -1372,6 +1451,71 @@
     var off = rootScope.$on('message:add:success', function (event, data) {
       data.from = WechatyBro.getContact(data.FromUserName)
       data.to = WechatyBro.getContact(data.ToUserName)
+
+      // Room messages: FromUserName is the room, actual sender is in Content prefix
+      if (data.FromUserName && data.FromUserName.startsWith('@@') && data.Content) {
+        var match = data.Content.match(/^(@[a-f0-9]+):\n([\s\S]*)/)
+        if (match) {
+          data.sender = WechatyBro.getContact(match[1])
+          data.Content = match[2]
+        }
+
+        // Parse @mentions from Content: @Name\u2005
+        var mentionRe = /@([^\u2005@]+)\u2005/g
+        var mentionMatch
+        var mentions = []
+        while ((mentionMatch = mentionRe.exec(data.Content)) !== null) {
+          mentions.push(mentionMatch[1])
+        }
+        if (mentions.length) {
+          try {
+            var injector = angular.element(document).injector()
+            var contactFactory = injector.get('contactFactory')
+            var room = contactFactory.getContact(data.FromUserName)
+            var selfUserName = getUserName()
+            var selfNickName = ''
+            try {
+              var selfContact = contactFactory.getContact(selfUserName)
+              selfNickName = cleanName(selfContact && selfContact.NickName) || ''
+            } catch (e) {}
+            data.mentions = []
+            data.mentionMe = false
+            var members = (room && room.MemberList) || []
+            for (var mi = 0; mi < mentions.length; mi++) {
+              var mName = mentions[mi]
+              // Check self first
+              if (selfNickName && mName === selfNickName) {
+                data.mentionMe = true
+                data.mentions.push(WechatyBro._resolveId(selfUserName) || selfUserName)
+                continue
+              }
+              // Search room members by DisplayName or NickName
+              var found = false
+              for (var ri = 0; ri < members.length; ri++) {
+                var dn = cleanName(members[ri].DisplayName)
+                var nn = cleanName(members[ri].NickName)
+                if ((dn && dn === mName) || (nn && nn === mName)) {
+                  var mUN = members[ri].UserName
+                  if (mUN === selfUserName) data.mentionMe = true
+                  data.mentions.push(WechatyBro._resolveId(mUN) || mUN)
+                  found = true
+                  break
+                }
+              }
+              if (!found) {
+                // Fallback: try full contact lookup by NickName
+                var full = contactFactory.getContact(mName)
+                if (full && full.UserName) {
+                  if (full.UserName === selfUserName) data.mentionMe = true
+                  data.mentions.push(WechatyBro._resolveId(full.UserName) || full.UserName)
+                }
+              }
+            }
+          } catch (e) {
+            log('mention parse error:', e.message)
+          }
+        }
+      }
 
       if (data.MsgType === 34 && data.MsgId) {
         WechatyBro.downloadVoice(data.MsgId, function (base64Audio) {

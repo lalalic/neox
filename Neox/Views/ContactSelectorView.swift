@@ -175,13 +175,7 @@ protocol ContactDisplayable {
 }
 
 extension WeChatContact: ContactDisplayable {
-    var displayName: String {
-        let candidates = [remarkName, nickName]
-        for c in candidates {
-            if let c, !c.isEmpty { return c }
-        }
-        return name.isEmpty ? userName : name
-    }
+    var displayName: String { name }
     var avatarURL: URL? {
         guard let url = headImgUrl, !url.isEmpty else { return nil }
         if url.hasPrefix("http") { return URL(string: url) }
