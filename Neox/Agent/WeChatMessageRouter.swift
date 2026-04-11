@@ -49,28 +49,46 @@ final class WeChatMessageRouter {
     func route(_ message: WeChatMessage) {
         guard let weChatService, let coordinator else { return }
 
-        // Supported message types: text (1), voice (34), image (3)
+        // Look up which project this contact is bound to
+        let contactId = message.routingContactId
+        guard let projectId = weChatService.projectForContact(contactId) else {
+            return
+        }
+
+        // Process message based on type
         let messageText: String
+        var savedMediaPath: String? = nil
+
         switch message.msgType {
         case 1:
             messageText = message.content
         case 34:
-            // Voice message — note for agent (transcription TBD)
+            // Voice message
             let duration = message.voiceLength.map { "\($0)s" } ?? "unknown duration"
-            messageText = "[Voice message (\(duration))]"
+            if let base64 = message.voiceBase64, !base64.isEmpty {
+                let path = saveMedia(base64: base64, ext: "mp3", projectId: projectId)
+                savedMediaPath = path
+                messageText = "[Voice message (\(duration)) — saved to \(path ?? "failed")]"
+            } else {
+                messageText = "[Voice message (\(duration))]"
+            }
         case 3:
-            messageText = "[Image received]"
+            // Image message — save and tell agent to view it
+            if let base64 = message.imageBase64, !base64.isEmpty {
+                let path = saveMedia(base64: base64, ext: "jpg", projectId: projectId)
+                savedMediaPath = path
+                if let path {
+                    messageText = "[Image received — use view tool with path '\(path)' to see it]"
+                } else {
+                    messageText = "[Image received but failed to save]"
+                }
+            } else {
+                messageText = "[Image received but not downloaded]"
+            }
         case 49:
             // App message (file, link, mini-program)
-            messageText = "[Shared link or file]"
+            messageText = formatAppMessage(message)
         default:
-            // Unsupported type — skip silently
-            return
-        }
-
-        // Look up which project this contact is bound to
-        let contactId = message.routingContactId
-        guard let projectId = weChatService.projectForContact(contactId) else {
             return
         }
 
@@ -332,6 +350,67 @@ final class WeChatMessageRouter {
     func recentHistory(for projectId: String, limit: Int = 20) -> [ChatLogEntry] {
         let history = conversationHistory[projectId] ?? []
         return Array(history.suffix(limit))
+    }
+
+    // MARK: - Media Helpers
+
+    /// Save base64-encoded media data to the project's media directory.
+    /// Returns the workspace-relative path (e.g. "projectId/media/img-1234.jpg").
+    private func saveMedia(base64: String, ext: String, projectId: String) -> String? {
+        guard let coordinator else { return nil }
+        let fm = FileManager.default
+        let mediaDir = coordinator.workspaceRootURL
+            .appendingPathComponent(projectId, isDirectory: true)
+            .appendingPathComponent("media", isDirectory: true)
+        try? fm.createDirectory(at: mediaDir, withIntermediateDirectories: true)
+
+        let timestamp = Int(Date().timeIntervalSince1970)
+        let filename = "\(ext)-\(timestamp).\(ext)"
+        let fileURL = mediaDir.appendingPathComponent(filename)
+
+        guard let data = Data(base64Encoded: base64) else {
+            NSLog("[WeChatRouter] Failed to decode base64 media for project '%@'", projectId)
+            return nil
+        }
+
+        do {
+            try data.write(to: fileURL)
+            let relativePath = "\(projectId)/media/\(filename)"
+            NSLog("[WeChatRouter] Saved media: %@ (%d bytes)", relativePath, data.count)
+            return relativePath
+        } catch {
+            NSLog("[WeChatRouter] Failed to save media: %@", error.localizedDescription)
+            return nil
+        }
+    }
+
+    /// Format an app message (msgType 49) with extracted title/desc/url.
+    private func formatAppMessage(_ message: WeChatMessage) -> String {
+        var parts: [String] = []
+
+        if let title = message.appTitle, !title.isEmpty {
+            parts.append("Title: \(title)")
+        }
+        if let desc = message.appDesc, !desc.isEmpty {
+            parts.append("Description: \(desc)")
+        }
+        if let url = message.appUrl, !url.isEmpty {
+            parts.append("URL: \(url)")
+        }
+
+        if parts.isEmpty {
+            return "[Shared link or file]"
+        }
+
+        let appTypeLabel: String
+        switch message.appType {
+        case 5: appTypeLabel = "Link"
+        case 6: appTypeLabel = "File"
+        case 33, 36: appTypeLabel = "Mini Program"
+        default: appTypeLabel = "Shared content"
+        }
+
+        return "[\(appTypeLabel)]\n\(parts.joined(separator: "\n"))"
     }
 }
 

@@ -355,6 +355,39 @@
       }
     },
 
+    /** Download an image message as base64.
+     *  Uses the webwxgetmsgimg endpoint with type=big for full resolution.
+     *  @param {string} msgId - Message ID
+     *  @param {function} callback - (base64String|null) */
+    downloadImage: function (msgId, callback) {
+      try {
+        var xhr = new XMLHttpRequest()
+        xhr.open('GET', '/cgi-bin/mmwebwx-bin/webwxgetmsgimg?MsgID=' + msgId + '&skey=' + encodeURIComponent(getSkey()) + '&type=big', true)
+        xhr.responseType = 'arraybuffer'
+        xhr.onload = function () {
+          if (xhr.status === 200) {
+            var bytes = new Uint8Array(xhr.response)
+            var binary = ''
+            for (var i = 0; i < bytes.byteLength; i++) {
+              binary += String.fromCharCode(bytes[i])
+            }
+            callback(btoa(binary))
+          } else {
+            log('downloadImage failed: HTTP ' + xhr.status)
+            callback(null)
+          }
+        }
+        xhr.onerror = function () {
+          log('downloadImage error')
+          callback(null)
+        }
+        xhr.send()
+      } catch (e) {
+        log('downloadImage exception:', e.message)
+        callback(null)
+      }
+    },
+
     /** Get contact thumbnail image as base64. Accepts pyId or UserName. */
     getContactImage: function (id, callback) {
       try {
@@ -1478,6 +1511,28 @@
           data.voiceLength = data.VoiceLength || 0
           emitTypedMessage(data)
         })
+      } else if (data.MsgType === 3 && data.MsgId) {
+        WechatyBro.downloadImage(data.MsgId, function (base64Img) {
+          data.imageBase64 = base64Img
+          emitTypedMessage(data)
+        })
+      } else if (data.MsgType === 49) {
+        // Extract file/link info from app message XML
+        try {
+          var xml = data.Content || ''
+          var titleMatch = xml.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/)
+          var descMatch = xml.match(/<des><!\[CDATA\[(.*?)\]\]><\/des>/)
+          var urlMatch = xml.match(/<url><!\[CDATA\[(.*?)\]\]><\/url>/)
+          var typeMatch = xml.match(/<type>(\d+)<\/type>/)
+          var fnMatch = xml.match(/<appattach>[\s\S]*?<cdnattachurl><!\[CDATA\[(.*?)\]\]><\/cdnattachurl>/)
+          data.appTitle = titleMatch ? titleMatch[1] : ''
+          data.appDesc = descMatch ? descMatch[1] : ''
+          data.appUrl = urlMatch ? urlMatch[1] : ''
+          data.appType = typeMatch ? parseInt(typeMatch[1]) : 0
+        } catch (e) {
+          log('app msg parse error:', e.message)
+        }
+        emitTypedMessage(data)
       } else {
         emitTypedMessage(data)
       }
