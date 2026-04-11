@@ -41,6 +41,13 @@ struct DiscordChannelView: View {
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .keyboardType(.numberPad)
+                .onSubmit {
+                    if !discord.guildId.isEmpty && !discord.isConnected {
+                        let parsed = coordinator.parseLocalRelayURL()
+                        discord.updateRelay(host: parsed.host, port: parsed.port)
+                        Task { await discord.connect() }
+                    }
+                }
 
             if !discord.registeredChannels.isEmpty {
                 HStack {
@@ -61,6 +68,7 @@ struct DiscordChannelView: View {
 struct DiscordWiringSheet: View {
     @ObservedObject var discord: DiscordService
     let projectId: String
+    @EnvironmentObject var coordinator: AgentCoordinator
     @Environment(\.dismiss) private var dismiss
 
     @State private var channels: [DiscordService.ChannelInfo] = []
@@ -179,6 +187,12 @@ struct DiscordWiringSheet: View {
                 }
             }
             .task {
+                // Auto-connect if not connected and server ID is set
+                if !discord.isConnected && !discord.guildId.isEmpty {
+                    let parsed = coordinator.parseLocalRelayURL()
+                    discord.updateRelay(host: parsed.host, port: parsed.port)
+                    await discord.connect()
+                }
                 if discord.isConnected && !discord.guildId.isEmpty {
                     await loadChannels()
                 }
