@@ -40,15 +40,14 @@ struct DiscordChannelView: View {
 // MARK: - Discord Wiring Sheet (per-project)
 
 /// Sheet for wiring a project to a Discord channel.
-/// Shows guild/channel picker from the bot's connected servers.
+/// User enters server ID and channel ID manually (from Discord Developer Mode).
 struct DiscordWiringSheet: View {
     @ObservedObject var discord: DiscordService
     let projectId: String
     @Environment(\.dismiss) private var dismiss
 
-    @State private var guilds: [DiscordService.GuildInfo] = []
-    @State private var isLoading = true
-    @State private var selectedChannel: DiscordService.ChannelInfo?
+    @State private var serverId = ""
+    @State private var channelId = ""
     @State private var isSaving = false
     @State private var errorText: String?
 
@@ -59,7 +58,7 @@ struct DiscordWiringSheet: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            Form {
                 // Current binding info
                 if let binding = currentBinding {
                     Section("Current Channel") {
@@ -86,58 +85,30 @@ struct DiscordWiringSheet: View {
                     }
                 }
 
-                // Channel picker
                 if !discord.isConnected {
-                    Section("Select Channel") {
+                    Section {
                         Label("Discord is not connected", systemImage: "wifi.slash")
                             .foregroundStyle(.secondary)
                         Text("Enable Discord in Settings first.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                } else if isLoading {
-                    Section("Select Channel") {
-                        ProgressView("Loading channels…")
-                    }
-                } else if guilds.isEmpty {
-                    Section("Select Channel") {
-                        Text("No guilds available")
-                            .foregroundStyle(.secondary)
-                    }
                 } else {
-                    ForEach(guilds) { guild in
-                        Section(guild.guildName) {
-                            let textChannels = guild.channels.filter { $0.type == 0 }
-                            ForEach(textChannels) { channel in
-                                let isCurrent = currentBinding?.channelId == channel.channelId
-                                let isBoundToOther = !isCurrent && discord.registeredChannels.contains { $0.channelId == channel.channelId }
-                                Button {
-                                    if selectedChannel?.channelId == channel.channelId {
-                                        selectedChannel = nil
-                                    } else {
-                                        selectedChannel = channel
-                                    }
-                                } label: {
-                                    HStack {
-                                        Text("#\(channel.channelName)")
-                                        Spacer()
-                                        if isCurrent {
-                                            Text("current")
-                                                .font(.caption)
-                                                .foregroundStyle(.indigo)
-                                        } else if isBoundToOther {
-                                            Text("other project")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        } else if selectedChannel?.channelId == channel.channelId {
-                                            Image(systemName: "checkmark")
-                                                .foregroundStyle(.blue)
-                                        }
-                                    }
-                                }
-                                .disabled(isCurrent || isBoundToOther)
-                            }
-                        }
+                    Section("Channel") {
+                        TextField("Server ID", text: $serverId)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.numberPad)
+                        TextField("Channel ID", text: $channelId)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.numberPad)
+                    }
+
+                    Section {
+                        Text("In Discord, enable Developer Mode (Settings → Advanced), then right-click a server or channel → Copy ID.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -159,30 +130,22 @@ struct DiscordWiringSheet: View {
                     Button("Wire") {
                         Task { await wireChannel() }
                     }
-                    .disabled(selectedChannel == nil || isSaving)
+                    .disabled(channelId.isEmpty || isSaving || !discord.isConnected)
                     .bold()
                 }
             }
-            .task {
-                if discord.isConnected {
-                    await loadGuilds()
+            .onAppear {
+                // Pre-fill from existing binding
+                if let binding = currentBinding {
+                    channelId = binding.channelId
                 }
             }
-        }
-    }
-
-    private func loadGuilds() async {
-        isLoading = true
-        defer { isLoading = false }
-        do {
-            guilds = try await discord.fetchGuilds()
-        } catch {
-            errorText = error.localizedDescription
         }
     }
 
     private func wireChannel() async {
-        guard let channel = selectedChannel else { return }
+        let cid = channelId.trimmingCharacters(in: .whitespaces)
+        guard !cid.isEmpty else { return }
         isSaving = true
         defer { isSaving = false }
 
@@ -192,7 +155,7 @@ struct DiscordWiringSheet: View {
         }
 
         do {
-            _ = try await discord.registerChannel(channelId: channel.channelId, projectId: projectId)
+            _ = try await discord.registerChannel(channelId: cid, projectId: projectId)
             dismiss()
         } catch {
             errorText = error.localizedDescription
