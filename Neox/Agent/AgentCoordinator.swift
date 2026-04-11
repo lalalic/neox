@@ -689,15 +689,22 @@ final class AgentCoordinator: ObservableObject {
         return type
     }
 
+    /// Build project tag for prompt prefix (e.g. "wechat room", "wechat individual").
+    /// Returns nil if project has no special channel wiring.
+    func buildProjectTag(projectId: String) -> String? {
+        let bindings = weChatService.getBindings(for: projectId)
+        guard let first = bindings.contacts.first else { return nil }
+        return "wechat \(first.isRoom ? "room" : "individual")"
+    }
+
     /// Build a lightweight steer message for when user switches to a project.
     /// The agent should self-discover project details by reading files.
     func buildProjectSwitchSteer(projectId: String) -> String? {
         let projectDir = workspaceURL.appendingPathComponent(projectId, isDirectory: true)
         guard FileManager.default.fileExists(atPath: projectDir.path) else { return nil }
 
-        let projectType = readProjectType(projectId: projectId)
         var lines: [String] = []
-        lines.append("User switched to project '\(projectId)'\(projectType.map { " (\($0))" } ?? "").")
+        lines.append("User switched to project '\(projectId)'.")
 
         // Description from package.json
         let packageURL = projectDir.appendingPathComponent("package.json")

@@ -107,37 +107,39 @@ Tear down and recreate ChatViewModel with project-specific system instructions.
 
 ## Chosen Approach: Lightweight Hybrid
 
-**Prefix** `[Project: xyz | project-assistant]` on every message + **lightweight steer** on scope change.
+**Prefix** on every message + **lightweight steer** on scope change.
 
-The steer message is NOT a heavy context dump. It's a nudge:
+There's no "projectType" concept — projects are just projects. Only wechat-wired projects get a channel tag.
+
+### Prefix Format
+
 ```
-User switched to project 'my-app' (project-assistant).
+[project:my-app] message                         # regular project
+[project:my-app][wechat room] message             # wired to wechat room
+[project:my-app][wechat individual] message       # wired to wechat contact
+```
+
+### Steer Message (on project switch)
+
+Not a heavy context dump. A nudge for the agent to self-discover:
+```
+User switched to project 'my-app'.
 Description: A todo app built with React.
 Wired to WeChat room 'devteam' (weight: 80).
 Read the project's README.md for full context.
 ```
 
-The agent should **self-discover** — read README.md, list files, understand the project on its own. We just give it enough to know where to look.
-
-### Steer Message Content
-
-- Project name + type
-- Short description (from package.json/project.json)  
-- Wired WeChat contact info if any (room/individual, weight, autoReply)
-- Hint: "Read README.md for full context"
-
-### Prefix Content
-
-Every message gets: `[Project: xyz | project-assistant]`
+The agent should **read README.md, list files, understand the project on its own**.
 
 ## Data Flow
 
 ```mermaid
 graph TD
     A[User taps project] --> B[Set projectScope]
-    B --> C["Lightweight steer: 'switched to xyz, read README'"]
-    C --> D[Agent reads README.md on its own]
-    B --> E["Every message: [Project: xyz | project-assistant] ..."]
+    B --> C["Set projectTag: 'wechat room' or nil"]
+    C --> D["Lightweight steer: 'switched to xyz, read README'"]
+    D --> E[Agent reads README.md on its own]
+    B --> F["Every message: [project:xyz][wechat room] ..."]
 ```
 
 ## Implementation Notes
