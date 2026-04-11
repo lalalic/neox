@@ -58,19 +58,18 @@ final class WeChatMessageRouter {
             return
         }
 
-        // Get sender info
+        // Get sender info — use JS-parsed senderContact for rooms
         let senderName: String
         let senderId: String
         if message.isRoom {
-            senderId = message.roomSenderUserName ?? "unknown"
-            senderName = weChatService.contacts
-                .first(where: { $0.userName == senderId })?.name ?? senderId
+            senderId = message.senderContact?.userName ?? "unknown"
+            senderName = message.senderContact?.name ?? senderId
         } else {
             senderId = message.fromUserName
             senderName = message.fromContact?.name ?? senderId
         }
 
-        let cleanText = message.cleanContent
+        let messageText = message.content
         let weight = weChatService.senderWeight(
             contactId: contactId,
             senderId: message.isRoom ? senderId : nil,
@@ -85,7 +84,7 @@ final class WeChatMessageRouter {
             timestamp: Date(),
             sender: senderName,
             senderId: senderId,
-            text: cleanText,
+            text: messageText,
             weight: weight,
             projectId: projectId,
             contactId: contactId,
@@ -95,20 +94,36 @@ final class WeChatMessageRouter {
 
         // Track which contact triggered this for response routing
         lastActiveContact[projectId] = contactId
-        lastIncomingText[projectId] = cleanText
+        lastIncomingText[projectId] = messageText
         // Update thread-safe ref for guardrails tool handler
         coordinator.contactIdRefs[projectId]?.value = contactId
 
-        NSLog("[WeChatRouter] %@ (w:%d) → project '%@': %@", senderName, weight, projectId, String(cleanText.prefix(80)))
+        NSLog("[WeChatRouter] %@ (w:%d) → project '%@': %@", senderName, weight, projectId, String(messageText.prefix(80)))
 
         // Get or create per-project session, then forward the message
         let vm = coordinator.createProjectSession(projectId: projectId) { [weak self] response in
             await self?.handleProjectResponse(projectId: projectId, response: response)
         }
 
-        // Format message with sender attribution
-        let roomLabel = message.isRoom ? " in \(message.fromContact?.name ?? contactId)" : ""
-        let prompt = "[WeChat message from \(senderName) (weight: \(weight))\(roomLabel)]\n\(cleanText)"
+        // Format message with rich context for the agent
+        let prompt: String
+        if message.isRoom {
+            let roomName = message.fromContact?.name ?? contactId
+            var lines = ["[WeChat message in \(roomName)]"]
+            lines.append("From: \(senderName) (weight: \(weight))")
+            if message.mentionMe {
+                lines.append("@mentioned you: yes")
+            }
+            if !message.mentions.isEmpty {
+                let mentionedNames = message.mentions.joined(separator: ", ")
+                lines.append("Mentioned: \(mentionedNames)")
+            }
+            lines.append("---")
+            lines.append(messageText)
+            prompt = lines.joined(separator: "\n")
+        } else {
+            prompt = "[WeChat message from \(senderName) (weight: \(weight))]\n\(messageText)"
+        }
 
         let history = recentHistory(for: projectId)
         let contactName = message.fromContact?.name ?? contactId
@@ -140,7 +155,7 @@ final class WeChatMessageRouter {
 
             // Classify the message using routing sub-agent
             let action = await routingAgent?.classify(
-                message: cleanText,
+                message: messageText,
                 sender: senderName,
                 weight: weight,
                 contactName: contactName,
@@ -170,7 +185,7 @@ final class WeChatMessageRouter {
                         projectId: projectId,
                         sender: senderName,
                         weight: weight,
-                        text: cleanText,
+                        text: messageText,
                         isRoom: true
                     )
                     if case .ready(let answer) = result {
