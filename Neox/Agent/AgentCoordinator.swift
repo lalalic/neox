@@ -71,6 +71,8 @@ final class AgentCoordinator: ObservableObject {
     
     /// WeChat service for forwarding messages.
     let weChatService: WeChatService
+    /// Discord service for channel message forwarding.
+    let discordService: DiscordService
     /// Routes incoming WeChat messages to project sessions.
     private(set) var messageRouter: WeChatMessageRouter?
     private let profileLoader: AgentProfileLoader
@@ -128,12 +130,19 @@ final class AgentCoordinator: ObservableObject {
         let memProvider = self.memoryToolProvider
         let fileProvider = self.fileToolProvider
         let savedPort = UserDefaults.standard.integer(forKey: "relayPort")
+        let savedHost = UserDefaults.standard.string(forKey: "relayHost") ?? "relay.ai.qili2.com"
+        let resolvedPort: UInt16 = savedPort > 0 ? UInt16(savedPort) : 443
+        self.discordService = DiscordService(
+            workspaceURL: resolvedWorkspace,
+            relayHost: savedHost,
+            relayPort: resolvedPort
+        )
         let terminalProvider = TerminalToolProvider(workspaceURL: resolvedWorkspace)
         self.terminalToolProvider = terminalProvider
         self.subAgentToolProvider = SubAgentToolProvider(
             workspaceURL: resolvedWorkspace,
-            relayHost: UserDefaults.standard.string(forKey: "relayHost") ?? "relay.ai.qili2.com",
-            relayPort: savedPort > 0 ? UInt16(savedPort) : 443,
+            relayHost: savedHost,
+            relayPort: resolvedPort,
             userId: UserDefaults.standard.string(forKey: "neoxUserId"),
             toolsBuilder: {
                 var tools: [ToolDefinition] = []
@@ -162,6 +171,15 @@ final class AgentCoordinator: ObservableObject {
         weChatService.onReady = { [weak self] in
             self?.startWiredProjectSessions()
         }
+
+        // Wire Discord message routing
+        discordService.onIncomingMessage = { [weak self] message in
+            self?.handleDiscordMessage(message)
+        }
+        // Connect Discord if there are persisted channel bindings
+        if !discordService.registeredChannels.isEmpty {
+            Task { await discordService.connect() }
+        }
     }
 
     /// Create agent sessions for all projects that have active WeChat bindings.
@@ -175,6 +193,43 @@ final class AgentCoordinator: ObservableObject {
                 await self?.messageRouter?.handleProjectResponse(projectId: projectId, response: response)
             }
             NSLog("[SessionLifecycle] Auto-created session for wired project '%@'", projectId)
+        }
+    }
+
+    /// Handle an incoming Discord message — route to the bound project session.
+    private func handleDiscordMessage(_ message: DiscordService.DiscordMessage) {
+        let projectId = message.projectId
+        guard !projectId.isEmpty else {
+            NSLog("[Discord] Message with no projectId — ignoring")
+            return
+        }
+
+        let sourceLabel = "🎮 #\(message.channelName ?? message.channelId) · \(message.senderName)"
+        let prompt = "[Discord message in #\(message.channelName ?? message.channelId)]\nFrom: \(message.senderName)\n---\n\(message.text)"
+
+        let vm = createProjectSession(projectId: projectId) { [weak self] response in
+            await self?.handleDiscordResponse(projectId: projectId, channelId: message.channelId, response: response)
+        }
+
+        Task {
+            let ready = await vm.waitForReady(timeout: 15)
+            guard ready else {
+                NSLog("[Discord] Session failed to connect for project '%@'", projectId)
+                return
+            }
+            await vm.send(prompt, startAgent: true, source: sourceLabel)
+        }
+    }
+
+    /// Handle an agent response from a Discord-bound project session — send back to Discord channel.
+    private func handleDiscordResponse(projectId: String, channelId: String, response: String) async {
+        let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            try await discordService.sendMessage(channelId: channelId, text: trimmed)
+            NSLog("[Discord] Sent reply to #%@ (%d chars)", channelId, trimmed.count)
+        } catch {
+            NSLog("[Discord] Failed to send reply: %@", error.localizedDescription)
         }
     }
     
