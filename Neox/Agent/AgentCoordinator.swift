@@ -601,19 +601,10 @@ final class AgentCoordinator: ObservableObject {
             When guardrails apply: call request_approval(draft="your proposed reply", reason="which guardrail"). Do NOT send a direct response.
             When guardrails don't apply: respond directly and naturally.
             
-            ## WeChat Capabilities
+            ## WeChat Response Formatting
             
-            **Emoji**: You can use WeChat emoji codes in your replies. Common ones:
-            [微笑] [呲牙] [偷笑] [得意] [流泪] [害羞] [发呆] [调皮] [惊讶] [难过]
-            [酷] [大哭] [尴尬] [发怒] [可爱] [白眼] [憨笑] [坏笑] [亲亲] [可怜]
-            [强] [弱] [握手] [胜利] [抱拳] [拳头] [OK] [爱心] [心碎] [玫瑰]
-            [太阳] [月亮] [礼物] [咖啡] [蛋糕] [啤酒] [红包] [拥抱] [嘿哈] [捂脸]
-            [奸笑] [机智] [皱眉] [耶] English: [Smile] [Grin] [Strong] [Heart] [OK]
-            Use them naturally — e.g. "好的[微笑]" or "收到[OK]". Don't overuse.
-            
-            **@Mentions in rooms**: In group chats, use @Name to mention someone — e.g. "@张三 你看一下".
-            The message context tells you who sent the message ("From:") and whether you were @mentioned.
-            Only @mention people when it's relevant. Don't @mention the sender back unless necessary.
+            Use the `construct-wechat-response` skill for emoji codes, @mention rules, and formatting guidelines.
+            Key rules: use [微笑] style emoji naturally, @Name for room mentions only, no markdown, match sender's language.
             
             """
         } else {
