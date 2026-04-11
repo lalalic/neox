@@ -1,20 +1,32 @@
 import SwiftUI
 
 /// Settings section for Discord connection status (global settings).
-/// Shows connection toggle and registered channel count.
+/// Shows connection toggle, server ID, invite link, and bound channel count.
 struct DiscordChannelView: View {
     @ObservedObject var discord: DiscordService
     @EnvironmentObject var coordinator: AgentCoordinator
 
+    private let botClientId = "1489316184578068755"
+
+    private var inviteURL: URL {
+        URL(string: "https://discord.com/oauth2/authorize?client_id=\(botClientId)&permissions=3072&scope=bot")!
+    }
+
     var body: some View {
         Section("Discord") {
+            // Invite bot button
+            Button {
+                UIApplication.shared.open(inviteURL)
+            } label: {
+                Label("Invite Bot to Server", systemImage: "link.badge.plus")
+            }
+
             // Connection toggle
             Toggle("Connected", isOn: Binding(
                 get: { discord.isConnected },
                 set: { newValue in
                     Task {
                         if newValue {
-                            // Always use local relay for Discord (bot runs locally)
                             let parsed = coordinator.parseLocalRelayURL()
                             discord.updateRelay(host: parsed.host, port: parsed.port)
                             await discord.connect()
