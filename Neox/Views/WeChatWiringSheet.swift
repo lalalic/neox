@@ -50,62 +50,6 @@ struct WeChatWiringSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                // Current wiring status
-                if let current = currentWired {
-                    Section("Currently Wired") {
-                        HStack {
-                            Image(systemName: current.isRoom ? "person.3.fill" : "person.circle.fill")
-                                .foregroundStyle(.green)
-                            Text(current.name)
-                            Spacer()
-                            Button("Unwire") {
-                                unwire()
-                            }
-                            .foregroundStyle(.red)
-                            .font(.caption)
-                        }
-                    }
-                }
-
-                // Project type picker
-                Section {
-                    HStack(spacing: 8) {
-                        Button {
-                            projectType = "project-assistant"
-                        } label: {
-                            Text("Project Assistant")
-                                .font(.subheadline)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                                .background(projectType == "project-assistant" ? Color.blue : Color(.systemGray5), in: RoundedRectangle(cornerRadius: 8))
-                                .foregroundStyle(projectType == "project-assistant" ? .white : .primary)
-                        }
-                        .buttonStyle(.plain)
-
-                        Button {
-                            projectType = "wechat-assistant"
-                        } label: {
-                            Text("WeChat Assistant")
-                                .font(.subheadline)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                                .background(projectType == "wechat-assistant" ? Color.blue : Color(.systemGray5), in: RoundedRectangle(cornerRadius: 8))
-                                .foregroundStyle(projectType == "wechat-assistant" ? .white : .primary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    if projectType == "project-assistant" {
-                        Text("Agent responds with 🤖 prefix. Acts as project helper.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("Agent replies as you (no prefix). Seamless auto-reply.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
                 // Contact picker
                 if weChatService.contacts.isEmpty {
                     Section("Select Contact") {
