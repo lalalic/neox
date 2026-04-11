@@ -132,8 +132,8 @@ final class WeChatService: ObservableObject {
     func enable() {
         guard channel == nil else { return }
 
-        // nonPersistent WKWebsiteDataStore means each channel starts
-        // with a clean slate — no stale cookies or cached QR pages.
+        // Default WKWebsiteDataStore persists cookies across sessions
+        // so the user stays logged in after app restart.
         startChannel()
     }
 
