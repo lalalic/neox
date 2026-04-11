@@ -32,6 +32,9 @@ final class DiscordService: ObservableObject {
 
     @Published var isConnected = false
     @Published var registeredChannels: [ChannelBinding] = []
+    @Published var guildId: String {
+        didSet { UserDefaults.standard.set(guildId, forKey: "discord_guild_id") }
+    }
 
     // MARK: - Callbacks
 
@@ -63,6 +66,7 @@ final class DiscordService: ObservableObject {
         self.workspaceURL = workspaceURL
         self.relayHost = relayHost
         self.relayPort = relayPort
+        self.guildId = UserDefaults.standard.string(forKey: "discord_guild_id") ?? ""
         loadBindings()
     }
 
@@ -221,7 +225,14 @@ final class DiscordService: ObservableObject {
 
         rpcId += 1
         let id = rpcId
-        let jsonStr = "{\"jsonrpc\":\"2.0\",\"id\":\(id),\"method\":\"discord.guilds\",\"params\":{}}"
+        // If guildId is set, pass it as filter param
+        let paramsStr: String
+        if !guildId.isEmpty {
+            paramsStr = "{\"guildId\":\"\(guildId)\"}"
+        } else {
+            paramsStr = "{}"
+        }
+        let jsonStr = "{\"jsonrpc\":\"2.0\",\"id\":\(id),\"method\":\"discord.guilds\",\"params\":\(paramsStr)}"
         let jsonData = Data(jsonStr.utf8)
         let header = "Content-Length: \(jsonData.count)\r\n\r\n"
         var framed = Data(header.utf8)
