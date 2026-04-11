@@ -825,4 +825,9 @@ final class AgentCoordinator: ObservableObject {
         let port = UInt16(url.port ?? 8765)
         return (host, port)
     }
+
+    /// Parse localRelayURL into host/port for external use (e.g. DiscordService).
+    func parseLocalRelayURL() -> (host: String, port: UInt16) {
+        parseRelayURL(localRelayURL) ?? ("10.0.0.111", 8765)
+    }
 }

@@ -66,6 +66,12 @@ final class DiscordService: ObservableObject {
         loadBindings()
     }
 
+    /// Update relay connection info (used when relay settings change).
+    func updateRelay(host: String, port: UInt16) {
+        relayHost = host
+        relayPort = port
+    }
+
     // MARK: - Lifecycle
 
     func connect() async {

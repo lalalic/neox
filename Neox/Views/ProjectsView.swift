@@ -79,11 +79,13 @@ struct ProjectsView: View {
     let onSelect: (ProjectItem?) -> Void
     let onDelete: (ProjectItem) -> Void
     var weChatService: WeChatService?
+    var discordService: DiscordService?
     var onSessionReset: ((String) -> Void)?  // projectId → destroy session
 
     @Environment(\.dismiss) private var dismiss
     @State private var projects: [ProjectItem] = []
     @State private var wiringProject: ProjectItem?
+    @State private var discordWiringProject: ProjectItem?
 
     var body: some View {
         NavigationStack {
@@ -114,6 +116,7 @@ struct ProjectsView: View {
                     } else {
                         ForEach(projects) { project in
                             let wiredContact = weChatService?.getBindings(for: project.id).contacts.first
+                            let discordBinding = discordService?.registeredChannels.first { $0.projectId == project.id }
                             HStack(spacing: 0) {
                                 Button {
                                     onSelect(project)
@@ -123,10 +126,24 @@ struct ProjectsView: View {
                                         project: project,
                                         isSelected: currentProject == project.name,
                                         isWired: wiredContact != nil,
-                                        wiredContactName: wiredContact?.name
+                                        wiredContactName: wiredContact?.name,
+                                        discordChannelName: discordBinding?.channelName
                                     )
                                 }
                                 .tint(.primary)
+
+                                if discordService != nil {
+                                    Button {
+                                        discordWiringProject = project
+                                    } label: {
+                                        Image(systemName: "number")
+                                            .font(.body)
+                                            .foregroundStyle(discordBinding != nil ? .indigo : .secondary)
+                                            .frame(width: 44, height: 44)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel(discordBinding != nil ? "Discord Channel" : "Wire to Discord")
+                                }
 
                                 if weChatService != nil {
                                     Button {
@@ -164,6 +181,14 @@ struct ProjectsView: View {
                     )
                 }
             }
+            .sheet(item: $discordWiringProject) { project in
+                if let ds = discordService {
+                    DiscordWiringSheet(
+                        discord: ds,
+                        projectId: project.id
+                    )
+                }
+            }
         }
     }
 }
@@ -175,6 +200,7 @@ private struct ProjectRowView: View {
     let isSelected: Bool
     var isWired: Bool = false
     var wiredContactName: String? = nil
+    var discordChannelName: String? = nil
 
     var body: some View {
         HStack {
@@ -204,6 +230,14 @@ private struct ProjectRowView: View {
                             .padding(.vertical, 2)
                             .background(.green.opacity(0.1), in: Capsule())
                             .foregroundStyle(.green)
+                    }
+                    if let channel = discordChannelName {
+                        Label("#\(channel)", systemImage: "number")
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.indigo.opacity(0.1), in: Capsule())
+                            .foregroundStyle(.indigo)
                     }
                 }
             }

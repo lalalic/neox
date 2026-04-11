@@ -152,6 +152,7 @@ struct ContentView: View {
                     }
                 },
                 weChatService: coordinator.weChatService,
+                discordService: coordinator.discordService,
                 onSessionReset: { projectId in
                     coordinator.destroyProjectSession(projectId: projectId)
                 }
