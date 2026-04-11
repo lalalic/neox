@@ -42,6 +42,7 @@
 		8F48A0C1FB3A677868DA3DEB /* NeoxApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 418207ED5F8A754F490D10E6 /* NeoxApp.swift */; };
 		955542E3A972596BB378BB8A /* wechat-bro.js in Resources */ = {isa = PBXBuildFile; fileRef = 50F08BD9D24BEF277BABA0F8 /* wechat-bro.js */; };
 		9D745037123904342BCD4551 /* Neox.storekit in Resources */ = {isa = PBXBuildFile; fileRef = E1641F6FF4066ACD4F03721A /* Neox.storekit */; };
+		9F9F13DE3EFE747DFC60E6EE /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EC77D95C63D7C98C483027A2 /* Assets.xcassets */; };
 		A613BC2C32B79761A1AC8B24 /* WeChatService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F56D1803937F2A6B3E815060 /* WeChatService.swift */; };
 		B9C4D42D30A315C5AE7040F3 /* PlanSubAgentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A6B5B3BC17B5ADA9013CC0F /* PlanSubAgentTests.swift */; };
 		BCA44133C0A708A5823FEFB1 /* WeChatRoutingAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1027B9A1E2D539C2F59FB47B /* WeChatRoutingAgent.swift */; };
@@ -111,6 +112,7 @@
 		E1641F6FF4066ACD4F03721A /* Neox.storekit */ = {isa = PBXFileReference; path = Neox.storekit; sourceTree = "<group>"; };
 		E5207428BC5E6750ACC5A9FC /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		E66E23AA153269F23D4AB426 /* ChatViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModelTests.swift; sourceTree = "<group>"; };
+		EC77D95C63D7C98C483027A2 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F2D20EA5A5233879BE07C221 /* SpeechTranscriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechTranscriber.swift; sourceTree = "<group>"; };
 		F56D1803937F2A6B3E815060 /* WeChatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeChatService.swift; sourceTree = "<group>"; };
 		F74E68AF045E3A655F2BC039 /* WatcherBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatcherBadge.swift; sourceTree = "<group>"; };
@@ -212,6 +214,7 @@
 		525076733AE5FD04E85145E3 /* Neox */ = {
 			isa = PBXGroup;
 			children = (
+				EC77D95C63D7C98C483027A2 /* Assets.xcassets */,
 				0C0896E9C5D7BB8138151B5E /* Info.plist */,
 				FF875092D6508FF2A9677FFD /* Neox.entitlements */,
 				94C01F2A2B4437191B0C74EA /* Agent */,
@@ -394,6 +397,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9F9F13DE3EFE747DFC60E6EE /* Assets.xcassets in Resources */,
 				9D745037123904342BCD4551 /* Neox.storekit in Resources */,
 				CE9345C44FA9962802D710FC /* commandDictionary.plist in Resources */,
 				955542E3A972596BB378BB8A /* wechat-bro.js in Resources */,
