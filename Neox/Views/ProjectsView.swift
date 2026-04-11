@@ -132,7 +132,8 @@ struct ProjectsView: View {
                                 }
                                 .tint(.primary)
 
-                                if discordService != nil {
+                                // Only one channel per project: Discord OR WeChat
+                                if discordService != nil && wiredContact == nil {
                                     Button {
                                         discordWiringProject = project
                                     } label: {
@@ -145,7 +146,7 @@ struct ProjectsView: View {
                                     .accessibilityLabel(discordBinding != nil ? "Discord Channel" : "Wire to Discord")
                                 }
 
-                                if weChatService != nil {
+                                if weChatService != nil && discordBinding == nil {
                                     Button {
                                         wiringProject = project
                                     } label: {
