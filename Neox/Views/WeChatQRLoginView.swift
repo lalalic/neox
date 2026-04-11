@@ -51,9 +51,6 @@ struct WeChatQRLoginView: View {
                 } else {
                     ProgressView()
                         .controlSize(.large)
-                    Text("Loading QR code…")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
                 }
 
                 if weChatService.channelState == .loggingIn {
