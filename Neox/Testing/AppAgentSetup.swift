@@ -211,7 +211,6 @@ final class AppAgentSetup {
             return await MainActor.run {
                 guard let self, let coordinator = self.coordinator else { return "Error: not ready" }
                 let service = coordinator.weChatService
-                guard service.isOnline else { return "Error: WeChat not online" }
 
                 guard case .object(let dict) = args,
                       case .string(let from) = dict["from"],
@@ -240,9 +239,14 @@ final class AppAgentSetup {
                     content = message
                 }
 
+                let msgType: Int
+                if case .int(let t) = dict["msgType"] { msgType = t }
+                else if case .double(let t) = dict["msgType"] { msgType = Int(t) }
+                else { msgType = 1 }
+
                 let fakeMsg = WeChatMessage(
                     msgId: "sim-\(Int(Date().timeIntervalSince1970 * 1000))",
-                    msgType: 1,
+                    msgType: msgType,
                     content: content,
                     fromUserName: fromId,
                     toUserName: "self",
@@ -252,18 +256,19 @@ final class AppAgentSetup {
 
                 // Route directly through the message router
                 coordinator.messageRouter?.route(fakeMsg)
-                return "Simulated incoming message from \(contact?.name ?? from) (id: \(fromId), room: \(isRoom)): \(message)"
+                return "Simulated incoming message from \(contact?.name ?? from) (id: \(fromId), room: \(isRoom), type: \(msgType)): \(message)"
             }
         }
         server.register(
             name: "wechat_simulate_incoming",
-            description: "Simulate a WeChat incoming message for E2E testing. Injects a fake message directly into the routing pipeline.",
+            description: "Simulate a WeChat incoming message for E2E testing. Injects a fake message directly into the routing pipeline. Works without WeChat login.",
             inputSchema: [
                 "type": "object",
                 "properties": [
                     "from": ["type": "string", "description": "Contact/room name or UserName the message is 'from'"],
                     "message": ["type": "string", "description": "Message text"],
                     "sender": ["type": "string", "description": "(Rooms only) Name of the sender within the room"],
+                    "msgType": ["type": "number", "description": "Message type: 1=text, 34=voice, 3=image, 49=app (default: 1)"],
                 ] as [String: Any],
                 "required": ["from", "message"]
             ] as [String: Any],
