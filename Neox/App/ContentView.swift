@@ -341,7 +341,6 @@ struct RelaySettingsView: View {
                     Toggle("Usage/Cost", isOn: $coordinator.showUsageInChat)
                     Toggle("Agent Progress", isOn: $coordinator.showProgressInChat)
                     Toggle("Build Status", isOn: $coordinator.showBuildInChat)
-                    Toggle("WeChat Events", isOn: $coordinator.showWeChatInChat)
                 }
 
                 // MARK: WeChat Channel
@@ -356,10 +355,6 @@ struct RelaySettingsView: View {
                             }
                         }
                     ))
-
-                    if weChatService.config.enabled {
-                        WeChatChannelStatusView(weChatService: weChatService)
-                    }
                 }
 
                 Section("Relay Server") {

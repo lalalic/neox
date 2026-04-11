@@ -52,7 +52,6 @@ final class AgentCoordinator: ObservableObject {
     @Published var showUsageInChat: Bool = UserDefaults.standard.object(forKey: "showUsageInChat") == nil ? false : UserDefaults.standard.bool(forKey: "showUsageInChat")
     @Published var showProgressInChat: Bool = UserDefaults.standard.object(forKey: "showProgressInChat") == nil ? true : UserDefaults.standard.bool(forKey: "showProgressInChat")
     @Published var showBuildInChat: Bool = UserDefaults.standard.object(forKey: "showBuildInChat") == nil ? true : UserDefaults.standard.bool(forKey: "showBuildInChat")
-    @Published var showWeChatInChat: Bool = UserDefaults.standard.object(forKey: "showWeChatInChat") == nil ? true : UserDefaults.standard.bool(forKey: "showWeChatInChat")
 
     /// Unique device identifier for relay routing. Generated on first launch.
     @Published var neoxUserId: String = {
@@ -160,12 +159,6 @@ final class AgentCoordinator: ObservableObject {
         weChatService.onReady = { [weak self] in
             self?.startWiredProjectSessions()
         }
-
-        // Monitor all WeChat events as system messages in chat
-        weChatService.onEvent = { [weak self] name, detail in
-            guard let self, self.showWeChatInChat else { return }
-            self.chatViewModel?.addNotification(title: "WeChat: \(name)", body: detail.isEmpty ? "(no data)" : detail)
-        }
     }
 
     /// Create agent sessions for all projects that have active WeChat bindings.
@@ -198,7 +191,6 @@ final class AgentCoordinator: ObservableObject {
         UserDefaults.standard.set(showUsageInChat, forKey: "showUsageInChat")
         UserDefaults.standard.set(showProgressInChat, forKey: "showProgressInChat")
         UserDefaults.standard.set(showBuildInChat, forKey: "showBuildInChat")
-        UserDefaults.standard.set(showWeChatInChat, forKey: "showWeChatInChat")
     }
 
     var chatInputModes: InputMode {
