@@ -328,6 +328,51 @@ final class AppAgentSetup {
             "inputSchema": ["type": "object"]
         ])
 
+        // ── wechat_contacts: list all contacts with detail ──
+        let contactsHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] args in
+            let doRefresh: Bool
+            if case .object(let dict) = args, case .bool(let r) = dict["refresh"] {
+                doRefresh = r
+            } else {
+                doRefresh = false
+            }
+            return await MainActor.run {
+                guard let self, let coordinator = self.coordinator else { return "Error: not ready" }
+                let service = coordinator.weChatService
+                let contacts = service.contacts
+
+                var lines: [String] = ["Total: \(contacts.count) (refresh: \(doRefresh))"]
+                let rooms = contacts.filter { $0.isRoom }
+                let people = contacts.filter { !$0.isRoom }
+                lines.append("Rooms (\(rooms.count)):")
+                for r in rooms {
+                    lines.append("  \(r.name) | \(r.userName.prefix(20))...")
+                }
+                lines.append("People (\(people.count)):")
+                for p in people {
+                    lines.append("  \(p.name) | id:\(p.id)")
+                }
+                return lines.joined(separator: "\n")
+            }
+        }
+        server.register(
+            name: "wechat_contacts",
+            description: "List all loaded WeChat contacts with full detail.",
+            inputSchema: [
+                "type": "object",
+                "properties": [
+                    "refresh": ["type": "boolean", "description": "Re-fetch contacts from JS bridge"]
+                ] as [String: Any]
+            ] as [String: Any],
+            handler: contactsHandler
+        )
+        bridgeHandlers["wechat_contacts"] = contactsHandler
+        bridgeToolList.append([
+            "name": "wechat_contacts",
+            "description": "List all WeChat contacts with detail",
+            "inputSchema": ["type": "object"]
+        ])
+
         try server.start()
         self.server = server
         
@@ -493,8 +538,10 @@ final class AppAgentSetup {
 
         // Find room contact
         let room = contacts.first(where: { $0.name == roomName || $0.userName.hasPrefix("@@") && $0.name.contains(roomName) })
-        // Find 1:1 contact
-        let direct = contacts.first(where: { $0.name == directName })
+        // Find 1:1 contact (match name or userName)
+        let direct = contacts.first(where: {
+            $0.name == directName || $0.userName == directName
+        })
 
         // Create project-assistant binding for the room
         if let room {
@@ -539,9 +586,8 @@ final class AppAgentSetup {
             results.append("✅ Contact '\(direct.name)' (id: \(direct.userName)) → project 'test-direct-assistant'")
         } else {
             results.append("⚠️ Contact '\(directName)' not found")
-            // List some contacts
-            let people = contacts.filter { !$0.userName.hasPrefix("@@") }.prefix(10)
-            results.append("Available contacts (first 10): \(people.map { $0.name }.joined(separator: ", "))")
+            let people = contacts.filter { !$0.userName.hasPrefix("@@") }.prefix(15)
+            results.append("Available contacts (\(people.count)): " + people.map { $0.name }.joined(separator: ", "))
         }
 
         return results.joined(separator: "\n")
