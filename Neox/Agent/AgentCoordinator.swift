@@ -159,6 +159,12 @@ final class AgentCoordinator: ObservableObject {
         weChatService.onReady = { [weak self] in
             self?.startWiredProjectSessions()
         }
+
+        // Monitor all WeChat events as system messages in chat
+        weChatService.onEvent = { [weak self] name, detail in
+            guard let self else { return }
+            self.chatViewModel?.addNotification(title: "WeChat: \(name)", body: detail.isEmpty ? "(no data)" : detail)
+        }
     }
 
     /// Create agent sessions for all projects that have active WeChat bindings.

@@ -88,6 +88,9 @@ final class WeChatService: ObservableObject {
     /// Callback when WeChat channel becomes ready. Used to create/resume wired project sessions.
     var onReady: (() -> Void)?
 
+    /// Callback for every bridge event (for monitoring in chat).
+    var onEvent: ((_ name: String, _ detail: String) -> Void)?
+
     private static let configKey = "wechat_service_config"
     private static let bindingsFileName = "wechat-bindings.json"
 
@@ -156,6 +159,14 @@ final class WeChatService: ObservableObject {
         ch.onMessage = { [weak self] message in
             Task { @MainActor in
                 self?.onIncomingMessage?(message)
+            }
+        }
+
+        // Wire event monitor for chat system messages
+        ch.onEvent = { [weak self] name, data in
+            let detail = data.isEmpty ? "" : data.map { "\($0.key): \($0.value)" }.joined(separator: ", ")
+            Task { @MainActor in
+                self?.onEvent?(name, detail)
             }
         }
 
