@@ -91,7 +91,6 @@ struct ProjectsView: View {
                 // "All / No Project" row
                 Button {
                     onSelect(nil)
-                    dismiss()
                 } label: {
                     HStack {
                         Image(systemName: "tray.full")
@@ -117,17 +116,20 @@ struct ProjectsView: View {
                             HStack(spacing: 0) {
                                 Button {
                                     onSelect(project)
-                                    dismiss()
                                 } label: {
                                     ProjectRowView(
                                         project: project,
-                                        isSelected: currentProject == project.name,
                                         isWired: wiredContact != nil,
                                         wiredContactName: wiredContact?.name
                                     )
                                 }
                                 .tint(.primary)
 
+                                if currentProject == project.name {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(.blue)
+                                        .frame(width: 28)
+                                }
                                 if weChatService != nil {
                                     Button {
                                         wiringProject = project
@@ -172,45 +174,37 @@ struct ProjectsView: View {
 
 private struct ProjectRowView: View {
     let project: ProjectItem
-    let isSelected: Bool
     var isWired: Bool = false
     var wiredContactName: String? = nil
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(project.displayName)
-                    .font(.body)
-                    .lineLimit(1)
-                if let desc = project.description {
-                    Text(desc)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-                HStack(spacing: 4) {
-                    if let type = project.projectType {
-                        Text(type)
-                            .font(.caption2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(.blue.opacity(0.1), in: Capsule())
-                            .foregroundStyle(.blue)
-                    }
-                    if isWired, let name = wiredContactName {
-                        Label(name, systemImage: "bubble.left.and.bubble.right.fill")
-                            .font(.caption2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(.green.opacity(0.1), in: Capsule())
-                            .foregroundStyle(.green)
-                    }
-                }
+        VStack(alignment: .leading, spacing: 2) {
+            Text(project.displayName)
+                .font(.body)
+                .lineLimit(1)
+            if let desc = project.description {
+                Text(desc)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
-            Spacer()
-            if isSelected {
-                Image(systemName: "checkmark")
-                    .foregroundStyle(.blue)
+            HStack(spacing: 4) {
+                if let type = project.projectType {
+                    Text(type)
+                        .font(.caption2)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.blue.opacity(0.1), in: Capsule())
+                        .foregroundStyle(.blue)
+                }
+                if isWired, let name = wiredContactName {
+                    Label(name, systemImage: "bubble.left.and.bubble.right.fill")
+                        .font(.caption2)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.green.opacity(0.1), in: Capsule())
+                        .foregroundStyle(.green)
+                }
             }
         }
         .contentShape(Rectangle())
