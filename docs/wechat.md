@@ -129,11 +129,36 @@ The JS bridge hooks into WeChat Web's AngularJS internals. Full docs: `wechat-br
 | **`AppMsgType`** | **No** | Sub-type for app messages |
 | **`MMActualContent`** | **No** | Rich message content |
 
-## Two Scenarios
+## How Projects Use WeChat
 
-### Scenario 1: Project Assistant
+Any Neox project can wire one or more WeChat contacts (rooms or 1:1 chats). This delegates the project's communication channel to WeChat — the contact becomes a participant who provides requirements, gives feedback, receives progress updates, and answers the agent's questions.
 
-Wire a project to a WeChat room or 1:1 chat. Agent acts as project assistant with 🤖 prefix.
+```mermaid
+flowchart TB
+    subgraph Projects
+        P1[Marketing App]
+        P2[Sales Deck]
+        P3[WeChat Assistant]
+    end
+
+    subgraph WeChat
+        R1[Marketing Room]
+        C1[John 1:1]
+        C2[Alice 1:1]
+        C3[Bob 1:1]
+    end
+
+    P1 -->|wired| R1
+    P1 -->|wired| C1
+    P2 -->|wired| C2
+    P3 -->|auto-reply| C3
+```
+
+### Wiring (any project)
+
+Wire a WeChat contact to a project. The agent acts as project assistant, prefixing responses with 🤖 to distinguish from the owner's manual messages.
+
+Use cases: discuss requirements, collect feedback, send notifications, answer questions — like delegating the project chat to WeChat.
 
 ```mermaid
 flowchart TB
@@ -149,9 +174,9 @@ flowchart TB
     AGENT -->|response| WC[Send 🤖 reply to WeChat]
 ```
 
-### Scenario 2: WeChat Assistant
+### WeChat Assistant (special template)
 
-Template project type. Agent auto-replies as the account owner (no prefix). Persona and rules defined in `context.md`.
+A template project type where the agent auto-replies *as the account owner* (no 🤖 prefix). Persona and behavior rules defined in `context.md`. Guardrails escalate sensitive topics for owner approval.
 
 ```mermaid
 flowchart TB
