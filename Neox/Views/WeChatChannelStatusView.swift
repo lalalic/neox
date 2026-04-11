@@ -71,6 +71,10 @@ struct WeChatChannelStatusView: View {
             }
             .font(.footnote)
         }
+
+        // Debug: show/hide WKWebView
+        Toggle("Show WebView", isOn: $weChatService.webViewVisible)
+            .font(.footnote)
     }
 
     private var statusLabel: String {

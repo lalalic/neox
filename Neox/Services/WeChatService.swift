@@ -214,6 +214,67 @@ final class WeChatService: ObservableObject {
         hiddenWindow = nil
     }
 
+    /// Toggle WKWebView visibility for debugging via Safari Web Inspector.
+    @Published var webViewVisible: Bool = false {
+        didSet {
+            guard let window = hiddenWindow, let wv = channel?.webView else { return }
+            if webViewVisible {
+                window.windowLevel = .normal
+                window.alpha = 1.0
+                window.isUserInteractionEnabled = true
+                // Fit webView to screen bounds
+                wv.frame = window.bounds
+                wv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                // Add close button
+                addCloseButton(to: window)
+            } else {
+                window.windowLevel = .init(rawValue: -1000)
+                window.alpha = 0.01
+                window.isUserInteractionEnabled = false
+                // Restore 1280×900 for proper wx.qq.com rendering
+                wv.frame = CGRect(x: 0, y: 0, width: 1280, height: 900)
+                wv.autoresizingMask = []
+                // Remove close button
+                window.rootViewController?.view.viewWithTag(9999)?.removeFromSuperview()
+            }
+        }
+    }
+
+    private func addCloseButton(to window: UIWindow) {
+        guard let vc = window.rootViewController else { return }
+        // Remove existing if any
+        vc.view.viewWithTag(9999)?.removeFromSuperview()
+        vc.view.viewWithTag(9998)?.removeFromSuperview()
+
+        // Close button
+        let btn = UIButton(type: .system)
+        btn.tag = 9999
+        btn.setImage(UIImage(systemName: "xmark.circle.fill"), for: .normal)
+        btn.tintColor = .white
+        btn.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+        btn.layer.cornerRadius = 20
+        btn.frame = CGRect(x: window.bounds.width - 52, y: 50, width: 40, height: 40)
+        btn.autoresizingMask = [.flexibleLeftMargin, .flexibleBottomMargin]
+        btn.addAction(UIAction { [weak self] _ in
+            self?.webViewVisible = false
+        }, for: .touchUpInside)
+        vc.view.addSubview(btn)
+
+        // Reload button
+        let reload = UIButton(type: .system)
+        reload.tag = 9998
+        reload.setImage(UIImage(systemName: "arrow.clockwise.circle.fill"), for: .normal)
+        reload.tintColor = .white
+        reload.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+        reload.layer.cornerRadius = 20
+        reload.frame = CGRect(x: window.bounds.width - 100, y: 50, width: 40, height: 40)
+        reload.autoresizingMask = [.flexibleLeftMargin, .flexibleBottomMargin]
+        reload.addAction(UIAction { [weak self] _ in
+            self?.channel?.reload()
+        }, for: .touchUpInside)
+        vc.view.addSubview(reload)
+    }
+
     // MARK: - Debug
 
     /// Make the hidden WKWebView visible for debugging (e.g. to see the actual QR code on wx.qq.com).

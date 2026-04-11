@@ -355,6 +355,10 @@ struct RelaySettingsView: View {
                             }
                         }
                     ))
+
+                    if weChatService.config.enabled {
+                        WeChatChannelStatusView(weChatService: weChatService)
+                    }
                 }
 
                 Section("Relay Server") {
