@@ -132,15 +132,14 @@ struct ContentView: View {
                     currentProjectDisplay = project?.displayName
                     if let chatVM = coordinator.chatViewModel {
                         chatVM.projectScope = project?.name
-                        // Set wechat channel tag if project is wired
                         if let pid = project?.id {
                             chatVM.projectTag = coordinator.buildProjectTag(projectId: pid)
-                            // Lightweight steer: tell the agent about the project switch
                             if let steer = coordinator.buildProjectSwitchSteer(projectId: pid) {
                                 Task { try? await chatVM.steerWithContext(steer) }
                             }
                         } else {
                             chatVM.projectTag = nil
+                            Task { try? await chatVM.steerWithContext("User left project context. No specific project is selected.") }
                         }
                     }
                 },
