@@ -200,6 +200,13 @@ F --> G[Send Reply to Original Channel]
 - [ ] App build hash recorded
 - [ ] Relay log window archived
 
+### Pre-Run Health
+- [ ] App launched and stable
+- [ ] Relay running and Discord bot online
+- [ ] WeChat online when running WeChat cases
+- [ ] Target bindings confirmed
+- [ ] Selected project badge confirmed
+
 ### P1-CH-001 Exclusive Channel Mode Toggle
 - [ ] WeChat enabled and Discord disabled
 - [ ] Discord enabled and WeChat disabled
