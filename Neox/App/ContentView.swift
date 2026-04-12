@@ -61,6 +61,8 @@ struct ContentView: View {
                                         Button(action: { showProjects = true }) {
                                             Image(systemName: "folder.fill")
                                                 .foregroundStyle(.primary)
+                                                .frame(width: 44, height: 44)
+                                                .contentShape(Rectangle())
                                         }
                                         .accessibilityLabel("Projects")
                                         ConnectionTitleView(
@@ -69,17 +71,6 @@ struct ContentView: View {
                                         )
                                         if coordinator.activeWatcherCount > 0 {
                                             WatcherBadge(count: coordinator.activeWatcherCount)
-                                        }
-                                        if coordinator.weChatService.config.enabled {
-                                            WeChatStatusIndicator(
-                                                weChatService: coordinator.weChatService,
-                                                project: currentProject,
-                                                onLongPress: { showContactSelector = true },
-                                                onQRTap: {
-                                                    qrLoginDismissed = false
-                                                    showQRLogin = true
-                                                }
-                                            )
                                         }
                                     }
                                 }
