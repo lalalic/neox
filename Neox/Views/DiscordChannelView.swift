@@ -60,7 +60,6 @@ struct DiscordChannelView: View {
 struct DiscordWiringSheet: View {
     @ObservedObject var discord: DiscordService
     let projectId: String
-    @EnvironmentObject var coordinator: AgentCoordinator
     @Environment(\.dismiss) private var dismiss
 
     @State private var channels: [DiscordService.ChannelInfo] = []
@@ -68,6 +67,7 @@ struct DiscordWiringSheet: View {
     @State private var selectedChannel: DiscordService.ChannelInfo?
     @State private var isSaving = false
     @State private var errorText: String?
+    @State private var infoText: String?
 
     /// Current binding for this project (if any).
     private var currentBinding: DiscordService.ChannelBinding? {
@@ -91,6 +91,21 @@ struct DiscordWiringSheet: View {
                                 }
                             }
                             Spacer()
+                            Text(binding.routingActive ? "active" : "paused")
+                                .font(.caption)
+                                .foregroundStyle(binding.routingActive ? .green : .secondary)
+                        }
+
+                        HStack {
+                            Button(binding.routingActive ? "Pause" : "Activate") {
+                                Task {
+                                    await setActivation(active: !binding.routingActive)
+                                }
+                            }
+                            .buttonStyle(.bordered)
+
+                            Spacer()
+
                             Button(role: .destructive) {
                                 Task {
                                     try? await discord.unregisterChannel(channelId: binding.channelId)
@@ -163,6 +178,14 @@ struct DiscordWiringSheet: View {
                             .font(.caption)
                     }
                 }
+
+                if let infoText {
+                    Section {
+                        Text(infoText)
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                    }
+                }
             }
             .navigationTitle("Discord Channel")
             .navigationBarTitleDisplayMode(.inline)
@@ -209,9 +232,23 @@ struct DiscordWiringSheet: View {
         }
 
         do {
-            _ = try await discord.registerChannel(channelId: channel.channelId, projectId: projectId)
-            dismiss()
+            _ = try await discord.registerChannel(channelId: channel.channelId, projectId: projectId, active: false)
+            selectedChannel = nil
+            errorText = nil
+            infoText = "Channel wired. Tap Activate to enable routing."
         } catch {
+            infoText = nil
+            errorText = error.localizedDescription
+        }
+    }
+
+    private func setActivation(active: Bool) async {
+        do {
+            try await discord.setRoutingActive(for: projectId, active: active)
+            errorText = nil
+            infoText = active ? "Routing is active." : "Routing is paused."
+        } catch {
+            infoText = nil
             errorText = error.localizedDescription
         }
     }

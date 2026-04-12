@@ -232,6 +232,10 @@ final class AgentCoordinator: ObservableObject {
             NSLog("[Discord] Message with no projectId — ignoring")
             return
         }
+        guard discordService.isRoutingActive(for: projectId) else {
+            NSLog("[Discord] Project '%@' is paused — ignoring incoming message", projectId)
+            return
+        }
         NSLog("[Discord] Incoming from %@ in #%@: %@", message.senderName, message.channelName ?? message.channelId, String(message.text.prefix(60)))
 
         let sourceLabel = "🎮 #\(message.channelName ?? message.channelId) · \(message.senderName)"

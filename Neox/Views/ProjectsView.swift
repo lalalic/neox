@@ -127,7 +127,8 @@ struct ProjectsView: View {
                                         isSelected: currentProject == project.name,
                                         isWired: wiredContact != nil,
                                         wiredContactName: wiredContact?.name,
-                                        discordChannelName: discordBinding?.channelName
+                                        discordChannelName: discordBinding?.channelName,
+                                        discordRoutingActive: discordBinding?.routingActive
                                     )
                                 }
                                 .tint(.primary)
@@ -227,6 +228,7 @@ private struct ProjectRowView: View {
     var isWired: Bool = false
     var wiredContactName: String? = nil
     var discordChannelName: String? = nil
+    var discordRoutingActive: Bool? = nil
 
     var body: some View {
         HStack {
@@ -264,6 +266,14 @@ private struct ProjectRowView: View {
                             .padding(.vertical, 2)
                             .background(.indigo.opacity(0.1), in: Capsule())
                             .foregroundStyle(.indigo)
+                        if discordRoutingActive == false {
+                            Text("paused")
+                                .font(.caption2)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.gray.opacity(0.15), in: Capsule())
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }

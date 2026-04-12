@@ -14,6 +14,32 @@ final class DiscordService: ObservableObject {
         let projectId: String
         var channelName: String?
         var guildName: String?
+        var routingActive: Bool = true
+
+        enum CodingKeys: String, CodingKey {
+            case channelId
+            case projectId
+            case channelName
+            case guildName
+            case routingActive
+        }
+
+        init(channelId: String, projectId: String, channelName: String? = nil, guildName: String? = nil, routingActive: Bool = true) {
+            self.channelId = channelId
+            self.projectId = projectId
+            self.channelName = channelName
+            self.guildName = guildName
+            self.routingActive = routingActive
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            channelId = try c.decode(String.self, forKey: .channelId)
+            projectId = try c.decode(String.self, forKey: .projectId)
+            channelName = try c.decodeIfPresent(String.self, forKey: .channelName)
+            guildName = try c.decodeIfPresent(String.self, forKey: .guildName)
+            routingActive = try c.decodeIfPresent(Bool.self, forKey: .routingActive) ?? true
+        }
     }
 
     struct DiscordMessage {
@@ -107,7 +133,7 @@ final class DiscordService: ObservableObject {
     /// Register all persisted bindings on the shared connection.
     /// Call after the main ChatViewModel connects.
     func registerBindings() async {
-        for binding in registeredChannels {
+        for binding in registeredChannels where binding.routingActive {
             do {
                 _ = try await sendRPC(
                     method: "discord.register",
@@ -119,6 +145,31 @@ final class DiscordService: ObservableObject {
             }
         }
         isConnected = true
+    }
+
+    func isRoutingActive(for projectId: String) -> Bool {
+        registeredChannels.first { $0.projectId == projectId }?.routingActive == true
+    }
+
+    func setRoutingActive(for projectId: String, active: Bool) async throws {
+        guard let idx = registeredChannels.firstIndex(where: { $0.projectId == projectId }) else { return }
+        let binding = registeredChannels[idx]
+
+        if active {
+            _ = try await sendRPC(
+                method: "discord.register",
+                params: ["channelId": .string(binding.channelId), "projectId": .string(binding.projectId)]
+            )
+            registeredChannels[idx].routingActive = true
+            NSLog("[Discord] Activated routing for project '%@' (#%@)", projectId, binding.channelName ?? binding.channelId)
+        } else {
+            // Even if relay unregister fails, local deactivation still prevents project routing.
+            _ = try? await sendRPC(method: "discord.unregister", params: ["channelId": .string(binding.channelId)])
+            registeredChannels[idx].routingActive = false
+            NSLog("[Discord] Paused routing for project '%@' (#%@)", projectId, binding.channelName ?? binding.channelId)
+        }
+
+        saveBindings()
     }
 
     func markDisconnected() {
@@ -147,7 +198,7 @@ final class DiscordService: ObservableObject {
 
     // MARK: - Channel Management
 
-    func registerChannel(channelId: String, projectId: String) async throws -> ChannelBinding {
+    func registerChannel(channelId: String, projectId: String, active: Bool = false) async throws -> ChannelBinding {
         let result = try await sendRPC(
             method: "discord.register",
             params: ["channelId": .string(channelId), "projectId": .string(projectId)]
@@ -158,7 +209,7 @@ final class DiscordService: ObservableObject {
             throw DiscordError.registrationFailed(error)
         }
 
-        var binding = ChannelBinding(channelId: channelId, projectId: projectId)
+        var binding = ChannelBinding(channelId: channelId, projectId: projectId, routingActive: active)
         binding.channelName = resultObj["channelName"]?.stringValue
         binding.guildName = resultObj["guildName"]?.stringValue
 
@@ -170,7 +221,11 @@ final class DiscordService: ObservableObject {
         }
         saveBindings()
 
-        NSLog("[Discord] Registered #%@ → project '%@'", binding.channelName ?? channelId, projectId)
+        if !active {
+            _ = try? await sendRPC(method: "discord.unregister", params: ["channelId": .string(channelId)])
+        }
+
+        NSLog("[Discord] Wired #%@ → project '%@' (%@)", binding.channelName ?? channelId, projectId, active ? "active" : "paused")
         return binding
     }
 
