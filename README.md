@@ -31,6 +31,8 @@ xcodebuild -scheme Neox -destination 'platform=iOS Simulator,name=iPhone 16 Pro'
 
 | Doc | Description |
 |-----|-------------|
+| [E2E User Stories (P1)](E2E%20-%20user%20stories.md) | Channel routing, project-scope, Discord/WeChat E2E tests |
+| [E2E All Features (P2-P4)](E2E%20-%20all%20features.md) | Comprehensive 37-story test suite for all Neox features |
 | [Product Spec](.github/product-spec.md) | Full feature spec and architecture |
 | [Coding Agent Pipeline](docs/coding-agent-project-delivery-design-v2.md) | Two-tier agent architecture for project delivery |
 | [Remote Project Dev](docs/2026-04-02-remote-project-dev-design.md) | Phone → GitHub → TestFlight pipeline |
