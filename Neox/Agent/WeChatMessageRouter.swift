@@ -191,6 +191,10 @@ final class WeChatMessageRouter {
             prompt = "[WeChat message from \(senderName) (weight: \(weight))]\n\(messageText)"
         }
 
+        // Mirror user message to main chat for visibility
+        let userMsg = ChatMessage(role: .user, content: [.text(messageText)], project: projectId, source: sourceLabel)
+        Task { @MainActor in coordinator.chatViewModel?.mirror(userMsg) }
+
         let history = recentHistory(for: projectId)
         let contactName = message.fromContact?.name ?? contactId
 
@@ -329,6 +333,12 @@ final class WeChatMessageRouter {
         }
 
         NSLog("[WeChatRouter] Response → %@: %@", contactId, String(formatted.prefix(80)))
+
+        // Mirror response to main chat for visibility
+        let respSource = "WeChat | \(contactId)"
+        let responseMsg = ChatMessage(role: .assistant, content: [.text(trimmed)], project: projectId, source: respSource)
+        Task { @MainActor in coordinator.chatViewModel?.mirror(responseMsg) }
+
         await weChatService.sendToContact(contactId, message: formatted, watermark: true)
         responseLog[0] += " → \(contactId) OK"
     }

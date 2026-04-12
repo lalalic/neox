@@ -247,6 +247,10 @@ final class AgentCoordinator: ObservableObject {
             await self?.handleDiscordResponse(projectId: projectId, channelId: channelId, response: response)
         }
 
+        // Mirror user message to main chat for visibility
+        let userMsg = ChatMessage(role: .user, content: [.text(message.text)], project: projectId, source: sourceLabel)
+        Task { @MainActor in chatViewModel?.mirror(userMsg) }
+
         Task {
             let ready = await vm.waitForReady(timeout: 15)
             guard ready else {
@@ -261,6 +265,12 @@ final class AgentCoordinator: ObservableObject {
     private func handleDiscordResponse(projectId: String, channelId: String, response: String) async {
         let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+
+        // Mirror response to main chat for visibility
+        let channelName = discordService.channelBindings.first(where: { $0.channelId == channelId })?.channelName ?? channelId
+        let responseMsg = ChatMessage(role: .assistant, content: [.text(trimmed)], project: projectId, source: "Discord | #\(channelName)")
+        await chatViewModel?.mirror(responseMsg)
+
         do {
             try await discordService.sendMessage(channelId: channelId, text: trimmed)
             NSLog("[Discord] Sent reply to #%@ (%d chars)", channelId, trimmed.count)
