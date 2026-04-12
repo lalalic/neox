@@ -81,10 +81,10 @@ final class AppAgentSetup {
                 let roomName: String
                 let directName: String
                 if case .object(let dict) = args {
-                    if case .string(let r) = dict["room"] { roomName = r } else { roomName = "3人组" }
+                    if case .string(let r) = dict["room"] { roomName = r } else { roomName = "三人组" }
                     if case .string(let d) = dict["direct"] { directName = d } else { directName = "文件传输助手" }
                 } else {
-                    roomName = "3人组"
+                    roomName = "三人组"
                     directName = "文件传输助手"
                 }
                 return self.setupWeChatTest(roomName: roomName, directName: directName)
@@ -96,7 +96,7 @@ final class AppAgentSetup {
             inputSchema: [
                 "type": "object",
                 "properties": [
-                    "room": ["type": "string", "description": "Room name to bind (default: 3人组)"],
+                    "room": ["type": "string", "description": "Room name to bind (default: 三人组)"],
                     "direct": ["type": "string", "description": "1:1 contact name to bind (default: 文件传输助手)"],
                 ] as [String: Any]
             ] as [String: Any],
@@ -609,10 +609,10 @@ final class AppAgentSetup {
     /// Set up test bindings for WeChat bidirectional E2E testing.
     /// Finds target contacts in the WeChat bridge and creates project bindings.
     /// - Parameters:
-    ///   - roomName: Name of the room to bind (e.g. "3人组")
+    ///   - roomName: Name of the room to bind (e.g. "三人组")
     ///   - directName: Name of the 1:1 contact to bind (e.g. "文件传输助手")
     /// - Returns: Status message with created bindings and contact IDs.
-    func setupWeChatTest(roomName: String = "3人组", directName: String = "文件传输助手") -> String {
+    func setupWeChatTest(roomName: String = "三人组", directName: String = "文件传输助手") -> String {
         guard let coordinator else { return "Error: coordinator not set" }
         let service = coordinator.weChatService
 
