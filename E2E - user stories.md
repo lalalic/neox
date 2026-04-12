@@ -12,6 +12,7 @@ tools:
 ## Activation Rule
 Selected project scope is the activation flag.
 Only messages bound to the selected project are routed.
+Channel mode is exclusive: run Discord and WeChat scenarios separately, never as concurrent routing paths.
 
 ```mermaid
 flowchart LR
@@ -32,7 +33,7 @@ F --> G[Send Reply to Original Channel]
 | P1-DIS-003 | Discord ask-questions roundtrip | Discord | Required | Questions posted and answers routed back | Answers in wrong scope ignored | Planned |
 | P1-WC-001 | WeChat room project assistant routing | WeChat | Required | Selected room project replies | Other project contact ignored | Ready |
 | P1-WC-002 | WeChat direct assistant routing | WeChat | Required | Selected direct project replies | Other project contact ignored | Planned |
-| P1-XCH-001 | Cross-channel scope consistency | Discord + WeChat | Required | Same gating semantics on both | Any non-selected project blocked | Ready |
+| P1-WC-003 | WeChat ask-questions roundtrip | WeChat | Required | Questions and answers route in selected scope | Wrong-scope answers ignored | Planned |
 
 ## P1-CH-001 Exclusive Channel Mode Toggle
 ### Preconditions
@@ -159,25 +160,29 @@ F --> G[Send Reply to Original Channel]
 ### Evidence
 1. wechat_router_status response log and destination contact id.
 
-## P1-XCH-001 Cross-Channel Scope Consistency
+## P1-WC-003 WeChat Ask-Questions Roundtrip
 ### Preconditions
-1. Discord and WeChat both configured with different project bindings.
-2. Any one project selected in scope.
+1. P1-WC-001 completed.
+2. WeChat room or direct binding is configured.
+3. Matching project scope is selected.
 
 ### User Journey
-1. Send one Discord message for selected project.
-2. Send one WeChat message for non-selected project.
-3. Switch selected scope.
-4. Repeat in opposite direction.
+1. Send a WeChat prompt that triggers ask-questions.
+2. Verify question appears in the same WeChat conversation.
+3. Send answer from the same conversation.
+4. Verify answer is routed back and final response is posted.
 
 ### Assertions
-1. Selected project messages pass.
-2. Non-selected project messages are ignored.
-3. Behavior is identical across channels.
+1. Question dispatch works in selected scope.
+2. Answer is consumed by the same project session.
+3. Final response is posted back to the same WeChat destination.
+
+### Negative Assertion
+1. Answers from a non-selected project scope are ignored.
 
 ### Evidence
-1. Relay discord.send lines for selected scope only.
-2. wechat_router_status entries for selected scope only.
+1. wechat_router_status response log showing question and final response.
+2. WeChat transcript snippet for question and answer roundtrip.
 
 ## Failure Catalog
 1. Scope mismatch: inbound message arrives but no reply expected.
@@ -189,9 +194,9 @@ F --> G[Send Reply to Original Channel]
 2. P1-DIS-001
 3. P1-DIS-002
 4. P1-WC-001
-5. P1-XCH-001
+5. P1-WC-002
 6. P1-DIS-003
-7. P1-WC-002
+7. P1-WC-003
 
 ## Manual Execution Checklist
 ### Test Run Metadata
@@ -240,11 +245,11 @@ F --> G[Send Reply to Original Channel]
 - [ ] Non-selected room message ignored
 - [ ] Router status evidence captured
 
-### P1-XCH-001 Cross-Channel Scope Consistency
-- [ ] Selected project passed on Discord
-- [ ] Non-selected project blocked on Discord
-- [ ] Selected project passed on WeChat
-- [ ] Non-selected project blocked on WeChat
+### P1-WC-003 WeChat Ask-Questions Roundtrip
+- [ ] Ask-questions prompt posted question in WeChat
+- [ ] WeChat answer routed back to the selected project session
+- [ ] Final response posted to the same WeChat destination
+- [ ] Wrong-scope answer did not produce response
 
 ### Sign-Off
 - [ ] All required P1 cases passed
