@@ -423,7 +423,11 @@ struct RelaySettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                    Button("Done") {
+                        applySettings()
+                        coordinator.reconnect()
+                        dismiss()
+                    }
                 }
             }
         }
