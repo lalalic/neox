@@ -232,8 +232,14 @@ final class AgentCoordinator: ObservableObject {
             NSLog("[Discord] Message with no projectId — ignoring")
             return
         }
-        guard let activeProject = chatViewModel?.projectScope, activeProject == projectId else {
-            let active = chatViewModel?.projectScope ?? "none"
+        let activeScope = chatViewModel?.projectScope?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedActive = activeScope?.lowercased()
+        let normalizedProjectId = projectId.lowercased()
+        let projectName = projectNameForId(projectId)?.lowercased()
+
+        guard let normalizedActive,
+              normalizedActive == normalizedProjectId || normalizedActive == projectName else {
+            let active = activeScope ?? "none"
             NSLog("[Discord] Project '%@' not active (current: %@) — ignoring", projectId, active)
             return
         }
@@ -267,6 +273,15 @@ final class AgentCoordinator: ObservableObject {
         } catch {
             NSLog("[Discord] Failed to send reply: %@", error.localizedDescription)
         }
+    }
+
+    private func projectNameForId(_ projectId: String) -> String? {
+        let jsonURL = workspaceRootURL.appendingPathComponent(projectId).appendingPathComponent("project.json")
+        guard let data = try? Data(contentsOf: jsonURL),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return json["name"] as? String
     }
     
     /// Save relay settings to UserDefaults.
