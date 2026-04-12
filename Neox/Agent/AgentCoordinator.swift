@@ -247,6 +247,22 @@ final class AgentCoordinator: ObservableObject {
             await self?.handleDiscordResponse(projectId: projectId, channelId: channelId, response: response)
         }
 
+        // Set up ask_questions forwarding to Discord
+        let channelName = message.channelName ?? message.channelId
+        vm.onChannelQuestions = { [weak self] questionText in
+            guard let self else { return }
+            let formatted = "❓ **Question:**\n\(questionText)"
+            // Mirror question to main chat
+            let qMsg = ChatMessage(role: .assistant, content: [.text(questionText)], project: projectId, source: "Discord | #\(channelName)")
+            await MainActor.run { self.chatViewModel?.mirror(qMsg) }
+            do {
+                try await self.discordService.sendMessage(channelId: channelId, text: formatted)
+                NSLog("[Discord] Sent ask_questions to #%@ for project '%@'", channelId, projectId)
+            } catch {
+                NSLog("[Discord] Failed to send question: %@", error.localizedDescription)
+            }
+        }
+
         // Mirror user message to main chat for visibility
         let userMsg = ChatMessage(role: .user, content: [.text(message.text)], project: projectId, source: sourceLabel)
         Task { @MainActor in chatViewModel?.mirror(userMsg) }
@@ -746,7 +762,7 @@ final class AgentCoordinator: ObservableObject {
         }
         projectContext += "\nKeep responses under 3 sentences unless the question requires a detailed answer. Match the language of the sender."
         projectContext += "\nUse memory tools with path '\(projectId)/memory.md' to remember project-specific info (contacts, preferences, key facts). Read it at session start."
-        projectContext += "\nIMPORTANT: This is a headless session with no interactive user. Do NOT call ask_questions. Just provide your best response directly."
+        projectContext += "\nThis is a channel-connected session. Messages come from Discord or WeChat users. Use ask_questions when you need clarification."
 
         var tools = buildTools()
         // Inject request_approval tool for wechat-assistant projects
