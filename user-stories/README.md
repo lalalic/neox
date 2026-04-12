@@ -19,6 +19,10 @@
 | WC-002 | [WC-002](WC-002-wechat-direct-routing.md) | WeChat | Direct assistant routing | Reply + wrong-project silence + name |
 | WC-003 | [WC-003](WC-003-wechat-ask-questions.md) | WeChat | Ask-questions roundtrip | Question → answer → response |
 | WC-004 | [WC-004](WC-004-wechat-assistant-auto-reply.md) | WeChat | Background auto-reply assistant | Auto-start + natural reply + guardrail |
+| WC-005 | [WC-005](WC-005-image-message.md) | WeChat | Image message → agent describes | Image saved + view tool + description |
+| WC-006 | [WC-006](WC-006-link-share.md) | WeChat | Link share → agent summarizes | Formatted link + meaningful response |
+| WC-007 | [WC-007](WC-007-voice-message.md) | WeChat | Voice message handling | Graceful handling + text follow-up |
+| WC-008 | [WC-008](WC-008-project-memory.md) | WeChat | Project memory persistence | Write preference + recall correctly |
 
 ## Run Order
 1. CH-001 (channel exclusivity — foundation for all others)
@@ -26,9 +30,13 @@
 3. WC-002 (direct routing)
 4. WC-003 (ask-questions)
 5. WC-004 (assistant auto-reply + guardrails)
-6. DIS-001 (Discord setup)
-7. DIS-002 (restart)
-8. DIS-003 (Discord ask-questions)
+6. WC-005 (image message)
+7. WC-006 (link share)
+8. WC-007 (voice message)
+9. WC-008 (project memory)
+10. DIS-001 (Discord setup)
+11. DIS-002 (restart)
+12. DIS-003 (Discord ask-questions)
 
 ## Close Loop Rules
 - Every story must verify BOTH positive and negative assertions
