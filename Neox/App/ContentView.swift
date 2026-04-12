@@ -23,11 +23,9 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             // WebAgentView behind chat — needs real frame for rendering
-            WebAgentView(manager: webManager)
-                .allowsHitTesting(showWebView)
-                .opacity(showWebView ? 1 : 0)
-                .overlay(alignment: .top) {
-                    if showWebView {
+            if showWebView {
+                WebAgentView(manager: webManager)
+                    .overlay(alignment: .top) {
                         HStack {
                             Button(action: { showWebView = false }) {
                                 Image(systemName: "xmark.circle.fill")
@@ -60,21 +58,18 @@ struct ContentView: View {
                             .toolbar {
                                 ToolbarItem(placement: .topBarLeading) {
                                     HStack(spacing: 8) {
+                                        Button(action: { showProjects = true }) {
+                                            Image(systemName: "folder.fill")
+                                                .foregroundStyle(.primary)
+                                        }
+                                        .accessibilityLabel("Projects")
                                         ConnectionTitleView(
                                             title: "Neo",
                                             viewModel: chatVM
                                         )
-                                        ProjectBadgeView(
-                                            currentProject: currentProjectDisplay,
-                                            action: { showProjects = true }
-                                        )
                                         if coordinator.activeWatcherCount > 0 {
                                             WatcherBadge(count: coordinator.activeWatcherCount)
                                         }
-                                    }
-                                }
-                                ToolbarItem(placement: .topBarTrailing) {
-                                    HStack(spacing: 8) {
                                         if coordinator.weChatService.config.enabled {
                                             WeChatStatusIndicator(
                                                 weChatService: coordinator.weChatService,
@@ -86,15 +81,14 @@ struct ContentView: View {
                                                 }
                                             )
                                         }
-                                        if webManager.currentURL != nil {
-                                            Button(action: { showWebView.toggle() }) {
-                                                Image(systemName: "globe")
-                                            }
-                                        }
-                                        Button(action: { showSettings = true }) {
-                                            Image(systemName: "gearshape.fill")
-                                                .foregroundStyle(.primary)
-                                        }
+                                    }
+                                }
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    Button(action: { showSettings = true }) {
+                                        Image(systemName: "gearshape.fill")
+                                            .foregroundStyle(.primary)
+                                            .frame(width: 44, height: 44)
+                                            .contentShape(Rectangle())
                                     }
                                 }
                             }
