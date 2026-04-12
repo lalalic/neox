@@ -232,8 +232,9 @@ final class AgentCoordinator: ObservableObject {
             NSLog("[Discord] Message with no projectId — ignoring")
             return
         }
-        guard discordService.isRoutingActive(for: projectId) else {
-            NSLog("[Discord] Project '%@' is paused — ignoring incoming message", projectId)
+        guard let activeProject = chatViewModel?.projectScope, activeProject == projectId else {
+            let active = chatViewModel?.projectScope ?? "none"
+            NSLog("[Discord] Project '%@' not active (current: %@) — ignoring", projectId, active)
             return
         }
         NSLog("[Discord] Incoming from %@ in #%@: %@", message.senderName, message.channelName ?? message.channelId, String(message.text.prefix(60)))
