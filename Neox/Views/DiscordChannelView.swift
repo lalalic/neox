@@ -14,12 +14,12 @@ struct DiscordChannelView: View {
 
     var body: some View {
         Section {
-            // Invite bot button
-            Button {
-                UIApplication.shared.open(inviteURL)
-            } label: {
-                Label("Invite Bot to Server", systemImage: "link.badge.plus")
-            }
+            Toggle("Enable Discord", isOn: Binding(
+                get: { coordinator.channelType == "discord" },
+                set: { newValue in
+                    coordinator.channelType = newValue ? "discord" : "wechat"
+                }
+            ))
 
             // Connection status (read-only — shares main relay WS)
             HStack {
@@ -41,13 +41,11 @@ struct DiscordChannelView: View {
                 .textInputAutocapitalization(.never)
                 .keyboardType(.numberPad)
 
-            if !discord.registeredChannels.isEmpty {
-                HStack {
-                    Text("Channels")
-                    Spacer()
-                    Text("\(discord.registeredChannels.count) bound")
-                        .foregroundStyle(.secondary)
-                }
+            // Invite bot button
+            Button {
+                UIApplication.shared.open(inviteURL)
+            } label: {
+                Label("Invite Bot to Server", systemImage: "link.badge.plus")
             }
         }
     }
