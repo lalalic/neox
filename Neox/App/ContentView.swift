@@ -278,6 +278,13 @@ struct RelaySettingsView: View {
                             availableTools: Array(Set(coordinator.allTools.map(\.name))).sorted()
                         )
                     }
+                    HStack {
+                        Text("Device ID")
+                        Spacer()
+                        Text(coordinator.neoxUserId)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
                 }
 
                 Section("Credits") {
@@ -360,15 +367,7 @@ struct RelaySettingsView: View {
                 DiscordChannelView(discord: coordinator.discordService)
 
                 #if DEBUG
-                Section("Relay Server") {
-                    HStack {
-                        Text("Device ID")
-                        Spacer()
-                        Text(coordinator.neoxUserId)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
-
+                Section("Developer") {
                     Toggle("Use local relay server", isOn: $coordinator.useLocalRelay)
 
                     TextField("http://10.0.0.111:8765", text: $coordinator.localRelayURL)
@@ -382,9 +381,7 @@ struct RelaySettingsView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
-                }
-                
-                Section("Dev Server") {
+
                     Toggle("Enable dev server bridge", isOn: $coordinator.useDevServer)
 
                     HStack {
