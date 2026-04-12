@@ -173,7 +173,7 @@ final class WeChatMessageRouter {
         let sourceLabel: String
         if message.isRoom {
             let roomName = message.fromContact?.name ?? contactId
-            sourceLabel = "💬 \(roomName) · \(senderName)"
+            sourceLabel = "WeChat | \(roomName) | \(senderName)"
             var lines = ["[WeChat message in \(roomName)]"]
             lines.append("From: \(senderName) (weight: \(weight))")
             if message.mentionMe {
@@ -187,7 +187,7 @@ final class WeChatMessageRouter {
             lines.append(messageText)
             prompt = lines.joined(separator: "\n")
         } else {
-            sourceLabel = "💬 \(senderName)"
+            sourceLabel = "WeChat | \(senderName)"
             prompt = "[WeChat message from \(senderName) (weight: \(weight))]\n\(messageText)"
         }
 

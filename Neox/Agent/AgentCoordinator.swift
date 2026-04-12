@@ -239,7 +239,7 @@ final class AgentCoordinator: ObservableObject {
         }
         NSLog("[Discord] Incoming from %@ in #%@: %@", message.senderName, message.channelName ?? message.channelId, String(message.text.prefix(60)))
 
-        let sourceLabel = "🎮 #\(message.channelName ?? message.channelId) · \(message.senderName)"
+        let sourceLabel = "Discord | #\(message.channelName ?? message.channelId) | \(message.senderName)"
         let prompt = "[Discord message in #\(message.channelName ?? message.channelId)]\nFrom: \(message.senderName)\n---\n\(message.text)"
 
         let channelId = message.channelId
