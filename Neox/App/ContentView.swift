@@ -359,14 +359,13 @@ struct RelaySettingsView: View {
                 }
 
                 // MARK: Channel
-                Section {
-                    Toggle("Enable WeChat", isOn: Binding(
+                Section("Channel") {
+                    Toggle("WeChat", isOn: Binding(
                         get: { weChatService.config.enabled },
                         set: { newValue in
                             if newValue {
                                 coordinator.channelType = "wechat"
                                 weChatService.enable()
-                                // Disable Discord when enabling WeChat
                             } else {
                                 if coordinator.channelType == "wechat" {
                                     coordinator.channelType = ""
@@ -375,10 +374,51 @@ struct RelaySettingsView: View {
                             }
                         }
                     ))
-                }
 
-                // MARK: Discord Channel
-                DiscordChannelView(discord: coordinator.discordService)
+                    Toggle("Discord", isOn: Binding(
+                        get: { coordinator.channelType == "discord" },
+                        set: { newValue in
+                            if newValue {
+                                coordinator.channelType = "discord"
+                            } else {
+                                coordinator.channelType = ""
+                            }
+                        }
+                    ))
+
+                    if coordinator.channelType == "discord" {
+                        HStack {
+                            Text("Status")
+                            Spacer()
+                            if coordinator.discordService.isConnected {
+                                Label("Connected", systemImage: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                                    .font(.caption)
+                            } else {
+                                Label("Disconnected", systemImage: "circle")
+                                    .foregroundStyle(.secondary)
+                                    .font(.caption)
+                            }
+                        }
+
+                        TextField("Server ID", text: Binding(
+                            get: { coordinator.discordService.guildId },
+                            set: { coordinator.discordService.guildId = $0 }
+                        ))
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.numberPad)
+
+                        Button {
+                            let botClientId = "1489316184578068755"
+                            if let url = URL(string: "https://discord.com/oauth2/authorize?client_id=\(botClientId)&permissions=3072&scope=bot") {
+                                UIApplication.shared.open(url)
+                            }
+                        } label: {
+                            Label("Invite Bot to Server", systemImage: "link.badge.plus")
+                        }
+                    }
+                }
 
                 #if DEBUG
                 Section("Developer") {
