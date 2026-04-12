@@ -225,6 +225,12 @@ final class AgentCoordinator: ObservableObject {
         }
     }
 
+    /// Re-wire Discord when channel mode changes to discord at runtime.
+    func rewireDiscordIfNeeded() {
+        guard let vm = chatViewModel else { return }
+        wireDiscord(to: vm)
+    }
+
     /// Handle an incoming Discord message — route to the bound project session.
     private func handleDiscordMessage(_ message: DiscordService.DiscordMessage) {
         let projectId = message.projectId

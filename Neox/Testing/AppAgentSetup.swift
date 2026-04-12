@@ -343,6 +343,9 @@ final class AppAgentSetup {
                 }
                 coordinator.channelType = mode
                 UserDefaults.standard.set(mode, forKey: "channelType")
+                if mode == "discord" {
+                    coordinator.rewireDiscordIfNeeded()
+                }
                 return "Channel switched to \(mode). Current channelType: \(coordinator.channelType)"
             }
         }
