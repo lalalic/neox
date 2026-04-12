@@ -17,7 +17,11 @@ struct DiscordChannelView: View {
             Toggle("Enable Discord", isOn: Binding(
                 get: { coordinator.channelType == "discord" },
                 set: { newValue in
-                    coordinator.channelType = newValue ? "discord" : "wechat"
+                    if newValue {
+                        coordinator.channelType = "discord"
+                    } else {
+                        coordinator.channelType = ""
+                    }
                 }
             ))
 

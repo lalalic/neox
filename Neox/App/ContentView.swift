@@ -338,31 +338,26 @@ struct RelaySettingsView: View {
                 }
 
                 // MARK: Channel
-                Section("Channel") {
-                    Picker("Type", selection: $coordinator.channelType) {
-                        Text("Discord").tag("discord")
-                        Text("WeChat").tag("wechat")
-                    }
-                    .pickerStyle(.segmented)
+                Section {
+                    Toggle("Enable WeChat", isOn: Binding(
+                        get: { weChatService.config.enabled },
+                        set: { newValue in
+                            if newValue {
+                                coordinator.channelType = "wechat"
+                                weChatService.enable()
+                                // Disable Discord when enabling WeChat
+                            } else {
+                                if coordinator.channelType == "wechat" {
+                                    coordinator.channelType = ""
+                                }
+                                weChatService.disable()
+                            }
+                        }
+                    ))
                 }
 
-                if coordinator.channelType == "wechat" {
-                    Section {
-                        Toggle("Enable WeChat", isOn: Binding(
-                            get: { weChatService.config.enabled },
-                            set: { newValue in
-                                if newValue {
-                                    weChatService.enable()
-                                } else {
-                                    weChatService.disable()
-                                }
-                            }
-                        ))
-                    }
-                } else {
-                    // MARK: Discord Channel
-                    DiscordChannelView(discord: coordinator.discordService)
-                }
+                // MARK: Discord Channel
+                DiscordChannelView(discord: coordinator.discordService)
 
                 #if DEBUG
                 Section("Relay Server") {
