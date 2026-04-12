@@ -57,20 +57,24 @@ struct ContentView: View {
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
                                 ToolbarItem(placement: .topBarLeading) {
-                                    HStack(spacing: 4) {
+                                    HStack(spacing: 0) {
                                         Button(action: { showProjects = true }) {
-                                            Image(systemName: "folder.fill")
-                                                .foregroundStyle(.primary)
-                                                .frame(width: 44, height: 44)
-                                                .contentShape(Rectangle())
+                                            HStack(spacing: 4) {
+                                                Image(systemName: "folder.fill")
+                                                    .foregroundStyle(.primary)
+                                                if let name = currentProject {
+                                                    Text(name)
+                                                        .font(.caption2)
+                                                        .foregroundStyle(.secondary)
+                                                        .lineLimit(1)
+                                                        .truncationMode(.tail)
+                                                        .frame(maxWidth: 60)
+                                                }
+                                            }
+                                            .frame(height: 44)
+                                            .contentShape(Rectangle())
                                         }
                                         .accessibilityLabel("Projects")
-                                        if let name = currentProject {
-                                            Text(name)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                                .lineLimit(1)
-                                        }
                                     }
                                 }
                                 ToolbarItem(placement: .principal) {
