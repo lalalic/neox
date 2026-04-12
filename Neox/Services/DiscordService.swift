@@ -1,11 +1,10 @@
 import Foundation
+import CopilotSDK
 
 /// Lightweight Discord bridge client.
-/// Connects to the relay server via WebSocket, registers Discord channels,
-/// and forwards incoming Discord messages to the app via callback.
-///
-/// Protocol: Content-Length framed JSON-RPC 2.0 (same as relay ↔ CLI).
-/// WS methods: discord.register, discord.unregister, discord.send, discord.channels, discord.guilds
+/// Can operate in two modes:
+/// 1. Shared: Uses the main ChatViewModel's WS connection (when main relay hosts Discord)
+/// 2. Standalone: Creates its own WS to a specified relay (when main relay differs from Discord relay)
 @MainActor
 final class DiscordService: ObservableObject {
 
@@ -40,19 +39,18 @@ final class DiscordService: ObservableObject {
 
     var onIncomingMessage: ((DiscordMessage) -> Void)?
 
+    // MARK: - RPC Provider
+
+    /// RPC sender — set externally (shared mode) or by standalone client.
+    var rpcSender: ((String, [String: JSONValue]) async throws -> JSONValue)?
+
+    // MARK: - Standalone Client
+
+    private var standaloneClient: StandaloneRelayClient?
+
     // MARK: - Config
 
-    private var relayHost: String
-    private var relayPort: UInt16
     private let workspaceURL: URL
-
-    // MARK: - WebSocket
-
-    private var webSocketTask: URLSessionWebSocketTask?
-    private var session: URLSession?
-    private var pingTask: Task<Void, Never>?
-    private var receiveTask: Task<Void, Never>?
-    private var rpcId = 0
 
     // MARK: - Persistence
 
@@ -62,96 +60,89 @@ final class DiscordService: ObservableObject {
 
     // MARK: - Init
 
-    init(workspaceURL: URL, relayHost: String, relayPort: UInt16) {
+    init(workspaceURL: URL) {
         self.workspaceURL = workspaceURL
-        self.relayHost = relayHost
-        self.relayPort = relayPort
         self.guildId = UserDefaults.standard.string(forKey: "discord_guild_id") ?? ""
         loadBindings()
     }
 
-    /// Update relay connection info (used when relay settings change).
-    func updateRelay(host: String, port: UInt16) {
-        relayHost = host
-        relayPort = port
-    }
+    // MARK: - Standalone Connection
 
-    // MARK: - Lifecycle
-
-    func connect() async {
-        guard webSocketTask == nil else { return }
-
-        let scheme = relayPort == 443 ? "wss" : "ws"
-        let urlStr = relayPort == 443 ? "\(scheme)://\(relayHost)" : "\(scheme)://\(relayHost):\(relayPort)"
-        guard let url = URL(string: urlStr) else {
-            NSLog("[Discord] Invalid relay URL: %@", urlStr)
-            return
-        }
-
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 300
-        let sess = URLSession(configuration: config)
-        self.session = sess
-
-        let task = sess.webSocketTask(with: url)
-        self.webSocketTask = task
-        task.resume()
-
-        // Wait for handshake
-        do {
-            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-                task.sendPing { error in
-                    if let error { cont.resume(throwing: error) }
-                    else { cont.resume() }
-                }
-            }
-        } catch {
-            NSLog("[Discord] WebSocket handshake failed: %@", error.localizedDescription)
-            disconnect()
-            return
-        }
-
-        isConnected = true
-        NSLog("[Discord] Connected to relay at %@", urlStr)
-
-        // Start receive loop
-        receiveTask = Task { await readLoop() }
-
-        // Start keepalive
-        pingTask = Task {
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(15))
-                guard !Task.isCancelled else { break }
-                self.webSocketTask?.sendPing { _ in }
+    /// Connect to a relay using a standalone WebSocket (when main relay doesn't host Discord).
+    func connectStandalone(host: String, port: UInt16) async {
+        let client = StandaloneRelayClient(host: host, port: port)
+        let notificationHandler: @Sendable (String, [String: JSONValue]?) -> Void = { [weak self] method, params in
+            Task { @MainActor [weak self] in
+                self?.handleNotification(method: method, params: params)
             }
         }
+        await client.setNotificationHandler(notificationHandler)
+        standaloneClient = client
 
-        // Send ping to relay
-        _ = try? await sendRPC(method: "ping", params: nil)
+        rpcSender = { [weak client] method, params in
+            guard let client else { throw DiscordError.notConnected }
+            return try await client.sendRPC(method: method, params: params)
+        }
 
-        // Re-register all persisted bindings
-        for binding in registeredChannels {
-            let result = try? await sendRPC(
-                method: "discord.register",
-                params: ["channelId": binding.channelId, "projectId": binding.projectId]
-            )
-            if let result, result.ok {
-                NSLog("[Discord] Re-registered #%@ → %@", binding.channelName ?? binding.channelId, binding.projectId)
-            }
+        let connected = await client.connect()
+        if connected {
+            isConnected = true
+            await registerBindings()
+        } else {
+            NSLog("[Discord] Standalone connection failed")
         }
     }
 
-    func disconnect() {
-        pingTask?.cancel()
-        pingTask = nil
-        receiveTask?.cancel()
-        receiveTask = nil
-        webSocketTask?.cancel(with: .goingAway, reason: nil)
-        webSocketTask = nil
-        session?.invalidateAndCancel()
-        session = nil
+    func disconnectStandalone() {
+        Task {
+            await standaloneClient?.disconnect()
+        }
+        standaloneClient = nil
+        rpcSender = nil
         isConnected = false
-        NSLog("[Discord] Disconnected")
+    }
+
+    // MARK: - Connection via shared WS
+
+    /// Register all persisted bindings on the shared connection.
+    /// Call after the main ChatViewModel connects.
+    func registerBindings() async {
+        for binding in registeredChannels {
+            do {
+                _ = try await sendRPC(
+                    method: "discord.register",
+                    params: ["channelId": .string(binding.channelId), "projectId": .string(binding.projectId)]
+                )
+                NSLog("[Discord] Re-registered #%@ → %@", binding.channelName ?? binding.channelId, binding.projectId)
+            } catch {
+                NSLog("[Discord] Failed to re-register #%@: %@", binding.channelName ?? binding.channelId, error.localizedDescription)
+            }
+        }
+        isConnected = true
+    }
+
+    func markDisconnected() {
+        isConnected = false
+    }
+
+    // MARK: - Notification Handling
+
+    /// Handle a custom notification from the shared WS (called by ChatViewModel.onCustomNotification).
+    func handleNotification(method: String, params: [String: JSONValue]?) {
+        guard method == "discord_message", let params else { return }
+
+        let msg = DiscordMessage(
+            channelId: params["channelId"]?.stringValue ?? "",
+            channelName: params["channelName"]?.stringValue,
+            guildName: params["guildName"]?.stringValue,
+            senderId: params["senderId"]?.stringValue ?? "",
+            senderName: params["senderName"]?.stringValue ?? "Unknown",
+            text: params["text"]?.stringValue ?? "",
+            projectId: params["projectId"]?.stringValue ?? "",
+            timestamp: params["timestamp"]?.intValue
+        )
+        NSLog("[Discord] Message from %@ in #%@: %@", msg.senderName, msg.channelName ?? msg.channelId, String(msg.text.prefix(60)))
+        onIncomingMessage?(msg)
     }
 
     // MARK: - Channel Management
@@ -159,16 +150,17 @@ final class DiscordService: ObservableObject {
     func registerChannel(channelId: String, projectId: String) async throws -> ChannelBinding {
         let result = try await sendRPC(
             method: "discord.register",
-            params: ["channelId": channelId, "projectId": projectId]
+            params: ["channelId": .string(channelId), "projectId": .string(projectId)]
         )
 
-        guard result.ok else {
-            throw DiscordError.registrationFailed(result.error ?? "Unknown error")
+        guard let resultObj = result.objectValue, resultObj["ok"]?.boolValue == true else {
+            let error = result.objectValue?["error"]?.stringValue ?? "Unknown error"
+            throw DiscordError.registrationFailed(error)
         }
 
         var binding = ChannelBinding(channelId: channelId, projectId: projectId)
-        binding.channelName = result.channelName
-        binding.guildName = result.guildName
+        binding.channelName = resultObj["channelName"]?.stringValue
+        binding.guildName = resultObj["guildName"]?.stringValue
 
         // Update or add
         if let idx = registeredChannels.firstIndex(where: { $0.channelId == channelId }) {
@@ -183,7 +175,7 @@ final class DiscordService: ObservableObject {
     }
 
     func unregisterChannel(channelId: String) async throws {
-        _ = try await sendRPC(method: "discord.unregister", params: ["channelId": channelId])
+        _ = try await sendRPC(method: "discord.unregister", params: ["channelId": .string(channelId)])
         registeredChannels.removeAll { $0.channelId == channelId }
         saveBindings()
         NSLog("[Discord] Unregistered channel %@", channelId)
@@ -192,10 +184,11 @@ final class DiscordService: ObservableObject {
     func sendMessage(channelId: String, text: String) async throws {
         let result = try await sendRPC(
             method: "discord.send",
-            params: ["channelId": channelId, "text": text]
+            params: ["channelId": .string(channelId), "text": .string(text)]
         )
-        guard result.ok else {
-            throw DiscordError.sendFailed(result.error ?? "Send failed")
+        guard result.objectValue?["ok"]?.boolValue == true else {
+            let error = result.objectValue?["error"]?.stringValue ?? "Send failed"
+            throw DiscordError.sendFailed(error)
         }
     }
 
@@ -221,180 +214,36 @@ final class DiscordService: ObservableObject {
     }
 
     func fetchGuilds() async throws -> [GuildInfo] {
-        guard let task = webSocketTask else { throw DiscordError.notConnected }
-
-        rpcId += 1
-        let id = rpcId
-        // If guildId is set, pass it as filter param
-        let paramsStr: String
-        if !guildId.isEmpty {
-            paramsStr = "{\"guildId\":\"\(guildId)\"}"
-        } else {
-            paramsStr = "{}"
-        }
-        let jsonStr = "{\"jsonrpc\":\"2.0\",\"id\":\(id),\"method\":\"discord.guilds\",\"params\":\(paramsStr)}"
-        let jsonData = Data(jsonStr.utf8)
-        let header = "Content-Length: \(jsonData.count)\r\n\r\n"
-        var framed = Data(header.utf8)
-        framed.append(jsonData)
-        try await task.send(.data(framed))
-
-        // Wait for raw JSON response
-        for _ in 0..<300 {
-            try await Task.sleep(for: .milliseconds(100))
-            if let raw = pendingRawResponses[id] {
-                pendingRawResponses.removeValue(forKey: id)
-                return parseGuilds(from: raw)
-            }
-        }
-        throw DiscordError.timeout
+        var params: [String: JSONValue] = [:]
+        if !guildId.isEmpty { params["guildId"] = .string(guildId) }
+        let result = try await sendRPC(method: "discord.guilds", params: params)
+        return parseGuilds(from: result)
     }
 
-    private var pendingRawResponses: [Int: [String: Any]] = [:]
-
-    private func parseGuilds(from json: [String: Any]) -> [GuildInfo] {
-        guard let result = json["result"] as? [String: Any],
-              let guildsArr = result["guilds"] as? [[String: Any]] else { return [] }
-        return guildsArr.compactMap { g in
-            guard let gid = g["guildId"] as? String,
-                  let name = g["guildName"] as? String,
-                  let channels = g["channels"] as? [[String: Any]] else { return nil }
+    private func parseGuilds(from json: JSONValue) -> [GuildInfo] {
+        guard let resultObj = json.objectValue,
+              case .array(let guildsArr) = resultObj["guilds"] else { return [] }
+        return guildsArr.compactMap { g -> GuildInfo? in
+            guard let gObj = g.objectValue,
+                  let gid = gObj["guildId"]?.stringValue,
+                  let name = gObj["guildName"]?.stringValue,
+                  case .array(let channels) = gObj["channels"] else { return nil }
             let chInfos = channels.compactMap { c -> ChannelInfo? in
-                guard let cid = c["id"] as? String,
-                      let cname = c["name"] as? String,
-                      let ctype = c["type"] as? Int else { return nil }
+                guard let cObj = c.objectValue,
+                      let cid = cObj["id"]?.stringValue,
+                      let cname = cObj["name"]?.stringValue,
+                      let ctype = cObj["type"]?.intValue else { return nil }
                 return ChannelInfo(channelId: cid, channelName: cname, type: ctype)
             }
             return GuildInfo(guildId: gid, guildName: name, channels: chInfos)
         }
     }
 
-    // MARK: - WebSocket I/O
+    // MARK: - RPC Helper
 
-    /// Simple JSON-RPC response value for Discord bridge operations.
-    struct RPCResult: Sendable {
-        var ok: Bool = false
-        var error: String?
-        var channelName: String?
-        var guildName: String?
-        var raw: [String: String] = [:]
-    }
-
-    private func sendRPC(method: String, params: [String: String]?) async throws -> RPCResult {
-        guard let task = webSocketTask else { throw DiscordError.notConnected }
-
-        rpcId += 1
-        // Build request JSON manually to avoid Any
-        var parts = ["\"jsonrpc\":\"2.0\"", "\"id\":\(rpcId)", "\"method\":\"\(method)\""]
-        if let params {
-            let paramParts = params.map { "\"\($0.key)\":\"\($0.value)\"" }
-            parts.append("\"params\":{\(paramParts.joined(separator: ","))}")
-        }
-        let jsonStr = "{\(parts.joined(separator: ","))}"
-        let jsonData = Data(jsonStr.utf8)
-        let header = "Content-Length: \(jsonData.count)\r\n\r\n"
-        var framed = Data(header.utf8)
-        framed.append(jsonData)
-
-        try await task.send(.data(framed))
-
-        // Wait for response with matching id (with timeout)
-        let expectedId = rpcId
-        for _ in 0..<300 { // 30 second timeout (100ms intervals)
-            try await Task.sleep(for: .milliseconds(100))
-            if let response = pendingResponses[expectedId] {
-                pendingResponses.removeValue(forKey: expectedId)
-                return response
-            }
-        }
-        throw DiscordError.timeout
-    }
-
-    // Pending RPC responses (filled by readLoop)
-    private var pendingResponses: [Int: RPCResult] = [:]
-
-    private nonisolated func readLoop() async {
-        var buffer = Data()
-
-        while true {
-            guard let task = await self.webSocketTask else { break }
-            do {
-                let message = try await task.receive()
-                switch message {
-                case .data(let data): buffer.append(data)
-                case .string(let text):
-                    if let data = text.data(using: .utf8) { buffer.append(data) }
-                @unknown default: break
-                }
-
-                // Extract Content-Length framed messages
-                while let (msgData, consumed) = Self.extractFrame(from: buffer) {
-                    buffer = Data(buffer.dropFirst(consumed))
-                    await handleIncoming(msgData)
-                }
-            } catch {
-                NSLog("[Discord] WebSocket receive error: %@", error.localizedDescription)
-                await MainActor.run { [weak self] in self?.isConnected = false }
-                break
-            }
-        }
-    }
-
-    private static nonisolated func extractFrame(from buffer: Data) -> (Data, Int)? {
-        let separator = Data("\r\n\r\n".utf8)
-        guard let headerEnd = buffer.range(of: separator) else { return nil }
-        let headerStr = String(data: buffer[buffer.startIndex..<headerEnd.lowerBound], encoding: .utf8) ?? ""
-        guard let colonRange = headerStr.range(of: ":", options: .literal),
-              let length = Int(headerStr[colonRange.upperBound...].trimmingCharacters(in: .whitespaces)) else {
-            return nil
-        }
-        let bodyStart = headerEnd.upperBound
-        let totalLength = buffer.distance(from: buffer.startIndex, to: bodyStart) + length
-        guard buffer.count >= totalLength else { return nil }
-        let body = buffer[bodyStart..<buffer.index(bodyStart, offsetBy: length)]
-        return (Data(body), totalLength)
-    }
-
-    private func handleIncoming(_ data: Data) {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-
-        // RPC response (has "id" and "result"/"error")
-        if let id = json["id"] as? Int {
-            // Store raw response for complex queries (fetchGuilds)
-            pendingRawResponses[id] = json
-
-            var result = RPCResult()
-            if let resultObj = json["result"] as? [String: Any] {
-                result.ok = resultObj["ok"] as? Bool ?? true
-                result.channelName = resultObj["channelName"] as? String
-                result.guildName = resultObj["guildName"] as? String
-                result.error = resultObj["error"] as? String
-            } else if let errorObj = json["error"] as? [String: Any] {
-                result.ok = false
-                result.error = errorObj["message"] as? String ?? "RPC error"
-            } else {
-                result.ok = true
-            }
-            pendingResponses[id] = result
-            return
-        }
-
-        // Notification (has "method" but no "id")
-        if let method = json["method"] as? String, method == "discord_message",
-           let params = json["params"] as? [String: Any] {
-            let msg = DiscordMessage(
-                channelId: params["channelId"] as? String ?? "",
-                channelName: params["channelName"] as? String,
-                guildName: params["guildName"] as? String,
-                senderId: params["senderId"] as? String ?? "",
-                senderName: params["senderName"] as? String ?? "Unknown",
-                text: params["text"] as? String ?? "",
-                projectId: params["projectId"] as? String ?? "",
-                timestamp: params["timestamp"] as? Int
-            )
-            NSLog("[Discord] Message from %@ in #%@: %@", msg.senderName, msg.channelName ?? msg.channelId, String(msg.text.prefix(60)))
-            onIncomingMessage?(msg)
-        }
+    private func sendRPC(method: String, params: [String: JSONValue]) async throws -> JSONValue {
+        guard let sender = rpcSender else { throw DiscordError.notConnected }
+        return try await sender(method, params)
     }
 
     // MARK: - Persistence
@@ -429,6 +278,180 @@ final class DiscordService: ObservableObject {
             case .sendFailed(let msg): return "Send failed: \(msg)"
             case .timeout: return "Request timed out"
             }
+        }
+    }
+}
+
+// MARK: - Standalone Relay Client
+
+/// Minimal WebSocket + Content-Length framed JSON-RPC client for Discord bridge.
+/// Used when the main ChatViewModel connects to a different relay than where Discord bot lives.
+actor StandaloneRelayClient {
+    private let host: String
+    private let port: UInt16
+    private var webSocketTask: URLSessionWebSocketTask?
+    private var session: URLSession?
+    private var rpcId = 0
+    private var pending: [Int: CheckedContinuation<JSONValue, Error>] = [:]
+    private var readTask: Task<Void, Never>?
+    private var pingTask: Task<Void, Never>?
+
+    var onNotification: (@Sendable (_ method: String, _ params: [String: JSONValue]?) -> Void)?
+
+    init(host: String, port: UInt16) {
+        self.host = host
+        self.port = port
+    }
+
+    func setNotificationHandler(_ handler: @Sendable @escaping (_ method: String, _ params: [String: JSONValue]?) -> Void) {
+        onNotification = handler
+    }
+
+    func connect() async -> Bool {
+        let scheme = port == 443 ? "wss" : "ws"
+        let urlStr = port == 443 ? "\(scheme)://\(host)" : "\(scheme)://\(host):\(port)"
+        guard let url = URL(string: urlStr) else { return false }
+
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 300
+        let sess = URLSession(configuration: config)
+        self.session = sess
+
+        let task = sess.webSocketTask(with: url)
+        self.webSocketTask = task
+        task.resume()
+
+        // Verify handshake
+        do {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                task.sendPing { error in
+                    if let error { cont.resume(throwing: error) }
+                    else { cont.resume() }
+                }
+            }
+        } catch {
+            NSLog("[Discord-Standalone] Handshake failed: %@", error.localizedDescription)
+            disconnect()
+            return false
+        }
+
+        NSLog("[Discord-Standalone] Connected to %@", urlStr)
+        readTask = Task { await readLoop() }
+        pingTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(15))
+                guard !Task.isCancelled else { break }
+                self.webSocketTask?.sendPing { _ in }
+            }
+        }
+        // Send initial ping RPC
+        _ = try? await sendRPC(method: "ping", params: [:])
+        return true
+    }
+
+    func disconnect() {
+        readTask?.cancel()
+        readTask = nil
+        pingTask?.cancel()
+        pingTask = nil
+        webSocketTask?.cancel(with: .goingAway, reason: nil)
+        webSocketTask = nil
+        session?.invalidateAndCancel()
+        session = nil
+        // Cancel all pending
+        for (_, cont) in pending {
+            cont.resume(throwing: DiscordService.DiscordError.notConnected)
+        }
+        pending.removeAll()
+    }
+
+    func sendRPC(method: String, params: [String: JSONValue]) async throws -> JSONValue {
+        guard let task = webSocketTask else { throw DiscordService.DiscordError.notConnected }
+
+        rpcId += 1
+        let id = rpcId
+        let request = JSONRPCRequest(id: id, method: method, params: params)
+        let jsonData = try JSONEncoder().encode(request)
+        let header = "Content-Length: \(jsonData.count)\r\n\r\n"
+        var framed = Data(header.utf8)
+        framed.append(jsonData)
+
+        try await task.send(.data(framed))
+
+        return try await withCheckedThrowingContinuation { cont in
+            pending[id] = cont
+        }
+    }
+
+    // MARK: - Internal
+
+    private struct JSONRPCRequest: Encodable {
+        let jsonrpc = "2.0"
+        let id: Int
+        let method: String
+        let params: [String: JSONValue]
+    }
+
+    private func readLoop() async {
+        var buffer = Data()
+        while let task = webSocketTask {
+            do {
+                let message = try await task.receive()
+                switch message {
+                case .data(let data): buffer.append(data)
+                case .string(let text):
+                    if let d = text.data(using: .utf8) { buffer.append(d) }
+                @unknown default: break
+                }
+                while let (msgData, consumed) = extractFrame(from: buffer) {
+                    buffer = Data(buffer.dropFirst(consumed))
+                    handleIncoming(msgData)
+                }
+            } catch {
+                NSLog("[Discord-Standalone] Read error: %@", error.localizedDescription)
+                break
+            }
+        }
+    }
+
+    private func extractFrame(from buffer: Data) -> (Data, Int)? {
+        let separator = Data("\r\n\r\n".utf8)
+        guard let headerEnd = buffer.range(of: separator) else { return nil }
+        let headerStr = String(data: buffer[buffer.startIndex..<headerEnd.lowerBound], encoding: .utf8) ?? ""
+        guard let colonRange = headerStr.range(of: ":", options: .literal),
+              let length = Int(headerStr[colonRange.upperBound...].trimmingCharacters(in: .whitespaces)) else {
+            return nil
+        }
+        let bodyStart = headerEnd.upperBound
+        let totalLength = buffer.distance(from: buffer.startIndex, to: bodyStart) + length
+        guard buffer.count >= totalLength else { return nil }
+        let body = buffer[bodyStart..<buffer.index(bodyStart, offsetBy: length)]
+        return (Data(body), totalLength)
+    }
+
+    private func handleIncoming(_ data: Data) {
+        guard let json = try? JSONDecoder().decode([String: JSONValue].self, from: data) else { return }
+
+        // RPC response
+        if case .int(let id) = json["id"] {
+            if let cont = pending.removeValue(forKey: id) {
+                if let result = json["result"] {
+                    cont.resume(returning: result)
+                } else if let error = json["error"] {
+                    let msg = error.objectValue?["message"]?.stringValue ?? "RPC error"
+                    cont.resume(throwing: DiscordService.DiscordError.sendFailed(msg))
+                } else {
+                    cont.resume(returning: .null)
+                }
+            }
+            return
+        }
+
+        // Notification
+        if case .string(let method) = json["method"] {
+            let params: [String: JSONValue]?
+            if case .object(let p) = json["params"] { params = p } else { params = nil }
+            onNotification?(method, params)
         }
     }
 }

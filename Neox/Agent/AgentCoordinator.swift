@@ -135,11 +135,7 @@ final class AgentCoordinator: ObservableObject {
         let savedPort = UserDefaults.standard.integer(forKey: "relayPort")
         let savedHost = UserDefaults.standard.string(forKey: "relayHost") ?? "relay.ai.qili2.com"
         let resolvedPort: UInt16 = savedPort > 0 ? UInt16(savedPort) : 443
-        self.discordService = DiscordService(
-            workspaceURL: resolvedWorkspace,
-            relayHost: savedHost,
-            relayPort: resolvedPort
-        )
+        self.discordService = DiscordService(workspaceURL: resolvedWorkspace)
         let terminalProvider = TerminalToolProvider(workspaceURL: resolvedWorkspace)
         self.terminalToolProvider = terminalProvider
         self.subAgentToolProvider = SubAgentToolProvider(
@@ -179,12 +175,6 @@ final class AgentCoordinator: ObservableObject {
         discordService.onIncomingMessage = { [weak self] message in
             self?.handleDiscordMessage(message)
         }
-        // Connect Discord if channel type is discord and server ID is configured
-        if channelType == "discord" && !discordService.guildId.isEmpty {
-            let parsed = parseLocalRelayURL()
-            discordService.updateRelay(host: parsed.host, port: parsed.port)
-            Task { await discordService.connect() }
-        }
     }
 
     /// Create agent sessions for all projects that have active WeChat bindings.
@@ -198,6 +188,40 @@ final class AgentCoordinator: ObservableObject {
                 await self?.messageRouter?.handleProjectResponse(projectId: projectId, response: response)
             }
             NSLog("[SessionLifecycle] Auto-created session for wired project '%@'", projectId)
+        }
+    }
+
+    /// Wire DiscordService to use the relay connection.
+    /// If the main relay is the same as the local relay, shares the ChatViewModel WS.
+    /// Otherwise, creates a standalone WS to the local relay for Discord.
+    private func wireDiscord(to vm: ChatViewModel) {
+        guard channelType == "discord" && !discordService.guildId.isEmpty else { return }
+
+        let localRelay = parseLocalRelayURL()
+        let mainIsLocal = relayHost == localRelay.host && relayPort == localRelay.port
+
+        if mainIsLocal {
+            // Shared mode: Discord RPCs go through the main ChatViewModel WS
+            discordService.rpcSender = { [weak vm] method, params in
+                guard let vm else { throw DiscordService.DiscordError.notConnected }
+                return try await vm.sendRPC(method: method, params: params)
+            }
+            vm.onCustomNotification = { [weak self] method, params in
+                self?.discordService.handleNotification(method: method, params: params)
+            }
+            Task {
+                let ready = await vm.waitForReady(timeout: 15)
+                guard ready else {
+                    NSLog("[Discord] Main session not ready — skipping channel registration")
+                    return
+                }
+                await discordService.registerBindings()
+            }
+        } else {
+            // Standalone mode: Discord uses its own WS to local relay
+            Task {
+                await discordService.connectStandalone(host: localRelay.host, port: localRelay.port)
+            }
         }
     }
 
@@ -610,6 +634,10 @@ final class AgentCoordinator: ObservableObject {
         
         self.chatViewModel = vm
         self.paymentManager = PaymentManager(usageTracker: vm.usageTracker)
+
+        // Wire Discord to use shared WS connection
+        wireDiscord(to: vm)
+
         Task { await vm.connect() }
         return vm
     }
@@ -618,10 +646,11 @@ final class AgentCoordinator: ObservableObject {
     func reconnect() {
         applyRelaySelection()
         saveRelaySettings()
+        discordService.disconnectStandalone()
+        discordService.markDisconnected()
         chatViewModel?.disconnect()
         chatViewModel = nil
-        let vm = createChatViewModel()
-        Task { await vm.connect() }
+        _ = createChatViewModel()
     }
     
     func stopAgent() {

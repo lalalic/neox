@@ -21,33 +21,25 @@ struct DiscordChannelView: View {
                 Label("Invite Bot to Server", systemImage: "link.badge.plus")
             }
 
-            // Connection toggle
-            Toggle("Connected", isOn: Binding(
-                get: { discord.isConnected },
-                set: { newValue in
-                    Task {
-                        if newValue {
-                            let parsed = coordinator.parseLocalRelayURL()
-                            discord.updateRelay(host: parsed.host, port: parsed.port)
-                            await discord.connect()
-                        } else {
-                            discord.disconnect()
-                        }
-                    }
+            // Connection status (read-only — shares main relay WS)
+            HStack {
+                Text("Status")
+                Spacer()
+                if discord.isConnected {
+                    Label("Connected", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.caption)
+                } else {
+                    Label("Disconnected", systemImage: "circle")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
                 }
-            ))
+            }
 
             TextField("Server ID", text: $discord.guildId)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .keyboardType(.numberPad)
-                .onSubmit {
-                    if !discord.guildId.isEmpty && !discord.isConnected {
-                        let parsed = coordinator.parseLocalRelayURL()
-                        discord.updateRelay(host: parsed.host, port: parsed.port)
-                        Task { await discord.connect() }
-                    }
-                }
 
             if !discord.registeredChannels.isEmpty {
                 HStack {
@@ -187,12 +179,6 @@ struct DiscordWiringSheet: View {
                 }
             }
             .task {
-                // Auto-connect if not connected and server ID is set
-                if !discord.isConnected && !discord.guildId.isEmpty {
-                    let parsed = coordinator.parseLocalRelayURL()
-                    discord.updateRelay(host: parsed.host, port: parsed.port)
-                    await discord.connect()
-                }
                 if discord.isConnected && !discord.guildId.isEmpty {
                     await loadChannels()
                 }
