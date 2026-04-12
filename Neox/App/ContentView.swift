@@ -57,7 +57,7 @@ struct ContentView: View {
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
                                 ToolbarItem(placement: .topBarLeading) {
-                                    HStack(spacing: 8) {
+                                    HStack(spacing: 4) {
                                         Button(action: { showProjects = true }) {
                                             Image(systemName: "folder.fill")
                                                 .foregroundStyle(.primary)
@@ -65,6 +65,16 @@ struct ContentView: View {
                                                 .contentShape(Rectangle())
                                         }
                                         .accessibilityLabel("Projects")
+                                        if let name = currentProject {
+                                            Text(name)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                        }
+                                    }
+                                }
+                                ToolbarItem(placement: .principal) {
+                                    HStack(spacing: 4) {
                                         ConnectionTitleView(
                                             title: "Neo",
                                             viewModel: chatVM
