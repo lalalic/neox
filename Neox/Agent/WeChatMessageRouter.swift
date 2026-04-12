@@ -56,6 +56,12 @@ final class WeChatMessageRouter {
             return
         }
 
+        guard coordinator.isProjectScopeActive(for: projectId) else {
+            let active = coordinator.chatViewModel?.projectScope ?? "none"
+            NSLog("[WeChatRouter] Project '%@' not active (current: %@) — ignoring", projectId, active)
+            return
+        }
+
         // Process message based on type
         let messageText: String
         var savedMediaPath: String? = nil

@@ -232,14 +232,8 @@ final class AgentCoordinator: ObservableObject {
             NSLog("[Discord] Message with no projectId — ignoring")
             return
         }
-        let activeScope = chatViewModel?.projectScope?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedActive = activeScope?.lowercased()
-        let normalizedProjectId = projectId.lowercased()
-        let projectName = projectNameForId(projectId)?.lowercased()
-
-        guard let normalizedActive,
-              normalizedActive == normalizedProjectId || normalizedActive == projectName else {
-            let active = activeScope ?? "none"
+        guard isProjectScopeActive(for: projectId) else {
+            let active = chatViewModel?.projectScope?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "none"
             NSLog("[Discord] Project '%@' not active (current: %@) — ignoring", projectId, active)
             return
         }
@@ -282,6 +276,15 @@ final class AgentCoordinator: ObservableObject {
             return nil
         }
         return json["name"] as? String
+    }
+
+    func isProjectScopeActive(for projectId: String) -> Bool {
+        let activeScope = chatViewModel?.projectScope?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedActive = activeScope?.lowercased()
+        let normalizedProjectId = projectId.lowercased()
+        let projectName = projectNameForId(projectId)?.lowercased()
+        guard let normalizedActive else { return false }
+        return normalizedActive == normalizedProjectId || normalizedActive == projectName
     }
     
     /// Save relay settings to UserDefaults.
