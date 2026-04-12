@@ -328,6 +328,43 @@ final class AppAgentSetup {
             "inputSchema": ["type": "object"]
         ])
 
+        // ── channel_switch: toggle between discord/wechat channel mode ──
+        let channelSwitchHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] args in
+            return await MainActor.run {
+                guard let self, let coordinator = self.coordinator else { return "Error: coordinator gone" }
+                let mode: String
+                if case .object(let dict) = args, case .string(let m) = dict["channel"] {
+                    mode = m.lowercased()
+                } else {
+                    return "Error: 'channel' parameter required (discord or wechat)"
+                }
+                guard mode == "discord" || mode == "wechat" else {
+                    return "Error: channel must be 'discord' or 'wechat'"
+                }
+                coordinator.channelType = mode
+                UserDefaults.standard.set(mode, forKey: "channelType")
+                return "Channel switched to \(mode). Current channelType: \(coordinator.channelType)"
+            }
+        }
+        server.register(
+            name: "channel_switch",
+            description: "Switch the global channel mode between discord and wechat.",
+            inputSchema: [
+                "type": "object",
+                "properties": [
+                    "channel": ["type": "string", "enum": ["discord", "wechat"], "description": "Channel mode to switch to"]
+                ] as [String: Any],
+                "required": ["channel"]
+            ] as [String: Any],
+            handler: channelSwitchHandler
+        )
+        bridgeHandlers["channel_switch"] = channelSwitchHandler
+        bridgeToolList.append([
+            "name": "channel_switch",
+            "description": "Switch global channel mode (discord/wechat)",
+            "inputSchema": ["type": "object"]
+        ])
+
         // ── wechat_router_status: diagnostic tool ──
         let routerStatusHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] _ in
             return await MainActor.run {

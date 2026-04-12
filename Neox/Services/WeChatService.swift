@@ -277,6 +277,22 @@ final class WeChatService: ObservableObject {
         contactLookup[contactId]
     }
 
+    /// Look up the display name for a contact ID from bindings or live contacts.
+    func contactDisplayName(_ contactId: String, project: String? = nil) -> String? {
+        // Check project bindings first
+        if let project {
+            let bindings = getBindings(for: project)
+            if let bound = bindings.contacts.first(where: { $0.id == contactId }), !bound.name.isEmpty {
+                return bound.name
+            }
+        }
+        // Fall back to live contacts
+        if let contact = contacts.first(where: { $0.userName == contactId }), !contact.name.isEmpty {
+            return contact.name
+        }
+        return nil
+    }
+
     /// Get the sender weight for a contact in a project's bindings.
     /// Owner (logged-in user) always gets weight 100 in room messages.
     func senderWeight(contactId: String, senderId: String?, project: String?) -> Int {

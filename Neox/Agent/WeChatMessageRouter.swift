@@ -50,6 +50,12 @@ final class WeChatMessageRouter {
     func route(_ message: WeChatMessage) {
         guard let weChatService, let coordinator else { return }
 
+        // Channel exclusivity: only route if global channel is wechat
+        guard coordinator.channelType == "wechat" else {
+            NSLog("[WeChatRouter] Channel type is '%@' — ignoring WeChat message", coordinator.channelType)
+            return
+        }
+
         // Look up which project this contact is bound to
         let contactId = message.routingContactId
         guard let projectId = weChatService.projectForContact(contactId) else {
@@ -168,11 +174,23 @@ final class WeChatMessageRouter {
             await self?.handleProjectResponse(projectId: projectId, response: response)
         }
 
+        // Set up ask_questions forwarding to WeChat
+        vm.onChannelQuestions = { [weak self] questionText in
+            guard let self, let ws = self.weChatService, let coord = self.coordinator else { return }
+            let activeContact = self.lastActiveContact[projectId] ?? contactId
+            let formatted = "❓ \(questionText)"
+            // Mirror question to main chat
+            let qMsg = ChatMessage(role: .assistant, content: [.text(questionText)], project: projectId, source: "WeChat | \(senderName)")
+            await MainActor.run { coord.chatViewModel?.mirror(qMsg) }
+            await ws.sendToContact(activeContact, message: formatted, watermark: true)
+            NSLog("[WeChatRouter] Sent ask_questions to %@ for project '%@'", activeContact, projectId)
+        }
+
         // Format message with rich context for the agent
         let prompt: String
         let sourceLabel: String
         if message.isRoom {
-            let roomName = message.fromContact?.name ?? contactId
+            let roomName = message.fromContact?.name ?? weChatService.contactDisplayName(contactId, project: projectId) ?? contactId
             sourceLabel = "WeChat | \(roomName) | \(senderName)"
             var lines = ["[WeChat message in \(roomName)]"]
             lines.append("From: \(senderName) (weight: \(weight))")
@@ -196,7 +214,7 @@ final class WeChatMessageRouter {
         Task { @MainActor in coordinator.chatViewModel?.mirror(userMsg) }
 
         let history = recentHistory(for: projectId)
-        let contactName = message.fromContact?.name ?? contactId
+        let contactName = message.fromContact?.name ?? weChatService.contactDisplayName(contactId, project: projectId) ?? contactId
 
         Task {
             // Wait for session to be connected before dispatching
@@ -327,7 +345,8 @@ final class WeChatMessageRouter {
         NSLog("[WeChatRouter] Response → %@: %@", contactId, String(formatted.prefix(80)))
 
         // Mirror response to main chat for visibility
-        let respSource = "WeChat | \(contactId)"
+        let contactName = weChatService.contactDisplayName(contactId, project: projectId) ?? contactId
+        let respSource = "WeChat | \(contactName)"
         let responseMsg = ChatMessage(role: .assistant, content: [.text(trimmed)], project: projectId, source: respSource)
         Task { @MainActor in coordinator.chatViewModel?.mirror(responseMsg) }
 

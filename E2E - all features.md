@@ -10,6 +10,7 @@ notes:
   - P1 channel stories are in "E2E - user stories.md"
   - WeChat stories blocked until login available
   - User is sleeping — run autonomously
+  - wechat test (lalalic@ca, testneo), simuate sender
 ---
 
 # Neox E2E — All Features
@@ -318,7 +319,7 @@ notes:
 | P3-AGENT-003 | Tool use indicators | Agent | AppAgent | **SKIP** |
 | P3-AGENT-004 | Thinking/reasoning display | Agent | AppAgent | **SKIP** |
 | P3-BROWSER-001 | Browser toggle visibility | Browser | AppAgent | **BLOCKED** |
-| P3-BROWSER-002 | Agent web navigation | Browser | AppAgent | **BLOCKED** |
+| P3-BROWSER-002 | Agent web navigation | Browser | AppAgent | **PASS** |
 | P3-MEM-001 | Memory read/write | Memory | AppAgent + logs | **SKIP** |
 | P3-FILE-001 | File operations | Files | AppAgent + logs | **SKIP** |
 | P3-MULTI-001 | Multi-modal input (photo) | Media | AppAgent | **BLOCKED** |
@@ -768,8 +769,12 @@ notes:
 ### P3-BROWSER-001 — BLOCKED
 > No browser toggle found in current UI. May require specific setup or WebKitAgent initialization.
 
-### P3-BROWSER-002 — BLOCKED
-> Depends on P3-BROWSER-001. Cannot test web navigation without browser access.
+### P3-BROWSER-002 — PASS
+- [x] Agent navigated to https://example.com via web_agent tool (server-side, not local WKWebView)
+- [x] Agent returned page title "Example Domain" correctly
+> Tested via Discord #general: sent "Use your web_agent tool to navigate to https://example.com and tell me its page title"
+> Agent response: "The page title of https://example.com is 'Example Domain'. [微笑]"
+> Note: Channel sessions use server-side web_agent, not local WKWebView browser toggle.
 
 ### P3-MEM-001 — SKIP
 > Memory tools require specific prompts and may modify project state. Skipped.

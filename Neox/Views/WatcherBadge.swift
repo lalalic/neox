@@ -12,7 +12,8 @@ struct WatcherBadge: View {
                 .font(.caption2.weight(.semibold))
                 .monospacedDigit()
         }
-        .padding(.horizontal, 6)
+        .fixedSize()
+        .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(Color.green.opacity(0.15), in: Capsule())
         .foregroundStyle(.green)
