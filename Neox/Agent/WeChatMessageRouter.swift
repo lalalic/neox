@@ -268,16 +268,8 @@ final class WeChatMessageRouter {
                 }
 
             case .newInput:
-                // New instruction/request for the agent
-                let state = vm.chatState
-                switch state {
-                case .waitingForQuestions, .waitingForUser:
-                    _ = await vm.sendToRelay(prompt, source: sourceLabel)
-                case .working:
-                    await vm.send(prompt, startAgent: false, source: sourceLabel)
-                default:
-                    await vm.send(prompt, startAgent: true, source: sourceLabel)
-                }
+                // New instruction/request — channelSend routes by state
+                await vm.channelSend(prompt, source: sourceLabel)
             }
         }
     }

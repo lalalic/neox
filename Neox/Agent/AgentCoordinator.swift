@@ -257,7 +257,7 @@ final class AgentCoordinator: ObservableObject {
                 NSLog("[Discord] Session failed to connect for project '%@'", projectId)
                 return
             }
-            await vm.send(prompt, startAgent: true, source: sourceLabel)
+            await vm.channelSend(prompt, source: sourceLabel)
         }
     }
 
@@ -267,7 +267,7 @@ final class AgentCoordinator: ObservableObject {
         guard !trimmed.isEmpty else { return }
 
         // Mirror response to main chat for visibility
-        let channelName = discordService.channelBindings.first(where: { $0.channelId == channelId })?.channelName ?? channelId
+        let channelName = discordService.registeredChannels.first(where: { $0.channelId == channelId })?.channelName ?? channelId
         let responseMsg = ChatMessage(role: .assistant, content: [.text(trimmed)], project: projectId, source: "Discord | #\(channelName)")
         await chatViewModel?.mirror(responseMsg)
 
