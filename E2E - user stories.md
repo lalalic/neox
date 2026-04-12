@@ -31,7 +31,7 @@ F --> G[Send Reply to Original Channel]
 | P1-CH-001 | Exclusive channel mode toggle | Global | Required | One channel enabled at a time | Disabled channel cannot route | **PARTIAL PASS** |
 | P1-DIS-001 | Discord first-time setup and reply | Discord | Required | Bound selected project replies | Unselected project ignored | **PASS** |
 | P1-DIS-002 | Discord restart persistence | Discord | Required | Restart preserves binding and reply loop | Wrong selected scope ignored | **PASS** |
-| P1-DIS-003 | Discord ask-questions roundtrip | Discord | Required | Questions posted and answers routed back | Answers in wrong scope ignored | **BLOCKED** |
+| P1-DIS-003 | Discord ask-questions roundtrip | Discord | Required | Questions posted and answers routed back | Answers in wrong scope ignored | **PASS** |
 | P1-WC-001 | WeChat room project assistant routing | WeChat | Required | Selected room project replies | Other project contact ignored | **BLOCKED** |
 | P1-WC-002 | WeChat direct assistant routing | WeChat | Required | Selected direct project replies | Other project contact ignored | **BLOCKED** |
 | P1-WC-003 | WeChat ask-questions roundtrip | WeChat | Required | Questions and answers route in selected scope | Wrong-scope answers ignored | **BLOCKED** |
@@ -233,11 +233,13 @@ F --> G[Send Reply to Original Channel]
 - [x] Reply loop works after restart (2+2 → "2+2 equals 4.")
 - [x] No selected scope → "Project not active (current: none) — ignoring" ✅
 
-### P1-DIS-003 Discord Ask-Questions Roundtrip — BLOCKED
-- [ ] Ask-questions prompt posted question — **not implemented: project sessions auto-answer ask_questions**
-- [ ] Discord answer routed back — **feature gap: no mechanism to forward questions to Discord**
-- [ ] Final response posted to same channel
-> Blocked: Headless project sessions use skipPendingRestore to auto-answer ask_questions. No forwarding of questions to Discord channel is implemented yet.
+### P1-DIS-003 Discord Ask-Questions Roundtrip — PASS
+- [x] Ask-questions prompt posted question to Discord channel (❓ **Question:** format)
+- [x] Discord answer routed back to project session via relay
+- [x] Final response posted to same channel
+- [x] Agent continued conversation with follow-up ask_questions (multi-turn confirmed)
+> Tested: Sent "I need help planning something important" → agent called ask_questions → question forwarded to #pathfinder → answered "Its a birthday party next Saturday evening" → agent processed answer and responded → agent asked follow-up question (full roundtrip confirmed).
+> Commits: copilot-ios 93b0e0b (onChannelQuestions callback), neox 9941f52 (AgentCoordinator wiring).
 
 ### P1-WC-001 WeChat Room Project Assistant Routing — BLOCKED
 - [ ] Room-bound selected project replied
@@ -254,7 +256,7 @@ F --> G[Send Reply to Original Channel]
 - [ ] WeChat answer routed back to the selected project session
 - [ ] Final response posted to the same WeChat destination
 - [ ] Wrong-scope answer did not produce response
-> Blocked: Same ask_questions forwarding gap as DIS-003, plus no WeChat message simulation.
+> Blocked: ask_questions forwarding now works for Discord (DIS-003 PASS), but WeChat needs equivalent wiring in handleWeChatMessage + no WeChat message simulation available.
 
 ## Bug Found During E2E
 ### Project Session Multi-Turn Bug (FIXED)
