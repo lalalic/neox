@@ -50,22 +50,27 @@ final class WeChatMessageRouter {
     func route(_ message: WeChatMessage) {
         guard let weChatService, let coordinator else { return }
 
-        // Channel exclusivity: only route if global channel is wechat
-        guard coordinator.channelType == "wechat" else {
-            NSLog("[WeChatRouter] Channel type is '%@' — ignoring WeChat message", coordinator.channelType)
-            return
-        }
-
         // Look up which project this contact is bound to
         let contactId = message.routingContactId
         guard let projectId = weChatService.projectForContact(contactId) else {
             return
         }
 
-        guard coordinator.isProjectScopeActive(for: projectId) else {
-            let active = coordinator.chatViewModel?.projectScope ?? "none"
-            NSLog("[WeChatRouter] Project '%@' not active (current: %@) — ignoring", projectId, active)
-            return
+        // wechat-assistant projects always listen (background mode)
+        let projectType = coordinator.readProjectType(projectId: projectId)
+        let isAutoListenProject = projectType == "wechat-assistant"
+
+        // Channel exclusivity: non-assistant projects only route if global channel is wechat
+        if !isAutoListenProject {
+            guard coordinator.channelType == "wechat" else {
+                NSLog("[WeChatRouter] Channel type is '%@' — ignoring WeChat message", coordinator.channelType)
+                return
+            }
+            guard coordinator.isProjectScopeActive(for: projectId) else {
+                let active = coordinator.chatViewModel?.projectScope ?? "none"
+                NSLog("[WeChatRouter] Project '%@' not active (current: %@) — ignoring", projectId, active)
+                return
+            }
         }
 
         // Process message based on type

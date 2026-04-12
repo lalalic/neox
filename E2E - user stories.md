@@ -15,14 +15,18 @@ Selected project scope is the activation flag.
 Only messages bound to the selected project are routed.
 Channel mode is exclusive: run Discord and WeChat scenarios separately, never as concurrent routing paths.
 
+**Exception: wechat-assistant projects** always listen in the background once wired. They do not require scope selection or WeChat channel mode to be active.
+
 ```mermaid
 flowchart LR
-A[Select Project Scope] --> B[Incoming Channel Message]
-B --> C{Bound Project == Selected Scope?}
-C -->|No| D[Ignore and do not reply]
-C -->|Yes| E[Route to Project Session]
-E --> F[Agent Produces Response]
-F --> G[Send Reply to Original Channel]
+A[Incoming WeChat Message] --> B{Project Type?}
+B -->|wechat-assistant| C[Always Route to Session]
+B -->|other| D{Selected Scope?}
+D -->|No| E[Ignore]
+D -->|Yes| F[Route to Session]
+C --> G[Agent Response]
+F --> G
+G --> H[Send Reply to WeChat]
 ```
 
 ## P1 Matrix
@@ -35,6 +39,9 @@ F --> G[Send Reply to Original Channel]
 | P1-WC-001 | WeChat room project assistant routing | WeChat | Required | Selected room project replies | Other project contact ignored | **PASS** |
 | P1-WC-002 | WeChat direct assistant routing | WeChat | Required | Selected direct project replies | Other project contact ignored | **PASS** |
 | P1-WC-003 | WeChat ask-questions roundtrip | WeChat | Required | Questions and answers route in selected scope | Wrong-scope answers ignored | **PASS** |
+| P1-WCA-001 | wechat-assistant auto-listen without scope | WeChat | Not Required | Wired assistant replies without being selected | N/A | |
+| P1-WCA-002 | wechat-assistant auto-listen with Discord active | Discord | Not Required | Assistant replies while Discord is active channel | N/A | |
+| P1-WCA-003 | wechat-assistant session auto-start on app launch | WeChat | Not Required | Session created on WeChat ready, responds to first message | N/A | |
 
 ## P1-CH-001 Exclusive Channel Mode Toggle
 ### Preconditions
@@ -269,6 +276,55 @@ F --> G[Send Reply to Original Channel]
 > "WeChat | 文件传输助手: 1. What is the main purpose... 2. Who will use... 3. How important... 4. Is there a target date?"
 > In-app Questions panel also displayed with interactive buttons.
 > Code change: WeChatMessageRouter.swift — added `vm.onChannelQuestions` after `createProjectSession`.
+
+## P1-WCA: WeChat-Assistant Auto-Listen Stories
+
+### P1-WCA-001 Auto-listen without scope selection
+#### Preconditions
+1. A wechat-assistant project is wired to a WeChat contact (e.g. "文件传输助手").
+2. WeChat is enabled and connected.
+3. A different project (or no project) is selected in the UI.
+
+#### User Journey
+1. Open app, select "All Messages" (no project scope).
+2. Send a message from the wired WeChat contact.
+3. Observe: agent responds to the contact without user switching to the project.
+
+#### Assertions
+- [ ] Message routed to wechat-assistant session despite no scope selected
+- [ ] Agent reply sent back to WeChat contact
+- [ ] Main chat does not show noise from background project session
+
+### P1-WCA-002 Auto-listen with Discord as active channel
+#### Preconditions
+1. A wechat-assistant project is wired.
+2. Discord is the active channel type (WeChat is still enabled).
+
+#### User Journey
+1. Set channel type to Discord in settings.
+2. Send a message from the wired WeChat contact.
+3. Observe: assistant processes and replies despite Discord being the active channel.
+
+#### Assertions
+- [ ] Message bypasses channelType == "wechat" guard for wechat-assistant
+- [ ] Agent reply sent back to WeChat contact
+- [ ] Discord routing continues to work independently
+
+### P1-WCA-003 Session auto-start on app launch
+#### Preconditions
+1. A wechat-assistant project is wired with routingActive = true.
+2. App is freshly launched.
+
+#### User Journey
+1. Launch app (cold start).
+2. Wait for WeChat channel to become ready.
+3. Send a message from the wired contact.
+4. Observe: agent responds on first message without any manual project selection.
+
+#### Assertions
+- [ ] `startWiredProjectSessions()` creates a session for the wechat-assistant project
+- [ ] First incoming message is processed without delay
+- [ ] `activeWatcherCount` reflects the background session
 
 ## Bug Found During E2E
 ### Project Session Multi-Turn Bug (FIXED)
