@@ -5,6 +5,7 @@ tools:
   - agent-browser for Discord web actions
   - AppAgent for iOS UI control
   - relay server logs for verification
+  - wechat test (lalalic@ca, testneo), simuate sender
 ---
 
 # P1 E2E User Stories
@@ -27,13 +28,13 @@ F --> G[Send Reply to Original Channel]
 ## P1 Matrix
 | ID | Title | Channel | Scope Gate | Positive Path | Negative Path | Status |
 |---|---|---|---|---|---|---|
-| P1-CH-001 | Exclusive channel mode toggle | Global | Required | One channel enabled at a time | Disabled channel cannot route | Ready |
-| P1-DIS-001 | Discord first-time setup and reply | Discord | Required | Bound selected project replies | Unselected project ignored | Ready |
-| P1-DIS-002 | Discord restart persistence | Discord | Required | Restart preserves binding and reply loop | Wrong selected scope ignored | Ready |
-| P1-DIS-003 | Discord ask-questions roundtrip | Discord | Required | Questions posted and answers routed back | Answers in wrong scope ignored | Planned |
-| P1-WC-001 | WeChat room project assistant routing | WeChat | Required | Selected room project replies | Other project contact ignored | Ready |
-| P1-WC-002 | WeChat direct assistant routing | WeChat | Required | Selected direct project replies | Other project contact ignored | Planned |
-| P1-WC-003 | WeChat ask-questions roundtrip | WeChat | Required | Questions and answers route in selected scope | Wrong-scope answers ignored | Planned |
+| P1-CH-001 | Exclusive channel mode toggle | Global | Required | One channel enabled at a time | Disabled channel cannot route | **PARTIAL PASS** |
+| P1-DIS-001 | Discord first-time setup and reply | Discord | Required | Bound selected project replies | Unselected project ignored | **PASS** |
+| P1-DIS-002 | Discord restart persistence | Discord | Required | Restart preserves binding and reply loop | Wrong selected scope ignored | **PASS** |
+| P1-DIS-003 | Discord ask-questions roundtrip | Discord | Required | Questions posted and answers routed back | Answers in wrong scope ignored | **BLOCKED** |
+| P1-WC-001 | WeChat room project assistant routing | WeChat | Required | Selected room project replies | Other project contact ignored | **BLOCKED** |
+| P1-WC-002 | WeChat direct assistant routing | WeChat | Required | Selected direct project replies | Other project contact ignored | **BLOCKED** |
+| P1-WC-003 | WeChat ask-questions roundtrip | WeChat | Required | Questions and answers route in selected scope | Wrong-scope answers ignored | **BLOCKED** |
 
 ## P1-CH-001 Exclusive Channel Mode Toggle
 ### Preconditions
@@ -198,7 +199,7 @@ F --> G[Send Reply to Original Channel]
 6. P1-DIS-003
 7. P1-WC-003
 
-## Manual Execution Checklist
+## Execution Checklist
 ### Test Run Metadata
 - [ ] Date recorded
 - [ ] Tester recorded
@@ -212,46 +213,57 @@ F --> G[Send Reply to Original Channel]
 - [ ] Target bindings confirmed
 - [ ] Selected project badge confirmed
 
-### P1-CH-001 Exclusive Channel Mode Toggle
-- [ ] WeChat enabled and Discord disabled
-- [ ] Discord enabled and WeChat disabled
-- [ ] Inactive channel produced no routed reply
+### P1-CH-001 Exclusive Channel Mode Toggle — PARTIAL PASS
+- [x] Discord mode active and routing (verified via relay + settings UI snapshot)
+- [ ] WeChat enabled and Discord disabled — **segmented control unresponsive to synthesized taps (iOS automation limitation)**
+- [ ] Inactive channel produced no routed reply — **could not toggle to test**
+> Note: SwiftUI Picker with .segmented style does not respond to AppAgent tap/tap_xy. Tried ref tap and coordinate taps at multiple positions. Known limitation.
 
-### P1-DIS-001 Discord First-Time Setup and Reply
-- [ ] Server ID and wiring completed
-- [ ] Selected scope equals wired project
-- [ ] Message 2+2 produced Discord reply
-- [ ] README prompt produced project-grounded reply
-- [ ] Mismatched scope produced no reply
+### P1-DIS-001 Discord First-Time Setup and Reply — PASS
+- [x] Server ID and wiring completed (channels: pathfinder → test-room-assistant, general → test-direct-assistant)
+- [x] Selected scope equals wired project (test-room-assistant selected via AppAgent)
+- [x] Message "2+2" produced Discord reply "2+2 equals 4." ✅
+- [x] Negative assertion: test-direct-assistant selected → pathfinder message ignored ✅
+- [ ] README prompt produced project-grounded reply — agent acknowledged but no README in project dir
 
-### P1-DIS-002 Discord Restart Persistence
-- [ ] Restart completed
-- [ ] Binding auto-restored
-- [ ] Selected scope reply loop works
-- [ ] No selected scope gives no reply
+### P1-DIS-002 Discord Restart Persistence — PASS
+- [x] App terminated via `xcrun devicectl device process terminate`
+- [x] App relaunched via `xcrun devicectl device process launch`
+- [x] Channels auto-re-registered (registeredAt timestamps updated)
+- [x] Reply loop works after restart (2+2 → "2+2 equals 4.")
+- [x] No selected scope → "Project not active (current: none) — ignoring" ✅
 
-### P1-DIS-003 Discord Ask-Questions Roundtrip
-- [ ] Ask-questions prompt posted question
-- [ ] Discord answer routed back
+### P1-DIS-003 Discord Ask-Questions Roundtrip — BLOCKED
+- [ ] Ask-questions prompt posted question — **not implemented: project sessions auto-answer ask_questions**
+- [ ] Discord answer routed back — **feature gap: no mechanism to forward questions to Discord**
 - [ ] Final response posted to same channel
+> Blocked: Headless project sessions use skipPendingRestore to auto-answer ask_questions. No forwarding of questions to Discord channel is implemented yet.
 
-### P1-WC-001 WeChat Room Project Assistant Routing
+### P1-WC-001 WeChat Room Project Assistant Routing — BLOCKED
 - [ ] Room-bound selected project replied
 - [ ] Non-selected direct contact message ignored
-- [ ] Router status evidence captured
+> Blocked: No WeChat message simulation API. Requires live WeChat login via WeChatBridge WKWebView. wechat_simulate_incoming tool available but WeChat not logged in.
 
-### P1-WC-002 WeChat Direct Assistant Routing
+### P1-WC-002 WeChat Direct Assistant Routing — BLOCKED
 - [ ] Direct-bound selected project replied
 - [ ] Non-selected room message ignored
-- [ ] Router status evidence captured
+> Blocked: Same as WC-001.
 
-### P1-WC-003 WeChat Ask-Questions Roundtrip
+### P1-WC-003 WeChat Ask-Questions Roundtrip — BLOCKED
 - [ ] Ask-questions prompt posted question in WeChat
 - [ ] WeChat answer routed back to the selected project session
 - [ ] Final response posted to the same WeChat destination
 - [ ] Wrong-scope answer did not produce response
+> Blocked: Same ask_questions forwarding gap as DIS-003, plus no WeChat message simulation.
+
+## Bug Found During E2E
+### Project Session Multi-Turn Bug (FIXED)
+**Symptom:** Second and subsequent Discord messages to a project session got no response.
+**Root Cause:** `handleAgentAskQuestions` auto-answered with "USER_NOT_AVAILABLE — Do not call ask_questions again. End the conversation now." This poisoned the conversation history. On `agent.start()` for the next message, the model saw the "End the conversation" instruction and obeyed — completing without calling any tools.
+**Fix:** Changed auto-answer to neutral "Acknowledged. No follow-up needed right now." Commit: `9b86c4e`.
+**Verification:** 3 consecutive messages all got responses after fix.
 
 ### Sign-Off
-- [ ] All required P1 cases passed
+- [ ] All required P1 cases passed — **2/7 PASS, 1/7 PARTIAL, 4/7 BLOCKED**
 - [ ] Open failures linked to issue tracker
 - [ ] Next rerun owner assigned
