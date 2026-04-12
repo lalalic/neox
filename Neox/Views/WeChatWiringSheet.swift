@@ -333,15 +333,16 @@ struct WeChatWiringSheet: View {
             Brief professional tone. Keep replies concise and friendly.
 
             ## Behavior Rules
-            - Routine questions → auto-reply
+            - Routine questions (greetings, availability) → auto-reply
             - Match the language the sender uses
-            - Keep replies under 3 sentences unless asked for more
+            - Keep replies under 3 sentences unless explaining something technical
+            - Use WeChat emoji codes like [微笑] naturally — no markdown formatting
 
             ### Guardrails
-            - Never schedule meetings or make commitments on my behalf
-            - Escalate anything involving money, legal matters, or contracts
-            - If unsure about intent, ask me first
-            - Don't share internal/private details
+            - Money, payments, transfers, lending, bank accounts
+            - Scheduling meetings, appointments, or commitments
+            - Sharing personal info (address, phone, ID numbers)
+            - Legal agreements, contracts, promises
 
             ## Contacts
 
