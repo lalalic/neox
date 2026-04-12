@@ -13,7 +13,7 @@ struct DiscordChannelView: View {
     }
 
     var body: some View {
-        Section("Discord") {
+        Section {
             // Invite bot button
             Button {
                 UIApplication.shared.open(inviteURL)

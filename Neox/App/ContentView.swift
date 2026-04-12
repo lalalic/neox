@@ -347,7 +347,7 @@ struct RelaySettingsView: View {
                 }
 
                 if coordinator.channelType == "wechat" {
-                    Section("WeChat Channel") {
+                    Section {
                         Toggle("Enable WeChat", isOn: Binding(
                             get: { weChatService.config.enabled },
                             set: { newValue in
@@ -364,6 +364,7 @@ struct RelaySettingsView: View {
                     DiscordChannelView(discord: coordinator.discordService)
                 }
 
+                #if DEBUG
                 Section("Relay Server") {
                     HStack {
                         Text("Device ID")
@@ -401,6 +402,7 @@ struct RelaySettingsView: View {
                             .disabled(!coordinator.useDevServer)
                     }
                 }
+                #endif
 
                 Section {
                     Button("Apply & Reconnect") {
