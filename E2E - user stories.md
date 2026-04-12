@@ -192,3 +192,54 @@ F --> G[Send Reply to Original Channel]
 5. P1-XCH-001
 6. P1-DIS-003
 7. P1-WC-002
+
+## Manual Execution Checklist
+### Test Run Metadata
+- [ ] Date recorded
+- [ ] Tester recorded
+- [ ] App build hash recorded
+- [ ] Relay log window archived
+
+### P1-CH-001 Exclusive Channel Mode Toggle
+- [ ] WeChat enabled and Discord disabled
+- [ ] Discord enabled and WeChat disabled
+- [ ] Inactive channel produced no routed reply
+
+### P1-DIS-001 Discord First-Time Setup and Reply
+- [ ] Server ID and wiring completed
+- [ ] Selected scope equals wired project
+- [ ] Message 2+2 produced Discord reply
+- [ ] README prompt produced project-grounded reply
+- [ ] Mismatched scope produced no reply
+
+### P1-DIS-002 Discord Restart Persistence
+- [ ] Restart completed
+- [ ] Binding auto-restored
+- [ ] Selected scope reply loop works
+- [ ] No selected scope gives no reply
+
+### P1-DIS-003 Discord Ask-Questions Roundtrip
+- [ ] Ask-questions prompt posted question
+- [ ] Discord answer routed back
+- [ ] Final response posted to same channel
+
+### P1-WC-001 WeChat Room Project Assistant Routing
+- [ ] Room-bound selected project replied
+- [ ] Non-selected direct contact message ignored
+- [ ] Router status evidence captured
+
+### P1-WC-002 WeChat Direct Assistant Routing
+- [ ] Direct-bound selected project replied
+- [ ] Non-selected room message ignored
+- [ ] Router status evidence captured
+
+### P1-XCH-001 Cross-Channel Scope Consistency
+- [ ] Selected project passed on Discord
+- [ ] Non-selected project blocked on Discord
+- [ ] Selected project passed on WeChat
+- [ ] Non-selected project blocked on WeChat
+
+### Sign-Off
+- [ ] All required P1 cases passed
+- [ ] Open failures linked to issue tracker
+- [ ] Next rerun owner assigned
