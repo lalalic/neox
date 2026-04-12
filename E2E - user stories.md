@@ -32,16 +32,16 @@ G --> H[Send Reply to WeChat]
 ## P1 Matrix
 | ID | Title | Channel | Scope Gate | Positive Path | Negative Path | Status |
 |---|---|---|---|---|---|---|
-| P1-CH-001 | Exclusive channel mode toggle | Global | Required | One channel enabled at a time | Disabled channel cannot route | **PARTIAL PASS** |
+| P1-CH-001 | Exclusive channel mode toggle | Global | Required | One channel enabled at a time | Disabled channel cannot route | **PASS** |
 | P1-DIS-001 | Discord first-time setup and reply | Discord | Required | Bound selected project replies | Unselected project ignored | **PASS** |
 | P1-DIS-002 | Discord restart persistence | Discord | Required | Restart preserves binding and reply loop | Wrong selected scope ignored | **PASS** |
 | P1-DIS-003 | Discord ask-questions roundtrip | Discord | Required | Questions posted and answers routed back | Answers in wrong scope ignored | **PASS** |
 | P1-WC-001 | WeChat room project assistant routing | WeChat | Required | Selected room project replies | Other project contact ignored | **PASS** |
 | P1-WC-002 | WeChat direct assistant routing | WeChat | Required | Selected direct project replies | Other project contact ignored | **PASS** |
 | P1-WC-003 | WeChat ask-questions roundtrip | WeChat | Required | Questions and answers route in selected scope | Wrong-scope answers ignored | **PASS** |
-| P1-WCA-001 | wechat-assistant auto-listen without scope | WeChat | Not Required | Wired assistant replies without being selected | N/A | |
-| P1-WCA-002 | wechat-assistant auto-listen with Discord active | Discord | Not Required | Assistant replies while Discord is active channel | N/A | |
-| P1-WCA-003 | wechat-assistant session auto-start on app launch | WeChat | Not Required | Session created on WeChat ready, responds to first message | N/A | |
+| P1-WCA-001 | wechat-assistant auto-listen without scope | WeChat | Not Required | Wired assistant replies without being selected | N/A | **PASS** |
+| P1-WCA-002 | wechat-assistant auto-listen with Discord active | Discord | Not Required | Assistant replies while Discord is active channel | N/A | **PASS** |
+| P1-WCA-003 | wechat-assistant session auto-start on app launch | WeChat | Not Required | Session created on WeChat ready, responds to first message | N/A | **PASS** |
 
 ## P1-CH-001 Exclusive Channel Mode Toggle
 ### Preconditions
