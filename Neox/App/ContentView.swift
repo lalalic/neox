@@ -289,7 +289,7 @@ struct RelaySettingsView: View {
                             fileURL: coordinator.mainAgentFileURL,
                             navigationTitleText: "Edit main.agent.md",
                             loadingText: "Loading main.agent.md...",
-                            availableTools: Array(Set(coordinator.allTools.map(\.name))).sorted()
+                            availableTools: Array(Set(coordinator.allRegisteredTools.map(\.name))).sorted()
                         )
                     }
                     HStack {

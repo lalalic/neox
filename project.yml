@@ -40,6 +40,8 @@ targets:
         DEVELOPMENT_TEAM: "JABNLDLN8G"
     dependencies:
       - package: copilot-ios
+        product: NeoxCore
+      - package: copilot-ios
         product: CopilotSDK
       - package: copilot-ios
         product: CopilotChat
