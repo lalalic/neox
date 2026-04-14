@@ -1,0 +1,340 @@
+{
+  "object" : {
+    "artifacts" : [
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "ffmpeg-kit-spm",
+          "kind" : "remoteSourceControl",
+          "location" : "https://github.com/yangliu-1995/ffmpeg-kit-spm.git",
+          "name" : "FFmpegKit-SPM"
+        },
+        "path" : "/Users/chengli/Workspace/free2/neox/.tmp/dd/SourcePackages/artifacts/ffmpeg-kit-spm/avfilter/libavfilter.xcframework",
+        "source" : {
+          "checksum" : "a16a21282405d964ca7cbd75b7fc1b02425274766c9cb34e18d538f51aea36d2",
+          "type" : "remote",
+          "url" : "https://github.com/yangliu-1995/ffmpeg-kit-spm/releases/download/binary-6.0/libavfilter.zip"
+        },
+        "targetName" : "avfilter"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "ffmpeg-kit-spm",
+          "kind" : "remoteSourceControl",
+          "location" : "https://github.com/yangliu-1995/ffmpeg-kit-spm.git",
+          "name" : "FFmpegKit-SPM"
+        },
+        "path" : "/Users/chengli/Workspace/free2/neox/.tmp/dd/SourcePackages/artifacts/ffmpeg-kit-spm/swscale/libswscale.xcframework",
+        "source" : {
+          "checksum" : "c0ca0c0d9df909bf85717a732ffa1851d5cc6f5a9da31d627131dd1211c237a3",
+          "type" : "remote",
+          "url" : "https://github.com/yangliu-1995/ffmpeg-kit-spm/releases/download/binary-6.0/libswscale.zip"
+        },
+        "targetName" : "swscale"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "ffmpeg-kit-spm",
+          "kind" : "remoteSourceControl",
+          "location" : "https://github.com/yangliu-1995/ffmpeg-kit-spm.git",
+          "name" : "FFmpegKit-SPM"
+        },
+        "path" : "/Users/chengli/Workspace/free2/neox/.tmp/dd/SourcePackages/artifacts/ffmpeg-kit-spm/avformat/libavformat.xcframework",
+        "source" : {
+          "checksum" : "6d5a7c666e6387a4eb71df01d1cecea5ef16c4096c66c5e1d0a63df06de089b4",
+          "type" : "remote",
+          "url" : "https://github.com/yangliu-1995/ffmpeg-kit-spm/releases/download/binary-6.0/libavformat.zip"
+        },
+        "targetName" : "avformat"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "ffmpeg-kit-spm",
+          "kind" : "remoteSourceControl",
+          "location" : "https://github.com/yangliu-1995/ffmpeg-kit-spm.git",
+          "name" : "FFmpegKit-SPM"
+        },
+        "path" : "/Users/chengli/Workspace/free2/neox/.tmp/dd/SourcePackages/artifacts/ffmpeg-kit-spm/swresample/libswresample.xcframework",
+        "source" : {
+          "checksum" : "6c39882a8fbc4256d528ec9aac2491775eda3a7982a0c3862d02bc2c4fd6a086",
+          "type" : "remote",
+          "url" : "https://github.com/yangliu-1995/ffmpeg-kit-spm/releases/download/binary-6.0/libswresample.zip"
+        },
+        "targetName" : "swresample"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "ffmpeg-kit-spm",
+          "kind" : "remoteSourceControl",
+          "location" : "https://github.com/yangliu-1995/ffmpeg-kit-spm.git",
+          "name" : "FFmpegKit-SPM"
+        },
+        "path" : "/Users/chengli/Workspace/free2/neox/.tmp/dd/SourcePackages/artifacts/ffmpeg-kit-spm/avutil/libavutil.xcframework",
+        "source" : {
+          "checksum" : "954121f1d8807a4c28a5569bb02e8f8bc2c3dd2d67c732988c41852f02981b12",
+          "type" : "remote",
+          "url" : "https://github.com/yangliu-1995/ffmpeg-kit-spm/releases/download/binary-6.0/libavutil.zip"
+        },
+        "targetName" : "avutil"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "ffmpeg-kit-spm",
+          "kind" : "remoteSourceControl",
+          "location" : "https://github.com/yangliu-1995/ffmpeg-kit-spm.git",
+          "name" : "FFmpegKit-SPM"
+        },
+        "path" : "/Users/chengli/Workspace/free2/neox/.tmp/dd/SourcePackages/artifacts/ffmpeg-kit-spm/avdevice/libavdevice.xcframework",
+        "source" : {
+          "checksum" : "2a6b06b2c16da3dc8e0f63bed5633db270d5dec5958ac6ebd632fd6e9f563ca4",
+          "type" : "remote",
+          "url" : "https://github.com/yangliu-1995/ffmpeg-kit-spm/releases/download/binary-6.0/libavdevice.zip"
+        },
+        "targetName" : "avdevice"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "ffmpeg-kit-spm",
+          "kind" : "remoteSourceControl",
+          "location" : "https://github.com/yangliu-1995/ffmpeg-kit-spm.git",
+          "name" : "FFmpegKit-SPM"
+        },
+        "path" : "/Users/chengli/Workspace/free2/neox/.tmp/dd/SourcePackages/artifacts/ffmpeg-kit-spm/avcodec/libavcodec.xcframework",
+        "source" : {
+          "checksum" : "0c1ca2badf089aa5dba9812c9a6dd28d7769d0092ad7d61c492c65e0e05ba462",
+          "type" : "remote",
+          "url" : "https://github.com/yangliu-1995/ffmpeg-kit-spm/releases/download/binary-6.0/libavcodec.zip"
+        },
+        "targetName" : "avcodec"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "ffmpeg-kit-spm",
+          "kind" : "remoteSourceControl",
+          "location" : "https://github.com/yangliu-1995/ffmpeg-kit-spm.git",
+          "name" : "FFmpegKit-SPM"
+        },
+        "path" : "/Users/chengli/Workspace/free2/neox/.tmp/dd/SourcePackages/artifacts/ffmpeg-kit-spm/ffmpegkit/ffmpegkit.xcframework",
+        "source" : {
+          "checksum" : "af8c17483302506b1f86ec8bd5e606a03300cb45bdac612f21d13dea05c87118",
+          "type" : "remote",
+          "url" : "https://github.com/yangliu-1995/ffmpeg-kit-spm/releases/download/binary-6.0/ffmpegkit.zip"
+        },
+        "targetName" : "ffmpegkit"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "ios-system-lite",
+          "kind" : "fileSystem",
+          "location" : "/Users/chengli/Workspace/free2/neox/copilot-ios/Packages/ios-system-lite",
+          "name" : "ios-system-lite"
+        },
+        "path" : "/Users/chengli/Workspace/free2/neox/.tmp/dd/SourcePackages/artifacts/ios-system-lite/files/files.xcframework",
+        "source" : {
+          "checksum" : "02d6522f5e1adc3b472f7aaa53910f049e6c5829e07c7e3005cf2a0d5f9f423a",
+          "type" : "remote",
+          "url" : "https://github.com/holzschu/ios_system/releases/download/v3.0.4/files.xcframework.zip"
+        },
+        "targetName" : "files"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "ios-system-lite",
+          "kind" : "fileSystem",
+          "location" : "/Users/chengli/Workspace/free2/neox/copilot-ios/Packages/ios-system-lite",
+          "name" : "ios-system-lite"
+        },
+        "path" : "/Users/chengli/Workspace/free2/neox/.tmp/dd/SourcePackages/artifacts/ios-system-lite/shell/shell.xcframework",
+        "source" : {
+          "checksum" : "78d71828b89c83741a8f7e857f0d065da72952558fd7deb806f5748c3801fd95",
+          "type" : "remote",
+          "url" : "https://github.com/holzschu/ios_system/releases/download/v3.0.4/shell.xcframework.zip"
+        },
+        "targetName" : "shell"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "ios-system-lite",
+          "kind" : "fileSystem",
+          "location" : "/Users/chengli/Workspace/free2/neox/copilot-ios/Packages/ios-system-lite",
+          "name" : "ios-system-lite"
+        },
+        "path" : "/Users/chengli/Workspace/free2/neox/.tmp/dd/SourcePackages/artifacts/ios-system-lite/ios_system/ios_system.xcframework",
+        "source" : {
+          "checksum" : "6973c1c14a66cdc110a5be7d62991af4546124bd0d9773b5391694b3a93a5be0",
+          "type" : "remote",
+          "url" : "https://github.com/holzschu/ios_system/releases/download/v3.0.4/ios_system.xcframework.zip"
+        },
+        "targetName" : "ios_system"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "ios-system-lite",
+          "kind" : "fileSystem",
+          "location" : "/Users/chengli/Workspace/free2/neox/copilot-ios/Packages/ios-system-lite",
+          "name" : "ios-system-lite"
+        },
+        "path" : "/Users/chengli/Workspace/free2/neox/.tmp/dd/SourcePackages/artifacts/ios-system-lite/tar/tar.xcframework",
+        "source" : {
+          "checksum" : "9bf482b29ea95bc643bfaa06b249394afed188e40482db055625f4928ffedc48",
+          "type" : "remote",
+          "url" : "https://github.com/holzschu/ios_system/releases/download/v3.0.4/tar.xcframework.zip"
+        },
+        "targetName" : "tar"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "ios-system-lite",
+          "kind" : "fileSystem",
+          "location" : "/Users/chengli/Workspace/free2/neox/copilot-ios/Packages/ios-system-lite",
+          "name" : "ios-system-lite"
+        },
+        "path" : "/Users/chengli/Workspace/free2/neox/.tmp/dd/SourcePackages/artifacts/ios-system-lite/awk/awk.xcframework",
+        "source" : {
+          "checksum" : "6898b01913261eee194edcb464212d4af6bc33355b1e286bbbd17f3f878c1706",
+          "type" : "remote",
+          "url" : "https://github.com/holzschu/ios_system/releases/download/v3.0.4/awk.xcframework.zip"
+        },
+        "targetName" : "awk"
+      },
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "ios-system-lite",
+          "kind" : "fileSystem",
+          "location" : "/Users/chengli/Workspace/free2/neox/copilot-ios/Packages/ios-system-lite",
+          "name" : "ios-system-lite"
+        },
+        "path" : "/Users/chengli/Workspace/free2/neox/.tmp/dd/SourcePackages/artifacts/ios-system-lite/text/text.xcframework",
+        "source" : {
+          "checksum" : "2450f309d0793490136a24f9af02c42fb712b327571cb44312fe330e87a156f2",
+          "type" : "remote",
+          "url" : "https://github.com/holzschu/ios_system/releases/download/v3.0.4/text.xcframework.zip"
+        },
+        "targetName" : "text"
+      }
+    ],
+    "dependencies" : [
+      {
+        "basedOn" : null,
+        "packageRef" : {
+          "identity" : "ffmpeg-kit-spm",
+          "kind" : "remoteSourceControl",
+          "location" : "https://github.com/yangliu-1995/ffmpeg-kit-spm.git",
+          "name" : "FFmpegKit-SPM"
+        },
+        "state" : {
+          "checkoutState" : {
+            "revision" : "1e881126683aef6d2686b479acb67a261efc5a40",
+            "version" : "6.0.0"
+          },
+          "name" : "sourceControlCheckout"
+        },
+        "subpath" : "ffmpeg-kit-spm"
+      },
+      {
+        "basedOn" : null,
+        "packageRef" : {
+          "identity" : "ios-system-lite",
+          "kind" : "fileSystem",
+          "location" : "/Users/chengli/Workspace/free2/neox/copilot-ios/Packages/ios-system-lite",
+          "name" : "ios-system-lite"
+        },
+        "state" : {
+          "name" : "fileSystem",
+          "path" : "/Users/chengli/Workspace/free2/neox/copilot-ios/Packages/ios-system-lite"
+        },
+        "subpath" : "ios-system-lite"
+      },
+      {
+        "basedOn" : null,
+        "packageRef" : {
+          "identity" : "zipfoundation",
+          "kind" : "remoteSourceControl",
+          "location" : "https://github.com/weichsel/ZIPFoundation.git",
+          "name" : "ZIPFoundation"
+        },
+        "state" : {
+          "checkoutState" : {
+            "revision" : "22787ffb59de99e5dc1fbfe80b19c97a904ad48d",
+            "version" : "0.9.20"
+          },
+          "name" : "sourceControlCheckout"
+        },
+        "subpath" : "ZIPFoundation"
+      }
+    ],
+    "prebuilts" : [
+
+    ]
+  },
+  "version" : 7
+}

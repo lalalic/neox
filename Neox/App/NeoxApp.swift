@@ -1,4 +1,5 @@
 import SwiftUI
+import AppAgent
 import CopilotChat
 import CopilotSDK
 import UIKit
@@ -124,6 +125,25 @@ extension Notification.Name {
     static let silentPushReceived = Notification.Name("silentPushReceived")
 }
 
+/// Deferred wrapper: injects DemoOverlayView once AppAgentSetup has a toolProvider.
+private struct DemoOverlayFromSetup: View {
+    @State private var runtime: DemoRuntime?
+    var body: some View {
+        Group {
+            if let runtime {
+                DemoOverlayView()
+                    .environmentObject(runtime)
+            }
+        }
+        .onAppear {
+            runtime = AppAgentSetup.shared.toolProvider?.demoRuntime
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            runtime = AppAgentSetup.shared.toolProvider?.demoRuntime
+        }
+    }
+}
+
 @main
 struct NeoxApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -138,6 +158,7 @@ struct NeoxApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .overlay { DemoOverlayFromSetup() }
                 .environmentObject(coordinator)
                 .task {
                     NSLog("[NeoxApp] .task started — relay: %@:%d, useLocal: %@", coordinator.relayHost, coordinator.relayPort, coordinator.useLocalRelay ? "yes" : "no")
@@ -155,7 +176,7 @@ struct NeoxApp: App {
                         relayPort: coordinator.relayPort,
                         userId: UserDefaults.standard.string(forKey: "neoxUserId"),
                         toolsBuilder: {
-                            var tools: [ToolDefinition] = []
+                            var tools: [CopilotSDK.ToolDefinition] = []
                             tools.append(contentsOf: memProvider.tools)
                             tools.append(contentsOf: fileProvider.tools)
                             return tools

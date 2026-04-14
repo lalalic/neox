@@ -11,7 +11,7 @@ final class AppAgentSetup {
     static let shared = AppAgentSetup()
     
     private var server: MCPServer?
-    private var toolProvider: AppAgentToolProvider?
+    private(set) var toolProvider: AppAgentToolProvider?
     private var bridgeHandlers: [String: (AppAgent.JSONValue) async throws -> String] = [:]
     private var bridgeToolList: [[String: Any]] = []
     private(set) var port: UInt16 = 9223
@@ -73,6 +73,19 @@ final class AppAgentSetup {
             "description": "Unified iOS app control — UI automation + chat",
             "inputSchema": ["type": "object"]
         ])
+
+        // Register demo overlay tools
+        let demoProvider = provider.demoToolProvider
+        for tool in demoProvider.tools {
+            server.register(tools: [tool])
+            let handler = tool.handler
+            bridgeHandlers[tool.name] = handler
+            bridgeToolList.append([
+                "name": tool.name,
+                "description": tool.description ?? "",
+                "inputSchema": ["type": "object"]
+            ])
+        }
 
         // WeChat test setup tool
         let wechatSetupHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] args in
