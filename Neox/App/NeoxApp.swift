@@ -374,7 +374,7 @@ struct NeoxApp: App {
                 return true
             }
             
-            let credits = PaymentManager.creditValues[productId] ?? 0
+            let credits = coordinator.paymentManager?.creditValues[productId] ?? 0
             if credits > 0 {
                 await MainActor.run {
                     coordinator.chatViewModel?.usageTracker.addCredits(credits)

@@ -27,6 +27,18 @@ final class AgentCoordinator: BaseCoordinator {
 
     override var appId: String { "neox" }
 
+    override var iapPacks: [PaymentManager.CreditPack] {
+        [
+            .init(productID: "com.neox.credits.starter", credits: 3.50, description: "$3.50 credits"),
+            .init(productID: "com.neox.credits.standard", credits: 7.50, description: "$7.50 credits · ~1.5M tokens"),
+            .init(productID: "com.neox.credits.pro", credits: 25.00, description: "$25 credits · ~5M tokens"),
+        ]
+    }
+
+    override var stripePaymentURL: String? {
+        "https://buy.stripe.com/test_fZe5n11yC3kM8Fi5kk?client_reference_id={CLIENT_ID}"
+    }
+
     // MARK: - Init
 
     override init() {
