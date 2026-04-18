@@ -1,6 +1,7 @@
 import SwiftUI
 import SafariServices
 import WebKitAgent
+import NeoxCore
 import CopilotChat
 import CopilotSDK
 
@@ -288,22 +289,7 @@ struct RelaySettingsView: View {
                     }
                 }
 
-                Section("Credits") {
-                    if let chatVM = coordinator.chatViewModel,
-                       let pm = coordinator.paymentManager {
-                        NavigationLink {
-                            PaymentView(paymentManager: pm, usageTracker: chatVM.usageTracker)
-                        } label: {
-                            HStack {
-                                Label("Buy Credits", systemImage: "creditcard.fill")
-                                Spacer()
-                                Text(String(format: "$%.2f", chatVM.usageTracker.balance))
-                                    .foregroundStyle(.secondary)
-                                    .monospacedDigit()
-                            }
-                        }
-                    }
-                }
+                SharedTopUpSettingsSection(coordinator: coordinator)
 
                 Section("Plans") {
                     NavigationLink {
@@ -331,18 +317,6 @@ struct RelaySettingsView: View {
                     } label: {
                         Label("File Explorer", systemImage: "folder")
                     }
-                }
-
-                Section("Chat Input") {
-                    Toggle("Text", isOn: $coordinator.enableTextInput)
-                    Toggle("Speech", isOn: $coordinator.enableSpeechInput)
-                    Toggle("Attachment", isOn: $coordinator.enableAttachmentInput)
-                }
-
-                Section("Chat Notifications") {
-                    Toggle("Usage/Cost", isOn: $coordinator.showUsageInChat)
-                    Toggle("Agent Progress", isOn: $coordinator.showProgressInChat)
-                    Toggle("Build Status", isOn: $coordinator.showBuildInChat)
                 }
 
                 // MARK: Channel
@@ -407,35 +381,14 @@ struct RelaySettingsView: View {
                     }
                 }
 
-                #if DEBUG
-                Section("Developer") {
-                    Toggle("Use local relay server", isOn: $coordinator.useLocalRelay)
-
-                    TextField("http://10.0.0.111:8765", text: $coordinator.localRelayURL)
-                        .textContentType(.URL)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .disabled(!coordinator.useLocalRelay)
-
-                    if !coordinator.useLocalRelay {
-                        Text("relay.ai.qili2.com")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                SharedAboutSettingsSection(coordinator: coordinator)
+                SharedDeveloperSettingsSection(
+                    coordinator: coordinator,
+                    reconnectAction: {
+                        applySettings()
+                        coordinator.reconnect()
                     }
-
-                    Toggle("Enable dev server bridge", isOn: $coordinator.useDevServer)
-
-                    HStack {
-                        Text("Port")
-                        Spacer()
-                        TextField("9223", value: $coordinator.devServerPort, format: .number)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 90)
-                            .keyboardType(.numberPad)
-                            .disabled(!coordinator.useDevServer)
-                    }
-                }
-                #endif
+                )
 
                 Section {
                     Button("Apply & Reconnect") {

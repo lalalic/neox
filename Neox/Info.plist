@@ -31,6 +31,40 @@
             </array>
         </dict>
     </array>
+    <key>NeoxAppConfig</key>
+    <dict>
+        <key>appId</key>
+        <string>neox</string>
+        <key>iapPacks</key>
+        <array>
+            <dict>
+                <key>credits</key>
+                <real>3.5</real>
+                <key>description</key>
+                <string>$3.50 credits</string>
+                <key>productID</key>
+                <string>com.neox.credits.starter</string>
+            </dict>
+            <dict>
+                <key>credits</key>
+                <real>7.5</real>
+                <key>description</key>
+                <string>$7.50 credits · ~1.5M tokens</string>
+                <key>productID</key>
+                <string>com.neox.credits.standard</string>
+            </dict>
+            <dict>
+                <key>credits</key>
+                <real>25</real>
+                <key>description</key>
+                <string>$25 credits · ~5M tokens</string>
+                <key>productID</key>
+                <string>com.neox.credits.pro</string>
+            </dict>
+        </array>
+        <key>stripePaymentURL</key>
+        <string>https://buy.stripe.com/test_fZe5n11yC3kM8Fi5kk?client_reference_id={CLIENT_ID}</string>
+    </dict>
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>UIApplicationSceneManifest</key>

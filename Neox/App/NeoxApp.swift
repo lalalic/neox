@@ -158,7 +158,9 @@ struct NeoxApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                #if DEBUG
                 .overlay { DemoOverlayFromSetup() }
+                #endif
                 .environmentObject(coordinator)
                 .task {
                     NSLog("[NeoxApp] .task started — relay: %@:%d, useLocal: %@", coordinator.relayHost, coordinator.relayPort, coordinator.useLocalRelay ? "yes" : "no")
@@ -184,7 +186,9 @@ struct NeoxApp: App {
                     )
                     PlanExecutor.shared.scheduleNextCheck()
                     
+                    #if DEBUG
                     startAppAgent(coordinator: coordinator)
+                    #endif
                     
                     // Onboarding: send hidden message on first launch
                     if !UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") {
@@ -213,6 +217,7 @@ struct NeoxApp: App {
                     if newPhase == .active {
                         checkPendingStripePayment()
                         
+                        #if DEBUG
                         // Restart AppAgent MCP server if it stopped while backgrounded
                         let setup = AppAgentSetup.shared
                         if !setup.isRunning {
@@ -224,6 +229,7 @@ struct NeoxApp: App {
                                 NSLog("[NeoxApp] AppAgent MCP server restart failed: %@", error.localizedDescription)
                             }
                         }
+                        #endif
                         
                         // Sync any delivered notifications that weren't tapped into chat
                         UNUserNotificationCenter.current().getDeliveredNotifications { notifications in
