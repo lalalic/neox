@@ -25,9 +25,17 @@ targets:
     preBuildScripts:
       - name: Rebuild workspace.zip
         script: |
-          cd "${PROJECT_DIR}/workspace"
-          zip -r "${PROJECT_DIR}/copilot-ios/CopilotSDK/Sources/Resources/workspace.zip" . -x "*.DS_Store" > /dev/null 2>&1
-          echo "workspace.zip rebuilt from neox/workspace"
+          ZIPFILE="${PROJECT_DIR}/copilot-ios/CopilotSDK/Sources/Resources/workspace.zip"
+          TMPDIR=$(mktemp -d)
+          cp -a "${PROJECT_DIR}/workspace/" "$TMPDIR/"
+          if [ -d "${PROJECT_DIR}/.github" ]; then
+            mkdir -p "$TMPDIR/.github"
+            cp -a "${PROJECT_DIR}/.github/" "$TMPDIR/.github/"
+          fi
+          rm -f "$ZIPFILE"
+          cd "$TMPDIR" && zip -r "$ZIPFILE" . -x "*.DS_Store" > /dev/null 2>&1
+          rm -rf "$TMPDIR"
+          echo "workspace.zip rebuilt from neox/workspace + .github"
         basedOnDependencyAnalysis: false
     settings:
       base:

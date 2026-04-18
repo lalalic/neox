@@ -243,20 +243,7 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Connection Title
-
-/// Observes ChatViewModel.chatState to show connection status in title color.
-private struct ConnectionTitleView: View {
-    let title: String
-    @ObservedObject var viewModel: ChatViewModel
-
-    var body: some View {
-        let connected = viewModel.chatState != .disconnected && viewModel.chatState != .connecting
-        Text(title)
-            .font(.headline)
-            .foregroundStyle(connected ? .green : .secondary)
-    }
-}
+// MARK: - Connection Title (now in CopilotChat.ConnectionTitleView)
 
 // MARK: - Relay Settings View
 
