@@ -125,7 +125,7 @@ Use during Phase 1 (Assess) after receiving the user's prompt and observing the 
 2. Call observe_camera to see the environment
 3. Call listen to hear ambient audio context
 4. Match to intent category (or combine)
-5. Propose concept to user via ask_user
+5. Propose concept to user via ask_questions
 6. On confirmation, load matching shot-planning template
 7. Adapt template to specific context (rename shots, adjust descriptions)
 8. Call production_state(command: 'plan_shots', shots: [...])

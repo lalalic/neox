@@ -3,7 +3,7 @@ import CopilotSDK
 
 /// Integration tests for CopilotSDK connection via pool relay.
 /// Connects to relay server at relay.ai.qili2.com:8765
-/// The relay runs sessions in agent/loop mode with send_response/ask_user tools.
+/// The relay runs sessions in agent/loop mode with send_response/ask_questions tools.
 final class CopilotIntegrationTests: XCTestCase {
     
     var client: CopilotClient!
@@ -65,9 +65,6 @@ final class CopilotIntegrationTests: XCTestCase {
             onResponse: { message in
                 await collector.set(message)
                 responseReceived.fulfill()
-            },
-            onAskUser: { _ in
-                return "No more tasks."
             }
         ))
         
@@ -116,9 +113,6 @@ final class CopilotIntegrationTests: XCTestCase {
             onResponse: { message in
                 await collector.set(message)
                 responseReceived.fulfill()
-            },
-            onAskUser: { _ in
-                return "No more tasks."
             }
         ))
         
@@ -174,9 +168,6 @@ final class CopilotIntegrationTests: XCTestCase {
             onResponse: { message in
                 await collector.set(message)
                 responseReceived.fulfill()
-            },
-            onAskUser: { _ in
-                return "No more tasks."
             }
         ))
         

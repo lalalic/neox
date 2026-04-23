@@ -14,8 +14,8 @@ Endpoint: http://10.0.0.81:9223/mcp
 - T3.2 Start listening (mic → stop button transition confirmed)
 - T3.5 Stop listening manually (stop button → mic transition confirmed)
 - T7.1 Steering placeholder shown during working state
-- T8.1 ask_user waiting state shown
-- T8.3 ask_user answer via text resumes loop
+- T8.1 ask_questions waiting state shown
+- T8.3 ask_questions answer via text resumes loop
 - AQ.1 ask_questions state entered (new feature)
 - AQ.2 ask_questions submit button flow works and state exits waitingForQuestions
 - T10.1–T10.2 Web/chat toggle works (Globe ↔ Comment Left)
@@ -117,17 +117,17 @@ Endpoint: http://10.0.0.81:9223/mcp
 | T7.6 | Steer input enabled | Verify input field is enabled during 'working' state | Can type and send. Not greyed out. |
 | T7.7 | Steer vs prompt | Send steer → wait for idle → send normal prompt | Steer goes as steer, next message goes as normal prompt |
 
-### T8 — ask_user Flow (Answer Questions)
+### T8 — ask_questions Flow (Answer Questions)
 | # | Scenario | Steps | Expected |
 |---|----------|-------|----------|
-| T8.1 | Question display | Agent calls ask_user with a question | Question appears as assistant message. Input gets orange border. |
+| T8.1 | Question display | Agent calls ask_questions with a question | Question appears as assistant message. Input gets orange border. |
 | T8.2 | Placeholder shows question | T8.1 observe input | Input placeholder shows truncated question text (~50 chars) |
 | T8.3 | Reply via text | T8.1 → type answer → send | Answer delivered, agent continues. State returns to working/idle. |
 | T8.4 | Reply via speech | T8.1 → tap mic → speak answer | Speech transcription sent as answer. Agent resumes. |
 | T8.5 | Long question truncation | Agent asks question longer than 50 chars | Placeholder truncated with "..." |
-| T8.6 | Multiple rounds | Agent asks → user answers → agent asks again | Each ask_user cycle works, orange border toggles correctly |
-| T8.7 | Answer after app background | ask_user → background app → resume → answer | Question still visible, can still answer |
-| T8.8 | Empty answer guard | ask_user pending → try sending empty text | Send button should be disabled for empty text |
+| T8.6 | Multiple rounds | Agent asks → user answers → agent asks again | Each ask_questions cycle works, orange border toggles correctly |
+| T8.7 | Answer after app background | ask_questions → background app → resume → answer | Question still visible, can still answer |
+| T8.8 | Empty answer guard | ask_questions pending → try sending empty text | Send button should be disabled for empty text |
 
 > `ask_questions` is now implemented with structured options, multi-select, and freeform support.
 
@@ -145,7 +145,7 @@ Endpoint: http://10.0.0.81:9223/mcp
 | T9.9 | Attachment chip | Agent sends attachment ref | Attachment chip with doc icon + filename displayed |
 | T9.10 | Large image handling | Select 4K photo → send | Image resized/compressed properly, doesn't crash or hang |
 | T9.11 | Multiple attachments | Select photo → send → select another → send | Both work independently |
-| T9.12 | Paperclip in ask_user | In waitingForUser state → tap paperclip | Attachment picker works while answering question |
+| T9.12 | Paperclip in ask_questions | In waitingForUser state → tap paperclip | Attachment picker works while answering question |
 
 ### T10 — Web View Toggle
 | # | Scenario | Steps | Expected |

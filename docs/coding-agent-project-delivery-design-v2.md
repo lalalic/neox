@@ -24,10 +24,10 @@ iOS/VS Code → WebSocket → relay-server.js → copilot CLI (pooled sessions)
 ```
 
 **Key mechanisms:**
-- **Agent loop injection** — system message forces agent to call `send_response` or `ask_user` before every turn end, preventing silent termination
-- **Two control tools** — `send_response` (deliver output) + `ask_user` (request input), injected as MCP tools into every pooled session
+- **Agent loop injection** — system message forces agent to call `send_response` or `ask_questions` before every turn end, preventing silent termination
+- **Two control tools** — `send_response` (deliver output) + `ask_questions` (request input), injected as MCP tools into every pooled session
 - **Session pooling** — pre-warmed CLI sessions assigned on connect, returned to pool on disconnect
-- **Hold state** — when agent calls `ask_user` and client disconnects, session enters on-hold with timeout + client pinning for reconnect
+- **Hold state** — when agent calls `ask_questions` and client disconnects, session enters on-hold with timeout + client pinning for reconnect
 - **Context recovery** — workspace snapshots (tar.gz) + `events.jsonl` parsing restore conversation on session loss
 - **Multi-workspace routing** — each app (`appId`) gets its own CLI process with isolated working directory
 
@@ -35,7 +35,7 @@ Agent instruction injection (relay-server.js L321):
 ```
 IMPORTANT: You are an autonomous agent running in an infinite loop.
 - Use the `send_response` tool to deliver your responses to the user.
-- Use the `ask_user` tool when you need more information or when all tasks are done.
+- Use the `ask_questions` tool when you need more information or when all tasks are done.
 - Always use one of these tools before your turn ends.
 ```
 
@@ -79,7 +79,7 @@ GitHub's cloud coding agent runs in a VM, creates PRs from issues:
 │  - iOS device control (AppAgent, port 9223)              │
 │  - Terminal execution                                    │
 │  - Git operations                                        │
-│  - MCP tools (relay send_response, ask_user)             │
+│  - MCP tools (relay send_response, ask_questions)             │
 └─────────────────────┬────────────────────────────────────┘
                       │ dispatches issues
                       ▼
@@ -135,13 +135,13 @@ stateDiagram-v2
         The core loop:
         work → report → ask → work
         Never terminate, always
-        call send_response or ask_user
+        call send_response or ask_questions
     end note
 
     note right of Idle
         Idle ≠ dead.
         Polling steer file,
-        waiting for ask_user answer,
+        waiting for ask_questions answer,
         or between task batches
     end note
 ```
@@ -152,7 +152,7 @@ stateDiagram-v2
 |------|-------|----|--------|
 | Idle | task from user / steer file / todo list | Working | Begin execution |
 | Working | step completed, more remain | Working | Report progress, continue |
-| Working | blocked on user input | Asking | Call `ask_user` / `ask_questions` |
+| Working | blocked on user input | Asking | Call `ask_questions` / `ask_questions` |
 | Working | task complete | Reporting | Call `send_response` with results |
 | Working | unrecoverable error | Reporting | Call `send_response` with failure summary |
 | Asking | user answers | Working | Incorporate answer, resume |
@@ -169,9 +169,9 @@ Two tools maintain the infinite loop. Both already exist in the relay server.
 { "name": "send_response", "parameters": { "message": "string (required)" } }
 ```
 
-**`ask_user`** — Request input, hold session
+**`ask_questions`** — Request input, hold session
 ```json
-{ "name": "ask_user", "parameters": { "question": "string (required)" } }
+{ "name": "ask_questions", "parameters": { "question": "string (required)" } }
 ```
 
 That's it. No `task_id`, no `artifacts` schema, no `report_progress`. Progress is just a `send_response` with progress content. The agent uses natural language to structure output — rigid schemas add friction without value.
@@ -251,7 +251,7 @@ Existing skills: `brainstorming`, `test-driven-development`, `executing-plans`, 
 
 | Failure | Recovery |
 |---------|----------|
-| Client disconnect during `ask_user` | Session held with timer; client reconnects to same session via `clientId` pinning |
+| Client disconnect during `ask_questions` | Session held with timer; client reconnects to same session via `clientId` pinning |
 | Hold timeout (10 min) | Workspace snapshot saved; session recycled; context extracted from `events.jsonl` on next connect |
 | CLI crash | Pool detects exit, respawns CLI, pre-warms sessions |
 | Relay restart | Client reconnects, gets snapshot-restored context |
@@ -271,7 +271,7 @@ Existing skills: `brainstorming`, `test-driven-development`, `executing-plans`, 
 |---------|-------------|---------|
 | `user-steer.md` edit | VS Code local | ~seconds |
 | `@copilot ...` PR comment | GitHub cloud | ~minutes |
-| `ask_user` tool answer | iOS relay | immediate |
+| `ask_questions` tool answer | iOS relay | immediate |
 | `ask_questions` answer | VS Code | immediate |
 
 ---
@@ -318,7 +318,7 @@ Currently manual (`progress/PROGRESS.md`). Could automate via GitHub API polling
 
 | Decision | Choice | Why |
 |----------|--------|-----|
-| Loop mechanism | `send_response` + `ask_user` injection | Already working, two tools, minimal surface |
+| Loop mechanism | `send_response` + `ask_questions` injection | Already working, two tools, minimal surface |
 | Progress reporting | Natural language via `send_response` | No rigid schema; agent adapts output to context |
 | Task tracking | `user-todo.md` + todo_list tool | File-first, human-readable, no database |
 | Steering | File edits (local) + PR comments (cloud) | Async, non-blocking, auditable |
@@ -355,7 +355,7 @@ Currently manual (`progress/PROGRESS.md`). Could automate via GitHub API polling
 
 ```
 copilot-relay/
-  relay-server.js          # Infinite-loop relay (send_response, ask_user, pooling)
+  relay-server.js          # Infinite-loop relay (send_response, ask_questions, pooling)
   DESIGN-v2.md             # Session lifecycle, hold state, multi-workspace
 
 .github/

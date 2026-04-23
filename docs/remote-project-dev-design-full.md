@@ -53,7 +53,7 @@ graph TD
 | **Where** | Relay server, copilot CLI session | GitHub cloud VM |
 | **Triggered by** | User chat message | Issue assignment |
 | **Role** | Discover requirements, design, dispatch | Implement code, create PRs, build |
-| **Tools** | `create_project`, `start_coding_task`, `send_response`, `ask_user` | `send_response`, `report_progress`, `report_usage` (via relay MCP) |
+| **Tools** | `create_project`, `start_coding_task`, `send_response`, `ask_questions` | `send_response`, `report_progress`, `report_usage` (via relay MCP) |
 | **Lifetime** | Persistent (session pool) | Per-issue (disposable VM) |
 
 ---
@@ -75,7 +75,7 @@ graph LR
     end
     R -->|"create_project"| Phone[User Phone]
     R -->|"send_response"| Phone
-    R -->|"ask_user"| Phone
+    R -->|"ask_questions"| Phone
     R -->|"start_coding_task"| Phone
     Phone -->|"GitHub ops via /github/ proxy"| GH[GitHub API]
     R -->|"activate"| GH
@@ -93,7 +93,7 @@ graph LR
 |------|-------------|-------------|---------|
 | `create_project` | Tier 1 only | Agent tool (intercepted) | On-device scaffold from `.templates/projects/` ([design](create-project-tool.md)) |
 | `send_response` | Tier 1 + Tier 2 | Agent tool + MCP | Delivers chat message to phone |
-| `ask_user` | Tier 1 only | Agent tool | Asks question, holds session for answer |
+| `ask_questions` | Tier 1 only | Agent tool | Asks question, holds session for answer |
 | `start_coding_task` | Tier 1 only | Agent tool (intercepted) | Relay-orchestrated: phone does GitHub, relay activates ([design](../../copilot-relay/docs/create-task-pipeline.md)) |
 | `report_progress` | Tier 2 only | MCP only | Push notification for milestones |
 | `report_usage` | Tier 2 only | MCP only | Token usage via APNs, on-device accounting |
@@ -331,7 +331,7 @@ sequenceDiagram
 
 | Failure | Recovery |
 |---------|----------|
-| Phone disconnect during `ask_user` | Session held 10 min, reconnect via clientId |
+| Phone disconnect during `ask_questions` | Session held 10 min, reconnect via clientId |
 | Hold timeout | Workspace snapshot saved, session recycled |
 | CLI crash | Pool respawns, pre-warms sessions |
 | Bad PR from coding agent | `@copilot fix: ...` comment |
@@ -370,7 +370,7 @@ User tests app → "Tab icons are too small"
 | Component | Status |
 |-----------|--------|
 | Relay server + session pooling | ✅ Deployed |
-| Agent loop (send_response + ask_user) | ✅ Working |
+| Agent loop (send_response + ask_questions) | ✅ Working |
 | start_coding_task pipeline (delegation) | ✅ Working — phone creates repo/issue, relay activates |
 | /github/* proxy | ✅ Working — transparent proxy, 6 tests pass |
 | Secret injection (libsodium) | ✅ Working |
@@ -399,7 +399,7 @@ User tests app → "Tab icons are too small"
 3. **Native modules** — Some features (Bluetooth, ARKit) need native code. How to handle?
 4. **Expo Updates** — OTA hotfixes without full rebuild (future phase)
 5. **Android** — Just add `--platform android` to EAS build (future phase)
-6. **ask_user for Tier 2** — Deferred. Blocking the GitHub VM while waiting for user input is expensive. Consider: async question queue, or agent makes best-judgment decisions instead of asking.
+6. **ask_questions for Tier 2** — Deferred. Blocking the GitHub VM while waiting for user input is expensive. Consider: async question queue, or agent makes best-judgment decisions instead of asking.
 
 ## 14. Shared Notification Handler (Implemented)
 

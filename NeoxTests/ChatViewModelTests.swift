@@ -25,8 +25,7 @@ func makeTestVM() -> ChatViewModel {
     let config = AgentConfig(
         instructions: "You are a test agent.",
         tools: [],
-        onResponse: { _ in },
-        onAskUser: { _ in "" }
+        onResponse: { _ in }
     )
     // Use a unique UserDefaults suite so tests don't read persisted data
     let testDefaults = UserDefaults(suiteName: "test.\(UUID().uuidString)")!

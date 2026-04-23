@@ -694,13 +694,13 @@ Calendar integration is Phase 3+ (after basic plans and BGTask scheduling work).
 
 For plans with `requiresApproval: true`:
 
-1. During execution, if the agent triggers an action tool (e.g., posting, sending), the existing `ask_user` mechanism fires
-2. In foreground: normal ask_user sheet appears
+1. During execution, if the agent triggers an action tool (e.g., posting, sending), the existing `ask_questions` mechanism fires
+2. In foreground: normal ask_questions sheet appears
 3. In background: post local notification with action buttons (Approve / Reject)
-4. Notification response wired back to `ask_user` reply
+4. Notification response wired back to `ask_questions` reply
 
 ```swift
-// In PlanExecutor.executePlan(), handle ask_user:
+// In PlanExecutor.executePlan(), handle ask_questions:
 await session.on(.externalToolRequested) { event in
     if plan.requiresApproval {
         // Post notification with actionable buttons

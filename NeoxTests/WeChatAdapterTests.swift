@@ -253,8 +253,7 @@ final class WeChatAgentIntegrationTests: XCTestCase {
             onResponse: { message in
                 await collector.set(message)
                 responseReceived.fulfill()
-            },
-            onAskUser: { _ in return "No more tasks." }
+            }
         ))
 
         let agentTask = Task {

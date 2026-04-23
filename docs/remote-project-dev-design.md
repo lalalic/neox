@@ -13,7 +13,7 @@ A Neox user wants to build an app from their phone. They describe the idea, the 
 | Component | Status | Description |
 |-----------|--------|-------------|
 | Relay server | ✅ Implemented | Multi-workspace, session pooling, agent loop, hold state, snapshots |
-| Agent loop | ✅ Implemented | `send_response` + `ask_user` keep agent running indefinitely |
+| Agent loop | ✅ Implemented | `send_response` + `ask_questions` keep agent running indefinitely |
 | Two-tier architecture | ✅ Designed | Local orchestrator (Tier 1) dispatches to cloud workers (Tier 2) |
 | Auto-merge workflow | ✅ Exists | `copilot-ios/.github/workflows/auto-merge.yml` — CI check, scope check, squash merge |
 | Skill discovery | ✅ Implemented | `.github/skills/*/SKILL.md` scanned and injected into system prompt |
@@ -41,12 +41,12 @@ Agent (relay session, Tier 1 — on-device)
     │   ┌──────── Custom Coding Agent (GitHub cloud VM) ─────────┐
     │   │                                                         │
     │   │  MCP connections:                                       │
-    │   │    • relay MCP (send_response, ask_user)                │
+    │   │    • relay MCP (send_response, ask_questions)                │
     │   │    • github-api MCP (workflow status polling)            │
     │   │                                                         │
     │   │  1. Code feature (Expo / React Native)                  │
     │   │     send_response("Working on tab nav...")  ──────► User sees progress
-    │   │     ask_user("Grid or list for Home?")      ◄─────► User answers "grid"
+    │   │     ask_questions("Grid or list for Home?")      ◄─────► User answers "grid"
     │   │                                                         │
     │   │  2. Push code → create PR                               │
     │   │     send_response("PR #1 created, CI running...")       │
@@ -75,7 +75,7 @@ Agent (relay session, Tier 1 — on-device)
 | App framework | **Expo (React Native)** | Cross-platform, EAS handles builds/signing, JS/TS is widely known |
 | Build service | **EAS Build** | Cloud macOS builders, automatic code signing, TestFlight upload |
 | Coding agent | Custom agent on GitHub cloud VM | Full control, MCP-enabled, stays alive through build |
-| Communication | Relay MCP bridge (`send_response`, `ask_user`) | Same pattern as local agent, bidirectional |
+| Communication | Relay MCP bridge (`send_response`, `ask_questions`) | Same pattern as local agent, bidirectional |
 | Repo ownership | Platform-managed org (`neos`) | Users don't need GitHub accounts |
 | Delivery | TestFlight (via EAS Submit) | User installs and tests on their actual device |
 
@@ -252,7 +252,7 @@ Same pattern as `copilot-ios/.github/workflows/auto-merge.yml`:
 | Tool | Description |
 |------|-------------|
 | `send_response` | Report progress or completion to user's phone |
-| `ask_user` | Ask user a question, wait for answer |
+| `ask_questions` | Ask user a question, wait for answer |
 
 **MCP config** (`.github/copilot-mcp.json`):
 ```json
@@ -283,7 +283,7 @@ You are a coding agent that implements features and delivers them to TestFlight.
 1. Read the issue spec carefully
 2. Implement the feature (TypeScript, React Native, Expo)
 3. Call send_response to report progress to the user
-4. If you have questions, call ask_user and wait for the answer
+4. If you have questions, call ask_questions and wait for the answer
 5. Push code and create a PR
 6. Wait for CI to pass (type check + lint + test)
 7. After CI passes, merge the PR
@@ -323,7 +323,7 @@ Agent picks up Issue #1
   → user sees progress in Neox chat
 
 Agent has a question
-  → ask_user("Should Home show a grid or list?")
+  → ask_questions("Should Home show a grid or list?")
   → user answers on phone → relay returns answer → agent continues
 
 Agent pushes code, creates PR
