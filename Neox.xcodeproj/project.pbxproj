@@ -421,7 +421,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "cd \"${PROJECT_DIR}/workspace\"\nzip -r \"${PROJECT_DIR}/copilot-ios/CopilotSDK/Sources/Resources/workspace.zip\" . -x \"*.DS_Store\" > /dev/null 2>&1\necho \"workspace.zip rebuilt from neox/workspace\"\n";
+			shellScript = "ZIPFILE=\"${PROJECT_DIR}/copilot-ios/CopilotSDK/Sources/Resources/workspace.zip\"\nTMPDIR=$(mktemp -d)\ncp -a \"${PROJECT_DIR}/workspace/\" \"$TMPDIR/\"\nif [ -d \"${PROJECT_DIR}/.github\" ]; then\n  mkdir -p \"$TMPDIR/.github\"\n  cp -a \"${PROJECT_DIR}/.github/\" \"$TMPDIR/.github/\"\nfi\nrm -f \"$ZIPFILE\"\ncd \"$TMPDIR\" && zip -r \"$ZIPFILE\" . -x \"*.DS_Store\" > /dev/null 2>&1\nrm -rf \"$TMPDIR\"\necho \"workspace.zip rebuilt from neox/workspace + .github\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

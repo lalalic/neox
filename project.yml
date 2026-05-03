@@ -78,3 +78,17 @@ targets:
         product: CopilotChat
       - package: copilot-ios
         product: WebKitAgent
+
+schemes:
+  Neox:
+    build:
+      targets:
+        Neox: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+    test:
+      config: Debug
+      targets:
+        - NeoxTests

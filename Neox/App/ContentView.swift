@@ -166,6 +166,7 @@ struct ContentView: View {
             NavigationStack {
                 ModelPickerView(
                     selectedModelId: $coordinator.selectedModel,
+                    models: coordinator.availableModels,
                     onModelChanged: { newModel in
                         coordinator.saveRelaySettings()
                         coordinator.reconnect()
@@ -260,6 +261,7 @@ struct RelaySettingsView: View {
                     NavigationLink {
                         ModelPickerView(
                             selectedModelId: $coordinator.selectedModel,
+                            models: coordinator.availableModels,
                             onModelChanged: { _ in
                                 coordinator.saveRelaySettings()
                             }
