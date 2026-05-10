@@ -167,8 +167,6 @@ struct ContentView: View {
                 ModelPickerView(
                     selectedModelId: $coordinator.selectedModel,
                     models: coordinator.availableModels,
-                    enabledIds: coordinator.enabledModelIds,
-                    grouping: .family,
                     onModelChanged: { newModel in
                         coordinator.saveRelaySettings()
                         coordinator.reconnect()
@@ -264,8 +262,6 @@ struct RelaySettingsView: View {
                         ModelPickerView(
                             selectedModelId: $coordinator.selectedModel,
                             models: coordinator.availableModels,
-                            enabledIds: coordinator.enabledModelIds,
-                            grouping: .family,
                             onModelChanged: { _ in
                                 coordinator.saveRelaySettings()
                             }
@@ -294,15 +290,6 @@ struct RelaySettingsView: View {
                             .textSelection(.enabled)
                     }
                 }
-
-                ProvidersSettingsSection(
-                    enabledIds: $coordinator.enabledModelIds,
-                    models: coordinator.availableModels,
-                    configuredProviderFamilies: [],   // direct-provider keys not surfaced in neox yet
-                    onChange: { id, enabled in
-                        coordinator.setModelEnabled(id, enabled: enabled)
-                    }
-                )
 
                 SharedTopUpSettingsSection(coordinator: coordinator)
 
