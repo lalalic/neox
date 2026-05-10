@@ -270,7 +270,7 @@ struct RelaySettingsView: View {
                         HStack {
                             Text("Model")
                             Spacer()
-                            Text(ModelCatalog.model(for: coordinator.selectedModel)?.name ?? coordinator.selectedModel)
+                            Text(coordinator.selectedModelDisplayName)
                                 .foregroundStyle(.secondary)
                         }
                     }
