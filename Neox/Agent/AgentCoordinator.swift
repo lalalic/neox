@@ -144,12 +144,8 @@ final class AgentCoordinator: BaseCoordinator {
     /// Override saveRelaySettings to also persist Neox-specific settings.
     override func saveRelaySettings() {
         super.saveRelaySettings()
-        normalizeInputSettings()
         UserDefaults.standard.set(useDevServer, forKey: "useDevServer")
         UserDefaults.standard.set(devServerPort, forKey: "devServerPort")
-        UserDefaults.standard.set(enableTextInput, forKey: "enableTextInput")
-        UserDefaults.standard.set(enableSpeechInput, forKey: "enableSpeechInput")
-        UserDefaults.standard.set(enableAttachmentInput, forKey: "enableAttachmentInput")
         UserDefaults.standard.set(selectedModel, forKey: "selectedModel")
         UserDefaults.standard.set(showUsageInChat, forKey: "showUsageInChat")
         UserDefaults.standard.set(showProgressInChat, forKey: "showProgressInChat")
