@@ -163,9 +163,7 @@ struct NeoxApp: App {
                 #endif
                 .environmentObject(coordinator)
                 .task {
-                    NSLog("[NeoxApp] .task started — relay: %@:%d, useLocal: %@", coordinator.relayHost, coordinator.relayPort, coordinator.useLocalRelay ? "yes" : "no")
-                    coordinator.applyRelaySelection()
-                    NSLog("[NeoxApp] After applyRelaySelection — relay: %@:%d", coordinator.relayHost, coordinator.relayPort)
+                    NSLog("[NeoxApp] .task started — relay: %@:%d", coordinator.relayHost, coordinator.relayPort)
                     let vm = coordinator.createChatViewModel()
                     NSLog("[NeoxApp] ChatViewModel created, connecting...")
                     

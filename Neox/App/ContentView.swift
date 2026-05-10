@@ -385,7 +385,6 @@ struct RelaySettingsView: View {
                     }
                 }
 
-                SharedAboutSettingsSection(coordinator: coordinator)
                 SharedDeveloperSettingsSection(
                     coordinator: coordinator,
                     reconnectAction: {
@@ -402,6 +401,8 @@ struct RelaySettingsView: View {
                     }
                     .frame(maxWidth: .infinity)
                 }
+
+                SharedAboutSettingsSection(coordinator: coordinator)
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -422,7 +423,6 @@ struct RelaySettingsView: View {
             coordinator.devServerPort = 9223
         }
 
-        coordinator.applyRelaySelection()
         coordinator.saveRelaySettings()
 
         let setup = AppAgentSetup.shared

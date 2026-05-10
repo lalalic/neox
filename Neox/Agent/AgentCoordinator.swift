@@ -75,7 +75,6 @@ final class AgentCoordinator: BaseCoordinator {
     }
 
     override func reconnect() {
-        applyRelaySelection()
         saveRelaySettings()
         discordService.disconnectStandalone()
         discordService.markDisconnected()
@@ -179,8 +178,9 @@ final class AgentCoordinator: BaseCoordinator {
     private func wireDiscord(to vm: ChatViewModel) {
         guard channelType == "discord" && !discordService.guildId.isEmpty else { return }
 
-        let localRelay = parseLocalRelayURL()
-        let mainIsLocal = relayHost == localRelay.host && relayPort == localRelay.port
+        // Use main relay connection for Discord RPC (local relay is no longer
+        // a separate path now that providers are configured per-provider).
+        let mainIsLocal = relayHost.hasPrefix("10.") || relayHost == "127.0.0.1" || relayHost == "localhost"
 
         if mainIsLocal {
             discordService.rpcSender = { [weak vm] method, params in
@@ -200,7 +200,7 @@ final class AgentCoordinator: BaseCoordinator {
             }
         } else {
             Task {
-                await discordService.connectStandalone(host: localRelay.host, port: localRelay.port)
+                await discordService.connectStandalone(host: relayHost, port: relayPort)
             }
         }
     }
