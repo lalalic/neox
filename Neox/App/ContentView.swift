@@ -166,7 +166,7 @@ struct ContentView: View {
             NavigationStack {
                 ModelPickerView(
                     selectedModelId: $coordinator.selectedModel,
-                    models: coordinator.availableModels,
+                    providerGroups: coordinator.pickerProviderGroups,
                     onModelChanged: { newModel in
                         coordinator.saveRelaySettings()
                         coordinator.reconnect()
@@ -261,7 +261,7 @@ struct RelaySettingsView: View {
                     NavigationLink {
                         ModelPickerView(
                             selectedModelId: $coordinator.selectedModel,
-                            models: coordinator.availableModels,
+                            providerGroups: coordinator.pickerProviderGroups,
                             onModelChanged: { _ in
                                 coordinator.saveRelaySettings()
                             }
@@ -290,6 +290,8 @@ struct RelaySettingsView: View {
                             .textSelection(.enabled)
                     }
                 }
+
+                ProvidersSettingsSection(coordinator: coordinator)
 
                 SharedTopUpSettingsSection(coordinator: coordinator)
 
