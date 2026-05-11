@@ -393,15 +393,6 @@ struct RelaySettingsView: View {
                     }
                 )
 
-                Section {
-                    Button("Apply & Reconnect") {
-                        applySettings()
-                        coordinator.reconnect()
-                        dismiss()
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-
                 SharedAboutSettingsSection(coordinator: coordinator)
             }
             .navigationTitle("Settings")
