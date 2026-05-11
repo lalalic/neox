@@ -2,6 +2,7 @@ import SwiftUI
 import AppAgent
 import CopilotChat
 import CopilotSDK
+import NeoxCore
 import UIKit
 import UserNotifications
 
@@ -153,6 +154,13 @@ struct NeoxApp: App {
     init() {
         // Register BGTask handlers before app finishes launching
         PlanExecutor.shared.registerBGTasks()
+        
+        // Wire feedback/crash reporting to the relay
+        NeoxCoreFeedback.bootstrap(
+            endpoint: URL(string: "https://relay.ai.qili2.com/github/r/bGFsYWxpYy9uZW94/issues")!,
+            app: "neox",
+            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        )
     }
     
     var body: some Scene {

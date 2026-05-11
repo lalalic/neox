@@ -33,6 +33,21 @@
     </array>
     <key>NeoxAppConfig</key>
     <dict>
+        <key>aboutLinks</key>
+        <array>
+            <dict>
+                <key>title</key>
+                <string>Privacy Policy</string>
+                <key>url</key>
+                <string>https://neox.lalalic.com/privacy</string>
+            </dict>
+            <dict>
+                <key>title</key>
+                <string>Terms of Use</string>
+                <key>url</key>
+                <string>https://neox.lalalic.com/terms</string>
+            </dict>
+        </array>
         <key>appId</key>
         <string>neox</string>
         <key>iapPacks</key>
