@@ -386,11 +386,7 @@ struct RelaySettingsView: View {
                 }
 
                 SharedDeveloperSettingsSection(
-                    coordinator: coordinator,
-                    reconnectAction: {
-                        applySettings()
-                        coordinator.reconnect()
-                    }
+                    coordinator: coordinator
                 )
 
                 SharedAboutSettingsSection(coordinator: coordinator)
