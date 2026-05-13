@@ -144,12 +144,8 @@ struct ContentView: View {
                         }
                     }
                 },
-                onDelete: { project in
-                    if let repo = project.repo {
-                        Task {
-                            await coordinator.chatViewModel?.archiveRepo(repo)
-                        }
-                    }
+                onDelete: { _ in
+                    // Project deletion: nothing to archive (coding-agent / GitHub-repo pipeline removed).
                 },
                 weChatService: coordinator.channelType == "wechat" ? coordinator.weChatService : nil,
                 discordService: coordinator.channelType == "discord" ? coordinator.discordService : nil,

@@ -41,19 +41,32 @@
 > `/api/neo/*` proxy and Neo's persistent WS connection (see bullx US-46/47/48).
 
 ## US-09: Discover & pair with Mac Neo
-**As a** Neox user, **I want to** discover my own Mac Neo install and pair
-with it, **so that** my phone can later issue requests against it through the
-relay.
+**As a** Neox user, **I want to** pair my phone with my Mac Neo via a short
+one-time code, **so that** my phone can later issue requests against it
+through the relay.
 
 **Acceptance criteria:**
-1. A "Pair with Mac Neo" entry exists in Neox Settings.
-2. The pairing flow shows the list of `deviceId`s owned by the signed-in relay
-   account (relay returns the set keyed by bootstrap-token ownership / user).
-3. Selecting a `deviceId` stores it locally as `pairedNeoDeviceId`; subsequent
-   API calls (`POST /api/neo/*`) automatically scope to that device.
-4. If only one Neo is registered for the user, auto-select on first launch.
-5. Unpair button clears `pairedNeoDeviceId` and tears down any active SSE.
-6. Offline indicator if the relay reports the paired Neo's WS as disconnected.
+1. The Mac Neo Settings UI shows a "Pair phone" button (bullx side, see
+   companion story). Clicking it calls `POST /api/pair/initiate` on the relay
+   (Authorization: device bearer `rlb_…`) and displays the returned 6-digit
+   `code` with a 5-min countdown.
+2. Neox Settings has a "Pair with Mac Neo" section with a 6-digit code field
+   and Pair button. Submitting calls `POST /api/pair/confirm`
+   `{code, phoneId, phoneName}` and on 200 stores the returned `secret` in
+   UserDefaults key `neox.neoDesktop.pairingSecret`.
+3. After success, the section flips to the paired state: shows Mac Neo's name,
+   green checkmark, "Use Neo Desktop" toggle, "Take questions" toggle, Unpair
+   button.
+4. While paired, `BaseCoordinator.createChatViewModel()` swaps in
+   `NeoDesktopRuntime` for the main chat — same chat UI, traffic now flows
+   over `/api/neo/proxy/*` and `/api/neo/stream/*`.
+5. The "Take questions" toggle calls `setAskChannel("neox" | "auto")` on the
+   Mac via the proxy; this updates `AppSettings.askChannel` server-side.
+6. Pairing handshake is single-use — relay clears the code from
+   `pendingPairings` after a successful confirm, and pushes `{type:"paired"}`
+   to the Mac over its WS so the Mac UI can auto-dismiss the code modal.
+7. Unpair calls clear `neoDesktopPairingSecret` locally **and** notify the
+   relay so future proxy calls with that secret are 401.
 
 ## US-10: Chat with my Mac Neo from the phone
 **As a** Neox user, **I want to** open a chat with my paired Mac Neo and send
