@@ -174,30 +174,9 @@ final class AgentCoordinator: BaseCoordinator {
     private func wireDiscord(to vm: ChatViewModel) {
         guard channelType == "discord" && !discordService.guildId.isEmpty else { return }
 
-        // Use main relay connection for Discord RPC (local relay is no longer
-        // a separate path now that providers are configured per-provider).
-        let mainIsLocal = relayHost.hasPrefix("10.") || relayHost == "127.0.0.1" || relayHost == "localhost"
-
-        if mainIsLocal {
-            discordService.rpcSender = { [weak vm] method, params in
-                guard let vm else { throw DiscordService.DiscordError.notConnected }
-                return try await vm.sendRPC(method: method, params: params)
-            }
-            vm.onCustomNotification = { [weak self] method, params in
-                self?.discordService.handleNotification(method: method, params: params)
-            }
-            Task {
-                let ready = await vm.waitForReady(timeout: 15)
-                guard ready else {
-                    NSLog("[Discord] Main session not ready — skipping channel registration")
-                    return
-                }
-                await discordService.registerBindings()
-            }
-        } else {
-            Task {
-                await discordService.connectStandalone(host: relayHost, port: relayPort)
-            }
+        // Always use standalone connection for Discord RPC
+        Task {
+            await discordService.connectStandalone(host: relayHost, port: relayPort)
         }
     }
 

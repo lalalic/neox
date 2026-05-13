@@ -127,7 +127,7 @@ final class DiscordService: ObservableObject {
 
     // MARK: - Notification Handling
 
-    /// Handle a custom notification from the shared WS (called by ChatViewModel.onCustomNotification).
+    /// Handle a custom notification from the standalone relay connection.
     func handleNotification(method: String, params: [String: JSONValue]?) {
         guard method == "discord_message", let params else { return }
 
