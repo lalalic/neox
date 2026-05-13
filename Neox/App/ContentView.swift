@@ -385,6 +385,9 @@ struct RelaySettingsView: View {
                     }
                 }
 
+                // MARK: - Neo Desktop
+                NeoDesktopSettingsSection(coordinator: coordinator)
+
                 SharedDeveloperSettingsSection(
                     coordinator: coordinator
                 )

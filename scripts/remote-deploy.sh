@@ -24,7 +24,7 @@ REMOTE_HOST="${REMOTE_HOST:-10.0.0.111}"
 REMOTE_USER="${REMOTE_USER:-chengli}"
 REMOTE_WORKSPACE="${REMOTE_WORKSPACE:-}"  # auto-detected if empty
 
-DEVICE_UDID="00008101-001609640C22001E"   # iPhone 12 mini
+DEVICE_UDID="A11BDE1D-10DB-5358-B809-CE0355678346"   # iPhone 12 mini (CoreDevice ID)
 DEVICE_IP="10.0.0.141"                    # iPhone LAN IP
 MCP_PORT="9223"                           # AppAgent MCP server port
 
