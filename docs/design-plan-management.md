@@ -756,7 +756,7 @@ Plans consume tokens from the same client-authoritative balance (see [design-pay
 11. Local notifications on completion
 
 ### Phase 3: Approval + Notifications
-11. Ask_user handling during background execution
+11. Ask_questions handling during background execution
 12. Actionable notification buttons (Approve/Reject)
 13. Token budget enforcement per execution
 14. Integration with UsageTracker for cost display
