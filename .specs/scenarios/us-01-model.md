@@ -14,3 +14,13 @@
 **Given** the user is on the model picker
 **When** they select a different model
 **Then** the selection is saved and the Agent Profile row updates to show the new model name
+
+## S-01.4: Picker reflects provider's enabled-models toggles immediately
+**Given** the user has a provider (e.g. Relay) with multiple models enabled
+**When** they open that provider, toggle one model off, and return to the model picker (without relaunching the app)
+**Then** the picker shows only the still-enabled models for that provider
+**And** if they re-enable the model, the picker shows it again without relaunch
+
+> Regression scenario for the picker live-sync bug fixed in `copilot-ios@5a76122`
+> (shared `NeoxCore.BaseCoordinator`). Affects Intento and Neox equally.
+
