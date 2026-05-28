@@ -57,34 +57,36 @@ struct ContentView: View {
                         CopilotChat.ChatView(viewModel: chatVM, inputModes: coordinator.chatInputModes)
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
-                                ToolbarItem(placement: .topBarLeading) {
-                                    HStack(spacing: 0) {
-                                        Button(action: { showProjects = true }) {
-                                            HStack(spacing: 4) {
-                                                Image(systemName: "folder.fill")
-                                                    .foregroundStyle(.primary)
-                                                if let name = currentProject {
-                                                    Text(name)
-                                                        .font(.caption2)
-                                                        .foregroundStyle(.secondary)
-                                                        .lineLimit(1)
-                                                        .truncationMode(.tail)
-                                                        .frame(maxWidth: 60)
+                                if !coordinator.isNeoChannelMode {
+                                    ToolbarItem(placement: .topBarLeading) {
+                                        HStack(spacing: 0) {
+                                            Button(action: { showProjects = true }) {
+                                                HStack(spacing: 4) {
+                                                    Image(systemName: "folder.fill")
+                                                        .foregroundStyle(.primary)
+                                                    if let name = currentProject {
+                                                        Text(name)
+                                                            .font(.caption2)
+                                                            .foregroundStyle(.secondary)
+                                                            .lineLimit(1)
+                                                            .truncationMode(.tail)
+                                                            .frame(maxWidth: 60)
+                                                    }
                                                 }
+                                                .frame(height: 44)
+                                                .contentShape(Rectangle())
                                             }
-                                            .frame(height: 44)
-                                            .contentShape(Rectangle())
+                                            .accessibilityLabel("Projects")
                                         }
-                                        .accessibilityLabel("Projects")
                                     }
                                 }
                                 ToolbarItem(placement: .principal) {
                                     HStack(spacing: 4) {
                                         ConnectionTitleView(
-                                            title: "Neo",
+                                            title: coordinator.isNeoChannelMode ? (coordinator.neoDesktopName ?? "Neo") : "Neo",
                                             viewModel: chatVM
                                         )
-                                        if coordinator.activeWatcherCount > 0 {
+                                        if !coordinator.isNeoChannelMode, coordinator.activeWatcherCount > 0 {
                                             WatcherBadge(count: coordinator.activeWatcherCount)
                                         }
                                     }
@@ -253,7 +255,36 @@ struct RelaySettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Agent Profile") {
+                if coordinator.isNeoChannelMode {
+                    neoChannelSettingsBody
+                } else {
+                    mobileNeoSettingsBody
+                }
+            }
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        applySettings()
+                        coordinator.reconnect()
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var neoChannelSettingsBody: some View {
+        NeoDesktopSettingsSection(coordinator: coordinator)
+        SharedFeedbackSettingsSection(app: "neox")
+        SharedAboutSettingsSection(coordinator: coordinator)
+    }
+
+    @ViewBuilder
+    private var mobileNeoSettingsBody: some View {
+        Section("Agent Profile") {
                     NavigationLink {
                         ModelPickerView(
                             selectedModelId: $coordinator.selectedModel,
@@ -389,19 +420,6 @@ struct RelaySettingsView: View {
                 )
 
                 SharedAboutSettingsSection(coordinator: coordinator)
-            }
-            .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        applySettings()
-                        coordinator.reconnect()
-                        dismiss()
-                    }
-                }
-            }
-        }
     }
 
     private func applySettings() {
