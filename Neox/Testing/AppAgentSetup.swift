@@ -473,6 +473,84 @@ final class AppAgentSetup {
             "inputSchema": ["type": "object"]
         ])
 
+        // ── chat_attachment: inject/remove/list attachments bypassing iOS pickers ──
+        let attachHandler: @Sendable (AppAgent.JSONValue) async throws -> String = { [weak self] args in
+            return await MainActor.run {
+                guard let self, let coordinator = self.coordinator,
+                      let vm = coordinator.chatViewModel else { return "Error: chatViewModel not ready" }
+                let store = vm.attachmentStore
+                guard case .object(let dict) = args else { return "Error: object args required" }
+                let op: String
+                if case .string(let v) = dict["op"] { op = v } else { op = "add" }
+                switch op {
+                case "add":
+                    guard case .string(let name) = dict["name"] else { return "Error: 'name' required for add" }
+                    let tmpDir = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("appagent-attachments", isDirectory: true)
+                    try? FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+                    let url = tmpDir.appendingPathComponent(name)
+                    var data: Data?
+                    if case .string(let b64) = dict["base64"] {
+                        data = Data(base64Encoded: b64, options: .ignoreUnknownCharacters)
+                    } else if case .string(let text) = dict["text"] {
+                        data = text.data(using: .utf8)
+                    } else {
+                        // Allow synthesizing a small dummy PNG when neither field supplied
+                        // (1x1 transparent PNG)
+                        let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+                        data = Data(base64Encoded: png)
+                    }
+                    guard let bytes = data else { return "Error: failed to decode payload" }
+                    do {
+                        try bytes.write(to: url, options: .atomic)
+                    } catch {
+                        return "Error: write failed: \(error.localizedDescription)"
+                    }
+                    let entry = store.add(url: url)
+                    return "Added: \(entry.displayName) (\(entry.mimeType), \(entry.fileSize) bytes). Total: \(store.entries.count)"
+                case "remove":
+                    var idx: Int?
+                    if case .int(let v) = dict["index"] { idx = v }
+                    if case .double(let v) = dict["index"] { idx = Int(v) }
+                    guard let i = idx else { return "Error: 'index' required for remove" }
+                    guard store.entries.indices.contains(i) else { return "Error: index \(i) out of range (count=\(store.entries.count))" }
+                    let name = store.entries[i].displayName
+                    store.remove(at: i)
+                    return "Removed [\(i)] \(name). Total: \(store.entries.count)"
+                case "clear":
+                    let n = store.entries.count
+                    store.clear()
+                    return "Cleared \(n) attachments"
+                case "list":
+                    if store.entries.isEmpty { return "No attachments" }
+                    return store.entries.enumerated().map { "\($0.offset). \($0.element.displayName) (\($0.element.mimeType), \($0.element.fileSize))" }.joined(separator: "\n")
+                default:
+                    return "Error: unknown op '\(op)'. Use add/remove/list/clear"
+                }
+            }
+        }
+        server.register(
+            name: "chat_attachment",
+            description: "Inject, list, remove, or clear chat attachments directly (bypasses iOS Photo/Files picker for E2E testing).",
+            inputSchema: [
+                "type": "object",
+                "properties": [
+                    "op": ["type": "string", "enum": ["add", "remove", "list", "clear"], "description": "Operation (default: add)"],
+                    "name": ["type": "string", "description": "Filename (e.g. 'photo1.png') for add op"],
+                    "base64": ["type": "string", "description": "Base64-encoded file data for add op (optional; defaults to 1x1 PNG)"],
+                    "text": ["type": "string", "description": "Plain text content for add op (alternative to base64)"],
+                    "index": ["type": "integer", "description": "Attachment index for remove op"],
+                ] as [String: Any]
+            ] as [String: Any],
+            handler: attachHandler
+        )
+        bridgeHandlers["chat_attachment"] = attachHandler
+        bridgeToolList.append([
+            "name": "chat_attachment",
+            "description": "Inject/list/remove/clear chat attachments",
+            "inputSchema": ["type": "object"]
+        ])
+
         try server.start()
         self.server = server
         
