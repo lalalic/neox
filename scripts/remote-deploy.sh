@@ -24,8 +24,8 @@ REMOTE_HOST="${REMOTE_HOST:-10.0.0.111}"
 REMOTE_USER="${REMOTE_USER:-chengli}"
 REMOTE_WORKSPACE="${REMOTE_WORKSPACE:-}"  # auto-detected if empty
 
-DEVICE_UDID="A11BDE1D-10DB-5358-B809-CE0355678346"   # iPhone 12 mini (CoreDevice ID)
-DEVICE_IP="10.0.0.141"                    # iPhone LAN IP
+DEVICE_UDID="${DEVICE_UDID:-FC6AEF41-F3A8-5176-8FEB-841232FF2237}"   # iPhone 17 (default); override with DEVICE_UDID=...
+DEVICE_IP="${DEVICE_IP:-10.0.0.81}"       # iPhone LAN IP (override with DEVICE_IP=...)
 MCP_PORT="9223"                           # AppAgent MCP server port
 
 BUNDLE_ID="com.neox.app"
