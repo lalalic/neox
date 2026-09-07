@@ -441,29 +441,40 @@ enum VisionMediaTools {
                 return "Error: \(error.localizedDescription)"
             }
 
-            return await withCheckedContinuation { (cont: CheckedContinuation<String, Never>) in
-                let request = SFSpeechURLRecognitionRequest(url: tmp)
-                request.shouldReportPartialResults = false
-                if recognizer.supportsOnDeviceRecognition {
-                    request.requiresOnDeviceRecognition = true
-                }
-                recognizer.recognitionTask(with: request) { result, error in
-                    if let error {
-                        cont.resume(returning: "Error: \(error.localizedDescription)")
-                    } else if let result, result.isFinal {
-                        let segments: [[String: Any]] = result.bestTranscription.segments.map {
-                            ["start_s": r1($0.timestamp),
-                             "end_s": r1($0.timestamp + $0.duration),
-                             "text": $0.substring]
-                        }
-                        cont.resume(returning: MediaTools.jsonString([
-                            "language": language,
-                            "text": result.bestTranscription.formattedString,
-                            "segments": segments,
-                        ]))
+            // Recognition may never finalize when the clip contains no speech —
+            // race it against a watchdog so the tool can't hang forever.
+            let once = OnceContinuation()
+            let request = SFSpeechURLRecognitionRequest(url: tmp)
+            request.shouldReportPartialResults = true
+            if recognizer.supportsOnDeviceRecognition {
+                request.requiresOnDeviceRecognition = true
+            }
+            let task = recognizer.recognitionTask(with: request) { result, error in
+                if let error {
+                    once.resume("Error: \(error.localizedDescription)")
+                } else if let result, result.isFinal {
+                    let segments: [[String: Any]] = result.bestTranscription.segments.map {
+                        ["start_s": r1($0.timestamp),
+                         "end_s": r1($0.timestamp + $0.duration),
+                         "text": $0.substring]
                     }
+                    once.resume(MediaTools.jsonString([
+                        "language": language,
+                        "text": result.bestTranscription.formattedString,
+                        "segments": segments,
+                    ]))
                 }
             }
+            // Watchdog: no final result within 90s → return whatever partial exists.
+            Task.detached {
+                try? await Task.sleep(nanoseconds: 90_000_000_000)
+                once.resume(MediaTools.jsonString([
+                    "language": language,
+                    "note": "timeout: no speech recognized, or clip too short to finalize",
+                ]))
+                _ = task
+            }
+            return await once.wait()
         }
     }
 }
@@ -476,3 +487,33 @@ private func r3(_ value: Float) -> Double { (Double(value) * 1000).rounded() / 1
 
 private func r1(_ v: Double) -> Double { (v * 10).rounded() / 10 }
 private func r2(_ v: Double) -> Double { (v * 100).rounded() / 100 }
+
+
+/// Resumes exactly once; guards against the recognizer never finalizing.
+final class OnceContinuation: @unchecked Sendable {
+    private let sem = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var value: String?
+    private var consumed = false
+
+    func resume(_ text: String) {
+        lock.lock()
+        if !consumed { value = text }
+        lock.unlock()
+        sem.signal()
+    }
+
+    func wait() async -> String {
+        await withCheckedContinuation { (cont: CheckedContinuation<String, Never>) in
+            DispatchQueue.global().async {
+                self.sem.wait()
+                self.lock.lock()
+                defer {
+                    self.consumed = true
+                    self.lock.unlock()
+                }
+                cont.resume(returning: self.value ?? "{\"error\":\"no output\"}")
+            }
+        }
+    }
+}
