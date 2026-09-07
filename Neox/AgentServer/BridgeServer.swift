@@ -24,6 +24,7 @@ final class BridgeServer: ObservableObject {
     @Published private(set) var state: State = .idle
     @Published private(set) var port: UInt16 = 9223
     @Published private(set) var logLines: [String] = []
+    @Published private(set) var registeredTools: [String] = []
     @Published private(set) var photosStatus: PHAuthorizationStatus
 
     private var server: MCPServer?
@@ -48,8 +49,20 @@ final class BridgeServer: ObservableObject {
         server.setStaticFileRoot(exportsDir)
         server.register(tools: PhotosToolProvider.tools(exportsDir: exportsDir))
         server.register(tools: DeviceToolProvider.tools())
+        server.register(
+            name: "clear_exports",
+            description: "Delete all files previously exported by photos_export from the /files/ serving directory. Call this after finishing downloads to free space on the phone.",
+            inputSchema: ["type": "object", "properties": [:] as [String: Any]]
+        ) { [weak self] _ in
+            guard let self else { return "Error: server deallocated" }
+            return await self.clearExports()
+        }
+        registeredTools = server.toolNames
         server.onRequest = { [weak self] line in
             Task { @MainActor [weak self] in self?.appendLog(line) }
+        }
+        server.onToolCall = { [weak self] name, arguments in
+            Task { @MainActor [weak self] in self?.appendLog("▸ \(name)(\(arguments))") }
         }
         server.onLog = { [weak self] message in
             Task { @MainActor [weak self] in self?.appendLog(message) }
@@ -75,11 +88,21 @@ final class BridgeServer: ObservableObject {
     }
 
     /// Delete all exported media from the /files/ serving directory.
-    func clearExports() {
+    @discardableResult
+    func clearExports() -> String {
         let fm = FileManager.default
-        guard let entries = try? fm.contentsOfDirectory(at: exportsDir, includingPropertiesForKeys: nil) else { return }
-        for entry in entries { try? fm.removeItem(at: entry) }
-        appendLog("exports cleared (\(entries.count) files)")
+        guard let entries = try? fm.contentsOfDirectory(at: exportsDir, includingPropertiesForKeys: nil) else {
+            appendLog("exports clear failed")
+            return "Error: could not read exports directory"
+        }
+        var freed: Int64 = 0
+        for entry in entries {
+            freed += (try? entry.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
+            try? fm.removeItem(at: entry)
+        }
+        let message = "cleared \(entries.count) files, freed \(ByteCountFormatter.string(fromByteCount: freed, countStyle: .file))"
+        appendLog("exports \(message)")
+        return message
     }
 
     var mcpURL: String {

@@ -54,6 +54,9 @@ public final class MCPServer {
     /// Called for every HTTP request line (e.g. "POST /mcp") — safe to call from the network queue.
     public nonisolated(unsafe) var onRequest: ((String) -> Void)?
 
+    /// Called on every tools/call with the tool name and compact JSON of its arguments.
+    public nonisolated(unsafe) var onToolCall: ((String, String) -> Void)?
+
     public init(name: String = "mcp-server", version: String = "1.0.0", port: UInt16 = 9223, bonjourName: String? = nil) {
         self.name = name
         self.version = version
@@ -370,6 +373,13 @@ public final class MCPServer {
 
             let arguments = params["arguments"] as? [String: Any] ?? [:]
             let jsonArgs = Self.toJSONValue(arguments)
+            if let onToolCall {
+                let argsPreview: String
+                if let data = try? JSONSerialization.data(withJSONObject: Self.jsonValueToAny(jsonArgs), options: [.sortedKeys]) {
+                    argsPreview = String(data: data, encoding: .utf8) ?? ""
+                } else { argsPreview = "" }
+                onToolCall(toolName, argsPreview)
+            }
 
             // Tool handlers may need MainActor — run in a detached task
             Task.detached { [weak self] in

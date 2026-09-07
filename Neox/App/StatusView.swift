@@ -1,73 +1,80 @@
 import Photos
 import SwiftUI
 
-/// Status screen — the only human-facing surface. Exists to show the agent
-/// where to connect, and to grant Photos permission once.
+/// Status screen — the only human-facing surface. Shows where to connect,
+/// what the server is doing, and grants Photos permission once.
 struct StatusView: View {
     @EnvironmentObject private var bridge: BridgeServer
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section("MCP Server") {
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(stateColor)
-                            .frame(width: 10, height: 10)
-                        Text(stateText)
-                            .font(.headline)
-                    }
-                    LabeledContent("Endpoint", value: bridge.mcpURL)
-                    LabeledContent("Bonjour", value: "neox._mcp._tcp")
-                    LabeledContent("LAN IP", value: BridgeServer.lanIPAddress() ?? "unavailable")
-                }
-
-                Section("Photo Library") {
-                    LabeledContent("Access", value: authText)
-                    if bridge.photosStatus == .notDetermined {
-                        Button("Allow Access") { bridge.requestPhotosAccess() }
-                    }
-                }
-
-                Section("Tools") {
-                    ForEach(["photos_search", "photos_export", "device_info"], id: \.self) { tool in
-                        Label(tool, systemImage: "wrench.and.screwdriver")
-                            .font(.callout)
-                    }
-                }
-
-                Section("Requests") {
-                    if bridge.logLines.isEmpty {
-                        Text("No requests yet.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(Array(bridge.logLines.enumerated().reversed()), id: \.offset) { _, line in
-                            Text(line)
-                                .font(.system(size: 11, weight: .regular, design: .monospaced))
-                                .textSelection(.enabled)
-                        }
-                    }
-                }
-
-                Section {
-                    Button("Clear Exported Files", role: .destructive) { bridge.clearExports() }
-                } footer: {
-                    Text("Exported media lives in the app's caches directory and is removed by iOS under storage pressure. Keep the app foregrounded for reliable serving.")
-                }
+        VStack(spacing: 0) {
+            // Top: running indicator + endpoint
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(stateColor)
+                    .frame(width: 14, height: 14)
+                Text(bridge.mcpURL)
+                    .font(.system(size: 17, weight: .semibold, design: .monospaced))
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
             }
-            .navigationTitle("Neox")
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 18)
+
+            Divider()
+
+            // Requests: tool list first, then every tool call
+            ListView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Divider()
+
+            // Foot buttons
+            HStack(spacing: 12) {
+                if bridge.photosStatus != .authorized && bridge.photosStatus != .limited {
+                    Button { bridge.requestPhotosAccess() } label: {
+                        Label("Access Photos", systemImage: "photo.on.rectangle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                Button(role: .destructive) { bridge.clearExports() } label: {
+                    Label("Clear Exports", systemImage: "trash")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding(12)
         }
+        .background(Color(.systemBackground))
         .onAppear { bridge.ensureRunning() }
     }
 
-    private var stateText: String {
-        switch bridge.state {
-        case .idle: "Idle"
-        case .starting: "Starting…"
-        case .running: "Running"
-        case .failed(let error): "Failed — \(error)"
+    private var ListView: some View {
+        List {
+            Section("Tools") {
+                ForEach(bridge.registeredTools, id: \.self) { tool in
+                    Text(tool)
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                }
+            }
+
+            Section("Requests") {
+                if bridge.logLines.isEmpty {
+                    Text("No requests yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(bridge.logLines.enumerated().reversed()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(.system(size: 11, weight: .regular, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                }
+            }
         }
+        .listStyle(.insetGrouped)
     }
 
     private var stateColor: Color {
@@ -75,17 +82,6 @@ struct StatusView: View {
         case .running: .green
         case .failed: .red
         default: .orange
-        }
-    }
-
-    private var authText: String {
-        switch bridge.photosStatus {
-        case .notDetermined: "Not requested"
-        case .restricted: "Restricted"
-        case .denied: "Denied — enable in Settings"
-        case .authorized: "Authorized"
-        case .limited: "Limited selection"
-        @unknown default: "Unknown"
         }
     }
 }
