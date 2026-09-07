@@ -45,7 +45,7 @@ final class BridgeServer: ObservableObject {
         guard server == nil else { return }
         state = .starting
 
-        let server = MCPServer(name: "phonebridge", port: port, bonjourName: "phonebridge")
+        let server = MCPServer(name: "neox", port: port, bonjourName: "neox")
         try? FileManager.default.createDirectory(at: exportsDir, withIntermediateDirectories: true)
         server.setStaticFileRoot(exportsDir)
         server.register(tools: PhotosToolProvider.tools(exportsDir: exportsDir))
@@ -60,7 +60,7 @@ final class BridgeServer: ObservableObject {
             try server.start()
             self.server = server
             state = .running
-            appendLog("listening on 0.0.0.0:\(port) · bonjour phonebridge._mcp._tcp")
+            appendLog("listening on 0.0.0.0:\(port) · bonjour neox._mcp._tcp")
             appendLog("exports dir served at /files/: \(exportsDir.path)")
         } catch {
             state = .failed(error.localizedDescription)

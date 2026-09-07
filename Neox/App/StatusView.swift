@@ -56,7 +56,7 @@ struct StatusView: View {
                     Text("Exported media lives in the app's caches directory and is removed by iOS under storage pressure. Keep the app foregrounded for reliable serving.")
                 }
             }
-            .navigationTitle("PhoneBridge")
+            .navigationTitle("Neox")
         }
         .onAppear { bridge.ensureRunning() }
     }

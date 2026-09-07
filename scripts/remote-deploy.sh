@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# remote-deploy.sh — Build, install, and launch Neox on iPhone 12 mini
+# remote-deploy.sh — Build, install, and launch PhoneBridge on iPhone 17
 #                     via the remote Mac (10.0.0.111) that has USB connection.
 #
 # Prerequisites:
@@ -29,7 +29,7 @@ DEVICE_IP="${DEVICE_IP:-10.0.0.81}"       # iPhone LAN IP (override with DEVICE_
 MCP_PORT="9223"                           # AppAgent MCP server port
 
 BUNDLE_ID="com.neox.app"
-SCHEME="Neox"
+SCHEME="PhoneBridgeApp"
 CONFIGURATION="Debug"
 TEAM_ID="JABNLDLN8G"
 
@@ -91,7 +91,7 @@ detect_remote_workspace() {
     done
 
     # Fallback: find it
-    REMOTE_WORKSPACE=$(_ssh "find /Users -maxdepth 4 -name 'Neox.xcodeproj' -type d 2>/dev/null | head -1 | sed 's|/neox/Neox.xcodeproj||'" || true)
+    REMOTE_WORKSPACE=$(_ssh "find /Users -maxdepth 4 \( -name 'PhoneBridge.xcodeproj' -o -name 'Neox.xcodeproj' \) -type d 2>/dev/null | head -1 | sed -E 's|/neox/(PhoneBridge|Neox)\.xcodeproj||'" || true)
     if [[ -z "$REMOTE_WORKSPACE" ]]; then
         fail "Cannot find workspace on remote Mac. Set REMOTE_WORKSPACE explicitly."
     fi
@@ -150,13 +150,18 @@ build_app() {
     local build_cmd
     # CRITICAL: keychain unlock + partition-list MUST be in same SSH session as xcodebuild,
     # otherwise codesign children can't access the private key (errSecInternalComponent)
-    build_cmd=""
+    # NOTE: run prep as its OWN ssh call — combining it with a long xcodebuild in one
+    # session can leave the channel hung with no output for minutes.
     if [[ -n "${KEYCHAIN_PASSWORD:-}" ]]; then
-        build_cmd="security unlock-keychain -p '${KEYCHAIN_PASSWORD}' ~/Library/Keychains/login.keychain-db && \
+        _ssh "security unlock-keychain -p '${KEYCHAIN_PASSWORD}' ~/Library/Keychains/login.keychain-db && \
 security set-keychain-settings -t 7200 -l ~/Library/Keychains/login.keychain-db && \
-security set-key-partition-list -S apple-tool:,apple:,unsigned: -s -k '${KEYCHAIN_PASSWORD}' ~/Library/Keychains/login.keychain-db > /dev/null 2>&1; "
+security set-key-partition-list -S apple-tool:,apple:,unsigned: -s -k '${KEYCHAIN_PASSWORD}' ~/Library/Keychains/login.keychain-db > /dev/null 2>&1; echo KEYCHAIN_READY" \
+            | grep -q KEYCHAIN_READY || warn "Keychain prep failed — signing may error"
     fi
-    build_cmd="${build_cmd}cd '${REMOTE_NEOX}' && xcodebuild -project Neox.xcodeproj -scheme ${SCHEME} -configuration ${CONFIGURATION} -destination 'id=${DEVICE_UDID}' -derivedDataPath build-device/DerivedData -allowProvisioningUpdates"
+    # Build for generic/platform=iOS: matching a specific device destination requires
+    # the developer disk image to mount, which times out when the phone's iOS is newer
+    # than the cached DDI. Install (devicectl) does NOT need the DDI.
+    build_cmd="cd '${REMOTE_NEOX}' && xcodebuild -project PhoneBridge.xcodeproj -scheme ${SCHEME} -configuration ${CONFIGURATION} -destination 'generic/platform=iOS' -derivedDataPath build-device/DerivedData -allowProvisioningUpdates"
     if _ssh "test -f '${AUTH_KEY_PATH}'" 2>/dev/null; then
         build_cmd="${build_cmd} -authenticationKeyID ${AUTH_KEY_ID} -authenticationKeyIssuerID ${AUTH_KEY_ISSUER} -authenticationKeyPath '${AUTH_KEY_PATH}'"
     fi
@@ -174,9 +179,14 @@ security set-key-partition-list -S apple-tool:,apple:,unsigned: -s -k '${KEYCHAI
             warn "Final attempt: serializing with -jobs 1"
             cmd_this="${build_cmd/xcodebuild/xcodebuild -jobs 1}"
         fi
-        if _ssh "${cmd_this} 2>&1" | tee /dev/stderr | tail -5 | grep -q 'BUILD SUCCEEDED'; then
+        # Log to a remote file, then grep it — avoids SSH pipe deadlock on long builds
+        _ssh "${cmd_this} > /tmp/pb-build.log 2>&1; echo EXIT_\$?; tail -4 /tmp/pb-build.log" | tee /dev/stderr | grep -q 'EXIT_0'
+        if [[ -n "$(ssh -o ConnectTimeout=10 -o BatchMode=yes "${REMOTE_USER}@${REMOTE_HOST}" "grep -c 'BUILD SUCCEEDED' /tmp/pb-build.log 2>/dev/null")" && "$(ssh -o ConnectTimeout=10 -o BatchMode=yes "${REMOTE_USER}@${REMOTE_HOST}" "grep -c 'BUILD SUCCEEDED' /tmp/pb-build.log 2>/dev/null")" != "0" ]]; then
             build_ok=true
             break
+        fi
+        if _ssh "grep -l 'Program License Agreement' /tmp/pb-build.log >/dev/null 2>&1"; then
+            fail "Apple PLA must be accepted: Account Holder logs in at developer.apple.com/account"
         fi
         warn "Build attempt ${attempt} failed — retrying"
         # Re-unlock + re-set partition list before retry

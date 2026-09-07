@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>PhoneBridge</string>
+	<string>Neox</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -32,9 +32,9 @@
 		<string>_mcp._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>PhoneBridge serves an MCP server on your local network so your desktop agent can reach it.</string>
+	<string>Neox serves an MCP server on your local network so your desktop agent can reach it.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>PhoneBridge lets your desktop agent browse and export your photo library.</string>
+	<string>Neox lets your desktop agent browse and export your photo library.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
