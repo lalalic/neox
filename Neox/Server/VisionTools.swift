@@ -21,9 +21,9 @@ enum VisionMediaTools {
         return [
             ToolDefinition(
                 name: "media.meta",
-                description: "Full metadata for one asset: EXIF (camera, lens, ISO, exposure), GPS coordinates, format, size, dates. Richer than media_search rows.",
+                description: "Full metadata for one asset: EXIF (camera, lens, ISO, exposure), GPS coordinates, format, size, dates. Richer than media.search rows.",
                 parameters: MediaTools.schema([
-                    "id": MediaTools.stringProp("Asset localIdentifier from media_search"),
+                    "id": MediaTools.stringProp("Asset localIdentifier from media.search"),
                 ], required: ["id"]),
                 handler: { args in
                     guard let id = MediaTools.str(args, "id") else { return "Error: 'id' required" }

@@ -17,7 +17,7 @@ final class ServerController: ObservableObject {
         case failed(String)
     }
 
-    /// Directory served at `/files/` — media_export writes here.
+    /// Directory served at `/files/` — media.export writes here.
     let exportsDir: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("exports", isDirectory: true)
 
@@ -51,7 +51,7 @@ final class ServerController: ObservableObject {
         server.register(tools: VisionMediaTools.tools(exportsDir: exportsDir))
         server.register(
             name: "clear_exports",
-            description: "Delete all files previously exported by media_export from the /files/ serving directory. Call this after finishing downloads to free space on the phone.",
+            description: "Delete all files previously exported by media.export from the /files/ serving directory. Call this after finishing downloads to free space on the phone.",
             inputSchema: ["type": "object", "properties": [:] as [String: Any]]
         ) { [weak self] _ in
             guard let self else { return "Error: server deallocated" }

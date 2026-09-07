@@ -5,8 +5,8 @@ import UniformTypeIdentifiers
 
 /// MCP tools exposing the device photo/video library to desktop agents.
 ///
-/// - `media_search` — enumerate assets with metadata (compact JSON)
-/// - `media_export` — export originals (or 720p/1080p video transcodes) to
+/// - `media.search` — enumerate assets with metadata (compact JSON)
+/// - `media.export` — export originals (or 720p/1080p video transcodes) to
 ///   files the MCPServer serves at `GET /files/<name>` with Range support.
 ///
 /// Tools return text/URLs only — never base64 media (videos would OOM iOS).
@@ -18,11 +18,11 @@ public enum MediaTools {
         try? FileManager.default.createDirectory(at: exportsDir, withIntermediateDirectories: true)
         return [
             ToolDefinition(
-                name: "media_search",
+                name: "media.search",
                 description: """
                 Search the iPhone photo/video library. Returns JSON with asset metadata: \
                 id, filename, media_type, pixel dimensions, duration (videos), creation date, \
-                file size. Sort: newest first. Use ids with media_export.
+                file size. Sort: newest first. Use ids with media.export.
                 """,
                 parameters: schema([
                     "media_type": stringProp("Filter by media type", enumVals: ["all", "image", "video"]),
@@ -39,15 +39,15 @@ public enum MediaTools {
                 }
             ),
             ToolDefinition(
-                name: "media_export",
+                name: "media.export",
                 description: """
-                Export photo/video assets (ids from media_search) to files served by this \
+                Export photo/video assets (ids from media.search) to files served by this \
                 phone's MCP server. Returns JSON with a `url` per asset — fetch it with HTTP \
                 Range requests (curl -C -). preset=720p/1080p transcodes videos with \
                 AVAssetExportSession to shrink the transfer; images always export original.
                 """,
                 parameters: schema([
-                    "ids": arrayProp("Asset localIdentifiers from media_search (one or more)"),
+                    "ids": arrayProp("Asset localIdentifiers from media.search (one or more)"),
                     "preset": stringProp("Video export preset: original (default), 720p, 1080p", enumVals: ["original", "720p", "1080p"]),
                 ], required: ["ids"]),
                 handler: { args in
@@ -120,7 +120,7 @@ public enum MediaTools {
         .up
     }
 
-    // MARK: - media_search
+    // MARK: - media.search
 
     private static func search(args: JSONValue) async throws -> String {
         let status = await requestAccess()
@@ -235,7 +235,7 @@ public enum MediaTools {
         return size
     }
 
-    // MARK: - media_export
+    // MARK: - media.export
 
     private static func export(args: JSONValue, exportsDir: URL) async throws -> String {
         let status = await requestAccess()
@@ -249,7 +249,7 @@ public enum MediaTools {
         } else if case .object(let dict) = args, case .string(let s)? = dict["ids"] {
             ids.append(s)
         }
-        guard !ids.isEmpty else { return "Error: 'ids' (array of asset ids from media_search) is required." }
+        guard !ids.isEmpty else { return "Error: 'ids' (array of asset ids from media.search) is required." }
 
         let preset = str(args, "preset") ?? "original"
         guard ["original", "720p", "1080p"].contains(preset) else {
