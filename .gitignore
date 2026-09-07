@@ -1,3 +1,5 @@
 build-sim/
+build/
 Neox.xcodeproj
 .DS_Store
+copilot-ios
