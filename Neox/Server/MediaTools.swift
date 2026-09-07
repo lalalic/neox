@@ -58,10 +58,66 @@ public enum MediaTools {
     }
 
     /// Shared authorization flow (also used by the status screen).
-    public static func requestAccess() async -> PHAuthorizationStatus {
+    static func requestAccess() async -> PHAuthorizationStatus {
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         guard status == .notDetermined else { return status }
         return await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+    }
+
+    /// Fetch one asset by id; failure carries user-readable error text.
+    enum AssetResult {
+        case found(PHAsset)
+        case failed(String)
+    }
+
+    static func asset(id: String) async -> AssetResult {
+        let status = await requestAccess()
+        guard status == .authorized || status == .limited else {
+            return .failed("Error: photo library access denied (status \(status.rawValue)). Grant access on the phone: Settings → Privacy & Security → Photos.")
+        }
+        let fetch = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil)
+        guard fetch.count > 0 else { return .failed("Error: asset \(id) not found") }
+        return .found(fetch.object(at: 0))
+    }
+
+    /// Load an asset's image, optionally downscaled to maxSide on the longest edge.
+    /// Returned CGImage is already upright (PHImageManager applies orientation).
+    static func requestImage(_ asset: PHAsset, maxSide: CGFloat?) async throws -> CGImage {
+        let options = PHImageRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.deliveryMode = .highQualityFormat
+        var target = CGSize(width: asset.pixelWidth, height: asset.pixelHeight)
+        if let maxSide {
+            options.resizeMode = .fast
+            target = scaledSize(pixel: target, maxSide: maxSide)
+        }
+        return try await withCheckedThrowingContinuation { cont in
+            var finished = false
+            PHImageManager.default().requestImage(for: asset, targetSize: target, contentMode: .aspectFit, options: options) { image, info in
+                let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) == true
+                guard !degraded, !finished else { return }
+                finished = true
+                if let image, let cg = image.cgImage {
+                    cont.resume(returning: cg)
+                } else {
+                    cont.resume(throwing: NSError(domain: "Neox", code: 10,
+                        userInfo: [NSLocalizedDescriptionKey: "could not load image"]))
+                }
+            }
+        }
+    }
+
+    private static func scaledSize(pixel: CGSize, maxSide: CGFloat) -> CGSize {
+        let longest = max(pixel.width, pixel.height)
+        guard longest > maxSide, longest > 0 else { return pixel }
+        let scale = maxSide / longest
+        return CGSize(width: pixel.width * scale, height: pixel.height * scale)
+    }
+
+    /// Vision orientation for images produced by requestImage(_:maxSide:).
+    /// PHImageManager delivers upright images, so .up is always correct there.
+    static func orientation(from asset: PHAsset) -> CGImagePropertyOrientation {
+        .up
     }
 
     // MARK: - media_search
@@ -131,7 +187,7 @@ public enum MediaTools {
         if offset < fetch.count {
             let end = min(fetch.count, offset + limit)
             for i in offset..<end {
-                assets.append(describe(fetch.object(at: i)))
+                assets.append(describeBase(fetch.object(at: i)))
             }
         }
 
@@ -146,7 +202,7 @@ public enum MediaTools {
         return Self.jsonString(result)
     }
 
-    private static func describe(_ asset: PHAsset) -> [String: Any] {
+    static func describeBase(_ asset: PHAsset) -> [String: Any] {
         var item: [String: Any] = [
             "id": asset.localIdentifier,
             "media_type": asset.mediaType == .video ? "video" : asset.mediaType == .image ? "image" : "other",
@@ -256,7 +312,7 @@ public enum MediaTools {
     }
 
     /// Stream the original bytes out of the photo library (iCloud assets download on demand).
-    private static func writeOriginal(asset: PHAsset, to url: URL) async throws {
+    static func writeOriginal(asset: PHAsset, to url: URL) async throws {
         let resources = PHAssetResource.assetResources(for: asset)
         guard let resource = resources.first(where: { $0.type == .photo })
             ?? resources.first(where: { $0.type == .video })
@@ -298,7 +354,7 @@ public enum MediaTools {
     // MARK: - Helpers
 
     /// Filesystem-safe name, stable per asset: "video-AB12CD34EF56".
-    private static func safeName(_ asset: PHAsset) -> String {
+    static func safeName(_ asset: PHAsset) -> String {
         let kind = asset.mediaType == .video ? "video" : "photo"
         let idPart = asset.localIdentifier.components(separatedBy: CharacterSet.alphanumerics.inverted).joined()
         return "\(kind)-\(idPart.suffix(12).lowercased())"
@@ -312,7 +368,7 @@ public enum MediaTools {
         return asset.mediaType == .video ? "mov" : "jpg"
     }
 
-    private static func str(_ args: JSONValue, _ key: String) -> String? {
+    static func str(_ args: JSONValue, _ key: String) -> String? {
         guard case .object(let dict) = args, case .string(let s)? = dict[key] else { return nil }
         return s
     }
@@ -321,11 +377,16 @@ public enum MediaTools {
         intOpt(args, key) ?? def
     }
 
-    private static func intOpt(_ args: JSONValue, _ key: String) -> Int? {
+    static func intOpt(_ args: JSONValue, _ key: String) -> Int? {
         guard case .object(let dict) = args else { return nil }
         if case .int(let i)? = dict[key] { return i }
         if case .double(let d)? = dict[key] { return Int(d) }
         return nil
+    }
+
+    static func doubleOpt(_ args: JSONValue, _ key: String) -> Double? {
+        guard case .object(let dict) = args, case .double(let d)? = dict[key] else { return nil }
+        return d
     }
 
     private static func bool(_ args: JSONValue, _ key: String) -> Bool {
@@ -338,7 +399,7 @@ public enum MediaTools {
         return Self.iso8601.date(from: s) ?? Self.iso8601DateOnly.date(from: s)
     }
 
-    private static nonisolated(unsafe) let iso8601: ISO8601DateFormatter = {
+    static nonisolated(unsafe) let iso8601: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
         return f
@@ -350,7 +411,7 @@ public enum MediaTools {
         return f
     }()
 
-    private static func jsonString(_ object: [String: Any]) -> String {
+    static func jsonString(_ object: [String: Any]) -> String {
         guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes]) else {
             return "{\"error\":\"json serialization failed\"}"
         }
@@ -359,7 +420,7 @@ public enum MediaTools {
 
     // MARK: - Schema builders
 
-    private static func schema(_ props: [String: JSONValue], required: [String] = []) -> JSONValue {
+    static func schema(_ props: [String: JSONValue], required: [String] = []) -> JSONValue {
         .object([
             "type": .string("object"),
             "properties": .object(props),
@@ -367,7 +428,7 @@ public enum MediaTools {
         ])
     }
 
-    private static func stringProp(_ desc: String, enumVals: [String]? = nil) -> JSONValue {
+    static func stringProp(_ desc: String, enumVals: [String]? = nil) -> JSONValue {
         var obj: [String: JSONValue] = [
             "type": .string("string"),
             "description": .string(desc),
@@ -376,8 +437,12 @@ public enum MediaTools {
         return .object(obj)
     }
 
-    private static func intProp(_ desc: String) -> JSONValue {
+    static func intProp(_ desc: String) -> JSONValue {
         .object(["type": .string("integer"), "description": .string(desc)])
+    }
+
+    static func doubleProp(_ desc: String) -> JSONValue {
+        .object(["type": .string("number"), "description": .string(desc)])
     }
 
     private static func boolProp(_ desc: String) -> JSONValue {

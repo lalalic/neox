@@ -48,6 +48,7 @@ final class ServerController: ObservableObject {
         try? FileManager.default.createDirectory(at: exportsDir, withIntermediateDirectories: true)
         server.setStaticFileRoot(exportsDir)
         server.register(tools: MediaTools.tools(exportsDir: exportsDir))
+        server.register(tools: VisionMediaTools.tools(exportsDir: exportsDir))
         server.register(
             name: "clear_exports",
             description: "Delete all files previously exported by media_export from the /files/ serving directory. Call this after finishing downloads to free space on the phone.",
