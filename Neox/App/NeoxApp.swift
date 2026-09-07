@@ -4,7 +4,7 @@ import SwiftUI
 /// to desktop agents. No chat, no channels: the status screen is the whole UI.
 @main
 struct NeoxApp: App {
-    @StateObject private var bridge = BridgeServer.shared
+    @StateObject private var bridge = ServerController.shared
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {

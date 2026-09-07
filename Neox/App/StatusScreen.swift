@@ -4,7 +4,7 @@ import SwiftUI
 /// Status screen — the only human-facing surface. Shows where to connect,
 /// what the server is doing, and grants Photos permission once.
 struct StatusView: View {
-    @EnvironmentObject private var bridge: BridgeServer
+    @EnvironmentObject private var bridge: ServerController
 
     var body: some View {
         VStack(spacing: 0) {

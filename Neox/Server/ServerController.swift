@@ -7,8 +7,8 @@ import Photos
 /// with HTTP Range support, so desktop agents stream multi-GB videos off the
 /// phone without the app ever holding media bytes in memory.
 @MainActor
-final class BridgeServer: ObservableObject {
-    static let shared = BridgeServer()
+final class ServerController: ObservableObject {
+    static let shared = ServerController()
 
     enum State: Equatable {
         case idle
@@ -47,7 +47,7 @@ final class BridgeServer: ObservableObject {
         let server = MCPServer(name: "neox", port: port, bonjourName: "neox")
         try? FileManager.default.createDirectory(at: exportsDir, withIntermediateDirectories: true)
         server.setStaticFileRoot(exportsDir)
-        server.register(tools: MediaToolProvider.tools(exportsDir: exportsDir))
+        server.register(tools: MediaTools.tools(exportsDir: exportsDir))
         server.register(
             name: "clear_exports",
             description: "Delete all files previously exported by media_export from the /files/ serving directory. Call this after finishing downloads to free space on the phone.",
@@ -80,7 +80,7 @@ final class BridgeServer: ObservableObject {
 
     func requestPhotosAccess() {
         Task {
-            let status = await MediaToolProvider.requestAccess()
+            let status = await MediaTools.requestAccess()
             photosStatus = status
             appendLog("photos access: \(describe(status))")
         }

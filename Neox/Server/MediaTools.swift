@@ -10,7 +10,7 @@ import UniformTypeIdentifiers
 ///   files the MCPServer serves at `GET /files/<name>` with Range support.
 ///
 /// Tools return text/URLs only — never base64 media (videos would OOM iOS).
-public enum MediaToolProvider {
+public enum MediaTools {
 
     // MARK: - Tool surface
 
