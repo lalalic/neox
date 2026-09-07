@@ -2,17 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>BGTaskSchedulerPermittedIdentifiers</key>
-	<array>
-		<string>com.neox.agent.fetch</string>
-		<string>com.neox.agent.processing</string>
-		<string>com.neox.plan.process</string>
-		<string>com.neox.plan.refresh</string>
-	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Neox</string>
+	<string>PhoneBridge</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -25,118 +18,33 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>0.1.0</string>
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleURLName</key>
-			<string>com.neox.stripe</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>neox</string>
-			</array>
-		</dict>
-	</array>
 	<key>CFBundleVersion</key>
-	<string>5</string>
+	<string>1</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
-		<key>NSExceptionDomains</key>
-		<dict>
-			<key>relay.ai.qili2.com</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<true/>
-				<key>NSIncludesSubdomains</key>
-				<true/>
-			</dict>
-		</dict>
 	</dict>
 	<key>NSBonjourServices</key>
 	<array>
-		<string>_copilot._tcp</string>
+		<string>_mcp._tcp</string>
 	</array>
-	<key>NSCameraUsageDescription</key>
-	<string>Neox uses the camera to capture photos for AI analysis</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Neox connects to Copilot CLI on your local network</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Neox uses the microphone for voice input to the agent</string>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Save WeChat login QR code to Photos for scanning</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Neox uses speech recognition for voice commands</string>
-	<key>NeoxAppConfig</key>
-	<dict>
-		<key>aboutLinks</key>
-		<array>
-			<dict>
-				<key>title</key>
-				<string>Privacy Policy</string>
-				<key>url</key>
-				<string>https://neox.lalalic.com/privacy</string>
-			</dict>
-			<dict>
-				<key>title</key>
-				<string>Terms of Use</string>
-				<key>url</key>
-				<string>https://neox.lalalic.com/terms</string>
-			</dict>
-		</array>
-		<key>appId</key>
-		<string>neox</string>
-		<key>iapPacks</key>
-		<array>
-			<dict>
-				<key>credits</key>
-				<real>3.5</real>
-				<key>description</key>
-				<string>$3.50 credits</string>
-				<key>productID</key>
-				<string>com.neox.credits.starter</string>
-			</dict>
-			<dict>
-				<key>credits</key>
-				<real>7.5</real>
-				<key>description</key>
-				<string>$7.50 credits · ~1.5M tokens</string>
-				<key>productID</key>
-				<string>com.neox.credits.standard</string>
-			</dict>
-			<dict>
-				<key>credits</key>
-				<real>25</real>
-				<key>description</key>
-				<string>$25 credits · ~5M tokens</string>
-				<key>productID</key>
-				<string>com.neox.credits.pro</string>
-			</dict>
-		</array>
-		<key>stripePaymentURL</key>
-		<string>https://buy.stripe.com/test_fZe5n11yC3kM8Fi5kk?client_reference_id={CLIENT_ID}</string>
-	</dict>
+	<string>PhoneBridge serves an MCP server on your local network so your desktop agent can reach it.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>PhoneBridge lets your desktop agent browse and export your photo library.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<false/>
 	</dict>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>processing</string>
-		<string>fetch</string>
-		<string>remote-notification</string>
-	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 </dict>
 </plist>

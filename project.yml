@@ -1,4 +1,4 @@
-name: Neox
+name: PhoneBridge
 options:
   bundleIdPrefix: com.neox
   deploymentTarget:
@@ -12,83 +12,36 @@ packages:
     path: copilot-ios
 
 targets:
-  Neox:
+  PhoneBridgeApp:
     type: application
     platform: iOS
     sources:
       - Neox
-      - path: Neox/Resources/wechat-bro.js
-        type: file
-        buildPhase: resources
     entitlements:
       path: Neox/Neox.entitlements
-    preBuildScripts:
-      - name: Rebuild workspace.zip
-        script: |
-          ZIPFILE="${PROJECT_DIR}/copilot-ios/CopilotSDK/Sources/Resources/workspace.zip"
-          TMPDIR=$(mktemp -d)
-          cp -a "${PROJECT_DIR}/workspace/" "$TMPDIR/"
-          if [ -d "${PROJECT_DIR}/.github" ]; then
-            mkdir -p "$TMPDIR/.github"
-            cp -a "${PROJECT_DIR}/.github/" "$TMPDIR/.github/"
-          fi
-          rm -f "$ZIPFILE"
-          cd "$TMPDIR" && zip -r "$ZIPFILE" . -x "*.DS_Store" > /dev/null 2>&1
-          rm -rf "$TMPDIR"
-          echo "workspace.zip rebuilt from neox/workspace + .github"
-        basedOnDependencyAnalysis: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.neox.app
+        PRODUCT_NAME: PhoneBridge
+        PRODUCT_MODULE_NAME: PhoneBridgeApp
         INFOPLIST_FILE: Neox/Info.plist
         CODE_SIGN_ENTITLEMENTS: Neox/Neox.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "6.0"
-        TARGETED_DEVICE_FAMILY: "1,2"
+        TARGETED_DEVICE_FAMILY: "1"
         DEVELOPMENT_TEAM: "JABNLDLN8G"
     dependencies:
       - package: copilot-ios
-        product: NeoxCore
-      - package: copilot-ios
-        product: CopilotSDK
-      - package: copilot-ios
-        product: CopilotChat
-      - package: copilot-ios
-        product: WebKitAgent
-      - package: copilot-ios
         product: AppAgent
       - package: copilot-ios
-        product: CameraKit
-
-  NeoxTests:
-    type: bundle.unit-test
-    platform: iOS
-    sources:
-      - NeoxTests
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.neox.tests
-        SWIFT_VERSION: "6.0"
-        GENERATE_INFOPLIST_FILE: "YES"
-    dependencies:
-      - target: Neox
-      - package: copilot-ios
-        product: CopilotSDK
-      - package: copilot-ios
-        product: CopilotChat
-      - package: copilot-ios
-        product: WebKitAgent
+        product: PhoneBridge
 
 schemes:
-  Neox:
+  PhoneBridgeApp:
     build:
       targets:
-        Neox: all
+        PhoneBridgeApp: all
     run:
       config: Debug
     archive:
       config: Release
-    test:
-      config: Debug
-      targets:
-        - NeoxTests
