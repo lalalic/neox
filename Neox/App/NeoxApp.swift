@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// PhoneBridge — headless MCP server exposing the phone's photo library
+/// Neox — headless MCP server exposing the phone's photo library
 /// to desktop agents. No chat, no channels: the status screen is the whole UI.
 @main
-struct PhoneBridgeApp: App {
+struct NeoxApp: App {
     @StateObject private var bridge = BridgeServer.shared
     @Environment(\.scenePhase) private var scenePhase
 

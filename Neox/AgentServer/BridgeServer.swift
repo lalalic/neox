@@ -1,9 +1,7 @@
-import AppAgent
 import Foundation
-import PhoneBridge
 import Photos
 
-/// Owns the MCP server lifecycle and wires the PhoneBridge tool surface.
+/// Owns the MCP server lifecycle and wires the tool surface.
 ///
 /// Exports directory contents are served at `http://<phone>:9223/files/<name>`
 /// with HTTP Range support, so desktop agents stream multi-GB videos off the

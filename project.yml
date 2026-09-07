@@ -1,4 +1,4 @@
-name: PhoneBridge
+name: Neox
 options:
   bundleIdPrefix: com.neox
   deploymentTarget:
@@ -7,12 +7,8 @@ options:
   createIntermediateGroups: true
   defaultConfig: Debug
 
-packages:
-  copilot-ios:
-    path: copilot-ios
-
 targets:
-  PhoneBridgeApp:
+  NeoxApp:
     type: application
     platform: iOS
     sources:
@@ -22,25 +18,20 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.neox.app
-        PRODUCT_NAME: PhoneBridge
-        PRODUCT_MODULE_NAME: PhoneBridgeApp
+        PRODUCT_NAME: Neox
+        PRODUCT_MODULE_NAME: NeoxApp
         INFOPLIST_FILE: Neox/Info.plist
         CODE_SIGN_ENTITLEMENTS: Neox/Neox.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "1"
         DEVELOPMENT_TEAM: "JABNLDLN8G"
-    dependencies:
-      - package: copilot-ios
-        product: AppAgent
-      - package: copilot-ios
-        product: PhoneBridge
 
 schemes:
-  PhoneBridgeApp:
+  NeoxApp:
     build:
       targets:
-        PhoneBridgeApp: all
+        NeoxApp: all
     run:
       config: Debug
     archive:

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# remote-deploy.sh — Build, install, and launch PhoneBridge on iPhone 17
+# remote-deploy.sh — Build, install, and launch Neox on iPhone 17
 #                     via the remote Mac (10.0.0.111) that has USB connection.
 #
 # Prerequisites:
@@ -29,7 +29,7 @@ DEVICE_IP="${DEVICE_IP:-10.0.0.81}"       # iPhone LAN IP (override with DEVICE_
 MCP_PORT="9223"                           # AppAgent MCP server port
 
 BUNDLE_ID="com.neox.app"
-SCHEME="PhoneBridgeApp"
+SCHEME="NeoxApp"
 CONFIGURATION="Debug"
 TEAM_ID="JABNLDLN8G"
 
@@ -91,7 +91,7 @@ detect_remote_workspace() {
     done
 
     # Fallback: find it
-    REMOTE_WORKSPACE=$(_ssh "find /Users -maxdepth 4 \( -name 'PhoneBridge.xcodeproj' -o -name 'Neox.xcodeproj' \) -type d 2>/dev/null | head -1 | sed -E 's|/neox/(PhoneBridge|Neox)\.xcodeproj||'" || true)
+    REMOTE_WORKSPACE=$(_ssh "find /Users -maxdepth 4 \( -name 'Neox.xcodeproj' -o -name 'PhoneBridge.xcodeproj' \) -type d 2>/dev/null | head -1 | sed -E 's|/neox/(Neox|PhoneBridge)\.xcodeproj||'" || true)
     if [[ -z "$REMOTE_WORKSPACE" ]]; then
         fail "Cannot find workspace on remote Mac. Set REMOTE_WORKSPACE explicitly."
     fi
@@ -161,7 +161,7 @@ security set-key-partition-list -S apple-tool:,apple:,unsigned: -s -k '${KEYCHAI
     # Build for generic/platform=iOS: matching a specific device destination requires
     # the developer disk image to mount, which times out when the phone's iOS is newer
     # than the cached DDI. Install (devicectl) does NOT need the DDI.
-    build_cmd="cd '${REMOTE_NEOX}' && xcodebuild -project PhoneBridge.xcodeproj -scheme ${SCHEME} -configuration ${CONFIGURATION} -destination 'generic/platform=iOS' -derivedDataPath build-device/DerivedData -allowProvisioningUpdates"
+    build_cmd="cd '${REMOTE_NEOX}' && xcodebuild -project Neox.xcodeproj -scheme ${SCHEME} -configuration ${CONFIGURATION} -destination 'generic/platform=iOS' -derivedDataPath build-device/DerivedData -allowProvisioningUpdates"
     if _ssh "test -f '${AUTH_KEY_PATH}'" 2>/dev/null; then
         build_cmd="${build_cmd} -authenticationKeyID ${AUTH_KEY_ID} -authenticationKeyIssuerID ${AUTH_KEY_ISSUER} -authenticationKeyPath '${AUTH_KEY_PATH}'"
     fi

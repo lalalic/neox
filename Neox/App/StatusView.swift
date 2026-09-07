@@ -18,7 +18,7 @@ struct StatusView: View {
                             .font(.headline)
                     }
                     LabeledContent("Endpoint", value: bridge.mcpURL)
-                    LabeledContent("Bonjour", value: "phonebridge._mcp._tcp")
+                    LabeledContent("Bonjour", value: "neox._mcp._tcp")
                     LabeledContent("LAN IP", value: BridgeServer.lanIPAddress() ?? "unavailable")
                 }
 
