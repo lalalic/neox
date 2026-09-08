@@ -5,8 +5,8 @@ Instructions for coding agents (and humans) modifying this repo.
 ## What this is
 
 `Neox` — a headless iPhone app that serves the phone's photo/video library to
-desktop agents over MCP. One app target, zero external SPM dependencies, 14
-tracked files. Source of truth for behavior: `Neox/Server/`.
+desktop agents over MCP. One app target, zero external SPM dependencies,
+27 tracked files (18 Swift). Source of truth for behavior: `Neox/Server/`.
 
 ## Repo layout
 
@@ -15,8 +15,9 @@ project.yml                  XcodeGen manifest — project/target/scheme = NeoxA
 Neox/
   App/
     NeoxApp.swift            @main; owns ServerController via scenePhase
-    StatusScreen.swift       the only UI: endpoint, tool list, request log,
-                             Access-Photos + Clear-Exports buttons
+    StatusScreen.swift       the only UI: endpoint, Siri/Shortcuts handoff
+                             preview, tool list, request log, Access-Photos
+                             + Clear-Exports buttons
   Server/
     MCPServer.swift          hand-rolled HTTP server on NWListener:
                              JSON-RPC 2.0 at POST /mcp (initialize, tools/list,
@@ -34,8 +35,12 @@ Neox/
                              (actor VisionIndexStore → vision-index.json) +
                              VisionIndexer batch engine + search/meta helpers
   Intents/
-    RunAgentIntent.swift     App Intents entry point: ensure server, compose
-                             handoff message, clipboard fallback, output value
+    RunAgentIntent.swift     "Run Agent Task": ensure server, compose handoff
+                             message, clipboard fallback, output value;
+                             openAppWhenRun (foregrounds for unattended runs);
+                             Photos preflight
+    AnalyzeMediaIntent.swift "Analyze Media": batch vision index (days/redo
+                             parameters), dialog reports the summary
     AgentHandoff.swift       the ONLY place the agent handoff message is built
                              (instruction + MCP URL; no reasoning here)
     NeoxShortcuts.swift      Siri phrases ("create a vlog with Neox",
@@ -110,6 +115,19 @@ xcodebuild -project Neox.xcodeproj -scheme NeoxApp -sdk iphonesimulator \
 - Never resume a continuation twice; use the existing `OnceContinuation`.
 - Image "markers": a tool result string starting `b64:<mime>,` is delivered as
   an MCP image content block; everything else is text.
+- **Swift 6 + continuations:** resuming with a non-Sendable value (e.g.
+  `AVAsset`) across `withCheckedThrowingContinuation` is a data-race error —
+  wrap in the local `SendableBox` (see `VisionIndex.swift`).
+- **Swift 6 + locks:** `NSLock` lock/unlock are unavailable from async context
+  (`ManagedAtomic` would break the no-deps rule) — guard cross-suspension
+  state with a tiny actor gate instead (see `VisionIndexer.RunGate`).
+- **App Intents:** `@Parameter` defaults must be compile-time literals
+  (constant refs fail); string params can't be Siri phrase placeholders (only
+  AppEntity/AppEnum); arg order is `title:` → `description:` → `default:`.
+- **Vision index:** batch OCR uses `.accurate` on purpose (search recall beats
+  speed; runs are once-per-asset). `total_indexed` must be read from
+  `store.totalCount` *after* the run — incrementing per-asset double-counts
+  on `redo`.
 
 ## Remote build & deploy (iPhone 17 via mac111)
 

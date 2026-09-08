@@ -33,9 +33,11 @@ search, analyze, and pull photos/videos off the phone over WiFi.
 
 ## Siri / Shortcuts → agent chat
 
-The app exposes one App Intent, **Run Agent Task**. It does no reasoning: it
-makes sure the MCP server is up, then produces a message that contains just the
-user instruction and this phone's MCP URL:
+The app exposes two App Intents:
+
+**Run Agent Task** does no reasoning: it makes sure the MCP server is up, then
+produces a message that contains just the user instruction and this phone's
+MCP URL:
 
 ```
 Create a vlog from yesterday's photos and videos
@@ -62,6 +64,10 @@ Delivery is owned by Codex Remote / Shortcuts:
   are configured by editing the Run Agent Task step in the Shortcuts editor
   (App Intents only allows entity-typed phrase placeholders, so the instruction
   isn't Siri-capturable).
+- **Analyze Media** (phrases: *"Analyze my media with Neox"*, *"Index my photos
+  with Neox"*) batch-runs the vision index (default: last 7 days) and reports
+  the summary; `days` / `re-analyze` parameters are editable in the Shortcuts
+  editor.
 - The intent's **output value** is the full message, so a Shortcut can chain it
   straight into the Codex chat ("Run intent → send to agent").
 - The message is also **copied to the clipboard** as a manual fallback.
@@ -71,11 +77,11 @@ Wi-Fi automation lives entirely in Shortcuts (Automation: *When connected to
 home Wi-Fi → Run "Run Agent Task" → send output to Codex*) — the app never
 detects the network transition.
 
-## Tools (13)
+## Tools (14)
 
 | tool | purpose | key args |
 |---|---|---|
-| `media.search` | enumerate library assets | `media_type` (all/image/video), `days`, `after`, `before`, `album`, `favorited`, `limit`, `offset` |
+| `media.search` | enumerate library assets; vision-index content filters | `media_type` (all/image/video), `days`, `after`, `before`, `album`, `favorited`, `has_label`, `has_text`, `with_people`, `limit`, `offset` |
 | `media.export` | export originals to `/files/` (videos optionally transcoded) | `ids[]`, `preset` (original/720p/1080p) |
 | `media.meta` | full EXIF/TIFF/GPS metadata for one asset | `id` |
 | `media.thumbnail` | JPEG preview served at `/files/` | `id`, `max_side` |
@@ -127,6 +133,10 @@ IDS=$(call media.search '{"media_type":"video","days":30,"limit":1}' \
 URL=$(call media.export "{\"ids\":[\"$IDS\"],\"preset\":\"720p\"}" \
       | jq -r '.result.content[0].text | fromjson | .exports[0].url')
 curl -C - -o clip.mp4 "$PHONE$URL"
+
+# content search over the vision index (no downloads, no re-analysis)
+call media.search '{"days":30,"has_label":"beach","limit":5}' | jq
+call media.search '{"days":30,"has_text":"receipt","limit":5}' | jq
 
 # analyze without downloading: classify + transcribe
 call vision.classify "{\"id\":\"$IDS\"}" | jq
