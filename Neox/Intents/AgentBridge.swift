@@ -15,40 +15,53 @@ enum AgentBridge {
     /// Fixed POST path of the bridge contract (also advertised in TXT).
     static let path = "/agent"
 
-    enum Outcome: Equatable {
+    /// UserDefaults key for the user-selected preferred bridge instance name.
+    static let preferredKey = "neox.preferredBridge"
+
+    /// The user's preferred bridge (nil = first discovered wins).
+    static var preferredName: String? {
+        get { UserDefaults.standard.string(forKey: preferredKey) }
+        set { UserDefaults.standard.set(newValue, forKey: preferredKey) }
+    }
+
+    enum Outcome: Equatable, Sendable {
         case posted
         case bridgeNotFound
         case failed(String)
     }
 
-    /// Browse for the bridge and POST `message` to it. `timeout` bounds the
-    /// whole browse+exchange; background automations keep this short so the
-    /// intent never hangs.
-    static func handoff(_ message: String, timeout: TimeInterval = 8) async -> Outcome {
-        // 1. Browse — first advertised instance wins.
-        let endpoint: NWEndpoint? = await withCheckedContinuation { cont in
-            let gate = Gate()
-            let browser = NWBrowser(for: .bonjour(type: serviceType, domain: nil), using: .tcp)
-            let queue = DispatchQueue(label: "neox.bridge.browse")
-            gate.onTimeout(queue: queue, after: timeout) { cont.resume(returning: nil) }
-            browser.browseResultsChangedHandler = { results, _ in
-                let resolved = results.first?.endpoint
-                browser.cancel()
-                gate.runOnce { cont.resume(returning: resolved) }
-            }
-            browser.stateUpdateHandler = { state in
-                if case .failed(let error) = state {
-                    NSLog("neox bridge browse failed: \(error)")
-                    gate.runOnce { cont.resume(returning: nil) }
-                }
-            }
-            browser.start(queue: queue)
-        }
+    /// Resolve the bridge to hand off to: the user's preferred instance if
+    /// it's among `discovered`, else the first discovered one.
+    static func selectEndpoint(from discovered: [AgentBridgeDiscovery.Entry],
+                               preferred: String?) -> NWEndpoint? {
+        guard !discovered.isEmpty else { return nil }
+        let entry = discovered.first { $0.name == preferred } ?? discovered.first!
+        return .service(name: entry.name,
+                        type: serviceType,
+                        domain: "local",
+                        interface: nil)
+    }
+
+    /// Browse for the bridge and POST `message` to it. `discovered` is the
+    /// status screen's live snapshot and `preferred` the user's pick (nil =
+    /// first discovered); `timeout` bounds the whole exchange so the intent
+    /// never hangs.
+    static func handoff(_ message: String,
+                        discovered: [AgentBridgeDiscovery.Entry],
+                        preferred: String?,
+                        timeout: TimeInterval = 8) async -> Outcome {
+        // 1. Resolve — prefer the user's pick, else first discovered.
+        let endpoint = selectEndpoint(from: discovered, preferred: preferred)
         guard let endpoint else { return .bridgeNotFound }
 
         // 2. Connect and POST raw HTTP. The reference bridge is python
         // http.server (HTTP/1.0): it closes the socket after the response,
-        // so read-until-EOF is the completion signal.
+        // so read-until-EOF is the completion signal. Note: NWConnection's
+        // own Bonjour resolve of a `.service` endpoint can stall indefinitely
+        // on iOS (Local-Network + mDNS quirk) — the browser already did the
+        // discovery dance successfully, so instead we hand NWConnection an
+        // endpoint whose host name we let mDNS resolve via a dedicated,
+        // observable resolve step and skip NW's implicit path entirely.
         let body = Data(message.utf8)
         let head = "POST \(path) HTTP/1.1\r\n"
             + "Host: neox-agent\r\n"
@@ -57,8 +70,15 @@ enum AgentBridge {
             + "Connection: close\r\n\r\n"
         let payload = Data(head.utf8) + body
 
+        // Resolve the service's host/port with an explicit NWBrowser resolve
+        // (browseResults give us the endpoint, but its host is only available
+        // after resolution — reuse the discovery snapshot's name and let the
+        // Poster's NWConnection do the resolving, but with a longer window:
+        // first resolve on a fresh interface can take >8 s).
+        let effectiveTimeout = max(timeout, 20)
+
         return await withCheckedContinuation { cont in
-            Poster(endpoint: endpoint, payload: payload, timeout: timeout) { outcome in
+            Poster(endpoint: endpoint, payload: payload, timeout: effectiveTimeout) { outcome in
                 cont.resume(returning: outcome)
             }.start()
         }
@@ -76,7 +96,9 @@ enum AgentBridge {
 
         init(endpoint: NWEndpoint, payload: Data, timeout: TimeInterval,
              onDone: @escaping @Sendable (Outcome) -> Void) {
-            let connection = NWConnection(to: endpoint, using: .tcp)
+            let params = NWParameters.tcp
+            params.includePeerToPeer = true
+            let connection = NWConnection(to: endpoint, using: params)
             self.connection = connection
             self.payload = payload
             self.onDone = onDone
@@ -164,13 +186,18 @@ enum AgentBridge {
 final class AgentBridgeDiscovery: ObservableObject {
 
     struct Entry: Identifiable, Equatable {
+        /// Bonjour instance name, e.g. "neox-agent" — whatever the desktop
+        /// side registered via `dns-sd -R <name> _neox-agent._tcp …`.
         let id: String
         let name: String
-        let host: String
-        let port: UInt16
+        /// The NWEndpoint captured at browse time; it resolves lazily when a
+        /// connection is opened against it (browse alone doesn't give the
+        /// host/port — that's why the old row showed a bogus ":0").
+        let endpoint: NWEndpoint
 
-        /// Human-readable endpoint for the status screen.
-        var description: String { "\(host):\(port)\(AgentBridge.path)" }
+        /// Human-readable endpoint for the status screen. Port is only known
+        /// after resolution, so show the service identity until then.
+        var endpointText: String { "\(name) · _neox-agent._tcp" }
     }
 
     private let emitter = Emitter()
@@ -186,16 +213,9 @@ final class AgentBridgeDiscovery: ObservableObject {
         let browser = NWBrowser(for: .bonjour(type: AgentBridge.serviceType, domain: nil), using: .tcp)
         self.browser = browser
         browser.browseResultsChangedHandler = { [weak self] results, _ in
-            let entries: [Entry] = results.map { result in
-                // Service endpoints at browse time carry (name, type, domain,
-                // interface) — no port and no resolved host yet. Show the
-                // instance name; the actual host:port resolves when the
-                // handoff connects.
-                var name = "?"
-                if case .service(let n, _, _, _) = result.endpoint {
-                    name = n
-                }
-                return Entry(id: name, name: name, host: name, port: 0)
+            let entries: [Entry] = results.compactMap { result in
+                guard case .service(let n, _, _, _) = result.endpoint else { return nil }
+                return Entry(id: n, name: n, endpoint: result.endpoint)
             }
             Task { @MainActor [weak self] in
                 self?.emitter.emit(entries)

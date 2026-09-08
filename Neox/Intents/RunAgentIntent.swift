@@ -55,7 +55,8 @@ struct RunAgentIntent: AppIntent {
         // the handoff directly — no Shortcut hop. Falls back to clipboard +
         // output value when no bridge is on the LAN.
         let dialog: String
-        switch await AgentBridge.handoff(message) {
+        switch await AgentBridge.handoff(message, discovered: bridge.discoveredBridges,
+                                         preferred: bridge.preferredBridge) {
         case .posted:
             dialog = "Handed off to the agent bridge."
         case .bridgeNotFound:

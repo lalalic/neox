@@ -68,24 +68,38 @@ struct StatusView: View {
                 }
             }
 
-            // Discovered agent bridges (the desktop half of the handoff pair).
+            // Discovered desktop bridges — the desktop half of the handoff
+            // pair, codename "Neoy". Tap to select the preferred one; the
+            // intent hands off there.
             Section {
-                ForEach(bridge.discoveredBridges, id: \.name) { bridgeEndpoint in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(bridgeEndpoint.name)
-                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                        Text(bridgeEndpoint.description)
-                            .font(.system(size: 11, design: .monospaced))
+                DisclosureGroup("Neoy: \(bridge.discoveredBridges.count) discovered") {
+                    ForEach(bridge.discoveredBridges) { entry in
+                        Button {
+                            bridge.preferredBridge = entry.name
+                        } label: {
+                            HStack {
+                                Image(systemName: bridge.preferredBridge == entry.name
+                                    ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(Color.accentColor)
+                                    .opacity(bridge.preferredBridge == entry.name ? 1 : 0.35)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.name)
+                                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(.primary)
+                                    Text(entry.endpoint)
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if bridge.discoveredBridges.isEmpty {
+                        Text("No Neoy on the LAN. Start one on the desktop (see neox-phone-mcp skill).")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
-                if bridge.discoveredBridges.isEmpty {
-                    Text("No agent bridge on the LAN. Start one on the desktop (see neox-phone-mcp skill).")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } header: {
-                Text("Agent Bridges")
             }
 
             // Collapsible reference sections, folded by default.

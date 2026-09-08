@@ -15,9 +15,13 @@ enum DebugTools {
                 ]),
                 handler: { args in
                     let instruction = MediaTools.str(args, "instruction") ?? AgentHandoff.defaultInstruction
-                    let mcpURL = await MainActor.run { ServerController.shared.mcpURL }
+                    let (mcpURL, discovered, preferred) = await MainActor.run {
+                        (ServerController.shared.mcpURL,
+                         ServerController.shared.discoveredBridges,
+                         ServerController.shared.preferredBridge)
+                    }
                     let message = AgentHandoff.message(instruction: instruction, mcpURL: mcpURL)
-                    switch await AgentBridge.handoff(message) {
+                    switch await AgentBridge.handoff(message, discovered: discovered, preferred: preferred) {
                     case .posted:
                         return "posted to bridge"
                     case .bridgeNotFound:

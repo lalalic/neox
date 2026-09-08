@@ -28,6 +28,10 @@ final class ServerController: ObservableObject {
     @Published private(set) var photosStatus: PHAuthorizationStatus
     /// Desktop agent bridges discovered on the LAN (`_neox-agent._tcp`).
     @Published private(set) var discoveredBridges: [AgentBridgeDiscovery.Entry] = []
+    /// User's preferred bridge instance (persisted); nil = first discovered.
+    @Published var preferredBridge: String? {
+        didSet { UserDefaults.standard.set(preferredBridge, forKey: AgentBridge.preferredKey) }
+    }
 
     /// Remote UI automation for agent-driven self-testing:
     /// `agent.pilot` (snapshot/tap/type/…) + `agent.demo` (spotlight/caption/TTS).
@@ -39,6 +43,7 @@ final class ServerController: ObservableObject {
 
     private init() {
         photosStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        preferredBridge = UserDefaults.standard.string(forKey: AgentBridge.preferredKey)
     }
 
     /// Idempotent — safe to call on every foreground activation.
@@ -94,6 +99,10 @@ final class ServerController: ObservableObject {
         }
         registeredTools = server.toolNames
         server.onRequest = { [weak self] line in
+            // Raw request lines ("POST /mcp") are noise — the onToolCall line
+            // (with the actual tool name) is what matters. Files requests
+            // still get logged since they have no tool-call counterpart.
+            guard line.contains("/files/") else { return }
             Task { @MainActor [weak self] in self?.appendLog(line) }
         }
         server.onToolCall = { [weak self] name, arguments in
@@ -107,7 +116,6 @@ final class ServerController: ObservableObject {
             self.server = server
             state = .running
             appendLog("listening on 0.0.0.0:\(port) · bonjour neox._mcp._tcp")
-            appendLog("exports dir served at /files/: \(exportsDir.path)")
         } catch {
             state = .failed(error.localizedDescription)
             appendLog("start failed: \(error.localizedDescription)")
