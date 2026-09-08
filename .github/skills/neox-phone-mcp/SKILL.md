@@ -139,6 +139,40 @@ Prefer `preset=720p` for video drafts; `original` only when quality matters.
 
 ## Workflow recipes
 
+**Receiving "Run Agent Task" handoffs (set up a tiny listener)**
+
+The phone's **Run Agent Task** intent produces the handoff message (user
+instruction + the phone's MCP URL) as its output. There is no built-in
+transport to your chat — so *you* provide one: run a minimal HTTP listener on
+this machine, and the user's Shortcut POSTs the message to it.
+
+1. Start the listener (pick a free port; keep it LAN-only):
+   ```bash
+   python3 - <<'PY' &
+   from http.server import BaseHTTPRequestHandler, HTTPServer
+   class H(BaseHTTPRequestHandler):
+       def do_POST(self):
+           body = self.rfile.read(int(self.headers.get('Content-Length', 0))).decode()
+           open('/tmp/neox-inbox.txt', 'a').write(body + '\n---\n')
+           self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
+   HTTPServer(('0.0.0.0', 8787), H).serve_forever()
+   PY
+   echo "listener on :8787 — inbox: /tmp/neox-inbox.txt"
+   ```
+2. Tell the user the one-time Shortcuts setup:
+   *Open Shortcuts → new shortcut → **Run Agent Task** (Neox) → **Get Contents
+   of URL** → `http://<this-mac-ip>:8787/agent`, Method POST, Body =
+   *Provided Input*. Name it and enable "Run when connected to home Wi-Fi" as
+   an automation if desired.*
+3. Poll `/tmp/neox-inbox.txt` (or watch it with `tail -f`) — each entry is a
+   handoff message: the instruction plus the phone's MCP URL. Then act on it
+   with the tools in this skill (search → index → export → download).
+
+Notes: the message is also copied to the phone's clipboard as a fallback, so
+the user can always paste it into the chat directly. Stop the listener when
+the session ends (`pkill -f neox-inbox` or kill the background job); it is a
+plain HTTP endpoint on the home LAN — don't expose it beyond that.
+
 **"Build a vlog from yesterday"**
 1. `media.search {"days":2}` (or the user's date range) → skim `vision` labels
 2. `vision.index {"days":2}` if rows lack a `vision` summary
