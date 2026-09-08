@@ -28,7 +28,13 @@ URL — **never base64 media**. All Vision/Speech analysis runs on-device.
 
 Try in order:
 
-1. **Known endpoint** — `http://10.0.0.135:9223/mcp` (iPhone 17 on the home LAN)
+1. **Bonjour** — the app advertises `neox._mcp._tcp`; resolve it to an IP:port:
+   ```bash
+   # browse for the service, then resolve the first result
+   dns-sd -B _mcp._tcp                 # browse (Ctrl-C to stop)
+   dns-sd -L "neox" _mcp._tcp local    # resolve name → host/port
+   dns-sd -G v4 <host-from-L>          # host name → IPv4
+   ```
 2. **ARP scan** — probe port 9223 on hosts whose ARP entry looks like an iPhone:
    ```bash
    arp -a | awk '/iphone/{print $2}' | tr -d '()'   # candidate IPs
@@ -37,7 +43,8 @@ Try in order:
    A `200` means Neox is there. (ARP labels lie — DHCP moves IPs between
    devices; always confirm by probing, not by name.)
 3. **Ask the user** to open Neox and read the endpoint from the status screen
-   (green dot = server running).
+   (green dot = server running; it also shows the raw URL as a fallback when
+   Bonjour is flaky on some networks).
 
 No `200` anywhere? The phone is likely locked-with-app-closed, or Local Network
 permission was just granted without an app restart. Ask the user to open Neox
@@ -46,7 +53,7 @@ on the phone (screen on), then re-probe.
 ## 2. Call tools (raw JSON-RPC over HTTP)
 
 ```bash
-PHONE=http://10.0.0.135:9223
+PHONE=http://<phone-ip>:9223     # from discovery above
 call() { curl -s -m 120 -X POST $PHONE/mcp -H 'Content-Type: application/json' \
          -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",
               \"params\":{\"name\":\"$1\",\"arguments\":$2}}"; }
@@ -149,7 +156,7 @@ Prefer `preset=720p` for video drafts; `original` only when quality matters.
 
 ## When Neox isn't installed
 
-The phone needs the Neox app (repo: `free2/neox`) built and installed —
-`scripts/remote-deploy.sh` in that repo does sync → build → install → launch →
-health check. That is a dev task, not an agent task: point the user at it
-rather than attempting a remote iOS build from here.
+The phone needs the Neox app built and installed on it first (Xcode + an
+Apple Developer team; the app's own repo has an `AGENTS.md` with the machine
+notes). That is a dev task, not an agent task: point the user at the repo's
+build instructions rather than attempting a remote iOS build from here.
