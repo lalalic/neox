@@ -146,6 +146,11 @@ instruction + the phone's MCP URL) as its output. There is no built-in
 transport to your chat — so *you* provide one: run a minimal HTTP listener on
 this machine, and the user's Shortcut POSTs the message to it.
 
+**Who knows what:** the app never learns the listener's address. The intent
+just emits text; the *Shortcut* holds the destination URL in its
+"Get Contents of URL" step (configured once — below). That's why no discovery
+code exists in the app.
+
 1. Start the listener (pick a free port; keep it LAN-only):
    ```bash
    python3 - <<'PY' &
@@ -157,11 +162,16 @@ this machine, and the user's Shortcut POSTs the message to it.
            self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
    HTTPServer(('0.0.0.0', 8787), H).serve_forever()
    PY
+   LOCAL=$(scutil --get LocalHostName)   # mDNS name, survives IP changes
    echo "listener on :8787 — inbox: /tmp/neox-inbox.txt"
+   echo "shortcut URL: http://$LOCAL.local:8787/agent"
    ```
-2. Tell the user the one-time Shortcuts setup:
+2. Tell the user the one-time Shortcuts setup (use the printed
+   `<hostname>.local` URL — iOS resolves mDNS, so it keeps working when the
+   Mac's DHCP address changes; fall back to the raw `ipconfig getifaddr en0`
+   IP only if `.local` fails to resolve):
    *Open Shortcuts → new shortcut → **Run Agent Task** (Neox) → **Get Contents
-   of URL** → `http://<this-mac-ip>:8787/agent`, Method POST, Body =
+   of URL** → `http://<this-mac>.local:8787/agent`, Method POST, Body =
    *Provided Input*. Name it and enable "Run when connected to home Wi-Fi" as
    an automation if desired.*
 3. Poll `/tmp/neox-inbox.txt` (or watch it with `tail -f`) — each entry is a
