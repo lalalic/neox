@@ -31,7 +31,47 @@ search, analyze, and pull photos/videos off the phone over WiFi.
 3. On first use the agent should call `media.search`; iOS will prompt for
    Photos permission — tap Allow once on the phone.
 
-## Tools (11)
+## Siri / Shortcuts → agent chat
+
+The app exposes one App Intent, **Run Agent Task**. It does no reasoning: it
+makes sure the MCP server is up, then produces a message that contains just the
+user instruction and this phone's MCP URL:
+
+```
+Create a vlog from yesterday's photos and videos
+
+iPhone media MCP server: http://10.0.0.135:9223/mcp
+LAN only, no auth. Discover tools with tools/list first; inspect metadata and
+thumbnails before exporting; stream originals from /files/ over HTTP — never
+inline media in the chat.
+```
+
+Delivery is owned by Codex Remote / Shortcuts:
+
+- The intent **foregrounds the app before running** — Wi-Fi automations fire in
+  the background, where iOS can suspend the app and drop the MCP listener;
+  foregrounding makes the server reliably reachable (the status screen is also
+  visible confirmation that the automation fired).
+- **Photos preflight**: if Photos permission hasn't been granted, the intent
+  requests it during the run, so a later unattended `media.search` doesn't hit
+  a permission wall. The result dialog reports the permission state.
+
+- Siri phrases: *"Create a vlog with Neox"*, *"Make a vlog with Neox"*,
+  *"Run my agent with Neox"* — these run with the default instruction
+  ("Create a vlog from yesterday's photos and videos"). Free-form instructions
+  are configured by editing the Run Agent Task step in the Shortcuts editor
+  (App Intents only allows entity-typed phrase placeholders, so the instruction
+  isn't Siri-capturable).
+- The intent's **output value** is the full message, so a Shortcut can chain it
+  straight into the Codex chat ("Run intent → send to agent").
+- The message is also **copied to the clipboard** as a manual fallback.
+- The status screen previews the exact message that would be sent.
+
+Wi-Fi automation lives entirely in Shortcuts (Automation: *When connected to
+home Wi-Fi → Run "Run Agent Task" → send output to Codex*) — the app never
+detects the network transition.
+
+## Tools (13)
 
 | tool | purpose | key args |
 |---|---|---|
@@ -46,6 +86,8 @@ search, analyze, and pull photos/videos off the phone over WiFi.
 | `video.sample_frames` | evenly-spaced JPEG frames | `id`, `count`, `interval_s`, `max_side` |
 | `video.transcribe` | on-device speech transcription | `id`, `language` |
 | `clear_exports` | free phone space after downloads | — |
+| `app_agent` | remote UI automation of this app (self-testing) | `command`: snapshot/tap/tap_xy/type/swipe/long_press/find/scroll_to/pick/screenshot |
+| `demo` | visual demo overlays (spotlight, caption, TTS…) | `command`: step/spotlight/annotate/caption/say/cursor/highlight/clear/pause/resume/wait/start_recording/stop_recording |
 
 Conventions: tool results are compact JSON or `/files/...` URLs — never base64
 media. Fetch files with ranged HTTP (`curl -C - "$URL"` resumes automatically).

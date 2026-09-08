@@ -27,6 +27,10 @@ final class ServerController: ObservableObject {
     @Published private(set) var registeredTools: [String] = []
     @Published private(set) var photosStatus: PHAuthorizationStatus
 
+    /// Remote UI automation for agent-driven self-testing:
+    /// `app_agent` (snapshot/tap/type/…) + `demo` (spotlight/caption/TTS).
+    let agentKit = AppAgentToolProvider()
+
     private var server: MCPServer?
     private static let logLimit = 120
 
@@ -49,6 +53,7 @@ final class ServerController: ObservableObject {
         server.setStaticFileRoot(exportsDir)
         server.register(tools: MediaTools.tools(exportsDir: exportsDir))
         server.register(tools: VisionMediaTools.tools(exportsDir: exportsDir))
+        server.register(tools: agentKit.tools)
         server.register(
             name: "clear_exports",
             description: "Delete all files previously exported by media.export from the /files/ serving directory. Call this after finishing downloads to free space on the phone.",
@@ -79,12 +84,13 @@ final class ServerController: ObservableObject {
         }
     }
 
-    func requestPhotosAccess() {
-        Task {
-            let status = await MediaTools.requestAccess()
-            photosStatus = status
-            appendLog("photos access: \(describe(status))")
-        }
+    /// Ask the user for Photos access; updates state and returns the result.
+    @discardableResult
+    func requestPhotosAccess() async -> PHAuthorizationStatus {
+        let status = await MediaTools.requestAccess()
+        photosStatus = status
+        appendLog("photos access: \(describe(status))")
+        return status
     }
 
     /// Delete all exported media from the /files/ serving directory.

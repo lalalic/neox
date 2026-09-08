@@ -28,6 +28,23 @@ Neox/
     MediaTools.swift         media.search / media.export / clear_exports
     VisionTools.swift        media.meta / media.thumbnail / vision.* /
                              video.* (Vision, Speech, AVFoundation)
+  Intents/
+    RunAgentIntent.swift     App Intents entry point: ensure server, compose
+                             handoff message, clipboard fallback, output value
+    AgentHandoff.swift       the ONLY place the agent handoff message is built
+                             (instruction + MCP URL; no reasoning here)
+    NeoxShortcuts.swift      Siri phrases ("create a vlog with Neox", …)
+  AgentKit/                  vendored from copilot-ios/AppAgent (NOT an SPM
+                             dependency) — remote UI automation for agent-driven
+                             self-testing on the device:
+    AppAgentToolProvider.swift  `app_agent` tool: snapshot/tap/type/swipe/find/
+                             scroll_to/pick/screenshot of THIS app's UI
+    DemoToolProvider.swift      `demo` tool: spotlight/annotate/caption/say(TTS)/
+                             step/cursor/highlight overlays
+    DemoRuntime.swift           overlay state machine (+ event recording)
+    DemoOverlayView.swift       SwiftUI overlay rendering demo visuals
+    AccessibilityScanner.swift  UIKit accessibility tree → refs (r0, r1, …)
+    InteractionEngine.swift     tap/type/swipe via UIKit APIs
   Info.plist                 display name, Bonjour service, permission strings
   Neox.entitlements          intentionally empty dict — real entitlements come
                              from the provisioning profile at signing
@@ -37,11 +54,20 @@ scripts/remote-deploy.sh     sync + build on mac111 + install on iPhone
 Hard rules:
 
 - **No third-party dependencies.** Everything is Foundation/AVFoundation/
-  Photos/Vision/Speech/Network. Do not add SPM packages.
+  Photos/Vision/Speech/Network. Do not add SPM packages. (`AgentKit/` is
+  vendored source copied from `copilot-ios/AppAgent` — edit it in place; do
+  not re-import the package.)
 - **No base64 media in tool results.** Write files into `exportsDir` and return
   `/files/<name>` URLs; the server range-streams them.
 - **English + Swifty naming**, dot-namespaced tool names (`media.search`).
 - Keep the app target self-contained: nothing may import `copilot-ios`.
+
+## Self-testing on the device
+
+The app embeds its own automation: after deploy, drive and verify the UI from
+the Mac over MCP — `app_agent` with `snapshot`/`tap`/`type`/`screenshot` and
+`demo` for visual overlays. `scripts/remote-deploy.sh --snapshot` and
+`--mcp CMD [ARGS]` are shortcuts for this loop.
 
 ## Regenerating / building locally
 

@@ -11,6 +11,10 @@ struct NeoxApp: App {
         WindowGroup {
             StatusView()
                 .environmentObject(bridge)
+                // Inject directly on the overlay: environmentObject on the
+                // parent doesn't reach .overlay content on all iOS versions
+                // and crashes DemoOverlayView's @EnvironmentObject lookup.
+                .overlay { DemoOverlayView().environmentObject(bridge.agentKit.demoRuntime) }
                 .onChange(of: scenePhase) { phase in
                     // iOS may tear the listener down while backgrounded —
                     // restart on every foreground activation.

@@ -33,7 +33,7 @@ struct StatusView: View {
             // Foot buttons
             HStack(spacing: 12) {
                 if bridge.photosStatus != .authorized && bridge.photosStatus != .limited {
-                    Button { bridge.requestPhotosAccess() } label: {
+                    Button { Task { await bridge.requestPhotosAccess() } } label: {
                         Label("Access Photos", systemImage: "photo.on.rectangle")
                             .frame(maxWidth: .infinity)
                     }
@@ -53,6 +53,16 @@ struct StatusView: View {
 
     private var ListView: some View {
         List {
+            Section("Siri / Shortcuts") {
+                Text("“Hey Siri, create a vlog with Neox”")
+                    .font(.subheadline)
+                Text(AgentHandoff.message(instruction: AgentHandoff.defaultInstruction,
+                                          mcpURL: bridge.mcpURL))
+                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+
             Section("Tools") {
                 ForEach(bridge.registeredTools, id: \.self) { tool in
                     Text(tool)
