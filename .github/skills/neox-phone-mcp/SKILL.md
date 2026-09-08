@@ -4,9 +4,11 @@ description: >-
   Use an iPhone as a local MCP media server via the Neox app: search the
   phone's photo/video library by content (vision index), analyze on-device
   (classify/OCR/people/transcribe), and pull originals over WiFi with ranged
-  HTTP. Use when a task needs the user's phone media: "find photos of X",
-  "pull recent videos off my phone", "build a vlog from my camera roll",
-  "OCR my screenshots", or any macOS agent flow that mentions Neox.
+  HTTP. Includes the neox-agent bridge — a Bonjour-advertised HTTP endpoint
+  you implement + run (via session hook) that receives "Run Agent Task"
+  handoffs from the phone. Use when a task needs the user's phone media:
+  "find photos of X", "pull recent videos off my phone", "build a vlog from
+  my camera roll", "OCR my screenshots", or any macOS agent flow mentioning Neox.
 ---
 
 # neox-phone-mcp — Drive an iPhone's media library from a desktop agent
@@ -139,49 +141,73 @@ Prefer `preset=720p` for video drafts; `original` only when quality matters.
 
 ## Workflow recipes
 
-**Receiving "Run Agent Task" handoffs (set up a tiny listener)**
+**Receiving "Run Agent Task" handoffs — implement the bridge (do this at session start)**
 
 The phone's **Run Agent Task** intent produces the handoff message (user
-instruction + the phone's MCP URL) as its output. There is no built-in
-transport to your chat — so *you* provide one: run a minimal HTTP listener on
-this machine, and the user's Shortcut POSTs the message to it.
+instruction + the phone's MCP URL). There is no built-in transport to your
+chat — so *you* implement and run a **bridge**: a small HTTP endpoint on this
+machine that receives the handoff and is discoverable by the phone via
+Bonjour.
 
-**Who knows what:** the app never learns the listener's address. The intent
-just emits text; the *Shortcut* holds the destination URL in its
-"Get Contents of URL" step (configured once — below). That's why no discovery
-code exists in the app.
+**The discovery contract** (mirrors how the phone advertises `neox._mcp._tcp`):
 
-1. Start the listener (pick a free port; keep it LAN-only):
+- The bridge advertises `_neox-agent._tcp` on the LAN, instance name
+  `neox-agent`, with TXT `path=/agent`. A Neox build with bridge discovery
+  (NWBrowser for `_neox-agent._tcp`) will resolve this automatically — no IP
+  or port is ever configured on the phone.
+- Until that app build exists, the user's Shortcut POSTs to the bridge's
+  `.local` URL (below) — same destination, configured once.
+
+**Who knows what:** the app never hardcodes the bridge address — it either
+resolves it via Bonjour (target state) or the Shortcut holds the `.local` URL
+(interim). The bridge is stateless: POST body → inbox file; you read the
+inbox.
+
+1. **Implement** — write this as `neox-bridge.py` in your workspace (or
+   `/tmp`), then start it:
    ```bash
-   python3 - <<'PY' &
-   from http.server import BaseHTTPRequestHandler, HTTPServer
-   class H(BaseHTTPRequestHandler):
+   cat > /tmp/neox-bridge.py <<'PY'
+   import subprocess, http.server, socketserver
+   PORT = 8787
+   class H(http.server.BaseHTTPRequestHandler):
        def do_POST(self):
            body = self.rfile.read(int(self.headers.get('Content-Length', 0))).decode()
            open('/tmp/neox-inbox.txt', 'a').write(body + '\n---\n')
            self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
-   HTTPServer(('0.0.0.0', 8787), H).serve_forever()
+       def log_message(self, *a): pass
+   socketserver.TCPServer.allow_reuse_address = True
+   # Bonjour: the phone resolves _neox-agent._tcp to find us
+   subprocess.Popen(['dns-sd', '-R', 'neox-agent', '_neox-agent._tcp', '.', str(PORT), 'path=/agent'],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+   socketserver.TCPServer(('0.0.0.0', PORT), H).serve_forever()
    PY
-   LOCAL=$(scutil --get LocalHostName)   # mDNS name, survives IP changes
-   echo "listener on :8787 — inbox: /tmp/neox-inbox.txt"
-   echo "shortcut URL: http://$LOCAL.local:8787/agent"
+   nohup python3 /tmp/neox-bridge.py >/dev/null 2>&1 &
+   sleep 1
+   echo "bridge up — inbox: /tmp/neox-inbox.txt · shortcut URL: http://$(scutil --get LocalHostName).local:8787/agent"
    ```
-2. Tell the user the one-time Shortcuts setup (use the printed
-   `<hostname>.local` URL — iOS resolves mDNS, so it keeps working when the
-   Mac's DHCP address changes; fall back to the raw `ipconfig getifaddr en0`
-   IP only if `.local` fails to resolve):
-   *Open Shortcuts → new shortcut → **Run Agent Task** (Neox) → **Get Contents
-   of URL** → `http://<this-mac>.local:8787/agent`, Method POST, Body =
-   *Provided Input*. Name it and enable "Run when connected to home Wi-Fi" as
-   an automation if desired.*
-3. Poll `/tmp/neox-inbox.txt` (or watch it with `tail -f`) — each entry is a
-   handoff message: the instruction plus the phone's MCP URL. Then act on it
-   with the tools in this skill (search → index → export → download).
+2. **Start it via your session-start hook** so handoffs are always receivable,
+   not only after you remember to run it. Wire `neox-bridge.py` into whatever
+   session-lifecycle hook your harness has (a `SessionStart`/`session_start`
+   hook config, a startup script, or your shell profile). Idempotency: check
+   first so parallel sessions don't double-bind —
+   ```bash
+   curl -s -m 2 -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8787/agent -d ping
+   # 000 → not running → start it; anything else → already up
+   ```
+3. **Consume**: poll `/tmp/neox-inbox.txt` (or `tail -f`) — each entry is a
+   handoff: the instruction plus the phone's MCP URL. Then act with the tools
+   in this skill (search → index → export → download).
 
-Notes: the message is also copied to the phone's clipboard as a fallback, so
-the user can always paste it into the chat directly. Stop the listener when
-the session ends (`pkill -f neox-inbox` or kill the background job); it is a
-plain HTTP endpoint on the home LAN — don't expose it beyond that.
+Tell the user the interim one-time Shortcuts setup (only needed until the app
+ships Bonjour discovery; the `.local` URL survives DHCP changes):
+*Shortcuts → new shortcut → **Run Agent Task** (Neox) → **Get Contents of
+URL** → `http://<mac>.local:8787/agent`, Method POST, Body = *Provided
+Input*. Optionally wrap in a "Run when connected to home Wi-Fi" automation.*
+
+Fallbacks: the message is also on the phone's clipboard (paste into chat).
+Stop the bridge when the session's work ends (`pkill -f neox-bridge.py`) —
+unless the session hook is meant to keep it alive for future handoffs; it is
+a plain LAN-only HTTP endpoint, never expose it beyond the home network.
 
 **"Build a vlog from yesterday"**
 1. `media.search {"days":2}` (or the user's date range) → skim `vision` labels
