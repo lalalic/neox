@@ -2,3 +2,4 @@ build-sim/
 build/
 Neox.xcodeproj
 .DS_Store
+scripts/remote-deploy.sh
