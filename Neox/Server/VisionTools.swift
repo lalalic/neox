@@ -91,6 +91,18 @@ enum VisionMediaTools {
                 }
             ),
             ToolDefinition(
+                name: "vision.index",
+                description: "Batch-run on-device Vision analysis (labels, OCR text, faces/people) over recent library assets and persist results keyed by asset id. Powers media.search has_label/has_text/with_people filters and media.meta analysis sections. One run at a time; results checkpoint every 25 assets.",
+                parameters: MediaTools.schema([
+                    "days": MediaTools.intProp("How far back to analyze (default 7; 0 = whole library — slow)"),
+                    "redo": MediaTools.boolProp("Re-analyze assets already indexed (default false)"),
+                    "limit": MediaTools.intProp("Max assets per run (default 200, max 5000)"),
+                ]),
+                handler: { args in
+                    await indexLibrary(args: args)
+                }
+            ),
+            ToolDefinition(
                 name: "video.sample_frames",
                 description: "Sample frames from a video, serve as JPEGs at /files/. Returns per-frame {t_s, url}. count = evenly spaced frames (default 6, max 30); interval_s overrides count.",
                 parameters: MediaTools.schema([
@@ -124,9 +136,18 @@ enum VisionMediaTools {
         switch await MediaTools.asset(id: id) {
         case .failed(let text): return text
         case .found(let asset):
-            var out = MediaTools.describeBase(asset)
+            var out = await MediaTools.describeBase(asset, store: VisionIndexStore.shared)
             out["gps"] = gpsDict(asset)
             out["exif"] = await exifDict(asset)
+            if let analysis = await VisionIndexStore.shared.analysis(for: asset.localIdentifier) {
+                out["analysis"] = [
+                    "analyzed_at": MediaTools.iso8601.string(from: analysis.analyzedAt),
+                    "labels": analysis.labels.map { ["label": $0.label, "confidence": $0.confidence] },
+                    "ocr_text": analysis.ocrText ?? "",
+                    "face_count": analysis.faceCount,
+                    "person_count": analysis.personCount,
+                ]
+            }
             return MediaTools.jsonString(out)
         }
     }
@@ -294,6 +315,27 @@ enum VisionMediaTools {
     private static func points(_ region: VNFaceLandmarkRegion2D?) -> [[Double]]? {
         guard let region else { return nil }
         return region.normalizedPoints.map { [r3($0.x), r3($0.y)] }
+    }
+
+    // MARK: - vision.index
+
+    private static func indexLibrary(args: JSONValue) async -> String {
+        let days = MediaTools.intOpt(args, "days") ?? 7
+        let redo = MediaTools.bool(args, "redo") ?? false
+        let limit = min(max(MediaTools.intOpt(args, "limit") ?? 200, 1), 5000)
+        let summary = await VisionIndexer.run(days: max(days, 0), redo: redo, limit: limit)
+        if summary.failed == -1 {
+            return "Error: another index run is already in progress — retry shortly or use its results."
+        }
+        if summary.failed == -2 {
+            return "Error: photo library access denied. Grant access on the phone first."
+        }
+        return MediaTools.jsonString([
+            "indexed": summary.indexed,
+            "skipped": summary.skipped,
+            "failed": summary.failed,
+            "total_indexed": summary.totalIndexed,
+        ])
     }
 
     // MARK: - vision.similarity

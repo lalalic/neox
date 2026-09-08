@@ -22,7 +22,8 @@ public enum MediaTools {
                 description: """
                 Search the iPhone photo/video library. Returns JSON with asset metadata: \
                 id, filename, media_type, pixel dimensions, duration (videos), creation date, \
-                file size. Sort: newest first. Use ids with media.export.
+                file size — plus a `vision` summary (labels, faces, text flag) for assets \
+                covered by the vision index (see vision.index). Sort: newest first. Use ids with media.export.
                 """,
                 parameters: schema([
                     "media_type": stringProp("Filter by media type", enumVals: ["all", "image", "video"]),
@@ -31,6 +32,9 @@ public enum MediaTools {
                     "before": stringProp("Only assets created before this ISO8601 date"),
                     "album": stringProp("Only assets in the album with this exact name"),
                     "favorited": boolProp("Only favorited assets"),
+                    "has_label": stringProp("Only assets whose vision index labels contain this keyword (requires vision.index coverage)"),
+                    "has_text": stringProp("Only assets whose recognized OCR text contains this keyword (requires vision.index coverage)"),
+                    "with_people": boolProp("Only assets with detected faces/people (requires vision.index coverage)"),
                     "limit": intProp("Max assets to return (default 50, max 500)"),
                     "offset": intProp("Skip this many results for pagination (see next_offset in response)"),
                 ]),
@@ -134,6 +138,12 @@ public enum MediaTools {
         let limit = min(max(intArg(args, "limit", default: 50), 1), 500)
         let offset = max(intArg(args, "offset", default: 0), 0)
 
+        // Vision-index filters: match against the persisted analysis store.
+        let hasLabel = str(args, "has_label")
+        let hasText = str(args, "has_text")
+        let withPeople = bool(args, "with_people")
+        let visionFiltered = hasLabel != nil || hasText != nil || withPeople
+
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
 
@@ -184,10 +194,40 @@ public enum MediaTools {
         }
 
         var assets: [[String: Any]] = []
+        let store = VisionIndexStore.shared
+        if visionFiltered {
+            // Scan the fetch result and keep only indexed assets matching the
+            // vision filters; paginate over the matching subset.
+            var matches: [PHAsset] = []
+            let scanCap = min(fetch.count, 5000)
+            for i in 0..<scanCap {
+                let asset = fetch.object(at: i)
+                let analysis = await store.analysis(for: asset.localIdentifier)
+                if VisionIndexQuery.matches(analysis, hasLabel: hasLabel, hasText: hasText, withPeople: withPeople) {
+                    matches.append(asset)
+                }
+            }
+            let end = min(matches.count, offset + limit)
+            if offset < end {
+                for i in offset..<end {
+                    assets.append(await describeBase(matches[i], store: store))
+                }
+            }
+            var result: [String: Any] = [
+                "matched": matches.count,
+                "returned": assets.count,
+                "assets": assets,
+            ]
+            if matches.count > offset + assets.count {
+                result["next_offset"] = offset + assets.count
+            }
+            return Self.jsonString(result)
+        }
+
         if offset < fetch.count {
             let end = min(fetch.count, offset + limit)
             for i in offset..<end {
-                assets.append(describeBase(fetch.object(at: i)))
+                assets.append(await describeBase(fetch.object(at: i), store: store))
             }
         }
 
@@ -202,7 +242,7 @@ public enum MediaTools {
         return Self.jsonString(result)
     }
 
-    static func describeBase(_ asset: PHAsset) -> [String: Any] {
+    static func describeBase(_ asset: PHAsset, store: VisionIndexStore? = nil) async -> [String: Any] {
         var item: [String: Any] = [
             "id": asset.localIdentifier,
             "media_type": asset.mediaType == .video ? "video" : asset.mediaType == .image ? "image" : "other",
@@ -221,6 +261,9 @@ public enum MediaTools {
         }
         if let size = fileSize(of: asset) {
             item["size_bytes"] = size
+        }
+        if let store, let analysis = await store.analysis(for: asset.localIdentifier) {
+            item["vision"] = VisionIndexQuery.rowSummary(analysis)
         }
         return item
     }
@@ -389,7 +432,7 @@ public enum MediaTools {
         return d
     }
 
-    private static func bool(_ args: JSONValue, _ key: String) -> Bool {
+    static func bool(_ args: JSONValue, _ key: String) -> Bool {
         guard case .object(let dict) = args, case .bool(let b)? = dict[key] else { return false }
         return b
     }
@@ -445,7 +488,7 @@ public enum MediaTools {
         .object(["type": .string("number"), "description": .string(desc)])
     }
 
-    private static func boolProp(_ desc: String) -> JSONValue {
+    static func boolProp(_ desc: String) -> JSONValue {
         .object(["type": .string("boolean"), "description": .string(desc)])
     }
 

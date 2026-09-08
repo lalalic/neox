@@ -57,8 +57,8 @@ Delivery is owned by Codex Remote / Shortcuts:
   a permission wall. The result dialog reports the permission state.
 
 - Siri phrases: *"Create a vlog with Neox"*, *"Make a vlog with Neox"*,
-  *"Run my agent with Neox"* — these run with the default instruction
-  ("Create a vlog from yesterday's photos and videos"). Free-form instructions
+  *"Run my agent with Neox"* — plus *"Analyze my media with Neox"* which runs
+  the vision index batch (see below). Free-form instructions
   are configured by editing the Run Agent Task step in the Shortcuts editor
   (App Intents only allows entity-typed phrase placeholders, so the instruction
   isn't Siri-capturable).
@@ -83,11 +83,27 @@ detects the network transition.
 | `vision.ocr` | text recognition | `id` |
 | `vision.detect_people` | faces + bodies with boxes/landmarks | `id` |
 | `vision.similarity` | visually similar assets (feature-print scan) | `id`, `limit`, `days` |
+| `vision.index` | batch-analyze library (labels/OCR/people) into the persistent index | `days` (default 7), `redo`, `limit` (default 200) |
 | `video.sample_frames` | evenly-spaced JPEG frames | `id`, `count`, `interval_s`, `max_side` |
 | `video.transcribe` | on-device speech transcription | `id`, `language` |
 | `clear_exports` | free phone space after downloads | — |
 | `app_agent` | remote UI automation of this app (self-testing) | `command`: snapshot/tap/tap_xy/type/swipe/long_press/find/scroll_to/pick/screenshot |
 | `demo` | visual demo overlays (spotlight, caption, TTS…) | `command`: step/spotlight/annotate/caption/say/cursor/highlight/clear/pause/resume/wait/start_recording/stop_recording |
+
+## Vision index — persistent media knowledge
+
+`vision.index` (MCP tool) and **Analyze Media** (Siri: *"analyze my media with
+Neox"*) batch-run on-device Vision over the library and persist per-asset
+results (top labels, OCR text, face/people counts) in
+`Application Support/Neox/vision-index.json`, keyed by asset id. Once indexed:
+
+- `media.search` gains `has_label` / `has_text` / `with_people` filters, and
+  every row carries a compact `vision` summary (top 3 labels, faces, text flag)
+- `media.meta` includes the full `analysis` section
+- incremental by default: already-indexed assets are skipped unless `redo`
+
+So `media.search {"has_label":"beach"}` or `{"has_text":"receipt"}` finds media
+by *content* without any downloads or re-analysis.
 
 Conventions: tool results are compact JSON or `/files/...` URLs — never base64
 media. Fetch files with ranged HTTP (`curl -C - "$URL"` resumes automatically).

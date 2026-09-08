@@ -25,15 +25,21 @@ Neox/
     Tool.swift               ToolDefinition / JSONValue (AppAgent-style types)
     ServerController.swift   lifecycle singleton; registers all tools; serves
                              exportsDir at /files/; request log publisher
-    MediaTools.swift         media.search / media.export / clear_exports
+    MediaTools.swift         media.search / media.export / clear_exports;
+                             search supports vision-index filters (has_label /
+                             has_text / with_people) + per-row `vision` summary
     VisionTools.swift        media.meta / media.thumbnail / vision.* /
                              video.* (Vision, Speech, AVFoundation)
+    VisionIndex.swift        persistent per-asset vision analysis store
+                             (actor VisionIndexStore → vision-index.json) +
+                             VisionIndexer batch engine + search/meta helpers
   Intents/
     RunAgentIntent.swift     App Intents entry point: ensure server, compose
                              handoff message, clipboard fallback, output value
     AgentHandoff.swift       the ONLY place the agent handoff message is built
                              (instruction + MCP URL; no reasoning here)
-    NeoxShortcuts.swift      Siri phrases ("create a vlog with Neox", …)
+    NeoxShortcuts.swift      Siri phrases ("create a vlog with Neox",
+                             "analyze my media with Neox", …)
   AgentKit/                  vendored from copilot-ios/AppAgent (NOT an SPM
                              dependency) — remote UI automation for agent-driven
                              self-testing on the device:

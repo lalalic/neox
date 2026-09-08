@@ -17,5 +17,14 @@ struct NeoxShortcuts: AppShortcutsProvider {
             shortTitle: "Run Agent Task",
             systemImageName: "wand.and.stars"
         )
+        AppShortcut(
+            intent: AnalyzeMediaIntent(),
+            phrases: [
+                "Analyze my media with \(.applicationName)",
+                "Index my photos with \(.applicationName)"
+            ],
+            shortTitle: "Analyze Media",
+            systemImageName: "eye.trianglebadge.exclamationmark"
+        )
     }
 }
