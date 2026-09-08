@@ -51,9 +51,22 @@ struct RunAgentIntent: AppIntent {
         let message = AgentHandoff.message(instruction: instruction, mcpURL: bridge.mcpURL)
         UIPasteboard.general.string = message
 
+        // Preferred path: discover the desktop bridge over Bonjour and POST
+        // the handoff directly — no Shortcut hop. Falls back to clipboard +
+        // output value when no bridge is on the LAN.
+        let dialog: String
+        switch await AgentBridge.handoff(message) {
+        case .posted:
+            dialog = "Handed off to the agent bridge."
+        case .bridgeNotFound:
+            dialog = "No agent bridge found — instruction and MCP URL copied to the clipboard; paste them into the agent chat."
+        case .failed(let why):
+            dialog = "Bridge error (\(why)) — message copied to the clipboard as fallback."
+        }
+
         return .result(
             value: message,
-            dialog: "Instruction and MCP URL ready — copied to clipboard for the agent chat.\(photosNote)"
+            dialog: IntentDialog(stringLiteral: dialog)
         )
     }
 }

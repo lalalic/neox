@@ -1,7 +1,7 @@
 #if os(iOS)
 import Foundation
 
-/// Provides a single MCP tool (`app_agent`) with sub-commands for native iOS UI automation.
+/// Provides a single MCP tool (`agent.pilot`) with sub-commands for native iOS UI automation.
 /// Uses accessibility APIs to scan, tap, and type in the app's own UI.
 @MainActor
 public final class AppAgentToolProvider {
@@ -27,9 +27,9 @@ public final class AppAgentToolProvider {
 
     // MARK: - Skill Prompt
 
-    /// System prompt snippet describing app_agent sub-commands.
+    /// System prompt snippet describing pilot sub-commands.
     public static let skillPrompt = """
-    You have an `app_agent` tool for native iOS app UI automation. Use the `command` parameter to specify the action.
+    You have an `agent.pilot` tool for native iOS app UI automation. Use the `command` parameter to specify the action.
 
     Sub-commands:
     - `snapshot` — Scan the screen for interactive elements. Returns tree with refs r0, r1, r2...
@@ -45,7 +45,7 @@ public final class AppAgentToolProvider {
     Workflow: snapshot → read refs → tap/type/swipe → snapshot again after interactions.
     """
 
-    // MARK: - Tools (app_agent + demo)
+    // MARK: - Tools (pilot + demo)
 
     public var tools: [ToolDefinition] {
         [appAgentTool] + demoToolProvider.tools
@@ -53,7 +53,7 @@ public final class AppAgentToolProvider {
 
     private var appAgentTool: ToolDefinition {
         ToolDefinition(
-            name: "app_agent",
+            name: "agent.pilot",
             description: "Native iOS app UI automation. Use this tool to test and manipulate the app. Use 'command' to specify action: snapshot (get UI elements), tap (tap element by ref), tap_xy, type (enter text), swipe, long_press, find, scroll_to, pick, screenshot.",
             parameters: .object([
                 "type": .string("object"),

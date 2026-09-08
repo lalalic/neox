@@ -1,8 +1,8 @@
 #if os(iOS)
 import Foundation
 
-/// Provides a single MCP tool (`demo`) with sub-commands for visual demo overlays.
-/// Mirrors the `app_agent` sub-command pattern.
+/// Provides a single MCP tool (`agent.demo`) with sub-commands for visual demo overlays.
+/// Mirrors the `agent.pilot` sub-command pattern.
 @MainActor
 public final class DemoToolProvider {
 
@@ -15,7 +15,7 @@ public final class DemoToolProvider {
     // MARK: - Skill Prompt
 
     public static let skillPrompt = """
-    You have a `demo` tool for visual demo overlays on iOS. Use the `command` parameter to specify the action.
+    You have a `agent.demo` tool for visual demo overlays on iOS. Use the `command` parameter to specify the action.
 
     Sub-commands:
     - `step` — Show step badge. Params: `title` (required).
@@ -32,7 +32,7 @@ public final class DemoToolProvider {
     - `start_recording` — Start event timeline recording.
     - `stop_recording` — Stop recording, return events JSON.
 
-    Typical workflow: step → spotlight/say → app_agent tap → demo clear → next step.
+    Typical workflow: step → spotlight/say → pilot tap → demo clear → next step.
     """
 
     // MARK: - Tool Definition
@@ -43,7 +43,7 @@ public final class DemoToolProvider {
 
     private var demoTool: ToolDefinition {
         ToolDefinition(
-            name: "demo",
+            name: "agent.demo",
             description: "Visual demo overlay for iOS app. Show spotlights, captions, TTS narration, step badges, cursor animations. Use 'command' to specify action.",
             parameters: .object([
                 "type": .string("object"),

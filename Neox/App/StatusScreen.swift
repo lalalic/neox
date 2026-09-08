@@ -53,23 +53,7 @@ struct StatusView: View {
 
     private var ListView: some View {
         List {
-            Section("Siri / Shortcuts") {
-                Text("“Hey Siri, create a vlog with Neox”")
-                    .font(.subheadline)
-                Text(AgentHandoff.message(instruction: AgentHandoff.defaultInstruction,
-                                          mcpURL: bridge.mcpURL))
-                    .font(.system(size: 11, weight: .regular, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-            }
-
-            Section("Tools") {
-                ForEach(bridge.registeredTools, id: \.self) { tool in
-                    Text(tool)
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
-                }
-            }
-
+            // Most-live information first.
             Section("Requests") {
                 if bridge.logLines.isEmpty {
                     Text("No requests yet.")
@@ -83,8 +67,85 @@ struct StatusView: View {
                     }
                 }
             }
+
+            // Discovered agent bridges (the desktop half of the handoff pair).
+            Section {
+                ForEach(bridge.discoveredBridges, id: \.name) { bridgeEndpoint in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(bridgeEndpoint.name)
+                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        Text(bridgeEndpoint.description)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if bridge.discoveredBridges.isEmpty {
+                    Text("No agent bridge on the LAN. Start one on the desktop (see neox-phone-mcp skill).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Agent Bridges")
+            }
+
+            // Collapsible reference sections, folded by default.
+            Section {
+                DisclosureGroup("Tools (\(bridge.registeredTools.count))") {
+                    ForEach(toolRows, id: \.name) { row in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.name)
+                                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                            Text(row.summary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
+            Section {
+                DisclosureGroup("Siri / Shortcuts") {
+                    Text("“Hey Siri, create a vlog with Neox”")
+                        .font(.subheadline)
+                    Text("“Hey Siri, analyze my media with Neox”")
+                        .font(.subheadline)
+                    Text(AgentHandoff.message(instruction: AgentHandoff.defaultInstruction,
+                                              mcpURL: bridge.mcpURL))
+                        .font(.system(size: 11, weight: .regular, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
         }
         .listStyle(.insetGrouped)
+    }
+
+    private struct ToolRow {
+        let name: String
+        let summary: String
+    }
+
+    /// One-line description per registered tool (UI summary, kept in sync
+    /// with the tool definitions).
+    private var toolRows: [ToolRow] {
+        let descriptions: [String: String] = [
+            "media.search": "enumerate library; content filters (has_label/has_text/with_people)",
+            "media.export": "stage originals at /files/ (720p/1080p transcode)",
+            "media.meta": "EXIF + GPS + vision analysis for one asset",
+            "media.thumbnail": "JPEG preview served at /files/",
+            "vision.classify": "scene classification",
+            "vision.ocr": "text recognition",
+            "vision.detect_people": "faces + bodies",
+            "vision.similarity": "visually similar assets",
+            "vision.index": "batch-analyze library into the persistent index",
+            "video.sample_frames": "JPEG frames from a video",
+            "video.transcribe": "on-device speech → text",
+            "media.clear": "delete staged exports",
+            "agent.pilot": "remote UI automation of this app",
+            "agent.demo": "spotlight/caption/TTS overlays",
+            "agent.handoff": "self-test the phone→bridge handoff path",
+        ]
+        return bridge.registeredTools.map { ToolRow(name: $0, summary: descriptions[$0] ?? "") }
     }
 
     private var stateColor: Color {

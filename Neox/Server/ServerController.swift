@@ -26,12 +26,15 @@ final class ServerController: ObservableObject {
     @Published private(set) var logLines: [String] = []
     @Published private(set) var registeredTools: [String] = []
     @Published private(set) var photosStatus: PHAuthorizationStatus
+    /// Desktop agent bridges discovered on the LAN (`_neox-agent._tcp`).
+    @Published private(set) var discoveredBridges: [AgentBridgeDiscovery.Entry] = []
 
     /// Remote UI automation for agent-driven self-testing:
-    /// `app_agent` (snapshot/tap/type/…) + `demo` (spotlight/caption/TTS).
+    /// `agent.pilot` (snapshot/tap/type/…) + `agent.demo` (spotlight/caption/TTS).
     let agentKit = AppAgentToolProvider()
 
     private var server: MCPServer?
+    private var bridgeBrowser: AgentBridgeDiscovery?
     private static let logLimit = 120
 
     private init() {
@@ -39,9 +42,35 @@ final class ServerController: ObservableObject {
     }
 
     /// Idempotent — safe to call on every foreground activation.
+    ///
+    /// iOS kills sockets while the app is backgrounded, sometimes without the
+    /// NWListener ever reporting `.failed` (log shows "defunct connection").
+    /// The old `guard server == nil` left a dead listener bound forever, so
+    /// foregrounding now always tears down and re-binds. Rebinding is cheap
+    /// and the app has no long-lived client connections to preserve.
     func ensureRunning() {
-        guard server == nil else { return }
+        if let server {
+            server.stop()
+            self.server = nil
+        }
         start()
+        startBridgeDiscovery()
+    }
+
+    /// Keep a live Bonjour browse running for the handoff bridge — the status
+    /// screen lists what's out there, and AgentBridge.handoff resolves fast
+    /// because macOS/iOS cache mDNS answers seen recently.
+    private func startBridgeDiscovery() {
+        guard bridgeBrowser == nil else { return }
+        let browser = AgentBridgeDiscovery()
+        bridgeBrowser = browser
+        browser.start()
+        Task { [weak self] in
+            for await entries in browser.entries() {
+                guard let self else { return }
+                self.discoveredBridges = entries
+            }
+        }
     }
 
     func start() {
@@ -54,8 +83,9 @@ final class ServerController: ObservableObject {
         server.register(tools: MediaTools.tools(exportsDir: exportsDir))
         server.register(tools: VisionMediaTools.tools(exportsDir: exportsDir))
         server.register(tools: agentKit.tools)
+        server.register(tools: DebugTools.tools())
         server.register(
-            name: "clear_exports",
+            name: "media.clear",
             description: "Delete all files previously exported by media.export from the /files/ serving directory. Call this after finishing downloads to free space on the phone.",
             inputSchema: ["type": "object", "properties": [:] as [String: Any]]
         ) { [weak self] _ in

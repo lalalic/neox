@@ -54,6 +54,11 @@ Delivery is owned by Codex Remote / Shortcuts:
   the background, where iOS can suspend the app and drop the MCP listener;
   foregrounding makes the server reliably reachable (the status screen is also
   visible confirmation that the automation fired).
+- **Direct bridge handoff**: the intent browses for `_neox-agent._tcp` (the
+  Bonjour service your desktop agent's bridge advertises — see the
+  `neox-phone-mcp` skill) and POSTs the message straight to it. No Shortcut
+  hop. If no bridge is on the LAN, the message lands on the clipboard as a
+  fallback and the dialog says so.
 - **Photos preflight**: if Photos permission hasn't been granted, the intent
   requests it during the run, so a later unattended `media.search` doesn't hit
   a permission wall. The result dialog reports the permission state.
@@ -77,7 +82,7 @@ Wi-Fi automation lives entirely in Shortcuts (Automation: *When connected to
 home Wi-Fi → Run "Run Agent Task" → send output to Codex*) — the app never
 detects the network transition.
 
-## Tools (14)
+## Tools (15)
 
 | tool | purpose | key args |
 |---|---|---|
@@ -92,9 +97,10 @@ detects the network transition.
 | `vision.index` | batch-analyze library (labels/OCR/people) into the persistent index | `days` (default 7), `redo`, `limit` (default 200) |
 | `video.sample_frames` | evenly-spaced JPEG frames | `id`, `count`, `interval_s`, `max_side` |
 | `video.transcribe` | on-device speech transcription | `id`, `language` |
-| `clear_exports` | free phone space after downloads | — |
-| `app_agent` | remote UI automation of this app (self-testing) | `command`: snapshot/tap/tap_xy/type/swipe/long_press/find/scroll_to/pick/screenshot |
-| `demo` | visual demo overlays (spotlight, caption, TTS…) | `command`: step/spotlight/annotate/caption/say/cursor/highlight/clear/pause/resume/wait/start_recording/stop_recording |
+| `media.clear` | free phone space after downloads | — |
+| `agent.handoff` | self-test the phone→bridge handoff path (Bonjour discovery + POST) | `instruction` |
+| `agent.pilot` | remote UI automation of this app (self-testing) | `command`: snapshot/tap/tap_xy/type/swipe/long_press/find/scroll_to/pick/screenshot |
+| `agent.demo` | visual demo overlays (spotlight, caption, TTS…) | `command`: step/spotlight/annotate/caption/say/cursor/highlight/clear/pause/resume/wait/start_recording/stop_recording |
 
 ## Vision index — persistent media knowledge
 
@@ -143,7 +149,7 @@ call vision.classify "{\"id\":\"$IDS\"}" | jq
 call video.transcribe "{\"id\":\"$IDS\"}" | jq
 
 # housekeeping
-call clear_exports '{}'
+call media.clear '{}'
 ```
 
 ## Building

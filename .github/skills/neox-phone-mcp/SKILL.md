@@ -74,7 +74,7 @@ Discover the live tool list first (`tools/list`), then:
 | `video.sample_frames` | peek into a video without exporting | `id`, `count`, `interval_s` |
 | `video.transcribe` | speech → text (on-device) | `id`, `language` |
 | `media.export` | stage originals for download | `ids[]`, `preset` (original/720p/1080p) |
-| `clear_exports` | free phone space when done | — |
+| `media.clear` | free phone space when done | — |
 
 Rows from `media.search` look like:
 
@@ -117,7 +117,7 @@ URL=$(call media.export "{\"ids\":[\"$IDS\"],\"preset\":\"720p\"}" \
 curl -C - -o clip.mp4 "$PHONE$URL"
 
 # 3. housekeeping — the phone has finite disk
-call clear_exports '{}'
+call media.clear '{}'
 ```
 
 Prefer `preset=720p` for video drafts; `original` only when quality matters.
@@ -130,7 +130,7 @@ Prefer `preset=720p` for video drafts; `original` only when quality matters.
   chat. JSON + `/files/` URLs only.
 - **Content search first, export second.** Filter with the index, verify with
   thumbnails/frames, export only the winners.
-- **Always `clear_exports`** after downloading — it deletes the staged files
+- **Always `media.clear`** after downloading — it deletes the staged files
   from the phone.
 - Long batch calls (`vision.index`, `video.transcribe`) can exceed a 120 s
   curl timeout — raise `-m` for those.
@@ -152,11 +152,10 @@ Bonjour.
 **The discovery contract** (mirrors how the phone advertises `neox._mcp._tcp`):
 
 - The bridge advertises `_neox-agent._tcp` on the LAN, instance name
-  `neox-agent`, with TXT `path=/agent`. A Neox build with bridge discovery
-  (NWBrowser for `_neox-agent._tcp`) will resolve this automatically — no IP
-  or port is ever configured on the phone.
-- Until that app build exists, the user's Shortcut POSTs to the bridge's
-  `.local` URL (below) — same destination, configured once.
+  `neox-agent`, with TXT `path=/agent`. Neox resolves this automatically when
+  Run Agent Task fires — no IP or port is ever configured on the phone.
+- The Shortcuts "Get Contents of URL" POST (below) is only a legacy fallback
+  for older Neox builds; current builds hand off directly over Bonjour.
 
 **Who knows what:** the app never hardcodes the bridge address — it either
 resolves it via Bonjour (target state) or the Shortcut holds the `.local` URL
@@ -198,11 +197,11 @@ inbox.
    handoff: the instruction plus the phone's MCP URL. Then act with the tools
    in this skill (search → index → export → download).
 
-Tell the user the interim one-time Shortcuts setup (only needed until the app
-ships Bonjour discovery; the `.local` URL survives DHCP changes):
-*Shortcuts → new shortcut → **Run Agent Task** (Neox) → **Get Contents of
-URL** → `http://<mac>.local:8787/agent`, Method POST, Body = *Provided
-Input*. Optionally wrap in a "Run when connected to home Wi-Fi" automation.*
+Tell the user (only if they run an older Neox build): the interim Shortcuts
+setup POSTs to the bridge's `.local` URL —
+*Shortcuts → Run Agent Task (Neox) → Get Contents of URL →
+`http://<mac>.local:8787/agent`, Method POST, Body = Provided Input.*
+Current builds need no Shortcut at all.
 
 Fallbacks: the message is also on the phone's clipboard (paste into chat).
 Stop the bridge when the session's work ends (`pkill -f neox-bridge.py`) —
@@ -214,7 +213,7 @@ a plain LAN-only HTTP endpoint, never expose it beyond the home network.
 2. `vision.index {"days":2}` if rows lack a `vision` summary
 3. `media.search {"days":2,"has_label":"…","with_people":true}` → shortlist
 4. `video.sample_frames` / `media.thumbnail` to verify picks
-5. `media.export` shortlist → `curl -C -` → edit locally → `clear_exports`
+5. `media.export` shortlist → `curl -C -` → edit locally → `media.clear`
 
 **"What does this screenshot say?"**
 `media.search {"media_type":"image","has_text":"…","limit":5}` or
@@ -222,7 +221,7 @@ a plain LAN-only HTTP endpoint, never expose it beyond the home network.
 
 **"Pull everything since Friday off my phone"**
 `media.search {"after":"<iso>","limit":500}` paging with `offset` →
-`media.export` in batches of ~10 → ranged downloads → `clear_exports`.
+`media.export` in batches of ~10 → ranged downloads → `media.clear`.
 
 ## When Neox isn't installed
 

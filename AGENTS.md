@@ -26,7 +26,9 @@ Neox/
     Tool.swift               ToolDefinition / JSONValue (AppAgent-style types)
     ServerController.swift   lifecycle singleton; registers all tools; serves
                              exportsDir at /files/; request log publisher
-    MediaTools.swift         media.search / media.export / clear_exports;
+    DebugTools.swift         agent.handoff — self-test of the phone→bridge
+                             handoff path (not part of the media workflow)
+    MediaTools.swift         media.search / media.export / media.clear;
                              search supports vision-index filters (has_label /
                              has_text / with_people) + per-row `vision` summary
     VisionTools.swift        media.meta / media.thumbnail / vision.* /
@@ -36,9 +38,13 @@ Neox/
                              VisionIndexer batch engine + search/meta helpers
   Intents/
     RunAgentIntent.swift     "Run Agent Task": ensure server, compose handoff
-                             message, clipboard fallback, output value;
+                             message, Bonjour-discover the agent bridge and
+                             POST to it (clipboard/output fallback);
                              openAppWhenRun (foregrounds for unattended runs);
                              Photos preflight
+    AgentBridge.swift        phone-side half of the bridge contract:
+                             NWBrowser(_neox-agent._tcp) → raw-HTTP POST over
+                             NWConnection (Gate one-shot latch for races)
     AnalyzeMediaIntent.swift "Analyze Media": batch vision index (days/redo
                              parameters), dialog reports the summary
     AgentHandoff.swift       the ONLY place the agent handoff message is built
@@ -48,9 +54,9 @@ Neox/
   AgentKit/                  vendored from copilot-ios/AppAgent (NOT an SPM
                              dependency) — remote UI automation for agent-driven
                              self-testing on the device:
-    AppAgentToolProvider.swift  `app_agent` tool: snapshot/tap/type/swipe/find/
+    AppAgentToolProvider.swift  `agent.pilot` tool: snapshot/tap/type/swipe/find/
                              scroll_to/pick/screenshot of THIS app's UI
-    DemoToolProvider.swift      `demo` tool: spotlight/annotate/caption/say(TTS)/
+    DemoToolProvider.swift      `agent.demo` tool: spotlight/annotate/caption/say(TTS)/
                              step/cursor/highlight overlays
     DemoRuntime.swift           overlay state machine (+ event recording)
     DemoOverlayView.swift       SwiftUI overlay rendering demo visuals
@@ -76,8 +82,8 @@ Hard rules:
 ## Self-testing on the device
 
 The app embeds its own automation: after deploy, drive and verify the UI from
-the Mac over MCP — `app_agent` with `snapshot`/`tap`/`type`/`screenshot` and
-`demo` for visual overlays. `scripts/remote-deploy.sh --snapshot` and
+the Mac over MCP — `agent.pilot` with `snapshot`/`tap`/`type`/`screenshot` and
+`agent.demo` for visual overlays. `scripts/remote-deploy.sh --snapshot` and
 `--mcp CMD [ARGS]` are shortcuts for this loop.
 
 ## Regenerating / building locally
