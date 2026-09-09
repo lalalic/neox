@@ -5,6 +5,8 @@ import SwiftUI
 /// what the server is doing, and grants Photos permission once.
 struct StatusView: View {
     @EnvironmentObject private var bridge: ServerController
+    // Neoy bridge section starts collapsed (like Tools/Siri); tap to expand.
+    @State private var neoyExpanded = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -48,7 +50,9 @@ struct StatusView: View {
             .padding(12)
         }
         .background(Color(.systemBackground))
-        .onAppear { bridge.ensureRunning() }
+        // No .onAppear ensureRunning() here — NeoxApp's scenePhase(.active)
+        // handler already restarts on every foreground. Keeping both would
+        // restart twice at launch and log two 'listening' lines.
     }
 
     private var ListView: some View {
@@ -72,22 +76,24 @@ struct StatusView: View {
             // pair, codename "Neoy". Tap to select the preferred one; the
             // intent hands off there.
             Section {
-                DisclosureGroup("Neoy (\(bridge.discoveredBridges.count))") {
+                DisclosureGroup("Neoy (\(bridge.discoveredBridges.count))", isExpanded: $neoyExpanded) {
                     ForEach(bridge.discoveredBridges) { entry in
-                        HStack {
+                        HStack(spacing: 6) {
                             Image(systemName: bridge.preferredBridge == entry.name
                                 ? "checkmark.circle.fill" : "circle")
                                 .foregroundStyle(Color.accentColor)
                                 .opacity(bridge.preferredBridge == entry.name ? 1 : 0.35)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(entry.displayName)
-                                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                                    .foregroundStyle(.primary)
-                                Text(entry.endpointText)
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
+                            // Single line: name (semibold) + smaller address,
+                            // never wraps — scale/truncate together instead.
+                            (Text(entry.displayName)
+                                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(.primary)
+                             + Text("  " + entry.endpointText)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.secondary))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             // Select button kept OUTSIDE the row-tap target:
                             // a full-row Button inside DisclosureGroup content
                             // swallows taps, breaking fold/unfold.

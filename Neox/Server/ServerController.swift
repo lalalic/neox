@@ -130,7 +130,7 @@ final class ServerController: ObservableObject {
             try server.start()
             self.server = server
             state = .running
-            appendLog("listening on 0.0.0.0:\(port) · bonjour neox._mcp._tcp")
+            appendLog("neox listening on 0.0.0.0:\(port)")
         } catch {
             state = .failed(error.localizedDescription)
             appendLog("start failed: \(error.localizedDescription)")

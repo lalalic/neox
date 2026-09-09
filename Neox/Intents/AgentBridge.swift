@@ -104,11 +104,13 @@ final class AgentBridgeDiscovery: ObservableObject {
         /// the raw instance name.
         var displayName: String { host ?? name }
 
-        /// Human-readable endpoint for the status screen.
+        /// Compact address for the single-line row (no machine-name prefix —
+        /// the name is rendered separately and larger).
         var endpointText: String {
-            if let ip, let port { return "\(displayName) · \(ip):\(port)" }
-            if let port { return "\(displayName):\(port)" }
-            return "\(displayName) · neoy bridge"
+            if let ip, let port { return "\(ip):\(port)" }
+            if let host, let port { return "\(host):\(port)" }
+            if let port { return "port \(port)" }
+            return "neoy bridge"
         }
     }
 
