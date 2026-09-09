@@ -129,17 +129,27 @@ struct StatusView: View {
                 }
             }
 
+            // Hourly background indexing — only for devices that can run
+            // the full vision pass (hidden elsewhere; nothing to automate).
+            if bridge.caps?.indexing == true {
+                Section {
+                    Toggle("Analyze media hourly", isOn: $bridge.autoIndex)
+                    if let last = bridge.lastAutoIndex {
+                        Text(last)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Auto-index")
+                }
+            }
+
             Section {
                 DisclosureGroup("Siri / Shortcuts") {
                     Text("“Hey Siri, create a vlog with Neox”")
                         .font(.subheadline)
                     Text("“Hey Siri, analyze my media with Neox”")
                         .font(.subheadline)
-                    Text(AgentHandoff.message(instruction: AgentHandoff.defaultInstruction,
-                                              mcpURL: bridge.mcpURL))
-                        .font(.system(size: 11, weight: .regular, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
                 }
             }
         }

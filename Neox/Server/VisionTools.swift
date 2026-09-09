@@ -6,6 +6,67 @@ import Speech
 import UIKit
 import Vision
 
+/// Device capability probe: which Vision/Speech features actually work on
+/// this hardware. Probed once at startup against a tiny synthetic image —
+/// older phones can lack the classification taxonomy model, and one failing
+/// request inside the combined analysis pass would fail every asset.
+/// Results decide which tools are exposed to MCP clients.
+enum VisionCaps {
+
+    struct Summary: Equatable, Sendable {
+        var classify = false
+        var ocr = false
+        var faces = false
+        var featurePrint = false
+        var speech = false
+        /// The full index pass needs all three Vision requests to succeed.
+        var indexing: Bool { classify && ocr && faces }
+    }
+
+    private static let lock = NSLock()
+    // Guarded by `lock` above — safe from any thread.
+    nonisolated(unsafe) private static var stored = Summary()
+
+    /// Last probed summary (all-false until `probe()` completes).
+    static var summary: Summary {
+        lock.lock(); defer { lock.unlock() }
+        return stored
+    }
+
+    /// Probe the hardware. Runs fast (<0.5s) — 16×16 image, one request per
+    /// capability. Safe to call off-main.
+    @discardableResult
+    static func probe() -> Summary {
+        var s = Summary()
+        if let cg = probeImage() {
+            let handler = VNImageRequestHandler(cgImage: cg, orientation: .up)
+            s.classify = (try? handler.perform([VNClassifyImageRequest()])) != nil
+            let ocr = VNRecognizeTextRequest()
+            ocr.recognitionLevel = .fast
+            s.ocr = (try? handler.perform([ocr])) != nil
+            s.faces = (try? handler.perform([VNDetectFaceRectanglesRequest()])) != nil
+            s.featurePrint = (try? handler.perform([VNGenerateImageFeaturePrintRequest()])) != nil
+        }
+        let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+        let status = SFSpeechRecognizer.authorizationStatus()
+        s.speech = (recognizer?.isAvailable ?? false)
+            && status != .denied && status != .restricted
+        lock.lock(); stored = s; lock.unlock()
+        return s
+    }
+
+    /// Solid-gray 16×16 image — just enough for the frameworks to run.
+    private static func probeImage() -> CGImage? {
+        let side = 16
+        var pixels = [UInt8](repeating: 128, count: side * side * 4)
+        let ctx = CGContext(data: &pixels, width: side, height: side,
+                            bitsPerComponent: 8, bytesPerRow: side * 4,
+                            space: CGColorSpaceCreateDeviceRGB(),
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        return ctx?.makeImage()
+    }
+}
+
 /// On-device intelligence tools: deep metadata, thumbnails, Vision analysis
 /// (classify / OCR / people), visual similarity, video frame sampling and
 /// speech transcription. Everything runs locally — no network APIs.
@@ -18,7 +79,7 @@ enum VisionMediaTools {
 
     static func tools(exportsDir: URL) -> [ToolDefinition] {
         try? FileManager.default.createDirectory(at: exportsDir, withIntermediateDirectories: true)
-        return [
+        let tools: [ToolDefinition] = [
             ToolDefinition(
                 name: "media.meta",
                 description: "Full metadata for one asset: EXIF (camera, lens, ISO, exposure), GPS coordinates, format, size, dates. Richer than media.search rows.",
@@ -128,6 +189,18 @@ enum VisionMediaTools {
                 }
             ),
         ]
+
+        // Expose only what this hardware actually supports (see VisionCaps).
+        let caps = VisionCaps.summary
+        let needsCap: [String: Bool] = [
+            "vision.classify": caps.classify,
+            "vision.ocr": caps.ocr,
+            "vision.detect_people": caps.faces,
+            "vision.similarity": caps.featurePrint,
+            "vision.index": caps.indexing,
+            "video.transcribe": caps.speech,
+        ]
+        return tools.filter { needsCap[$0.name] ?? true }
     }
 
     // MARK: - media.meta

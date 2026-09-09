@@ -32,6 +32,20 @@ final class ServerController: ObservableObject {
     @Published var preferredBridge: String? {
         didSet { UserDefaults.standard.set(preferredBridge, forKey: AgentBridge.preferredKey) }
     }
+    /// Device capability probe result (nil until the startup probe finishes).
+    @Published private(set) var caps: VisionCaps.Summary?
+    /// Hourly background vision-index (persisted). Only effective when the
+    /// device supports the full indexing pass.
+    @Published var autoIndex: Bool {
+        didSet {
+            UserDefaults.standard.set(autoIndex, forKey: "neox.autoIndex")
+            scheduleAutoIndex()
+            if autoIndex { runAutoIndex() }
+        }
+    }
+    /// Human-readable result of the last auto-index run.
+    @Published private(set) var lastAutoIndex: String?
+    private var autoTimer: Timer?
 
     /// Remote UI automation for agent-driven self-testing:
     /// `agent.pilot` (snapshot/tap/type/…) + `agent.demo` (spotlight/caption/TTS).
@@ -44,6 +58,7 @@ final class ServerController: ObservableObject {
     private init() {
         photosStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         preferredBridge = UserDefaults.standard.string(forKey: AgentBridge.preferredKey)
+        autoIndex = UserDefaults.standard.bool(forKey: "neox.autoIndex")
     }
 
     /// Idempotent — safe to call on every foreground activation.
@@ -101,7 +116,6 @@ final class ServerController: ObservableObject {
         try? FileManager.default.createDirectory(at: exportsDir, withIntermediateDirectories: true)
         server.setStaticFileRoot(exportsDir)
         server.register(tools: MediaTools.tools(exportsDir: exportsDir))
-        server.register(tools: VisionMediaTools.tools(exportsDir: exportsDir))
         server.register(tools: agentKit.tools)
         server.register(tools: DebugTools.tools())
         server.register(
@@ -131,6 +145,26 @@ final class ServerController: ObservableObject {
             self.server = server
             state = .running
             appendLog("neox listening on 0.0.0.0:\(port)")
+            // Probe device caps (fast, off-main), then register the
+            // Vision/Speech tools this hardware actually supports.
+            // Identity guard: the server may have been re-created (foreground
+            // restart) by the time the probe finishes.
+            Task { @MainActor [weak self] in
+                let caps = await withCheckedContinuation { (cont: CheckedContinuation<VisionCaps.Summary, Never>) in
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        cont.resume(returning: VisionCaps.probe())
+                    }
+                }
+                guard let self, self.server === server else { return }
+                let tools = VisionMediaTools.tools(exportsDir: self.exportsDir)
+                if !tools.isEmpty { server.register(tools: tools) }
+                self.registeredTools = server.toolNames
+                self.caps = caps
+                self.appendLog("caps: classify \(caps.classify ? "✓" : "✗") · ocr \(caps.ocr ? "✓" : "✗") · "
+                             + "faces \(caps.faces ? "✓" : "✗") · speech \(caps.speech ? "✓" : "✗") · "
+                             + "tools \(server.toolNames.count)")
+                if self.autoIndex { self.scheduleAutoIndex() }
+            }
         } catch {
             state = .failed(error.localizedDescription)
             appendLog("start failed: \(error.localizedDescription)")
@@ -144,6 +178,47 @@ final class ServerController: ObservableObject {
         photosStatus = status
         appendLog("photos access: \(describe(status))")
         return status
+    }
+
+    // MARK: - Hourly auto-index
+
+    /// (Re)arm the hourly vision-index timer. iOS suspends timers while
+    /// backgrounded; ensureRunning() re-calls this on every foreground so
+    /// the next tick lands within an hour of coming back.
+    private func scheduleAutoIndex() {
+        autoTimer?.invalidate()
+        autoTimer = nil
+        guard autoIndex else { return }
+        guard caps?.indexing == true else {
+            appendLog("auto-index off: this device doesn't support on-device vision")
+            return
+        }
+        autoTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.runAutoIndex() }
+        }
+    }
+
+    /// One incremental index pass: only assets from the last 7 days that
+    /// aren't indexed yet, capped at 500 — near-zero cost once caught up.
+    private func runAutoIndex() {
+        guard autoIndex, caps?.indexing == true else { return }
+        appendLog("auto-index: running…")
+        Task {
+            let summary = await VisionIndexer.run(days: 7, redo: false, limit: 500)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                let text: String
+                if summary.failed == -1 {
+                    text = "auto-index skipped: a manual run is in progress"
+                } else if summary.failed == -2 {
+                    text = "auto-index skipped: no photo library access"
+                } else {
+                    text = "auto-index: +\(summary.indexed) new, \(summary.skipped) known, \(summary.totalIndexed) total"
+                }
+                lastAutoIndex = text
+                appendLog(text)
+            }
+        }
     }
 
     /// Delete all exported media from the /files/ serving directory.

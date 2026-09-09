@@ -30,7 +30,14 @@ public final class InteractionEngine {
             return "Tapped \(ref) [\(element.kind)] \"\(element.label)\""
         }
 
-        // Method 2: For UIControl subclasses, send touch events
+        // Method 2: For UIControl subclasses, send touch events. UISwitch is
+        // special: SwiftUI Toggle hosts one, and its binding listens to
+        // .valueChanged — setOn + valueChanged is the only reliable trigger.
+        if let switchControl = view as? UISwitch {
+            switchControl.setOn(!switchControl.isOn, animated: true)
+            switchControl.sendActions(for: .valueChanged)
+            return "Toggled \(ref) [\(element.kind)] \"\(element.label)\" → \(switchControl.isOn)"
+        }
         if let control = view as? UIControl {
             control.sendActions(for: .touchUpInside)
             return "Tapped \(ref) [\(element.kind)] \"\(element.label)\""
@@ -45,6 +52,11 @@ public final class InteractionEngine {
         // Method 4: Hit-test based approach as fallback
         if let window = view.window,
            let hitView = window.hitTest(center, with: nil) {
+            if let switchControl = hitView as? UISwitch {
+                switchControl.setOn(!switchControl.isOn, animated: true)
+                switchControl.sendActions(for: .valueChanged)
+                return "Toggled \(ref) [\(element.kind)] \"\(element.label)\" → \(switchControl.isOn) (via hitTest)"
+            }
             if let control = hitView as? UIControl {
                 control.sendActions(for: .touchUpInside)
                 return "Tapped \(ref) [\(element.kind)] \"\(element.label)\" (via hitTest)"

@@ -23,6 +23,12 @@ struct AnalyzeMediaIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<String> {
+        // Device support check: probe (fast) if startup hasn't already.
+        let caps = VisionCaps.summary.indexing ? VisionCaps.summary : VisionCaps.probe()
+        guard caps.indexing else {
+            return .result(value: "Error: this device doesn't support on-device vision analysis",
+                           dialog: "This device can't run on-device media analysis.")
+        }
         let summary = await VisionIndexer.run(days: max(days, 0), redo: redo, limit: 2000)
         if summary.failed == -1 {
             return .result(value: "Error: another analysis run is already in progress",
