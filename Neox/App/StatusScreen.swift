@@ -5,8 +5,9 @@ import SwiftUI
 /// what the server is doing, and grants Photos permission once.
 struct StatusView: View {
     @EnvironmentObject private var bridge: ServerController
-    // Neoy bridge section starts collapsed (like Tools/Siri); tap to expand.
+    // Reference sections start collapsed; tap a header to expand.
     @State private var neoyExpanded = false
+    @State private var siriExpanded = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -129,27 +130,22 @@ struct StatusView: View {
                 }
             }
 
-            // Hourly background indexing — only for devices that can run
-            // the full vision pass (hidden elsewhere; nothing to automate).
-            if bridge.caps?.indexing == true {
-                Section {
-                    Toggle("Analyze media hourly", isOn: $bridge.autoIndex)
-                    if let last = bridge.lastAutoIndex {
-                        Text(last)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text("Auto-index")
-                }
-            }
-
+            // Supported App Intents — what Siri/Shortcuts can run, with the
+            // phrase for each. Free-form instruction text is edited in the
+            // Shortcuts app (App Intents allows no free-form placeholders).
             Section {
-                DisclosureGroup("Siri / Shortcuts") {
-                    Text("“Hey Siri, create a vlog with Neox”")
-                        .font(.subheadline)
-                    Text("“Hey Siri, analyze my media with Neox”")
-                        .font(.subheadline)
+                DisclosureGroup("Siri / Shortcuts", isExpanded: $siriExpanded) {
+                    ForEach(intentRows) { row in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.intent)
+                                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                            ForEach(row.phrases, id: \.self) { phrase in
+                                Text("“Hey Siri, \(phrase)”")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -159,6 +155,28 @@ struct StatusView: View {
     private struct ToolRow {
         let name: String
         let summary: String
+    }
+
+    /// One row per supported App Intent: name + its Siri phrases (mirrors
+    /// NeoxShortcuts.appShortcuts — keep in sync).
+    private struct IntentRow: Identifiable {
+        let id: String
+        let intent: String
+        let phrases: [String]
+    }
+
+    private var intentRows: [IntentRow] {
+        [
+            IntentRow(id: "run-agent", intent: "Run Agent Task", phrases: [
+                "create a vlog with Neox",
+                "make a vlog with Neox",
+                "run my agent with Neox",
+            ]),
+            IntentRow(id: "analyze-media", intent: "Analyze Media", phrases: [
+                "analyze my media with Neox",
+                "index my photos with Neox",
+            ]),
+        ]
     }
 
     /// One-line description per registered tool (UI summary, kept in sync
