@@ -141,84 +141,145 @@ Prefer `preset=720p` for video drafts; `original` only when quality matters.
 
 ## Workflow recipes
 
-**Receiving "Run Agent Task" handoffs — implement the bridge (do this at session start)**
+**Receiving "Run Agent Task" handoffs — run the bridge (do this at session start)**
 
-The phone's **Run Agent Task** intent produces the handoff message (user
-instruction + the phone's MCP URL). There is no built-in transport to your
-chat — so *you* implement and run a **bridge**: a small HTTP endpoint on this
-machine that receives the handoff and is discoverable by the phone via
-Bonjour.
+The phone's **Run Agent Task** intent sends the handoff message (user
+instruction + the phone's MCP URL) to a small HTTP endpoint on this machine —
+the **bridge** (codename **Neoy**) — which it finds via Bonjour. Nothing is
+configured on the phone; if the bridge isn't running, the message falls back
+to the phone's clipboard.
 
-**The discovery contract** (mirrors how the phone advertises `neox._mcp._tcp`):
+### The bridge contract
 
-- The bridge (codename **Neoy**) advertises `_neoy._tcp` on the LAN. Use
-  the machine name as the instance name AND in TXT `host=` — the phone's
-  status screen shows it, so users see e.g. "mac111" instead of a cryptic
-  "neox-agent". Neox resolves this automatically when Run Agent Task fires —
-  no IP or port is ever configured on the phone.
-- The Shortcuts "Get Contents of URL" POST (below) is only a legacy fallback
-  for older Neox builds; current builds hand off directly over Bonjour.
+Two one-way pipes. Both bodies are the complete handoff message as plain
+UTF-8 text (`Content-Type: text/plain`) — never parse it; it is already a
+valid user message.
 
-**Who knows what:** the app never hardcodes the bridge address — it either
-resolves it via Bonjour (target state) or the Shortcut holds the `.local` URL
-(interim). The bridge is stateless: POST body → inbox file; you read the
-inbox.
+1. **Phone → bridge** — `POST /agent`. The phone discovers the bridge by
+   browsing `_neoy._tcp` on the LAN and reading its TXT records (`host=`
+   machine name, `port=`, `ip=` LAN address — `ip=` lets the phone skip mDNS
+   resolution, which stalls on iOS). A `200` response means delivered.
+   Advertise the machine name as the instance name so the user sees e.g.
+   "studio-mac" on the phone's status screen, not a cryptic "neox-agent".
+2. **Bridge → session (turn start)** — `GET /agent/next?timeout=25`.
+   Long-poll: responds with the oldest pending handoff as the body and
+   deletes it (FIFO, at-most-once), or `204` after `timeout` seconds when
+   nothing is pending. The session-side watcher loops on this endpoint; each
+   returned body starts exactly one new agent turn — as if the user had sent
+   it. `GET /agent/peek` returns the same body without consuming (debug /
+   recovery after a crashed watcher).
 
-1. **Implement** — write this as `neox-bridge.py` in your workspace (or
-   `/tmp`), then start it:
-   ```bash
-   cat > /tmp/neox-bridge.py <<'PY'
-   import subprocess, http.server, socketserver
-   PORT = 8787
-   class H(http.server.BaseHTTPRequestHandler):
-       def do_POST(self):
-           body = self.rfile.read(int(self.headers.get('Content-Length', 0))).decode()
-           open('/tmp/neox-inbox.txt', 'a').write(body + '\n---\n')
-           self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
-       def log_message(self, *a): pass
-   socketserver.TCPServer.allow_reuse_address = True
-   # Bonjour: the phone resolves _neoy._tcp to find us. Instance name and
-   # host= TXT carry the machine name for display; ip= lets the phone skip
-   # mDNS resolution entirely and connect directly (iOS stalls on .local).
-   import socket
-   HOST = socket.gethostname().split('.')[0]
-   # Best-effort LAN IP: the one the default route uses.
-   try:
-       s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-       s.connect(('8.8.8.8', 80)); IP = s.getsockname()[0]; s.close()
-   except Exception: IP = '127.0.0.1'
-   subprocess.Popen(['dns-sd', '-R', HOST, '_neoy._tcp', '.', str(PORT),
-                     'path=/agent', f'host={HOST}', f'port={PORT}', f'ip={IP}'],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-   socketserver.TCPServer(('0.0.0.0', PORT), H).serve_forever()
-   PY
-   nohup python3 /tmp/neox-bridge.py >/dev/null 2>&1 &
-   sleep 1
-   echo "bridge up — inbox: /tmp/neox-inbox.txt · shortcut URL: http://$(scutil --get LocalHostName).local:8787/agent"
-   ```
-2. **Start it via your session-start hook** so handoffs are always receivable,
-   not only after you remember to run it. Wire `neox-bridge.py` into whatever
-   session-lifecycle hook your harness has (a `SessionStart`/`session_start`
-   hook config, a startup script, or your shell profile). Idempotency: check
-   first so parallel sessions don't double-bind —
-   ```bash
-   curl -s -m 2 -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8787/agent -d ping
-   # 000 → not running → start it; anything else → already up
-   ```
-3. **Consume**: poll `/tmp/neox-inbox.txt` (or `tail -f`) — each entry is a
-   handoff: the instruction plus the phone's MCP URL. Then act with the tools
-   in this skill (search → index → export → download).
+Implementation notes: the server must hold the long-poll GET open without
+blocking POSTs (threaded server); pending handoffs live as one file each
+under `~/.neoy/inbox/`.
 
-Tell the user (only if they run an older Neox build): the interim Shortcuts
-setup POSTs to the bridge's `.local` URL —
-*Shortcuts → Run Agent Task (Neox) → Get Contents of URL →
-`http://<mac>.local:8787/agent`, Method POST, Body = Provided Input.*
-Current builds need no Shortcut at all.
+### 1. Run it
 
-Fallbacks: the message is also on the phone's clipboard (paste into chat).
-Stop the bridge when the session's work ends (`pkill -f neox-bridge.py`) —
-unless the session hook is meant to keep it alive for future handoffs; it is
-a plain LAN-only HTTP endpoint, never expose it beyond the home network.
+Check first — parallel sessions must not double-bind:
+
+```bash
+curl -s -m 2 -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8787/agent -d ping
+# 000 → not running → start it; anything else → already up
+```
+
+```bash
+mkdir -p ~/.neoy && cat > ~/.neoy/neox-bridge.py <<'PY'
+import glob, os, socket, socketserver, subprocess, time
+from http.server import BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
+
+PORT = 8787
+INBOX = os.path.expanduser("~/.neoy/inbox")   # one file per pending handoff
+os.makedirs(INBOX, exist_ok=True)
+
+def pending():
+    return sorted(glob.glob(os.path.join(INBOX, "*.txt")))
+
+class H(BaseHTTPRequestHandler):
+    def do_POST(self):                        # phone → bridge
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        if len(body) >= 8:                    # tiny bodies ("ping") are health checks
+            with open(os.path.join(INBOX, f"{time.time_ns()}.txt"), "wb") as f:
+                f.write(body)
+        self.send_response(200); self.end_headers(); self.wfile.write(b"ok")
+
+    def do_GET(self):                         # session → bridge (long-poll)
+        q = parse_qs(urlparse(self.path).query)
+        deadline = time.time() + float(q.get("timeout", ["0"])[0])
+        consume = "/next" in self.path
+        while True:
+            files = pending()
+            if files:
+                data = open(files[0], "rb").read()
+                if consume:
+                    os.unlink(files[0])
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers(); self.wfile.write(data)
+                return
+            if time.time() >= deadline:
+                self.send_response(204); self.end_headers(); return
+            time.sleep(0.5)
+
+    def log_message(self, *a): pass
+
+# Bonjour: the phone resolves _neoy._tcp to find us. Instance name and host=
+# TXT carry the machine name for display; ip= lets the phone skip mDNS
+# resolution entirely and connect directly (iOS stalls on .local).
+HOST = socket.gethostname().split(".")[0]
+try:                                          # best-effort LAN IP
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.connect(("8.8.8.8", 80)); IP = s.getsockname()[0]; s.close()
+except Exception:
+    IP = "127.0.0.1"
+subprocess.Popen(["dns-sd", "-R", HOST, "_neoy._tcp", ".", str(PORT),
+                  "path=/agent", f"host={HOST}", f"port={PORT}", f"ip={IP}"],
+                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+socketserver.ThreadingTCPServer.allow_reuse_address = True
+# ThreadingTCPServer, not TCPServer: a held-open long-poll GET must not block POSTs.
+socketserver.ThreadingTCPServer(("0.0.0.0", PORT), H).serve_forever()
+PY
+nohup python3 ~/.neoy/neox-bridge.py >/dev/null 2>&1 &
+sleep 1
+echo "bridge up — http://$(scutil --get LocalHostName).local:8787/agent"
+```
+
+Start both bridge and watcher from your session-start hook (a
+`SessionStart`/`session_start` hook config, a startup script, or your shell
+profile), so handoffs are receivable even when you're idle.
+
+### 2. Wire it to your turn loop (the watcher)
+
+The bridge only holds handoffs; *your harness* starts turns. Whatever
+mechanism your harness has for injecting a user message — a chat-input API,
+a headless one-shot prompt, a hook — point it at the bridge:
+
+```bash
+while true; do
+  msg=$(curl -s -m 30 "http://127.0.0.1:8787/agent/next?timeout=25")
+  [ -n "$msg" ] && start_agent_turn "$msg"    # ← your harness's injection point
+done
+```
+
+If your harness can't inject turns programmatically, poll `GET /agent/peek`
+whenever you get control and confirm with the user before acting on a
+pending handoff.
+
+### 3. Housekeeping
+
+- Multiple agent sessions running watchers on one machine: handoffs are
+  at-most-once — whichever session polls first consumes them.
+- Legacy apps: some installed versions use a Shortcuts "Get Contents of URL"
+  POST to `http://<mac>.local:8787/agent` (Method POST, Body = Provided
+  Input) — the same endpoint, so no bridge change is needed. The current
+  App Store release needs no Shortcut at all.
+- If the bridge is down, the message is also on the phone's clipboard —
+  the user can paste it into chat.
+- The bridge is a plain LAN-only HTTP endpoint: never expose it beyond the
+  home network. Stop it when the session's work ends (`pkill -f
+  neox-bridge.py`) unless the hook is meant to keep it alive for future
+  handoffs.
 
 **"Build a vlog from yesterday"**
 1. `media.search {"days":2}` (or the user's date range) → skim `vision` labels
@@ -237,7 +298,6 @@ a plain LAN-only HTTP endpoint, never expose it beyond the home network.
 
 ## When Neox isn't installed
 
-The phone needs the Neox app built and installed on it first (Xcode + an
-Apple Developer team; the app's own repo has an `AGENTS.md` with the machine
-notes). That is a dev task, not an agent task: point the user at the repo's
-build instructions rather than attempting a remote iOS build from here.
+Neox is on the App Store. If the phone doesn't have it, ask the user to
+install it from there and grant Local Network and Photos permission on first
+launch — no other setup is needed.

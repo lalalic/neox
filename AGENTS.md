@@ -66,6 +66,15 @@ Neox/
   Info.plist                 display name, Bonjour service, permission strings
   Neox.entitlements          intentionally empty dict — real entitlements come
                              from the provisioning profile at signing
+NeoxTests/                   XCTests hosted in the app; run on the device via
+                             `scripts/remote-deploy.sh --test`
+skills/
+  neox-phone-mcp/SKILL.md    the ONLY agent-facing doc — ships to desktop
+                             agents. Keep it free of repo/build/dev internals
+                             (the app is on the App Store): it documents
+                             discovery, the MCP tools, and the Neoy bridge
+                             contract (phone POSTs /agent; sessions long-poll
+                             /agent/next to start turns).
 scripts/remote-deploy.sh     sync + build on mac111 + install on iPhone
 ```
 
