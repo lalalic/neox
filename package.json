@@ -1,0 +1,17 @@
+{
+  "name": "neox",
+  "version": "1.0.0",
+  "description": "A headless iPhone app whose only consumer is a **desktop coding agent**. It runs an MCP (Model Context Protocol) server on the local network so an agent can search, analyze, and pull photos/videos off the phone over WiFi.",
+  "homepage": "https://github.com/lalalic/neox#readme",
+  "bugs": {
+    "url": "https://github.com/lalalic/neox/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lalalic/neox.git"
+  },
+  "license": "ISC",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}
