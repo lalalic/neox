@@ -3,15 +3,15 @@ import Network
 
 /// Phone-side half of the agent-bridge contract.
 ///
-/// The desktop bridge advertises `_neox-agent._tcp` (TXT `path=/agent`) — the
-/// mirror of this app's `neox._mcp._tcp`. Discovery means the phone never
-/// holds a bridge address: browse → connect to the resolved endpoint → speak
-/// minimal HTTP/1.1 by hand (raw `NWConnection`, no URLSession, no
-/// host-name resolution needed) → POST the handoff.
+/// The desktop bridge ("Neoy") advertises `_neoy._tcp` with TXT records
+/// carrying the machine name (`host=`), port (`port=`), and LAN IP (`ip=`).
+/// Discovery means the phone never hardcodes a bridge address: browse →
+/// read TXT metadata → POST via URLSession to the IP directly (bypassing
+/// iOS's Local Network gate that silently blocks raw NWConnection).
 enum AgentBridge {
 
     /// Bonjour service type the desktop bridge advertises.
-    static let serviceType = "_neox-agent._tcp"
+    static let serviceType = "_neoy._tcp"
     /// Fixed POST path of the bridge contract (also advertised in TXT).
     static let path = "/agent"
 
@@ -30,151 +30,47 @@ enum AgentBridge {
         case failed(String)
     }
 
-    /// Resolve the bridge to hand off to: the user's preferred instance if
-    /// it's among `discovered`, else the first discovered one.
-    static func selectEndpoint(from discovered: [AgentBridgeDiscovery.Entry],
-                               preferred: String?) -> NWEndpoint? {
-        guard !discovered.isEmpty else { return nil }
-        let entry = discovered.first { $0.name == preferred } ?? discovered.first!
-        return .service(name: entry.name,
-                        type: serviceType,
-                        domain: "local",
-                        interface: nil)
-    }
-
     /// Browse for the bridge and POST `message` to it. `discovered` is the
     /// status screen's live snapshot and `preferred` the user's pick (nil =
     /// first discovered); `timeout` bounds the whole exchange so the intent
     /// never hangs.
+    ///
+    /// Uses URLSession (not raw NWConnection) — iOS's Local Network privacy
+    /// gate silently blocks NWConnection to raw IPs and .local hostnames,
+    /// but URLSession triggers the permission prompt and honors the grant.
     static func handoff(_ message: String,
                         discovered: [AgentBridgeDiscovery.Entry],
                         preferred: String?,
                         timeout: TimeInterval = 8) async -> Outcome {
-        // 1. Resolve — prefer the user's pick, else first discovered.
-        let endpoint = selectEndpoint(from: discovered, preferred: preferred)
-        guard let endpoint else { return .bridgeNotFound }
+        guard !discovered.isEmpty else { return .bridgeNotFound }
+        let entry = discovered.first { $0.name == preferred } ?? discovered.first!
 
-        // 2. Connect and POST raw HTTP. The reference bridge is python
-        // http.server (HTTP/1.0): it closes the socket after the response,
-        // so read-until-EOF is the completion signal. Note: NWConnection's
-        // own Bonjour resolve of a `.service` endpoint can stall indefinitely
-        // on iOS (Local-Network + mDNS quirk) — the browser already did the
-        // discovery dance successfully, so instead we hand NWConnection an
-        // endpoint whose host name we let mDNS resolve via a dedicated,
-        // observable resolve step and skip NW's implicit path entirely.
-        let body = Data(message.utf8)
-        let head = "POST \(path) HTTP/1.1\r\n"
-            + "Host: neox-agent\r\n"
-            + "Content-Type: text/plain\r\n"
-            + "Content-Length: \(body.count)\r\n"
-            + "Connection: close\r\n\r\n"
-        let payload = Data(head.utf8) + body
-
-        // Resolve the service's host/port with an explicit NWBrowser resolve
-        // (browseResults give us the endpoint, but its host is only available
-        // after resolution — reuse the discovery snapshot's name and let the
-        // Poster's NWConnection do the resolving, but with a longer window:
-        // first resolve on a fresh interface can take >8 s).
-        let effectiveTimeout = max(timeout, 20)
-
-        return await withCheckedContinuation { cont in
-            Poster(endpoint: endpoint, payload: payload, timeout: effectiveTimeout) { outcome in
-                cont.resume(returning: outcome)
-            }.start()
+        // Build the URL from TXT metadata. IP is preferred (no DNS lookup).
+        let hostPart: String
+        if let ip = entry.ip {
+            hostPart = ip
+        } else if let host = entry.host {
+            hostPart = host.hasSuffix(".local") ? host : "\(host).local"
+        } else {
+            return .failed("bridge has no host/ip in TXT")
         }
-    }
+        guard let port = entry.port else { return .failed("bridge has no port in TXT") }
 
-    /// One POST exchange over a single NWConnection. `@unchecked Sendable`:
-    /// all mutable state (buffer, gate) is confined to the connection's
-    /// serial queue + the NSLock inside `Gate`.
-    private final class Poster: @unchecked Sendable {
-        private let connection: NWConnection
-        private let payload: Data
-        private let gate = Gate()
-        private var buffer = Data()
-        private let onDone: @Sendable (Outcome) -> Void
+        let url = URL(string: "http://\(hostPart):\(port)\(path)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("text/plain", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data(message.utf8)
+        request.timeoutInterval = max(timeout, 20)
 
-        init(endpoint: NWEndpoint, payload: Data, timeout: TimeInterval,
-             onDone: @escaping @Sendable (Outcome) -> Void) {
-            let params = NWParameters.tcp
-            params.includePeerToPeer = true
-            let connection = NWConnection(to: endpoint, using: params)
-            self.connection = connection
-            self.payload = payload
-            self.onDone = onDone
-            gate.onTimeout(queue: DispatchQueue(label: "neox.bridge.post.timer"), after: timeout) {
-                connection.cancel()
-                onDone(.failed("timeout waiting for bridge"))
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, http.statusCode == 200 {
+                return .posted
             }
-        }
-
-        func start() {
-            connection.stateUpdateHandler = { [weak self] state in
-                switch state {
-                case .ready:
-                    self?.send()
-                    self?.readLoop()
-                case .failed(let error):
-                    self?.complete(.failed("connect: \(error.localizedDescription)"))
-                default:
-                    break
-                }
-            }
-            connection.start(queue: DispatchQueue(label: "neox.bridge.post"))
-        }
-
-        private func send() {
-            connection.send(content: payload, completion: .contentProcessed { [weak self] error in
-                if let error {
-                    self?.complete(.failed("send: \(error.localizedDescription)"))
-                    self?.connection.cancel()
-                }
-            })
-        }
-
-        /// Read-until-EOF: the reference bridge (python http.server, HTTP/1.0)
-        /// closes the socket after the response, so EOF is the completion.
-        private func readLoop() {
-            connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, isComplete, error in
-                guard let self else { return }
-                if let data { buffer.append(data) }
-                guard !isComplete && error == nil else {
-                    let status = String(decoding: buffer.prefix(64), as: UTF8.self)
-                    let firstLine = status.split(separator: "\r").first.map(String.init) ?? "no reply"
-                    connection.cancel()
-                    complete(status.contains(" 200") ? .posted : .failed("bridge said: \(firstLine)"))
-                    return
-                }
-                readLoop()
-            }
-        }
-
-        private func complete(_ outcome: Outcome) {
-            gate.runOnce { onDone(outcome) }
-        }
-    }
-
-    /// One-shot latch: exactly one `runOnce` body (or the timeout body) ever
-    /// executes, no matter how many Network callbacks race. `@unchecked
-    /// Sendable` because all state sits behind an NSLock — the same pattern
-    /// as the repo's OnceContinuation.
-    private final class Gate: @unchecked Sendable {
-        private let lock = NSLock()
-        private var open = true
-
-        /// Runs `body` if this is the first finish; returns whether it ran.
-        @discardableResult
-        func runOnce(_ body: () -> Void) -> Bool {
-            lock.lock(); defer { lock.unlock() }
-            if open { open = false; body(); return true }
-            return false
-        }
-
-        /// Safety net: run `body` if the exchange hasn't completed in time.
-        func onTimeout(queue: DispatchQueue, after seconds: TimeInterval, _ body: @escaping @Sendable () -> Void) {
-            queue.asyncAfter(deadline: .now() + seconds) { [self] in
-                runOnce(body)
-            }
+            return .failed("bridge returned \((response as? HTTPURLResponse)?.statusCode ?? -1)")
+        } catch {
+            return .failed(error.localizedDescription)
         }
     }
 }
@@ -186,18 +82,34 @@ enum AgentBridge {
 final class AgentBridgeDiscovery: ObservableObject {
 
     struct Entry: Identifiable, Equatable {
-        /// Bonjour instance name, e.g. "neox-agent" — whatever the desktop
-        /// side registered via `dns-sd -R <name> _neox-agent._tcp …`.
+        /// Bonjour instance name — the desktop registers with its machine
+        /// name, so this is already human-readable. Kept as the stable
+        /// identity for preferred-bridge selection.
         let id: String
         let name: String
+        /// Machine name from the TXT `host=` record (nil for older bridges
+        /// that don't advertise it).
+        let host: String?
+        /// TCP port from the TXT `port=` record (nil for older bridges).
+        let port: UInt16?
+        /// IPv4 address from the TXT `ip=` record — lets the phone skip
+        /// all hostname resolution and connect directly.
+        let ip: String?
         /// The NWEndpoint captured at browse time; it resolves lazily when a
         /// connection is opened against it (browse alone doesn't give the
         /// host/port — that's why the old row showed a bogus ":0").
         let endpoint: NWEndpoint
 
-        /// Human-readable endpoint for the status screen. Port is only known
-        /// after resolution, so show the service identity until then.
-        var endpointText: String { "\(name) · _neox-agent._tcp" }
+        /// What the status screen shows: machine name when we have it, else
+        /// the raw instance name.
+        var displayName: String { host ?? name }
+
+        /// Human-readable endpoint for the status screen.
+        var endpointText: String {
+            if let ip, let port { return "\(displayName) · \(ip):\(port)" }
+            if let port { return "\(displayName):\(port)" }
+            return "\(displayName) · neoy bridge"
+        }
     }
 
     private let emitter = Emitter()
@@ -210,12 +122,23 @@ final class AgentBridgeDiscovery: ObservableObject {
 
     func start() {
         guard browser == nil else { return }
-        let browser = NWBrowser(for: .bonjour(type: AgentBridge.serviceType, domain: nil), using: .tcp)
+        // bonjourWithTXTRecord delivers the TXT metadata alongside each browse
+        // result — that's where the desktop's `host=` and `port=` records live.
+        let browser = NWBrowser(for: .bonjourWithTXTRecord(type: AgentBridge.serviceType, domain: nil), using: .tcp)
         self.browser = browser
         browser.browseResultsChangedHandler = { [weak self] results, _ in
             let entries: [Entry] = results.compactMap { result in
                 guard case .service(let n, _, _, _) = result.endpoint else { return nil }
-                return Entry(id: n, name: n, endpoint: result.endpoint)
+                var host: String?
+                var port: UInt16?
+                var ip: String?
+                if case .bonjour(let txt) = result.metadata {
+                    if case .string(let h)? = txt.getEntry(for: "host") { host = h }
+                    if case .string(let p)? = txt.getEntry(for: "port") { port = UInt16(p) }
+                    if case .string(let a)? = txt.getEntry(for: "ip") { ip = a }
+                }
+                return Entry(id: n, name: n, host: host, port: port, ip: ip,
+                             endpoint: result.endpoint)
             }
             Task { @MainActor [weak self] in
                 self?.emitter.emit(entries)

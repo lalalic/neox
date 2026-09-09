@@ -33,6 +33,12 @@ struct RunAgentIntent: AppIntent {
         let bridge = ServerController.shared
         bridge.ensureRunning()
 
+        // ensureRunning() restarts Bonjour browse; give mDNS a beat to
+        // populate so a freshly-started bridge is visible before we check.
+        if bridge.discoveredBridges.isEmpty {
+            try? await Task.sleep(for: .milliseconds(1500))
+        }
+
         // Photos preflight: an unattended automation must not discover a
         // permission wall only when the agent later calls media.search.
         var photosNote = ""

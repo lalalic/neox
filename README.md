@@ -54,7 +54,7 @@ Delivery is owned by Codex Remote / Shortcuts:
   the background, where iOS can suspend the app and drop the MCP listener;
   foregrounding makes the server reliably reachable (the status screen is also
   visible confirmation that the automation fired).
-- **Direct bridge handoff**: the intent browses for `_neox-agent._tcp` (the
+- **Direct bridge handoff**: the intent browses for `_neoy._tcp` (the
   Bonjour service your desktop agent's bridge advertises — see the
   `neox-phone-mcp` skill) and POSTs the message straight to it. No Shortcut
   hop. If no bridge is on the LAN, the message lands on the clipboard as a

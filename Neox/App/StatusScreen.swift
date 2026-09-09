@@ -72,27 +72,33 @@ struct StatusView: View {
             // pair, codename "Neoy". Tap to select the preferred one; the
             // intent hands off there.
             Section {
-                DisclosureGroup("Neoy: \(bridge.discoveredBridges.count) discovered") {
+                DisclosureGroup("Neoy (\(bridge.discoveredBridges.count))") {
                     ForEach(bridge.discoveredBridges) { entry in
-                        Button {
-                            bridge.preferredBridge = entry.name
-                        } label: {
-                            HStack {
-                                Image(systemName: bridge.preferredBridge == entry.name
-                                    ? "checkmark.circle.fill" : "circle")
-                                    .foregroundStyle(Color.accentColor)
-                                    .opacity(bridge.preferredBridge == entry.name ? 1 : 0.35)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(entry.name)
-                                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                                        .foregroundStyle(.primary)
-                                    Text(entry.endpoint)
-                                        .font(.system(size: 11, design: .monospaced))
-                                        .foregroundStyle(.secondary)
-                                }
+                        HStack {
+                            Image(systemName: bridge.preferredBridge == entry.name
+                                ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(Color.accentColor)
+                                .opacity(bridge.preferredBridge == entry.name ? 1 : 0.35)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.displayName)
+                                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(.primary)
+                                Text(entry.endpointText)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(.secondary)
                             }
+                            Spacer()
+                            // Select button kept OUTSIDE the row-tap target:
+                            // a full-row Button inside DisclosureGroup content
+                            // swallows taps, breaking fold/unfold.
+                            Button {
+                                bridge.preferredBridge = entry.name
+                            } label: {
+                                Image(systemName: "hand.tap")
+                                    .font(.system(size: 13))
+                            }
+                            .buttonStyle(.borderless)
                         }
-                        .buttonStyle(.plain)
                     }
                     if bridge.discoveredBridges.isEmpty {
                         Text("No Neoy on the LAN. Start one on the desktop (see neox-phone-mcp skill).")

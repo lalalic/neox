@@ -43,7 +43,8 @@ Neox/
                              openAppWhenRun (foregrounds for unattended runs);
                              Photos preflight
     AgentBridge.swift        phone-side half of the bridge contract:
-                             NWBrowser(_neox-agent._tcp) → raw-HTTP POST over
+                             NWBrowser(_neoy._tcp, TXT host=machine name) →
+                             raw-HTTP POST over
                              NWConnection (Gate one-shot latch for races)
     AnalyzeMediaIntent.swift "Analyze Media": batch vision index (days/redo
                              parameters), dialog reports the summary

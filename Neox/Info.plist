@@ -30,7 +30,7 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_mcp._tcp</string>
-		<string>_neox-agent._tcp</string>
+		<string>_neoy._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Neox serves an MCP server on your local network so your desktop agent can reach it.</string>

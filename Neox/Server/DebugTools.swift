@@ -9,7 +9,7 @@ enum DebugTools {
         [
             ToolDefinition(
                 name: "agent.handoff",
-                description: "Self-test the agent-bridge path: the phone resolves the _neox-agent._tcp Bonjour service and POSTs the Run Agent Task handoff message to it. Returns posted / bridgeNotFound / error. Use after starting the desktop bridge to verify reachability from the phone.",
+                description: "Self-test the agent-bridge path: the phone resolves the _neoy._tcp Bonjour service and POSTs the Run Agent Task handoff message to it. Returns posted / bridgeNotFound / error. Use after starting the desktop bridge to verify reachability from the phone.",
                 parameters: MediaTools.schema([
                     "instruction": MediaTools.stringProp("Instruction text to hand off (default: the standard vlog instruction)"),
                 ]),
@@ -25,7 +25,7 @@ enum DebugTools {
                     case .posted:
                         return "posted to bridge"
                     case .bridgeNotFound:
-                        return "Error: no _neox-agent._tcp bridge advertised on the LAN"
+                        return "Error: no _neoy._tcp bridge advertised on the LAN"
                     case .failed(let why):
                         return "Error: \(why)"
                     }

@@ -26,7 +26,7 @@ final class ServerController: ObservableObject {
     @Published private(set) var logLines: [String] = []
     @Published private(set) var registeredTools: [String] = []
     @Published private(set) var photosStatus: PHAuthorizationStatus
-    /// Desktop agent bridges discovered on the LAN (`_neox-agent._tcp`).
+    /// Desktop agent bridges ("Neoy") discovered on the LAN (`_neoy._tcp`).
     @Published private(set) var discoveredBridges: [AgentBridgeDiscovery.Entry] = []
     /// User's preferred bridge instance (persisted); nil = first discovered.
     @Published var preferredBridge: String? {
@@ -53,12 +53,27 @@ final class ServerController: ObservableObject {
     /// The old `guard server == nil` left a dead listener bound forever, so
     /// foregrounding now always tears down and re-binds. Rebinding is cheap
     /// and the app has no long-lived client connections to preserve.
+    ///
+    /// The Bonjour browser gets the same treatment: iOS suspends mDNS while
+    /// backgrounded and NWBrowser doesn't always recover, so we tear it down
+    /// and restart on every foreground. This is also what lets late-joining
+    /// bridges appear — a fresh browse immediately sees everything on the LAN.
     func ensureRunning() {
         if let server {
             server.stop()
             self.server = nil
         }
         start()
+        restartBridgeDiscovery()
+    }
+
+    /// Tear down and re-create the Bonjour browser. Called on every
+    /// foreground so stale backgrounded browsers don't linger, and newly
+    /// started bridges are discovered promptly.
+    private func restartBridgeDiscovery() {
+        bridgeBrowser?.stop()
+        bridgeBrowser = nil
+        discoveredBridges = []
         startBridgeDiscovery()
     }
 

@@ -4,7 +4,7 @@ description: >-
   Use an iPhone as a local MCP media server via the Neox app: search the
   phone's photo/video library by content (vision index), analyze on-device
   (classify/OCR/people/transcribe), and pull originals over WiFi with ranged
-  HTTP. Includes the neox-agent bridge — a Bonjour-advertised HTTP endpoint
+  HTTP. Includes the Neoy bridge — a Bonjour-advertised HTTP endpoint
   you implement + run (via session hook) that receives "Run Agent Task"
   handoffs from the phone. Use when a task needs the user's phone media:
   "find photos of X", "pull recent videos off my phone", "build a vlog from
@@ -151,9 +151,11 @@ Bonjour.
 
 **The discovery contract** (mirrors how the phone advertises `neox._mcp._tcp`):
 
-- The bridge advertises `_neox-agent._tcp` on the LAN, instance name
-  `neox-agent`, with TXT `path=/agent`. Neox resolves this automatically when
-  Run Agent Task fires — no IP or port is ever configured on the phone.
+- The bridge (codename **Neoy**) advertises `_neoy._tcp` on the LAN. Use
+  the machine name as the instance name AND in TXT `host=` — the phone's
+  status screen shows it, so users see e.g. "mac111" instead of a cryptic
+  "neox-agent". Neox resolves this automatically when Run Agent Task fires —
+  no IP or port is ever configured on the phone.
 - The Shortcuts "Get Contents of URL" POST (below) is only a legacy fallback
   for older Neox builds; current builds hand off directly over Bonjour.
 
@@ -175,8 +177,18 @@ inbox.
            self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
        def log_message(self, *a): pass
    socketserver.TCPServer.allow_reuse_address = True
-   # Bonjour: the phone resolves _neox-agent._tcp to find us
-   subprocess.Popen(['dns-sd', '-R', 'neox-agent', '_neox-agent._tcp', '.', str(PORT), 'path=/agent'],
+   # Bonjour: the phone resolves _neoy._tcp to find us. Instance name and
+   # host= TXT carry the machine name for display; ip= lets the phone skip
+   # mDNS resolution entirely and connect directly (iOS stalls on .local).
+   import socket
+   HOST = socket.gethostname().split('.')[0]
+   # Best-effort LAN IP: the one the default route uses.
+   try:
+       s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+       s.connect(('8.8.8.8', 80)); IP = s.getsockname()[0]; s.close()
+   except Exception: IP = '127.0.0.1'
+   subprocess.Popen(['dns-sd', '-R', HOST, '_neoy._tcp', '.', str(PORT),
+                     'path=/agent', f'host={HOST}', f'port={PORT}', f'ip={IP}'],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
    socketserver.TCPServer(('0.0.0.0', PORT), H).serve_forever()
    PY

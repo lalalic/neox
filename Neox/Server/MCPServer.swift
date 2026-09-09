@@ -144,7 +144,7 @@ public final class MCPServer {
                 switch state {
                 case .ready:
                     self.isRunning = true
-                    self.log("MCP Server '\(self.name)' listening on http://0.0.0.0:\(self.port)/mcp")
+                    
                 case .failed(let error):
                     self.isRunning = false
                     self.log("MCP Server failed: \(error)")
