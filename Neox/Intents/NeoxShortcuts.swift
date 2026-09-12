@@ -1,8 +1,7 @@
 import AppIntents
 
-/// Siri phrases for `RunAgentIntent`. Fixed phrases run with the default
-/// instruction; note App Intents only allows AppEntity/AppEnum placeholders in
-/// phrases, so free-form instructions are set in the Shortcuts editor.
+/// Siri phrases for `RunAgentIntent`. The AppEnum placeholder lets Siri fill
+/// today/yesterday/recent/unprocessed-today from the spoken request.
 struct NeoxShortcuts: AppShortcutsProvider {
     static let shortcutTileColor: ShortcutTileColor = .lightBlue
 
@@ -12,7 +11,8 @@ struct NeoxShortcuts: AppShortcutsProvider {
             phrases: [
                 "Create a vlog with \(.applicationName)",
                 "Make a vlog with \(.applicationName)",
-                "Run my agent with \(.applicationName)"
+                "Run my agent with \(.applicationName)",
+                "Tell \(.applicationName) what to do"
             ],
             shortTitle: "Run Agent Task",
             systemImageName: "wand.and.stars"

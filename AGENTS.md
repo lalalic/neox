@@ -69,12 +69,9 @@ Neox/
 NeoxTests/                   XCTests hosted in the app; run on the device via
                              `scripts/remote-deploy.sh --test`
 skills/
-  neox-phone-mcp/SKILL.md    the ONLY agent-facing doc — ships to desktop
-                             agents. Keep it free of repo/build/dev internals
-                             (the app is on the App Store): it documents
-                             discovery, the MCP tools, and the Neoy bridge
-                             contract (phone POSTs /agent; sessions long-poll
-                             /agent/next to start turns).
+  neox-phone-mcp/             agent-facing skill: concise workflow in
+                             SKILL.md, with protocol/troubleshooting
+                             references, executable bridge script, and evals.
 scripts/remote-deploy.sh     sync + build on mac111 + install on iPhone
 ```
 
@@ -190,6 +187,10 @@ Deployment gotchas (all hit in practice):
 - `devicectl` **hangs forever** when the tunnel is down. Wrap in timeouts;
   recover with `sudo pkill -9 CoreDeviceService` on mac111, unlock the phone,
   and re-trust if prompted.
+- An iOS app cannot host a reliable inbound LAN listener while backgrounded.
+  Rebind on the initial `.active` phase and every foreground return; make the
+  desktop producer retry briefly after a handoff rather than claiming
+  background-server persistence.
 - `security unlock-keychain` must run in the **same SSH session** as any
   `codesign`, or signing fails with `errSecInternalComponent`.
 - ASC API JWTs need `iat` from real epoch (`time.time()`, not naive

@@ -22,9 +22,9 @@ struct RunAgentIntent: AppIntent {
     }
     static let openAppWhenRun = true
 
-    // @Parameter's default must be a compile-time literal — keep in sync with
-    // AgentHandoff.defaultInstruction (used by the status-screen preview).
-    @Parameter(title: "Instruction", default: "Create a vlog from yesterday's photos and videos")
+    // Keep the complete user wording intact. Siri/Shortcuts is the courier;
+    // Neoy/Astra interprets dates, recency, and workflow constraints.
+    @Parameter(title: "Instruction", default: "Create a vlog from today's photos and videos")
     var instruction: String
 
     @MainActor

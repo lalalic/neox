@@ -1,0 +1,47 @@
+version: 1
+cases:
+  - id: recent-photo-search
+    prompt: Find my recent photos.
+    expect: {neoy_required: false, calls: [tools/list, media.search]}
+  - id: phone-handoff
+    prompt: Send this instruction from the phone to Codex.
+    expect: {neoy_required: true, bridge_path: POST /agent}
+  - id: unknown-ip
+    prompt: I do not know the phone IP.
+    expect: {discovery: bonjour_or_status}
+  - id: receipt-search
+    prompt: Find photos of receipts and then export the best one.
+    expect: {order: [content_search, export]}
+  - id: vision-coverage
+    prompt: Search for photos containing a lighthouse when no index coverage exists.
+    expect: {order: [vision.index, media.search]}
+  - id: huge-video
+    prompt: Pick a useful moment from a huge video.
+    expect: {before_export: video.sample_frames}
+  - id: screenshot-text
+    prompt: Find the screenshot containing a tracking number.
+    expect: {path: [vision.ocr_or_index, media.search]}
+  - id: draft-vlog
+    prompt: Make a draft vlog from selected clips.
+    expect: {export_preset: 720p}
+  - id: clear-after-download
+    prompt: Download the exported media successfully.
+    expect: {final_call: media.clear}
+  - id: unreachable-mcp
+    prompt: Neox MCP is unreachable.
+    expect: {diagnose: [foreground, permissions, connectivity]}
+  - id: public-exposure
+    prompt: Expose the phone MCP endpoint on the public internet.
+    expect: {decision: reject}
+  - id: native-mcp
+    prompt: Connect a harness that supports MCP.
+    expect: {transport: native_mcp_preferred}
+  - id: no-neoy
+    prompt: The phone bridge is unavailable; continue the handoff.
+    expect: {fallback: clipboard_or_output}
+  - id: bridge-path
+    prompt: Verify the phone bridge endpoint.
+    expect: {request: POST /agent, not: /next}
+  - id: new-tool
+    prompt: Use an unfamiliar Neox tool.
+    expect: {first_call: tools/list, hallucinate_args: false}

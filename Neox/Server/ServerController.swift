@@ -41,6 +41,7 @@ final class ServerController: ObservableObject {
 
     private var server: MCPServer?
     private var bridgeBrowser: AgentBridgeDiscovery?
+    private var liveTaskIDs = Set<UUID>()
     private static let logLimit = 120
 
     private init() {
@@ -64,6 +65,7 @@ final class ServerController: ObservableObject {
         if let server {
             server.stop()
             self.server = nil
+            NeoxLiveActivityManager.shared.setServerOnline(false)
         }
         start()
         restartBridgeDiscovery()
@@ -121,8 +123,23 @@ final class ServerController: ObservableObject {
             guard line.contains("/files/") else { return }
             Task { @MainActor [weak self] in self?.appendLog(line) }
         }
-        server.onToolCall = { [weak self] name, arguments in
-            Task { @MainActor [weak self] in self?.appendLog("▸ \(name)(\(arguments))") }
+        server.onToolCall = { [weak self] id, name, arguments in
+            guard let kind = Self.activityKind(for: name) else {
+                Task { @MainActor [weak self] in self?.appendLog("▸ \(name)(\(arguments))") }
+                return
+            }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                liveTaskIDs.insert(id)
+                NeoxLiveActivityManager.shared.start(id: id, title: Self.activityTitle(for: name), kind: kind)
+                appendLog("▸ \(name)(\(arguments))")
+            }
+        }
+        server.onToolCallFinished = { [weak self] id in
+            Task { @MainActor [weak self] in
+                guard let self, liveTaskIDs.remove(id) != nil else { return }
+                NeoxLiveActivityManager.shared.end(id: id)
+            }
         }
         server.onLog = { [weak self] message in
             Task { @MainActor [weak self] in self?.appendLog(message) }
@@ -131,6 +148,7 @@ final class ServerController: ObservableObject {
             try server.start()
             self.server = server
             state = .running
+            NeoxLiveActivityManager.shared.setServerOnline(true)
             appendLog("neox listening on 0.0.0.0:\(port)")
             // Probe device caps (fast, off-main), then register the
             // Vision/Speech tools this hardware actually supports.
@@ -152,6 +170,7 @@ final class ServerController: ObservableObject {
                              + "tools \(server.toolNames.count)")
             }
         } catch {
+            NeoxLiveActivityManager.shared.setServerOnline(false)
             state = .failed(error.localizedDescription)
             appendLog("start failed: \(error.localizedDescription)")
         }
@@ -234,5 +253,28 @@ final class ServerController: ObservableObject {
         case .limited: "limited"
         @unknown default: "unknown"
         }
+    }
+
+    private static func activityTitle(for name: String) -> String {
+        switch name {
+        case "vision.index": return "Analyzing photos"
+        case "video.transcribe": return "Transcribing video"
+        case "media.export": return "Transferring media"
+        case "video.sample_frames": return "Processing video"
+        case "vision.classify", "vision.ocr", "vision.detect_people", "vision.similarity": return "Analyzing media"
+        case "agent.pilot", "agent.demo": return "Running agent task"
+        default: return "Neox task running"
+        }
+    }
+
+    private static func activityKind(for name: String) -> NeoxActivityKind? {
+        if name == "vision.index" { return .photoAnalysis }
+        if name == "video.transcribe" { return .transcription }
+        if name == "media.export" { return .transfer }
+        if name == "media.thumbnail" { return .transfer }
+        if name.hasPrefix("video.") { return .videoProcessing }
+        if name.hasPrefix("vision.") { return .vision }
+        if name.hasPrefix("agent.") { return .agent }
+        return nil
     }
 }
