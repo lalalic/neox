@@ -11,17 +11,12 @@ targets:
   NeoxApp:
     type: application
     platform: iOS
-    dependencies:
-      - target: NeoxLiveActivity
-        embed: true
     sources:
       - Neox/App
       - Neox/Server
       - Neox/Intents
       - Neox/AgentKit
       - Neox/Assets.xcassets
-      - Neox/LiveActivity/NeoxActivityAttributes.swift
-      - Neox/LiveActivity/NeoxLiveActivityManager.swift
     entitlements:
       path: Neox/Neox.entitlements
     settings:
@@ -37,33 +32,11 @@ targets:
         DEVELOPMENT_TEAM: "JABNLDLN8G"
         PROVISIONING_PROFILE_SPECIFIER: PhoneBridge-Dev
         CODE_SIGN_STYLE: Manual
-        INFOPLIST_KEY_NSSupportsLiveActivities: YES
-
-  NeoxLiveActivity:
-    type: app-extension
-    platform: iOS
-    sources:
-      - Neox/LiveActivity/NeoxActivityAttributes.swift
-      - Neox/LiveActivity/NeoxLiveActivityWidget.swift
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.neox.app.LiveActivity
-        PRODUCT_NAME: NeoxLiveActivity
-        PRODUCT_MODULE_NAME: NeoxLiveActivity
-        INFOPLIST_FILE: Neox/LiveActivity/Info.plist
-        SWIFT_VERSION: "6.0"
-        TARGETED_DEVICE_FAMILY: "1"
-        DEVELOPMENT_TEAM: "JABNLDLN8G"
-        PROVISIONING_PROFILE_SPECIFIER: Neox-LiveActivity-Dev
-        CODE_SIGN_STYLE: Manual
-        CODE_SIGN_IDENTITY: "1BFCAE9159CD1B7D0C35B777E072621031F38748"
-
 schemes:
   NeoxApp:
     build:
       targets:
         NeoxApp: all
-        NeoxLiveActivity: all
     run:
       config: Debug
     archive:

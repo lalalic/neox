@@ -29,10 +29,7 @@ struct AnalyzeMediaIntent: AppIntent {
             return .result(value: "Error: this device doesn't support on-device vision analysis",
                            dialog: "This device can't run on-device media analysis.")
         }
-        let liveTaskID = UUID()
-        NeoxLiveActivityManager.shared.start(id: liveTaskID, title: "Analyzing photos", kind: .photoAnalysis)
         let summary = await VisionIndexer.run(days: max(days, 0), redo: redo, limit: 2000)
-        NeoxLiveActivityManager.shared.end(id: liveTaskID)
         if summary.failed == -1 {
             return .result(value: "Error: another analysis run is already in progress",
                            dialog: "An analysis run is already in progress.")
