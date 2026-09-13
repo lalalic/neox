@@ -51,28 +51,13 @@ struct StatusView: View {
             .padding(12)
         }
         .background(Color(.systemBackground))
-        // No .onAppear ensureRunning() here — NeoxApp's scenePhase(.active)
-        // handler already restarts on every foreground. Keeping both would
-        // restart twice at launch and log two 'listening' lines.
+        // NeoxApp's scenePhase handler starts once on launch and rebinds on
+        // every return to foreground. A local iOS listener cannot remain
+        // reachable while this app is backgrounded.
     }
 
     private var ListView: some View {
         List {
-            // Most-live information first.
-            Section("Requests") {
-                if bridge.logLines.isEmpty {
-                    Text("No requests yet.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(Array(bridge.logLines.enumerated().reversed()), id: \.offset) { _, line in
-                        Text(line)
-                            .font(.system(size: 11, weight: .regular, design: .monospaced))
-                            .textSelection(.enabled)
-                    }
-                }
-            }
-
             // Discovered desktop bridges — the desktop half of the handoff
             // pair, codename "Neoy". Tap to select the preferred one; the
             // intent hands off there.
@@ -111,6 +96,21 @@ struct StatusView: View {
                         Text("No Neoy on the LAN. Start one on the desktop (see neox-phone-mcp skill).")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            // Most-live information after the active handoff destination.
+            Section("Requests") {
+                if bridge.logLines.isEmpty {
+                    Text("No requests yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(bridge.logLines.enumerated().reversed()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(.system(size: 11, weight: .regular, design: .monospaced))
+                            .textSelection(.enabled)
                     }
                 }
             }

@@ -8,7 +8,7 @@ import Foundation
 /// Mac is Codex Remote's job.
 enum AgentHandoff {
     /// Default instruction backing the fixed Siri phrases ("Create a vlog with Neox").
-    static let defaultInstruction = "Create a vlog from yesterday's photos and videos"
+    static let defaultInstruction = "Create a vlog from today's photos and videos"
 
     static func message(instruction: String, mcpURL: String) -> String {
         let instruction = instruction.trimmingCharacters(in: .whitespacesAndNewlines)

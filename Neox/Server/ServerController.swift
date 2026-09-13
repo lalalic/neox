@@ -121,8 +121,11 @@ final class ServerController: ObservableObject {
             guard line.contains("/files/") else { return }
             Task { @MainActor [weak self] in self?.appendLog(line) }
         }
-        server.onToolCall = { [weak self] name, arguments in
-            Task { @MainActor [weak self] in self?.appendLog("▸ \(name)(\(arguments))") }
+        server.onToolCall = { [weak self] _, name, arguments in
+            Task { @MainActor [weak self] in
+                self?.appendLog("▸ \(name)(\(arguments))")
+            }
+        }
         }
         server.onLog = { [weak self] message in
             Task { @MainActor [weak self] in self?.appendLog(message) }
@@ -235,4 +238,5 @@ final class ServerController: ObservableObject {
         @unknown default: "unknown"
         }
     }
+
 }

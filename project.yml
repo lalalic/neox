@@ -12,7 +12,11 @@ targets:
     type: application
     platform: iOS
     sources:
-      - Neox
+      - Neox/App
+      - Neox/Server
+      - Neox/Intents
+      - Neox/AgentKit
+      - Neox/Assets.xcassets
     entitlements:
       path: Neox/Neox.entitlements
     settings:
@@ -26,7 +30,8 @@ targets:
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "1"
         DEVELOPMENT_TEAM: "JABNLDLN8G"
-
+        PROVISIONING_PROFILE_SPECIFIER: PhoneBridge-Dev
+        CODE_SIGN_STYLE: Manual
 schemes:
   NeoxApp:
     build:
