@@ -13,7 +13,13 @@ enum PhoneTransactionTools {
                 parameters: MediaTools.schema([
                     "label": MediaTools.stringProp("Short workflow label shown on the phone (default: Desktop workflow)"),
                     "reason": MediaTools.stringProp("Short reason the phone must stay foregrounded"),
-                    "timeout_minutes": MediaTools.intProp("Recovery timeout in minutes (default 30, max 240)"),
+                    "timeout_minutes": .object([
+                        "type": .string("integer"),
+                        "description": .string("Recovery timeout in minutes"),
+                        "default": .int(30),
+                        "minimum": .int(1),
+                        "maximum": .int(240),
+                    ]),
                 ]),
                 handler: { args in
                     await ServerController.shared.startTransaction(args)
@@ -39,7 +45,7 @@ enum PhoneTransactionTools {
 
     static func displayText(_ value: String, fallback: String) -> String {
         let compact = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
         return compact.isEmpty ? fallback : String(compact.prefix(100))
     }
 
@@ -73,8 +79,23 @@ enum PhoneTransactionTools {
             "state": alreadyReleased ? "already_released" : "released",
             "outcome": stateName(transaction.state),
             "ended_at": transaction.endedAt.map { MediaTools.iso8601.string(from: $0) } ?? NSNull(),
-            "message": "NeoX phone work is complete; you can use the phone normally. Desktop analysis or rendering may still be running.",
+            "message": releaseMessage(transaction.state),
         ])
+    }
+
+    private static func releaseMessage(_ state: PhoneTransactionState) -> String {
+        switch state {
+        case .completed:
+            "Phone work complete. NeoX is released; you can use the phone normally. Desktop processing may continue."
+        case .failed:
+            "Phone work failed. NeoX is released; you can use the phone normally. Desktop processing status is unchanged."
+        case .cancelled:
+            "Phone work cancelled. NeoX is released; you can use the phone normally. Desktop processing status is unchanged."
+        case .timeout:
+            "Phone work timed out. NeoX is released; you can use the phone normally. Desktop processing status is unchanged."
+        case .active:
+            "NeoX phone work is active; keep NeoX in the foreground."
+        }
     }
 
     private static func stateName(_ state: PhoneTransactionState) -> String {

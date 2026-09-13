@@ -30,15 +30,29 @@ struct StatusView: View {
             if let transaction = bridge.transaction {
                 PhoneTransactionBanner(snapshot: transaction)
                     .task(id: transaction.id) {
-                        while bridge.transaction?.state == .active {
+                        while !Task.isCancelled {
+                            if bridge.transaction?.state != .active {
+                                break
+                            }
+
                             bridge.refreshTransaction()
-                            try? await Task.sleep(for: .seconds(1))
+
+                            do {
+                                try await Task.sleep(for: .seconds(1))
+                            } catch {
+                                return
+                            }
                         }
 
-                        if bridge.transaction != nil {
-                            try? await Task.sleep(for: .seconds(60))
-                            bridge.dismissReleasedTransaction()
+                        guard !Task.isCancelled, bridge.transaction != nil else { return }
+
+                        do {
+                            try await Task.sleep(for: .seconds(60))
+                        } catch {
+                            return
                         }
+
+                        bridge.dismissReleasedTransaction()
                     }
             }
 
@@ -236,15 +250,15 @@ private struct PhoneTransactionBanner: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Label(
-                    isActive ? "Desktop workflow active" : "Phone work complete",
-                    systemImage: isActive ? "iphone.radiowaves.left.and.right" : "checkmark.circle.fill"
+                    isActive ? "NeoX phone work active" : terminalTitle,
+                    systemImage: isActive ? "iphone.radiowaves.left.and.right" : terminalIcon
                 )
                 .font(.headline)
 
                 Text(
                     isActive
-                        ? "Keep NeoX in the foreground."
-                        : "You can use your phone normally. Desktop analysis or rendering can continue."
+                        ? "Keep NeoX in the foreground while phone work is active."
+                        : terminalMessage
                 )
                 .font(.subheadline.weight(.semibold))
 
@@ -269,7 +283,52 @@ private struct PhoneTransactionBanner: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
             .foregroundStyle(.black)
-            .background(isActive ? .orange : .green)
+            .background(isActive ? .orange : terminalColor)
+        }
+    }
+
+    private var terminalTitle: String {
+        switch snapshot.state {
+        case .completed: "Phone work complete"
+        case .failed: "Phone work failed"
+        case .cancelled: "Phone work cancelled"
+        case .timeout: "Phone work timed out"
+        case .active: "NeoX phone work active"
+        }
+    }
+
+    private var terminalIcon: String {
+        switch snapshot.state {
+        case .completed: "checkmark.circle.fill"
+        case .failed: "exclamationmark.triangle.fill"
+        case .cancelled: "minus.circle.fill"
+        case .timeout: "clock.badge.exclamationmark"
+        case .active: "iphone.radiowaves.left.and.right"
+        }
+    }
+
+    private var terminalMessage: String {
+        switch snapshot.state {
+        case .completed:
+            "NeoX is released. You can use your phone normally; desktop processing may continue."
+        case .failed:
+            "NeoX is released after phone work failed. You can use your phone normally; desktop processing status is unchanged."
+        case .cancelled:
+            "NeoX is released after phone work was cancelled. You can use your phone normally; desktop processing status is unchanged."
+        case .timeout:
+            "NeoX is released after phone work timed out. You can use your phone normally; desktop processing status is unchanged."
+        case .active:
+            "Keep NeoX in the foreground while phone work is active."
+        }
+    }
+
+    private var terminalColor: Color {
+        switch snapshot.state {
+        case .completed: .green
+        case .failed: .red
+        case .timeout: .orange
+        case .cancelled: .gray
+        case .active: .orange
         }
     }
 

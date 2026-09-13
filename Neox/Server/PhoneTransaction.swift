@@ -57,14 +57,15 @@ enum PhoneTransactionEndResult: Equatable {
 @MainActor
 final class PhoneTransactionCoordinator {
     private(set) var releasedTransaction: PhoneTransactionSnapshot?
+    private var isReleasedTransactionDismissed = false
     private var activeTransaction: PhoneTransactionSnapshot?
 
     var current: PhoneTransactionSnapshot? {
-        activeTransaction ?? releasedTransaction
+        activeTransaction ?? (isReleasedTransactionDismissed ? nil : releasedTransaction)
     }
 
     func dismissReleased() {
-        releasedTransaction = nil
+        isReleasedTransactionDismissed = true
     }
 
     @discardableResult
@@ -76,6 +77,9 @@ final class PhoneTransactionCoordinator {
     ) -> PhoneTransactionSnapshot? {
         refresh(at: now)
         guard activeTransaction == nil else { return nil }
+
+        releasedTransaction = nil
+        isReleasedTransactionDismissed = false
 
         let transaction = PhoneTransactionSnapshot(
             label: label,
