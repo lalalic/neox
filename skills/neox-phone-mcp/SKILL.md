@@ -63,8 +63,28 @@ call() { curl -s -m 120 -X POST $PHONE/mcp -H 'Content-Type: application/json' \
 
 Discover the live tool list first (`tools/list`), then:
 
+Before the first phone-dependent operation, start an explicit phone transaction:
+
+```bash
+TX=$(call phone.transaction.start '{"label":"Vlog media pull","reason":"NeoX must stay foregrounded","timeout_minutes":30}' \
+     | jq -r '.result.content[0].text | fromjson | .transaction_id')
+```
+
+While that transaction is active, tell the user to leave NeoX in the foreground.
+After the final phone-dependent call (including `media.clear`), release the phone:
+
+```bash
+call phone.transaction.end "{\"transaction_id\":\"$TX\",\"outcome\":\"completed\"}"
+```
+
+Use `failed` or `cancelled` when that reflects the phone work. Matched end calls are
+idempotent; a mismatched id does not release the phone. Transactions also expire after
+their bounded timeout. After a successful end, do not ask NeoX to stay foregrounded unless
+you start a new transaction; local desktop analysis, TTS, editing, and rendering can continue.
+
 | tool | use for | key args |
 |---|---|---|
+| `phone.transaction.start` | begin the explicit NeoX foreground boundary | `label`, `reason`, `timeout_minutes` |
 | `media.search` | find assets — incl. **content search** | `media_type`, `days`/`after`/`before`, `album`, `favorited`, `has_label`, `has_text`, `with_people`, `limit`, `offset` |
 | `media.meta` | full EXIF/GPS + vision analysis for one asset | `id` |
 | `media.thumbnail` | JPEG preview at `/files/` (inspect cheaply) | `id`, `max_side` |
@@ -75,6 +95,7 @@ Discover the live tool list first (`tools/list`), then:
 | `video.transcribe` | speech → text (on-device) | `id`, `language` |
 | `media.export` | stage originals for download | `ids[]`, `preset` (original/720p/1080p) |
 | `media.clear` | free phone space when done | — |
+| `phone.transaction.end` | end the NeoX foreground boundary when phone work is done | `transaction_id`, `outcome` |
 
 Rows from `media.search` look like:
 
@@ -126,6 +147,7 @@ Prefer `preset=720p` for video drafts; `original` only when quality matters.
 
 ## Rules
 
+- **Start `phone.transaction.start` immediately before phone-dependent work and call `phone.transaction.end` immediately after it** (normally after `media.clear`). Remaining desktop workflow must not require NeoX foreground after end.
 - **Never** ask for base64 media in a tool result; never inline media bytes in
   chat. JSON + `/files/` URLs only.
 - **Content search first, export second.** Filter with the index, verify with

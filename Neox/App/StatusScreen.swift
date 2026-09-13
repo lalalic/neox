@@ -27,6 +27,21 @@ struct StatusView: View {
 
             Divider()
 
+            if let transaction = bridge.transaction {
+                PhoneTransactionBanner(snapshot: transaction)
+                    .task(id: transaction.id) {
+                        while bridge.transaction?.state == .active {
+                            bridge.refreshTransaction()
+                            try? await Task.sleep(for: .seconds(1))
+                        }
+
+                        if bridge.transaction != nil {
+                            try? await Task.sleep(for: .seconds(60))
+                            bridge.dismissReleasedTransaction()
+                        }
+                    }
+            }
+
             // Requests: tool list first, then every tool call
             ListView
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -208,5 +223,57 @@ struct StatusView: View {
         case .failed: .red
         default: .orange
         }
+    }
+}
+
+private struct PhoneTransactionBanner: View {
+    let snapshot: PhoneTransactionSnapshot
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let isActive = snapshot.state == .active
+            let now = context.date
+
+            VStack(alignment: .leading, spacing: 6) {
+                Label(
+                    isActive ? "Desktop workflow active" : "Phone work complete",
+                    systemImage: isActive ? "iphone.radiowaves.left.and.right" : "checkmark.circle.fill"
+                )
+                .font(.headline)
+
+                Text(
+                    isActive
+                        ? "Keep NeoX in the foreground."
+                        : "You can use your phone normally. Desktop analysis or rendering can continue."
+                )
+                .font(.subheadline.weight(.semibold))
+
+                Text(snapshot.label)
+                    .font(.subheadline)
+                    .lineLimit(1)
+
+                if let reason = snapshot.reason {
+                    Text(reason)
+                        .font(.caption)
+                        .lineLimit(2)
+                }
+
+                if isActive {
+                    Text("Elapsed \(format(now.timeIntervalSince(snapshot.startedAt))) · time left \(format(max(0, snapshot.expiresAt.timeIntervalSince(now))))")
+                        .font(.caption.monospacedDigit())
+                } else if let endedAt = snapshot.endedAt {
+                    Text("Released at \(endedAt.formatted(date: .omitted, time: .shortened))")
+                        .font(.caption.monospacedDigit())
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+            .foregroundStyle(.black)
+            .background(isActive ? .orange : .green)
+        }
+    }
+
+    private func format(_ interval: TimeInterval) -> String {
+        Duration.seconds(Int(interval.rounded())).formatted(.time(pattern: .minuteSecond))
     }
 }
