@@ -26,6 +26,7 @@ final class ServerController: ObservableObject {
     @Published private(set) var logLines: [String] = []
     @Published private(set) var registeredTools: [String] = []
     @Published private(set) var photosStatus: PHAuthorizationStatus
+    @Published private(set) var transaction: PhoneTransactionSnapshot?
     /// Desktop agent bridges ("Neoy") discovered on the LAN (`_neoy._tcp`).
     @Published private(set) var discoveredBridges: [AgentBridgeDiscovery.Entry] = []
     /// User's preferred bridge instance (persisted); nil = first discovered.
@@ -41,6 +42,7 @@ final class ServerController: ObservableObject {
 
     private var server: MCPServer?
     private var bridgeBrowser: AgentBridgeDiscovery?
+    private let transactionCoordinator = PhoneTransactionCoordinator()
     private static let logLimit = 120
 
     private init() {
@@ -103,6 +105,7 @@ final class ServerController: ObservableObject {
         try? FileManager.default.createDirectory(at: exportsDir, withIntermediateDirectories: true)
         server.setStaticFileRoot(exportsDir)
         server.register(tools: MediaTools.tools(exportsDir: exportsDir))
+        server.register(tools: PhoneTransactionTools.tools())
         server.register(tools: agentKit.tools)
         server.register(tools: DebugTools.tools())
         server.register(
@@ -164,6 +167,65 @@ final class ServerController: ObservableObject {
         photosStatus = status
         appendLog("photos access: \(describe(status))")
         return status
+    }
+
+    func startTransaction(_ args: JSONValue) -> String {
+        let label = PhoneTransactionTools.displayText(
+            MediaTools.str(args, "label") ?? "",
+            fallback: "Desktop workflow"
+        )
+        let reason = MediaTools.str(args, "reason").map {
+            PhoneTransactionTools.displayText($0, fallback: "Desktop workflow")
+        }
+        let timeoutMinutes = min(max(MediaTools.intOpt(args, "timeout_minutes") ?? 30, 1), 240)
+
+        guard let transaction = transactionCoordinator.start(
+            label: label,
+            reason: reason,
+            timeoutMinutes: timeoutMinutes
+        ) else {
+            return "Error: phone transaction already active"
+        }
+
+        self.transaction = transaction
+        appendLog("phone transaction started: \(transaction.id.uuidString)")
+        return PhoneTransactionTools.startedJSON(transaction)
+    }
+
+    func endTransaction(_ args: JSONValue) -> String {
+        guard let idText = MediaTools.str(args, "transaction_id"),
+              let id = UUID(uuidString: idText) else {
+            return "Error: 'transaction_id' required"
+        }
+        guard let outcome = PhoneTransactionTools.outcome(MediaTools.str(args, "outcome")) else {
+            return "Error: outcome must be completed, failed, or cancelled"
+        }
+
+        let result = transactionCoordinator.end(id: id, outcome: outcome)
+        switch result {
+        case .released(let transaction), .alreadyReleased(let transaction):
+            self.transaction = transaction
+            appendLog("phone transaction \(transaction.state): \(transaction.id.uuidString)")
+            return PhoneTransactionTools.endedJSON(transaction, alreadyReleased: result.isAlreadyReleased)
+        case .mismatched(let transaction):
+            if let transaction {
+                self.transaction = transaction
+            }
+            return "Error: transaction_id mismatch"
+        case .notFound:
+            return "Error: no active phone transaction"
+        }
+    }
+
+    func refreshTransaction(at now: Date = .now) {
+        _ = transactionCoordinator.refresh(at: now)
+        transaction = transactionCoordinator.current
+    }
+
+    func dismissReleasedTransaction() {
+        guard transaction?.state != .active else { return }
+        transaction = nil
+        transactionCoordinator.dismissReleased()
     }
 
     /// Delete all exported media from the /files/ serving directory.
