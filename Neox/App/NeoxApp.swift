@@ -7,10 +7,6 @@ struct NeoxApp: App {
     @StateObject private var bridge = ServerController.shared
     @Environment(\.scenePhase) private var scenePhase
 
-    init() {
-        _ = NeoxLiveActivityManager.shared
-    }
-
     var body: some Scene {
         WindowGroup {
             StatusView()
