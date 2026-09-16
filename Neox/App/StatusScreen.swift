@@ -8,6 +8,8 @@ struct StatusView: View {
     // Reference sections start collapsed; tap a header to expand.
     @State private var neoyExpanded = false
     @State private var siriExpanded = false
+    @State private var showingTourRunner = false
+    @StateObject private var tours = CaptureTourStore.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -80,6 +82,7 @@ struct StatusView: View {
             .padding(12)
         }
         .background(Color(.systemBackground))
+        .sheet(isPresented: $showingTourRunner) { CaptureTourRunnerView(tours: tours) }
         // No .onAppear ensureRunning() here — NeoxApp's scenePhase(.active)
         // handler already restarts on every foreground. Keeping both would
         // restart twice at launch and log two 'listening' lines.
@@ -101,6 +104,8 @@ struct StatusView: View {
                     }
                 }
             }
+
+            CaptureTourCard(tours: tours, showingRunner: $showingTourRunner)
 
             // Discovered desktop bridges — the desktop half of the handoff
             // pair, codename "Neoy". Tap to select the preferred one; the
@@ -227,6 +232,9 @@ struct StatusView: View {
             "agent.pilot": "remote UI automation of this app",
             "agent.demo": "spotlight/caption/TTS overlays",
             "agent.handoff": "self-test the phone→bridge handoff path",
+            "tour.start": "start a guided, human-in-the-loop recording tour",
+            "tour.status": "tour progress and accepted shot references",
+            "tour.cancel": "cancel the active recording tour",
         ]
         return bridge.registeredTools.map { ToolRow(name: $0, summary: descriptions[$0] ?? "") }
     }

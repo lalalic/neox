@@ -36,6 +36,10 @@
 	<string>Neox serves an MCP server on your local network so your desktop agent can reach it.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Neox lets your desktop agent browse and export your photo library.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Neox uses the camera to guide and record Capture Tour shots.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Neox records audio with Capture Tour shots.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Neox transcribes speech in your videos entirely on-device when your desktop agent asks.</string>
 	<key>UIApplicationSceneManifest</key>
