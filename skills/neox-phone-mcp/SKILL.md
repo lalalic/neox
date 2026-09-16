@@ -161,6 +161,19 @@ Prefer `preset=720p` for video drafts; `original` only when quality matters.
 - The phone is a personal device on a home LAN: LAN-only, no auth — never
   tunnel it to the public internet.
 
+## Capture Tour workflow
+
+For a human-guided recording session, call `tour.start` with a JSON-encoded
+version-1 manifest containing `tour_id`, `title`, and ordered `shots`. Each
+shot may specify `instruction`, `script`, `target_duration_s`, `camera`,
+`orientation`, `lens`, `framing`, and advisory `quality` preferences. The
+phone status screen exposes Start/Resume; the human records and reviews each
+shot with Retake, Accept, or Skip. Use `tour.status` to read progress and the
+accepted `shot_id` → `/files/...` references. Target duration and quality
+warnings are advisory; the runner never hard-stops or blocks acceptance. Use
+`tour.cancel` to clear a pending or active tour without deleting unrelated
+media.
+
 ## Workflow recipes
 
 **Receiving "Run Agent Task" handoffs — run the bridge (do this at session start)**

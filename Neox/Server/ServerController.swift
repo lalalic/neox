@@ -106,6 +106,7 @@ final class ServerController: ObservableObject {
         server.setStaticFileRoot(exportsDir)
         server.register(tools: MediaTools.tools(exportsDir: exportsDir))
         server.register(tools: PhoneTransactionTools.tools())
+        server.register(tools: CaptureTourTools.tools())
         server.register(tools: agentKit.tools)
         server.register(tools: DebugTools.tools())
         server.register(
