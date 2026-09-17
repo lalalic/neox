@@ -1,58 +1,87 @@
 #!/usr/bin/env python3
-"""Small reference Neoy bridge for the phone-facing POST /agent contract."""
-from __future__ import annotations
+"""LAN-only Neoy handoff bridge for the local Neo/Vlog producer."""
+import os
+import socket
+import socketserver
+import subprocess
+import time
+from http.server import BaseHTTPRequestHandler
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
-import argparse
-import http.server
-import pathlib
-import queue
-import threading
+PORT = 8686
+INBOX = Path.home() / ".neoy" / "inbox"
+INBOX.mkdir(parents=True, exist_ok=True)
 
 
-class BridgeHandler(http.server.BaseHTTPRequestHandler):
-    inbox: queue.Queue[str] = queue.Queue()
+def pending():
+    return sorted(INBOX.glob("*.txt"))
 
-    def do_POST(self) -> None:  # noqa: N802
-        if self.path != "/agent":
+
+class Handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        if urlparse(self.path).path != "/agent":
             self.send_error(404)
             return
         length = int(self.headers.get("Content-Length", "0"))
-        message = self.rfile.read(length).decode("utf-8")
-        self.inbox.put(message)
+        body = self.rfile.read(length)
+        if len(body) >= 8:  # Small requests are health checks, not handoffs.
+            (INBOX / f"{time.time_ns()}.txt").write_bytes(body)
         self.send_response(200)
         self.end_headers()
+        self.wfile.write(b"ok")
 
-    def log_message(self, *_args: object) -> None:
-        pass
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="LAN-only Neoy reference bridge")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--queue-dir", type=pathlib.Path)
-    args = parser.parse_args()
-    server = http.server.ThreadingHTTPServer((args.host, args.port), BridgeHandler)
-    print(f"Neoy listening on http://{args.host}:{args.port}/agent")
-
-    def persist() -> None:
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        if parsed.path not in {"/agent/next", "/agent/peek"}:
+            self.send_error(404)
+            return
+        try:
+            timeout = min(max(float(parse_qs(parsed.query).get("timeout", ["0"])[0]), 0), 30)
+        except ValueError:
+            self.send_error(400, "timeout must be numeric")
+            return
+        deadline = time.monotonic() + timeout
         while True:
-            message = BridgeHandler.inbox.get()
-            if args.queue_dir:
-                args.queue_dir.mkdir(parents=True, exist_ok=True)
-                path = args.queue_dir / f"handoff-{threading.get_native_id()}-{BridgeHandler.inbox.qsize()}.txt"
-                path.write_text(message, encoding="utf-8")
-            else:
-                print(message, flush=True)
+            files = pending()
+            if files:
+                message = files[0].read_bytes()
+                if parsed.path == "/agent/next":
+                    files[0].unlink()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Length", str(len(message)))
+                self.end_headers()
+                self.wfile.write(message)
+                return
+            if time.monotonic() >= deadline:
+                self.send_response(204)
+                self.end_headers()
+                return
+            time.sleep(0.25)
 
-    threading.Thread(target=persist, daemon=True).start()
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
+    def log_message(self, *_args):
         pass
-    finally:
-        server.server_close()
 
 
-if __name__ == "__main__":
-    main()
+class Server(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+host = socket.gethostname().split(".")[0]
+try:
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    probe.connect(("8.8.8.8", 80))
+    ip = probe.getsockname()[0]
+    probe.close()
+except OSError:
+    ip = "127.0.0.1"
+
+subprocess.Popen(
+    ["dns-sd", "-R", host, "_neoy._tcp", ".", str(PORT),
+     "path=/agent", f"host={host}", f"port={PORT}", f"ip={ip}"],
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+)
+Server(("0.0.0.0", PORT), Handler).serve_forever()
