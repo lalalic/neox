@@ -55,7 +55,10 @@ public final class MCPServer {
     public nonisolated(unsafe) var onRequest: ((String) -> Void)?
 
     /// Called on every tools/call with the tool name and compact JSON of its arguments.
-    public nonisolated(unsafe) var onToolCall: ((String, String) -> Void)?
+    public nonisolated(unsafe) var onToolCall: ((UUID, String, String) -> Void)?
+
+    /// Called after a tool handler has returned or failed.
+    public nonisolated(unsafe) var onToolCallFinished: ((UUID) -> Void)?
 
     public init(name: String = "mcp-server", version: String = "1.0.0", port: UInt16 = 9223, bonjourName: String? = nil) {
         self.name = name
@@ -373,16 +376,18 @@ public final class MCPServer {
 
             let arguments = params["arguments"] as? [String: Any] ?? [:]
             let jsonArgs = Self.toJSONValue(arguments)
+            let callID = UUID()
             if let onToolCall {
                 let argsPreview: String
                 if let data = try? JSONSerialization.data(withJSONObject: Self.jsonValueToAny(jsonArgs), options: [.sortedKeys]) {
                     argsPreview = String(data: data, encoding: .utf8) ?? ""
                 } else { argsPreview = "" }
-                onToolCall(toolName, argsPreview)
+                onToolCall(callID, toolName, argsPreview)
             }
 
             // Tool handlers may need MainActor — run in a detached task
             Task.detached { [weak self] in
+                defer { self?.onToolCallFinished?(callID) }
                 do {
                     let result = try await handler(jsonArgs)
                     // Image results come back as "b64:<mime>,<base64>"; everything else is text.
