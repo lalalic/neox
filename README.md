@@ -101,6 +101,23 @@ detects the network transition.
 | `agent.handoff` | self-test the phone→bridge handoff path (Bonjour discovery + POST) | `instruction` |
 | `agent.pilot` | remote UI automation of this app (self-testing) | `command`: snapshot/tap/tap_xy/type/swipe/long_press/find/scroll_to/pick/screenshot |
 | `agent.demo` | visual demo overlays (spotlight, caption, TTS…) | `command`: step/spotlight/annotate/caption/say/cursor/highlight/clear/pause/resume/wait/start_recording/stop_recording |
+| `tour.start` | validate and stage a human Capture Tour | `manifest` (JSON string) |
+| `tour.status` | inspect tour progress and accepted shot references | — |
+| `tour.cancel` | clear the active tour without deleting media | — |
+
+## Capture Tour Runner
+
+`tour.start` accepts one versioned, ordered shot manifest. Neox persists the
+session, shows a Start/Resume card on the status screen, and guides the human
+through each independent shot: live camera preview, script/instruction,
+framing guidance, target-duration progress (never an automatic cutoff), then
+Stop → Retake / Accept / Skip. Accepted takes are stored in the app's existing
+`/files/` cache and `tour.status` returns deterministic `shot_id` to
+`/files/<name>` references. Camera and microphone access are requested only
+when the runner is opened. The runner applies camera, orientation, and lens
+preferences where supported, with deterministic fallback notes. Talking-head
+shots can also show non-blocking Vision/luminance guidance for face presence,
+approximate distance, centering, and low light.
 
 ## Vision index — persistent media knowledge
 

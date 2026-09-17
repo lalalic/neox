@@ -8,6 +8,8 @@ struct StatusView: View {
     // Reference sections start collapsed; tap a header to expand.
     @State private var neoyExpanded = false
     @State private var siriExpanded = false
+    @State private var showingTourRunner = false
+    @StateObject private var tours = CaptureTourStore.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,6 +28,35 @@ struct StatusView: View {
             .padding(.vertical, 18)
 
             Divider()
+
+            if let transaction = bridge.transaction {
+                PhoneTransactionBanner(snapshot: transaction)
+                    .task(id: transaction.id) {
+                        while !Task.isCancelled {
+                            if bridge.transaction?.state != .active {
+                                break
+                            }
+
+                            bridge.refreshTransaction()
+
+                            do {
+                                try await Task.sleep(for: .seconds(1))
+                            } catch {
+                                return
+                            }
+                        }
+
+                        guard !Task.isCancelled, bridge.transaction != nil else { return }
+
+                        do {
+                            try await Task.sleep(for: .seconds(60))
+                        } catch {
+                            return
+                        }
+
+                        bridge.dismissReleasedTransaction()
+                    }
+            }
 
             // Requests: tool list first, then every tool call
             ListView
@@ -51,13 +82,31 @@ struct StatusView: View {
             .padding(12)
         }
         .background(Color(.systemBackground))
-        // NeoxApp's scenePhase handler starts once on launch and rebinds on
-        // every return to foreground. A local iOS listener cannot remain
-        // reachable while this app is backgrounded.
+        .sheet(isPresented: $showingTourRunner) { CaptureTourRunnerView(tours: tours) }
+        // No .onAppear ensureRunning() here — NeoxApp's scenePhase(.active)
+        // handler already restarts on every foreground. Keeping both would
+        // restart twice at launch and log two 'listening' lines.
     }
 
     private var ListView: some View {
         List {
+            // Most-live information first.
+            Section("Requests") {
+                if bridge.logLines.isEmpty {
+                    Text("No requests yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(bridge.logLines.enumerated().reversed()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(.system(size: 11, weight: .regular, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+
+            CaptureTourCard(tours: tours, showingRunner: $showingTourRunner)
+
             // Discovered desktop bridges — the desktop half of the handoff
             // pair, codename "Neoy". Tap to select the preferred one; the
             // intent hands off there.
@@ -96,21 +145,6 @@ struct StatusView: View {
                         Text("No Neoy on the LAN. Start one on the desktop (see neox-phone-mcp skill).")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            // Most-live information after the active handoff destination.
-            Section("Requests") {
-                if bridge.logLines.isEmpty {
-                    Text("No requests yet.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(Array(bridge.logLines.enumerated().reversed()), id: \.offset) { _, line in
-                        Text(line)
-                            .font(.system(size: 11, weight: .regular, design: .monospaced))
-                            .textSelection(.enabled)
                     }
                 }
             }
@@ -198,6 +232,9 @@ struct StatusView: View {
             "agent.pilot": "remote UI automation of this app",
             "agent.demo": "spotlight/caption/TTS overlays",
             "agent.handoff": "self-test the phone→bridge handoff path",
+            "tour.start": "start a guided, human-in-the-loop recording tour",
+            "tour.status": "tour progress and accepted shot references",
+            "tour.cancel": "cancel the active recording tour",
         ]
         return bridge.registeredTools.map { ToolRow(name: $0, summary: descriptions[$0] ?? "") }
     }
@@ -208,5 +245,102 @@ struct StatusView: View {
         case .failed: .red
         default: .orange
         }
+    }
+}
+
+private struct PhoneTransactionBanner: View {
+    let snapshot: PhoneTransactionSnapshot
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let isActive = snapshot.state == .active
+            let now = context.date
+
+            VStack(alignment: .leading, spacing: 6) {
+                Label(
+                    isActive ? "NeoX phone work active" : terminalTitle,
+                    systemImage: isActive ? "iphone.radiowaves.left.and.right" : terminalIcon
+                )
+                .font(.headline)
+
+                Text(
+                    isActive
+                        ? "Keep NeoX in the foreground while phone work is active."
+                        : terminalMessage
+                )
+                .font(.subheadline.weight(.semibold))
+
+                Text(snapshot.label)
+                    .font(.subheadline)
+                    .lineLimit(1)
+
+                if let reason = snapshot.reason {
+                    Text(reason)
+                        .font(.caption)
+                        .lineLimit(2)
+                }
+
+                if isActive {
+                    Text("Elapsed \(format(now.timeIntervalSince(snapshot.startedAt))) · time left \(format(max(0, snapshot.expiresAt.timeIntervalSince(now))))")
+                        .font(.caption.monospacedDigit())
+                } else if let endedAt = snapshot.endedAt {
+                    Text("Released at \(endedAt.formatted(date: .omitted, time: .shortened))")
+                        .font(.caption.monospacedDigit())
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+            .foregroundStyle(.black)
+            .background(isActive ? .orange : terminalColor)
+        }
+    }
+
+    private var terminalTitle: String {
+        switch snapshot.state {
+        case .completed: "Phone work complete"
+        case .failed: "Phone work failed"
+        case .cancelled: "Phone work cancelled"
+        case .timeout: "Phone work timed out"
+        case .active: "NeoX phone work active"
+        }
+    }
+
+    private var terminalIcon: String {
+        switch snapshot.state {
+        case .completed: "checkmark.circle.fill"
+        case .failed: "exclamationmark.triangle.fill"
+        case .cancelled: "minus.circle.fill"
+        case .timeout: "clock.badge.exclamationmark"
+        case .active: "iphone.radiowaves.left.and.right"
+        }
+    }
+
+    private var terminalMessage: String {
+        switch snapshot.state {
+        case .completed:
+            "NeoX is released. You can use your phone normally; desktop processing may continue."
+        case .failed:
+            "NeoX is released after phone work failed. You can use your phone normally; desktop processing status is unchanged."
+        case .cancelled:
+            "NeoX is released after phone work was cancelled. You can use your phone normally; desktop processing status is unchanged."
+        case .timeout:
+            "NeoX is released after phone work timed out. You can use your phone normally; desktop processing status is unchanged."
+        case .active:
+            "Keep NeoX in the foreground while phone work is active."
+        }
+    }
+
+    private var terminalColor: Color {
+        switch snapshot.state {
+        case .completed: .green
+        case .failed: .red
+        case .timeout: .orange
+        case .cancelled: .gray
+        case .active: .orange
+        }
+    }
+
+    private func format(_ interval: TimeInterval) -> String {
+        Duration.seconds(Int(interval.rounded())).formatted(.time(pattern: .minuteSecond))
     }
 }

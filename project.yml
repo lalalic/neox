@@ -12,11 +12,7 @@ targets:
     type: application
     platform: iOS
     sources:
-      - Neox/App
-      - Neox/Server
-      - Neox/Intents
-      - Neox/AgentKit
-      - Neox/Assets.xcassets
+      - Neox
     entitlements:
       path: Neox/Neox.entitlements
     settings:
@@ -30,8 +26,35 @@ targets:
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "1"
         DEVELOPMENT_TEAM: "JABNLDLN8G"
-        PROVISIONING_PROFILE_SPECIFIER: PhoneBridge-Dev
-        CODE_SIGN_STYLE: Manual
+
+  NeoxTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - NeoxTests
+    dependencies:
+      - target: NeoxApp
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.neox.app.tests
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Neox.app/Neox
+        BUNDLE_LOADER: $(TEST_HOST)
+        DEVELOPMENT_TEAM: "JABNLDLN8G"
+
+  NeoxUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - NeoxUITests
+    dependencies:
+      - target: NeoxApp
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.neox.app.uitests
+        DEVELOPMENT_TEAM: "JABNLDLN8G"
+
 schemes:
   NeoxApp:
     build:
@@ -39,5 +62,9 @@ schemes:
         NeoxApp: all
     run:
       config: Debug
+    test:
+      targets:
+        - NeoxTests
+        - NeoxUITests
     archive:
       config: Release
