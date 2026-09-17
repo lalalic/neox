@@ -4,30 +4,94 @@ import SwiftUI
 
 @main
 struct NeoxTourApp: App {
-    @StateObject private var store = CaptureTourStore.shared
-    @StateObject private var runner = CaptureRunner()
-    private let server: MCPServer
+    @NSApplicationDelegateAdaptor(NeoxTourAppDelegate.self) private var appDelegate
 
-    init() {
-        let server = MCPServer(name: "neox-tour-mac", version: "1.0.0", port: 9224,
-                               bonjourName: "neox-tour-mac")
-        server.register(tools: CaptureTourTools.tools())
+    var body: some Scene {
+        MenuBarExtra("Neox Tour", systemImage: "video") {
+            Button("Open Current Tour") { appDelegate.showTourWindow() }
+            Divider()
+            Button("Quit Neox Tour") { NSApp.terminate(nil) }
+        }
+    }
+}
+
+@MainActor
+final class NeoxTourAppDelegate: NSObject, NSApplicationDelegate {
+    private let store = CaptureTourStore.shared
+    private let runner = CaptureRunner()
+    private var server: MCPServer?
+    private var window: NSWindow?
+    private var observers: [NSObjectProtocol] = []
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        startServer()
+        observers.append(NotificationCenter.default.addObserver(
+            forName: .captureTourStarted, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.showTourWindow() }
+        })
+        observers.append(NotificationCenter.default.addObserver(
+            forName: .captureTourCompleted, object: nil, queue: .main
+        ) { [weak self] note in
+            let sessionID = note.userInfo?["session_id"] as? String
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(3))
+                guard let self,
+                      self.store.session?.sessionID == sessionID,
+                      self.store.session?.state == "completed" else { return }
+                self.window?.orderOut(nil)
+                self.runner.releaseCapture()
+            }
+        })
+        observers.append(NotificationCenter.default.addObserver(
+            forName: .captureTourCancelled, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.window?.orderOut(nil)
+                self?.runner.releaseCapture()
+            }
+        })
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
+    }
+
+    func showTourWindow() {
+        if window == nil {
+            let root = CaptureTourView(runner: runner).environmentObject(store)
+            let controller = NSHostingController(rootView: root)
+            let value = NSWindow(contentViewController: controller)
+            value.title = "Neox Tour"
+            value.setContentSize(NSSize(width: 860, height: 700))
+            value.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            value.isReleasedWhenClosed = false
+            value.center()
+            window = value
+        }
+        runner.configure()
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func startServer() {
+        let value = MCPServer(name: "neox-tour-mac", version: "1.0.0", port: 9224,
+                              bonjourName: "neox-tour-mac")
+        value.register(tools: CaptureTourTools.tools())
         let exports = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("NeoxTourMac/exports", isDirectory: true)
         try? FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
-        server.setStaticFileRoot(exports)
-        try? server.start()
-        self.server = server
+        value.setStaticFileRoot(exports)
+        try? value.start()
+        server = value
     }
+}
 
-    var body: some Scene {
-        WindowGroup("Neox Tour") {
-            CaptureTourView(runner: runner)
-                .environmentObject(store)
-                .frame(minWidth: 780, minHeight: 620)
-        }
-        .commands { CommandGroup(replacing: .appInfo) { } }
-    }
+extension Notification.Name {
+    static let captureTourStarted = Notification.Name("NeoxTour.captureTourStarted")
+    static let captureTourCompleted = Notification.Name("NeoxTour.captureTourCompleted")
+    static let captureTourCancelled = Notification.Name("NeoxTour.captureTourCancelled")
 }
 
 @MainActor
@@ -37,13 +101,14 @@ final class CaptureRunner: NSObject, ObservableObject, AVCaptureFileOutputRecord
     @Published private(set) var isConfigured = false
     @Published private(set) var isRecording = false
     @Published private(set) var hasTake = false
+    @Published private(set) var elapsed: Double = 0
     @Published private(set) var previewError: String?
     private var recordingStartedAt: Date?
+    private var completedDurationS: Double = 0
     private var temporaryURL: URL?
 
     override init() {
         super.init()
-        configure()
     }
 
     func configure() {
@@ -88,15 +153,33 @@ final class CaptureRunner: NSObject, ObservableObject, AVCaptureFileOutputRecord
         DispatchQueue.global(qos: .userInitiated).async { [session] in session.startRunning() }
     }
 
+    func releaseCapture() {
+        if isRecording { movieOutput.stopRecording() }
+        if session.isRunning { session.stopRunning() }
+        for input in session.inputs { session.removeInput(input) }
+        for output in session.outputs { session.removeOutput(output) }
+        isConfigured = false
+        previewError = nil
+        retake()
+    }
+
     func startRecording() {
         guard isConfigured, !isRecording else { return }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("neox-tour-\(UUID().uuidString).mov")
         try? FileManager.default.removeItem(at: url)
         temporaryURL = url
         recordingStartedAt = Date()
+        completedDurationS = 0
+        elapsed = 0
         hasTake = false
         isRecording = true
         movieOutput.startRecording(to: url, recordingDelegate: self)
+        Task { @MainActor [weak self] in
+            while let self, self.isRecording {
+                self.elapsed = Date().timeIntervalSince(self.recordingStartedAt ?? Date())
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
     }
 
     func stopRecording() {
@@ -109,6 +192,8 @@ final class CaptureRunner: NSObject, ObservableObject, AVCaptureFileOutputRecord
         if let temporaryURL { try? FileManager.default.removeItem(at: temporaryURL) }
         temporaryURL = nil
         recordingStartedAt = nil
+        completedDurationS = 0
+        elapsed = 0
         hasTake = false
     }
 
@@ -125,8 +210,7 @@ final class CaptureRunner: NSObject, ObservableObject, AVCaptureFileOutputRecord
         do {
             try FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
             try FileManager.default.moveItem(at: url, to: destination)
-            let duration = Date().timeIntervalSince(recordingStartedAt ?? Date())
-            appendResult(status: "accepted", duration: duration, reference: "/files/\(name)")
+            appendResult(status: "accepted", duration: completedDurationS, reference: "/files/\(name)")
         } catch { previewError = "Could not save take: \(error.localizedDescription)" }
     }
 
@@ -145,15 +229,23 @@ final class CaptureRunner: NSObject, ObservableObject, AVCaptureFileOutputRecord
         value.currentIndex += 1
         value.state = value.currentIndex >= value.manifest.shots.count ? "completed" : "ready"
         CaptureTourStore.shared.update(value)
+        if value.state == "completed" {
+            NotificationCenter.default.post(name: .captureTourCompleted, object: nil, userInfo: ["session_id": value.sessionID])
+        }
         temporaryURL = nil
         recordingStartedAt = nil
+        completedDurationS = 0
+        elapsed = 0
         hasTake = false
     }
 
     nonisolated func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL,
                                 from connections: [AVCaptureConnection], error: Error?) {
+        let recordedDuration = CMTimeGetSeconds(output.recordedDuration)
         Task { @MainActor in
             self.isRecording = false
+            self.completedDurationS = recordedDuration.isFinite ? max(0, recordedDuration) : 0
+            self.elapsed = self.completedDurationS
             if let error, (error as NSError).code != AVError.Code.maximumDurationReached.rawValue {
                 self.previewError = "Recording failed: \(error.localizedDescription)"
                 self.hasTake = false
@@ -200,6 +292,27 @@ struct CaptureTourView: View {
                     Text("Shot \(session.currentIndex + 1) of \(session.manifest.shots.count): \(shot.title)").font(.headline)
                     if let instruction = shot.instruction { Text(instruction).foregroundStyle(.secondary) }
                     CameraPreview(session: runner.session).clipShape(RoundedRectangle(cornerRadius: 12)).frame(minHeight: 360)
+                    if let target = shot.targetDurationS {
+                        ProgressView(value: min(runner.elapsed / max(target, 0.1), 1))
+                            .tint(runner.elapsed >= target ? .green : .accentColor)
+                        HStack {
+                            Text("\(runner.elapsed, specifier: "%.1f") / \(target, specifier: "%.0f")s")
+                                .font(.caption.monospacedDigit())
+                            Spacer()
+                            if runner.isRecording && runner.elapsed >= target {
+                                Text("Target reached — keep recording or stop")
+                                    .font(.caption.bold())
+                                    .foregroundStyle(.green)
+                            } else if runner.isRecording {
+                                Text("Recording")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } else {
+                        Text("\(runner.elapsed, specifier: "%.1f")s")
+                            .font(.caption.monospacedDigit())
+                    }
                     HStack {
                         Button(runner.isRecording ? "Stop recording" : "Record take") {
                             runner.isRecording ? runner.stopRecording() : runner.startRecording()

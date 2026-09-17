@@ -143,6 +143,7 @@ final class CaptureTourStore: ObservableObject {
         )
         session = value
         persist()
+        NotificationCenter.default.post(name: .captureTourStarted, object: nil, userInfo: ["session_id": value.sessionID])
         return value
     }
 
@@ -156,6 +157,7 @@ final class CaptureTourStore: ObservableObject {
     func cancel() {
         session = nil
         try? FileManager.default.removeItem(at: fileURL)
+        NotificationCenter.default.post(name: .captureTourCancelled, object: nil)
     }
 
     func update(_ value: CaptureTourSession) {
