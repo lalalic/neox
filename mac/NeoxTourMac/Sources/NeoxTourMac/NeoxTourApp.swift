@@ -79,6 +79,7 @@ final class NeoxTourAppDelegate: NSObject, NSApplicationDelegate {
         let value = MCPServer(name: "neox-tour-mac", version: "1.0.0", port: 9224,
                               bonjourName: "neox-tour-mac")
         value.register(tools: CaptureTourTools.tools())
+        value.register(tools: DemoRecorderTools.tools())
         let exports = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("NeoxTourMac/exports", isDirectory: true)
         try? FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
