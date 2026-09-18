@@ -14,8 +14,9 @@ final class DemoRecorder: NSObject {
     private(set) var displayHeight = 0
 
     private var stream: SCStream?
-    private var writer: AVAssetWriter?
-    private var writerInput: AVAssetWriterInput?
+    private var videoWriter: DemoVideoWriter?
+    private var systemRecording: AnyObject?
+    private let captureQueue = DispatchQueue(label: "neox-demo-recorder.capture")
     private var outputURL: URL?
     private var startedAt: Date?
     private var display: SCDisplay?
@@ -49,8 +50,17 @@ final class DemoRecorder: NSObject {
             configuration.queueDepth = 3
             configuration.showsCursor = true
 
+            guard let outputURL else { throw DemoRecorderError.message("Missing demo output URL") }
             let value = SCStream(filter: filter, configuration: configuration, delegate: nil)
-            try value.addStreamOutput(self, type: .screen, sampleHandlerQueue: DispatchQueue(label: "neox-demo-recorder.capture"))
+            if #available(macOS 15.0, *) {
+                let recorder = try DemoSystemRecording(outputURL: outputURL)
+                try value.addRecordingOutput(recorder.output)
+                systemRecording = recorder
+            } else {
+                let sink = DemoVideoWriter(outputURL: outputURL)
+                try value.addStreamOutput(sink, type: .screen, sampleHandlerQueue: captureQueue)
+                videoWriter = sink
+            }
             stream = value
             startedAt = Date()
             elapsed = 0
@@ -68,14 +78,17 @@ final class DemoRecorder: NSObject {
         do {
             if let stream { try await stream.stopCapture() }
             self.stream = nil
-            if let writer {
-                if writer.status == .writing { writerInput?.markAsFinished() }
-                await finish(writer)
+            if #available(macOS 15.0, *), let systemRecording = systemRecording as? DemoSystemRecording {
+                elapsed = try await systemRecording.finish()
+            } else if let videoWriter {
+                elapsed = try await videoWriter.finish()
+            } else {
+                throw DemoRecorderError.message("No screen recording backend was configured")
             }
-            writer = nil
-            writerInput = nil
-            elapsed = Date().timeIntervalSince(startedAt ?? Date())
+            self.systemRecording = nil
+            self.videoWriter = nil
             state = "completed"
+            DemoOverlayController.shared.clear(width: displayWidth, height: displayHeight)
         } catch {
             fail(error)
         }
@@ -87,10 +100,13 @@ final class DemoRecorder: NSObject {
             try? await stream.stopCapture()
         }
         self.stream = nil
-        writerInput?.markAsFinished()
-        writer?.cancelWriting()
-        writer = nil
-        writerInput = nil
+        if #available(macOS 15.0, *), let systemRecording = systemRecording as? DemoSystemRecording {
+            systemRecording.cancel()
+        }
+        systemRecording = nil
+        videoWriter?.cancel()
+        videoWriter = nil
+        DemoOverlayController.shared.clear(width: displayWidth, height: displayHeight)
         if let outputURL { try? FileManager.default.removeItem(at: outputURL) }
         reset()
         return statusJSON()
@@ -130,56 +146,145 @@ final class DemoRecorder: NSObject {
         state = "error"
         elapsed = Date().timeIntervalSince(startedAt ?? Date())
         stream = nil
-        writer = nil
-        writerInput = nil
+        if #available(macOS 15.0, *), let systemRecording = systemRecording as? DemoSystemRecording {
+            systemRecording.cancel()
+        }
+        systemRecording = nil
+        videoWriter?.cancel()
+        videoWriter = nil
         outputReference = nil
         NSLog("Neox demo recorder error: %@", error.localizedDescription)
     }
 
-    private func finish(_ writer: AVAssetWriter) async {
-        await withCheckedContinuation { continuation in
-            writer.finishWriting { continuation.resume() }
+}
+
+@available(macOS 15.0, *)
+private final class DemoSystemRecording: NSObject, SCRecordingOutputDelegate, @unchecked Sendable {
+    private(set) var output: SCRecordingOutput!
+    private var completion: CheckedContinuation<Double, Error>?
+    private var result: Result<Double, Error>?
+
+    init(outputURL: URL) throws {
+        try? FileManager.default.removeItem(at: outputURL)
+        let configuration = SCRecordingOutputConfiguration()
+        configuration.outputURL = outputURL
+        configuration.outputFileType = .mov
+        configuration.videoCodecType = .h264
+        super.init()
+        self.output = SCRecordingOutput(configuration: configuration, delegate: self)
+    }
+
+    func finish() async throws -> Double {
+        if let result { return try result.get() }
+        return try await withCheckedThrowingContinuation { continuation in
+            if let result { continuation.resume(with: result) }
+            else { completion = continuation }
+        }
+    }
+
+    func cancel() {
+        if result == nil { complete(.failure(DemoRecorderError.message("Demo recording cancelled"))) }
+    }
+
+    func recordingOutputDidStartRecording(_ recordingOutput: SCRecordingOutput) {}
+
+    func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: Error) {
+        complete(.failure(error))
+    }
+
+    func recordingOutputDidFinishRecording(_ recordingOutput: SCRecordingOutput) {
+        complete(.success(max(0, CMTimeGetSeconds(recordingOutput.recordedDuration))))
+    }
+
+    private func complete(_ value: Result<Double, Error>) {
+        guard result == nil else { return }
+        result = value
+        if let completion {
+            self.completion = nil
+            completion.resume(with: value)
         }
     }
 }
 
-extension DemoRecorder: SCStreamOutput {
-    nonisolated func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard type == .screen else { return }
-        let boxed = DemoSampleBuffer(sampleBuffer)
-        Task { @MainActor [weak self] in
-            guard let self, self.state == "recording", let imageBuffer = CMSampleBufferGetImageBuffer(boxed.value) else { return }
-            if self.writer == nil {
-                guard let outputURL = self.outputURL,
-                      let formatDescription = CMSampleBufferGetFormatDescription(boxed.value) else { return }
-                do {
-                    try? FileManager.default.removeItem(at: outputURL)
-                    let value = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
-                    let dimensions = CMVideoFormatDescriptionGetDimensions(formatDescription)
-                    let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
-                        AVVideoCodecKey: AVVideoCodecType.h264,
-                        AVVideoWidthKey: Int(dimensions.width),
-                        AVVideoHeightKey: Int(dimensions.height),
-                    ])
-                    input.expectsMediaDataInRealTime = true
-                    guard value.canAdd(input) else { throw DemoRecorderError.message("Could not configure H.264 writer") }
-                    value.add(input)
-                    guard value.startWriting() else { throw value.error ?? DemoRecorderError.message("Could not start writer") }
-                    value.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(boxed.value))
-                    self.writer = value
-                    self.writerInput = input
-                } catch { self.fail(error); return }
+private final class DemoVideoWriter: NSObject, SCStreamOutput, @unchecked Sendable {
+    private let outputURL: URL
+    private var writer: AVAssetWriter?
+    private var input: AVAssetWriterInput?
+    private var firstPTS: CMTime?
+    private var lastPTS: CMTime?
+    private var failure: Error?
+
+    init(outputURL: URL) {
+        self.outputURL = outputURL
+        super.init()
+    }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .screen, CMSampleBufferIsValid(sampleBuffer), CMSampleBufferDataIsReady(sampleBuffer),
+              CMSampleBufferGetImageBuffer(sampleBuffer) != nil else { return }
+
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+           let raw = attachments.first?[.status] as? Int,
+           let status = SCFrameStatus(rawValue: raw), status != .complete { return }
+
+        do {
+            if writer == nil { try configureWriter(for: sampleBuffer) }
+            guard failure == nil, let writer, let input, writer.status == .writing else { return }
+            guard input.isReadyForMoreMediaData else { return }
+            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            if input.append(sampleBuffer) {
+                if firstPTS == nil { firstPTS = pts }
+                lastPTS = pts
+            } else if let error = writer.error {
+                failure = error
             }
-            guard let input = self.writerInput, input.isReadyForMoreMediaData else { return }
-            _ = imageBuffer
-            input.append(boxed.value)
+        } catch {
+            failure = error
         }
     }
-}
 
-private final class DemoSampleBuffer: @unchecked Sendable {
-    let value: CMSampleBuffer
-    init(_ value: CMSampleBuffer) { self.value = value }
+    func finish() async throws -> Double {
+        if let failure { throw failure }
+        guard let writer, let input, writer.status == .writing else {
+            throw DemoRecorderError.message("Screen capture produced no writable video frames")
+        }
+        input.markAsFinished()
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            writer.finishWriting {
+                if writer.status == .completed { continuation.resume() }
+                else { continuation.resume(throwing: writer.error ?? DemoRecorderError.message("Could not finalize demo recording")) }
+            }
+        }
+        guard let firstPTS, let lastPTS else { return 0 }
+        return max(0, CMTimeGetSeconds(CMTimeSubtract(lastPTS, firstPTS)))
+    }
+
+    func cancel() {
+        input?.markAsFinished()
+        writer?.cancelWriting()
+        if FileManager.default.fileExists(atPath: outputURL.path) { try? FileManager.default.removeItem(at: outputURL) }
+    }
+
+    private func configureWriter(for sampleBuffer: CMSampleBuffer) throws {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) else {
+            throw DemoRecorderError.message("Screen frame has no format description")
+        }
+        try? FileManager.default.removeItem(at: outputURL)
+        let value = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
+        let dimensions = CMVideoFormatDescriptionGetDimensions(formatDescription)
+        let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: Int(dimensions.width),
+            AVVideoHeightKey: Int(dimensions.height),
+        ])
+        videoInput.expectsMediaDataInRealTime = true
+        guard value.canAdd(videoInput) else { throw DemoRecorderError.message("Could not configure H.264 writer") }
+        value.add(videoInput)
+        guard value.startWriting() else { throw value.error ?? DemoRecorderError.message("Could not start writer") }
+        value.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
+        writer = value
+        input = videoInput
+    }
 }
 
 @MainActor
@@ -188,6 +293,13 @@ final class DemoOverlayController {
     private var window: NSWindow?
     private var items: [String: DemoOverlayItem] = [:]
     private var clearTasks: [String: Task<Void, Never>] = [:]
+
+    func clear(width: Int, height: Int) {
+        clearTasks.values.forEach { $0.cancel() }
+        clearTasks.removeAll()
+        items.removeAll()
+        redraw(width: width, height: height)
+    }
 
     func update(kind: String, rect: CGRect?, text: String?, durationMS: Int?, width: Int, height: Int) throws {
         guard ["highlight", "spotlight", "caption", "clear"].contains(kind) else {

@@ -4,3 +4,5 @@ build-device/
 Neox.xcodeproj
 .DS_Store
 scripts/remote-deploy.sh
+mac/NeoxTourMac/NeoxTourMac.xcodeproj/
+mac/NeoxTourMac/build-signed/

@@ -32,5 +32,7 @@
 	<string>Neox Tour uses the microphone to record guided capture-tour audio.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Neox Tour records the screen on demand to create agent-driven product demos.</string>
 </dict>
 </plist>
