@@ -9,6 +9,8 @@ description: >-
   handoffs from the phone. Use when a task needs the user's phone media:
   "find photos of X", "pull recent videos off my phone", "build a vlog from
   my camera roll", "OCR my screenshots", or any macOS agent flow mentioning Neox.
+  The same skill also covers **Neox Tour Mac**, a native macOS MCP service for
+  guided Capture Tours and agent-driven product-demo recording.
 ---
 
 # neox-phone-mcp — Drive an iPhone's media library from a desktop agent
@@ -160,6 +162,45 @@ Prefer `preset=720p` for video drafts; `original` only when quality matters.
   out, ask the user to keep Neox foregrounded (ideally plugged in).
 - The phone is a personal device on a home LAN: LAN-only, no auth — never
   tunnel it to the public internet.
+
+## Neox Tour Mac
+
+Use **Neox Tour Mac** when the work happens on the Mac rather than on the
+iPhone. It is the native macOS counterpart to the phone Capture Tour runner and
+also provides an automated demo-recorder surface for agents.
+
+- MCP endpoint: `http://127.0.0.1:9224/mcp`
+- Bonjour service: `_mcp._tcp`, instance `neox-tour-mac`
+- Accepted captures and demo recordings are served from `/files/<name>`.
+- The app uses the same version-1 Capture Tour manifest and `tour.start`,
+  `tour.status`, and `tour.cancel` tools as the phone runner.
+- Mac-only demo tools record the main display with ScreenCaptureKit and can
+  render click-through overlays that are included in the recording.
+
+For product-demo automation, use this flow:
+
+    demo.start
+    → demo.overlay(highlight | spotlight | caption)
+    → operate the target app/browser
+    → update or clear overlays as the flow advances
+    → demo.stop
+
+`demo.start` returns `display_width` and `display_height`. Overlay rectangles
+use main-display pixel coordinates with origin `(0, 0)` at the top-left.
+Keep every rectangle inside the returned display bounds.
+
+Use `demo.overlay` to direct viewer attention without modifying the target
+application itself. Typical overlay kinds are `highlight`, `spotlight`,
+`caption`, and `clear`. Overlays are click-through and are intentionally
+captured in the final video.
+
+The recorder writes H.264 MOV output under
+`~/Library/Application Support/NeoxTourMac/exports`. Screen Recording
+permission is requested on demand when capture starts. Camera and microphone
+permissions are used only by guided Capture Tour recording.
+
+Before relying on any tool, call `tools/list` on the live Mac MCP endpoint.
+The running tool schema is authoritative.
 
 ## Capture Tour workflow
 
