@@ -31,6 +31,26 @@ search, analyze, and pull photos/videos off the phone over WiFi.
 3. On first use the agent should call `media.search`; iOS will prompt for
    Photos permission — tap Allow once on the phone.
 
+## Create a Vlog through iCloud Drive
+
+The status screen has a **Create Vlog** action for asynchronous Vlog creation when the phone and Mac do not need to be on the same LAN.
+
+First use:
+
+1. Tap **Create Vlog**.
+2. Tap **Choose Vlog Inbox** and select an iCloud Drive folder named `Vlog Inbox`.
+3. Select photos/videos, optionally add an instruction, then tap **Create Vlog Submission**.
+
+Neox stores the selected folder permission and writes one submission directory:
+
+```text
+Vlog Inbox/<submission-id>/
+├── media/...
+└── manifest.json
+```
+
+`manifest.json` is schema version 1 and is written only after every selected media file has been fully materialized. It is the ready signal consumed by Neo Vlog's Mac-side watcher; Neox does not create Relay Tasks itself.
+
 ## Siri / Shortcuts → agent chat
 
 The app exposes two App Intents:

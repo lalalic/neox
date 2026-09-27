@@ -9,6 +9,7 @@ struct StatusView: View {
     @State private var neoyExpanded = false
     @State private var siriExpanded = false
     @State private var showingTourRunner = false
+    @State private var showingVlogSubmission = false
     @StateObject private var tours = CaptureTourStore.shared
 
     var body: some View {
@@ -64,6 +65,13 @@ struct StatusView: View {
 
             Divider()
 
+            Button { showingVlogSubmission = true } label: {
+                Label("Create Vlog", systemImage: "film.stack")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .padding([.horizontal, .top], 12)
+
             // Foot buttons
             HStack(spacing: 12) {
                 if bridge.photosStatus != .authorized && bridge.photosStatus != .limited {
@@ -83,6 +91,7 @@ struct StatusView: View {
         }
         .background(Color(.systemBackground))
         .sheet(isPresented: $showingTourRunner) { CaptureTourRunnerView(tours: tours) }
+        .sheet(isPresented: $showingVlogSubmission) { VlogSubmissionView() }
         // No .onAppear ensureRunning() here — NeoxApp's scenePhase(.active)
         // handler already restarts on every foreground. Keeping both would
         // restart twice at launch and log two 'listening' lines.
