@@ -35,4 +35,12 @@ xcodebuild -project NeoY.xcodeproj -scheme NeoY -configuration Debug build
 xcodebuild -project NeoY.xcodeproj -scheme NeoY -configuration Debug test
 ```
 
+For iterative local installs, prefer:
+
+```bash
+./install-local.sh
+```
+
+The helper builds NeoY, discovers a valid local **Apple Development** signing identity, re-signs the app with that stable identity, installs it at `/Applications/NeoY.app`, and launches it. This avoids ad-hoc signatures whose designated requirement is only a changing CDHash; with the stable identity, Screen Recording and Accessibility authorization can survive rebuilds after the one-time grant.
+
 Run `NeoY.app` as an app bundle so macOS can associate Screen Recording, Accessibility, and Local Network permissions with `com.neox.neoy`.
