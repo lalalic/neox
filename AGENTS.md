@@ -199,6 +199,10 @@ Deployment gotchas (all hit in practice):
 - Provisioning profile `PhoneBridge-Dev` (id `QL7J5K8T3V`) covers bundle
   `com.neox.app` + cert `1BFCAE91…` + this iPhone.
 
+## Project learnings
+
+- 2026-09-27: For user-owned iCloud Drive workflows, prefer a native Files folder picker plus a persisted security-scoped bookmark over adding an app-owned iCloud container when the app only needs user-selected folder access. Write cross-device ready markers only after all referenced media bytes are complete.
+
 ## Health check after deploy
 
 ```bash

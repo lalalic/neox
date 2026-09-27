@@ -130,7 +130,6 @@ final class ServerController: ObservableObject {
                 self?.appendLog("▸ \(name)(\(arguments))")
             }
         }
-        }
         server.onLog = { [weak self] message in
             Task { @MainActor [weak self] in self?.appendLog(message) }
         }
