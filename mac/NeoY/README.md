@@ -1,74 +1,38 @@
 # NeoY macOS companion
 
-NeoY is NeoX's native menu-bar companion and the canonical home for the Mac
-Capture Tour and demo runtime.
+NeoY is NeoX's native menu-bar companion for Mac Capture Tour, demo automation, focused Accessibility/computer-use actions, phone media access, and phone-to-Mac agent handoff.
 
-It intentionally uses the same version-1 manifest and MCP tool names:
+## Runtime endpoints
 
-- `tour.start`
-- `tour.status`
-- `tour.cancel`
+- MCP: `http://127.0.0.1:9224/mcp`, Bonjour `_mcp._tcp` / `NeoY`
+- Phone handoff: TCP `8686`, Bonjour `_neoy._tcp`, `POST /agent`
+- Handoff queue: `GET /agent/peek`, `GET /agent/next?timeout=0..30`
+- Handoff persistence: `~/.neoy/inbox`
+- Local exports: `~/Library/Application Support/NeoY/exports`
 
-## Automated demo recorder MVP
+NeoY replaces both the old **Neox Tour** Mac app and the standalone Python `neoy-bridge.py` service. Only NeoY should own ports 9224 and 8686.
 
-Agents use the recorder as:
+## Demo runtime
 
-```text
-demo.start -> demo.overlay(highlight/spotlight/caption) -> agent uses MacBridge
-to operate Chrome/native app -> overlay update/clear -> demo.stop
-```
+The Mac binding follows `~/Workspace/demo/contracts/primitives.md` and exposes:
 
-`demo.start` captures video-only H.264 from the main display and writes a MOV
-under `~/Library/Application Support/NeoY/exports`; the result is
-served as `/files/<name>`. Screen Recording permission is requested only when
-`demo.start` first asks ScreenCaptureKit for shareable content.
+`demo.start_recording`, `demo.step`, `demo.spotlight`, `demo.annotate`, `demo.caption`, `demo.say`, `demo.cursor`, `demo.highlight`, `demo.clear`, `demo.pause`, `demo.resume`, `demo.wait`, and `demo.stop_recording`.
 
-Overlay rectangles use main-display pixel coordinates: origin `(0, 0)` is the
-top-left of the display, `x` grows right, and `y` grows down. `demo.start`
-returns `display_width` and `display_height`; every rectangle must fit within
-`0...display_width` and `0...display_height`. The overlay is converted to the
-main display's AppKit points internally, is click-through, and is included in
-the capture by the ScreenCaptureKit filter.
+The runtime records H.264 MOV output with ScreenCaptureKit and writes a semantic `.events.json` sidecar. Screen Recording permission is required for real capture.
 
-The app listens on `http://127.0.0.1:9224/mcp` and advertises `_mcp._tcp` as
-`neox-tour-mac`. Accepted takes are served from `/files/<name>` by the same
-HTTP server.
+UI actions stay separate from visual primitives: `accessibility.inspect`, `accessibility.resolve`, `computer.click`, `computer.type`, `computer.set_value`, `computer.key`, `computer.scroll`, and `computer.drag`. Semantic inspection/actions require macOS Accessibility permission.
 
-## Build
+## NeoX phone media
+
+NeoY discovers NeoX on `_mcp._tcp` or accepts the exact MCP URL embedded in a phone handoff. It exposes `phone.status`, `phone.media.search`, `phone.media.meta`, `phone.media.thumbnail`, and `phone.media.export`. Exports are downloaded to `~/Library/Application Support/NeoY/exports/phone/`; indexing remains authoritative on the phone.
+
+## Build and test
 
 ```bash
 cd mac/NeoY
 xcodegen generate
 xcodebuild -project NeoY.xcodeproj -scheme NeoY -configuration Debug build
+xcodebuild -project NeoY.xcodeproj -scheme NeoY -configuration Debug test
 ```
 
-Run the built `NeoY.app` from Xcode or Finder so macOS can present camera
-and microphone permission prompts.
-
-## Example
-
-```bash
-curl -s http://127.0.0.1:9224/ | jq
-curl -s -X POST http://127.0.0.1:9224/mcp \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | jq
-```
-
-A Director can send the same manifest it sends to the iPhone. Camera/lens and
-orientation requests that do not apply to the Mac are advisory and appear in
-`quality_warnings`; they never block capture or acceptance.
-
-## Native service boundaries
-
-`NeoYServices.swift` defines the extension points for the native companion:
-
-- `NeoYPhoneClient` — NeoX discovery, status, and media access.
-- `NeoYPhoneHandoffReceiver` — the `_neoy._tcp` handoff receiver.
-- `NeoYDemoRuntime` — demo primitives and runtime state.
-- `NeoYAccessibilityService` — accessibility inspection and target resolution.
-- `NeoYRecordingService` — recording lifecycle and output artifacts.
-- `NeoYFileService` — deterministic local exports and `/files/<name>` references.
-
-The pending adapters are intentionally inert until their follow-up tasks provide
-implementations; Capture Tour and the existing screen-demo recorder remain
-fully wired in the foundation.
+Run `NeoY.app` as an app bundle so macOS can associate Screen Recording, Accessibility, and Local Network permissions with `com.neox.neoy`.

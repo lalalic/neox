@@ -16,6 +16,8 @@ enum NeoYPaths {
 /// platform details.
 protocol NeoYPhoneClient: AnyObject {
     func status() async throws -> String
+    func startDiscovery()
+    func stopDiscovery()
 }
 
 protocol NeoYPhoneHandoffReceiver: AnyObject {
@@ -28,7 +30,7 @@ protocol NeoYDemoRuntime: AnyObject {
 }
 
 protocol NeoYAccessibilityService: AnyObject {
-    func inspect() async throws -> String
+    func inspect(maxDepth: Int, maxNodes: Int) async throws -> String
 }
 
 protocol NeoYRecordingService: AnyObject {
@@ -38,6 +40,10 @@ protocol NeoYRecordingService: AnyObject {
 
 final class NeoYFileService {
     let root: URL
+
+    var phoneExports: URL {
+        root.appendingPathComponent("phone", isDirectory: true)
+    }
 
     init(root: URL = NeoYPaths.exports) {
         self.root = root
@@ -50,6 +56,13 @@ final class NeoYFileService {
     func reference(for file: URL) -> String {
         "/files/\(file.lastPathComponent)"
     }
+
+    func reference(for file: URL, in directory: URL) -> String {
+        let root = directory.standardizedFileURL.path
+        let filePath = file.standardizedFileURL.path
+        let relative = filePath.hasPrefix(root + "/") ? String(filePath.dropFirst(root.count + 1)) : file.lastPathComponent
+        return "/files/\(relative)"
+    }
 }
 
 private enum NeoYUnavailableError: LocalizedError {
@@ -61,24 +74,20 @@ private enum NeoYUnavailableError: LocalizedError {
     }
 }
 
-final class PendingNeoYPhoneClient: NeoYPhoneClient {
-    func status() async throws -> String {
-        throw NeoYUnavailableError.unavailable("NeoX phone connectivity is not configured yet")
-    }
-}
-
-final class PendingNeoYPhoneHandoffReceiver: NeoYPhoneHandoffReceiver {
-    func start() throws {}
-    func stop() {}
-}
-
 final class PendingNeoYDemoRuntime: NeoYDemoRuntime {
     func status() async -> String { "{\"state\":\"idle\"}" }
 }
 
 final class PendingNeoYAccessibilityService: NeoYAccessibilityService {
-    func inspect() async throws -> String {
+    func inspect(maxDepth: Int, maxNodes: Int) async throws -> String {
         throw NeoYUnavailableError.unavailable("NeoY accessibility service is not configured yet")
+    }
+}
+
+@MainActor
+final class NeoYDemoRecorderService: NeoYDemoRuntime {
+    func status() async -> String {
+        DemoRecorder.shared.statusJSON()
     }
 }
 
@@ -105,15 +114,14 @@ final class NeoYServiceRegistry {
 
     init(
         files: NeoYFileService = NeoYFileService(),
-        phone: NeoYPhoneClient = PendingNeoYPhoneClient(),
-        handoff: NeoYPhoneHandoffReceiver = PendingNeoYPhoneHandoffReceiver(),
-        demo: NeoYDemoRuntime = PendingNeoYDemoRuntime(),
-        accessibility: NeoYAccessibilityService = PendingNeoYAccessibilityService(),
+        targetStore: NeoXPhoneTargetStore = NeoXPhoneTargetStore(),
+        demo: NeoYDemoRuntime = NeoYDemoRecorderService(),
+        accessibility: NeoYAccessibilityService = NeoYAccessibilityController.shared,
         recording: NeoYRecordingService = PendingNeoYRecordingService()
     ) {
         self.files = files
-        self.phone = phone
-        self.handoff = handoff
+        self.phone = NeoXPhoneClient(targetStore: targetStore, files: files)
+        self.handoff = NativeNeoYPhoneHandoffReceiver(targetStore: targetStore)
         self.demo = demo
         self.accessibility = accessibility
         self.recording = recording

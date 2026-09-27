@@ -21,9 +21,10 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSBonjourServices</key>
-	<array>
-		<string>_mcp._tcp</string>
-	</array>
+		<array>
+			<string>_mcp._tcp</string>
+			<string>_neoy._tcp</string>
+		</array>
 	<key>NSCameraUsageDescription</key>
 	<string>NeoY uses the camera to record guided capture-tour shots.</string>
 	<key>NSLocalNetworkUsageDescription</key>

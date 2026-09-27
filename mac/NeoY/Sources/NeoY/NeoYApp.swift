@@ -27,6 +27,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         startServer()
+        startNativePhoneServices()
         observers.append(NotificationCenter.default.addObserver(
             forName: .captureTourStarted, object: nil, queue: .main
         ) { [weak self] _ in
@@ -57,6 +58,8 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
+        services.phone.stopDiscovery()
+        services.handoff.stop()
     }
 
     func showTourWindow() {
@@ -77,14 +80,23 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startServer() {
-        let value = MCPServer(name: "neox-tour-mac", version: "1.0.0", port: 9224,
-                              bonjourName: "neox-tour-mac")
+        let value = MCPServer(name: "NeoY", version: "1.0.0", port: 9224,
+                              bonjourName: "NeoY")
         value.register(tools: CaptureTourTools.tools())
         value.register(tools: DemoRecorderTools.tools())
+        value.register(tools: AccessibilityTools.tools())
+        value.register(tools: NeoXPhoneTools.tools(client: services.phone as! NeoXPhoneClient,
+                                                   handoff: services.handoff as! NativeNeoYPhoneHandoffReceiver))
         try? services.files.prepare()
         value.setStaticFileRoot(services.files.root)
         try? value.start()
         server = value
+    }
+
+    private func startNativePhoneServices() {
+        services.phone.startDiscovery()
+        do { try services.handoff.start() }
+        catch { NSLog("NeoY handoff listener failed: %@", error.localizedDescription) }
     }
 }
 

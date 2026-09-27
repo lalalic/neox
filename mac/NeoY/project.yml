@@ -24,10 +24,27 @@ targets:
     entitlements:
       path: Resources/NeoY.entitlements
 
+  NeoYTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/NeoYTests
+    dependencies:
+      - target: NeoY
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.neox.neoy.tests
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: YES
+
 schemes:
   NeoY:
     build:
       targets:
         NeoY: all
+        NeoYTests: [test]
     run:
       config: Debug
+    test:
+      targets:
+        - NeoYTests
