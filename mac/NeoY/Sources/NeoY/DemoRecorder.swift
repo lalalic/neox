@@ -37,7 +37,7 @@ final class DemoRecorder: NSObject {
             let id = UUID().uuidString
             sessionID = id
             let exports = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("NeoxTourMac/exports", isDirectory: true)
+                .appendingPathComponent("NeoY/exports", isDirectory: true)
             try FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
             let name = "demo-\(id).mov"
             outputURL = exports.appendingPathComponent(name)

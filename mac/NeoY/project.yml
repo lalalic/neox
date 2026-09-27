@@ -1,4 +1,4 @@
-name: NeoxTourMac
+name: NeoY
 options:
   bundleIdPrefix: com.neox
   deploymentTarget:
@@ -7,27 +7,27 @@ options:
   createIntermediateGroups: true
 
 targets:
-  NeoxTourMac:
+  NeoY:
     type: application
     platform: macOS
     sources:
-      - Sources/NeoxTourMac
+      - Sources/NeoY
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.neox.tour.mac
-        PRODUCT_NAME: Neox Tour
+        PRODUCT_BUNDLE_IDENTIFIER: com.neox.neoy
+        PRODUCT_NAME: NeoY
         SWIFT_VERSION: "6.0"
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Resources/Info.plist
         CODE_SIGN_STYLE: Automatic
         ENABLE_HARDENED_RUNTIME: YES
     entitlements:
-      path: Resources/NeoxTourMac.entitlements
+      path: Resources/NeoY.entitlements
 
 schemes:
-  NeoxTourMac:
+  NeoY:
     build:
       targets:
-        NeoxTourMac: all
+        NeoY: all
     run:
       config: Debug
