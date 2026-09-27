@@ -318,11 +318,19 @@ public final class MCPServer {
             sendJSON(connection: connection, status: 200, json: info)
 
         default:
-            // Static file serving: GET /files/... (alias /public/... kept for compatibility)
-            if method == "GET", path.hasPrefix("/files/") || path.hasPrefix("/public/"), let root = _staticFileRoot {
+            // Static file serving: GET/HEAD /files/... (alias /public/... kept for compatibility)
+            if ["GET", "HEAD"].contains(method),
+               path.hasPrefix("/files/") || path.hasPrefix("/public/"),
+               let root = _staticFileRoot {
                 let prefix = path.hasPrefix("/files/") ? "/files/" : "/public/"
                 let relativePath = String(path.dropFirst(prefix.count))
-                serveStaticFile(relativePath: relativePath, root: root, rangeHeader: rangeHeader, connection: connection)
+                serveStaticFile(
+                    relativePath: relativePath,
+                    root: root,
+                    rangeHeader: rangeHeader,
+                    headOnly: method == "HEAD",
+                    connection: connection
+                )
             } else {
                 sendHTTP(connection: connection, status: 404, body: "Not found".data(using: .utf8))
             }
@@ -557,7 +565,13 @@ public final class MCPServer {
 
     // MARK: - Static File Serving
 
-    nonisolated private func serveStaticFile(relativePath: String, root: URL, rangeHeader: String?, connection: NWConnection) {
+    nonisolated private func serveStaticFile(
+        relativePath: String,
+        root: URL,
+        rangeHeader: String?,
+        headOnly: Bool,
+        connection: NWConnection
+    ) {
         // Security: prevent path traversal
         let fileURL = root.appendingPathComponent(relativePath)
 
@@ -621,6 +635,13 @@ public final class MCPServer {
         }
 
         let headerData = Data((headers.joined(separator: "\r\n") + "\r\n\r\n").utf8)
+        if headOnly {
+            connection.send(content: headerData, completion: .contentProcessed { _ in
+                connection.cancel()
+            })
+            return
+        }
+
         guard let handle = try? FileHandle(forReadingFrom: fileURL) else {
             sendHTTP(connection: connection, status: 500, body: "Read error".data(using: .utf8))
             return

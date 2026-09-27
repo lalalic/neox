@@ -3,20 +3,21 @@ import AppKit
 import SwiftUI
 
 @main
-struct NeoxTourApp: App {
-    @NSApplicationDelegateAdaptor(NeoxTourAppDelegate.self) private var appDelegate
+struct NeoYApp: App {
+    @NSApplicationDelegateAdaptor(NeoYAppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra("Neox Tour", systemImage: "video") {
+        MenuBarExtra("NeoY", systemImage: "video") {
             Button("Open Current Tour") { appDelegate.showTourWindow() }
             Divider()
-            Button("Quit Neox Tour") { NSApp.terminate(nil) }
+            Button("Quit NeoY") { NSApp.terminate(nil) }
         }
     }
 }
 
 @MainActor
-final class NeoxTourAppDelegate: NSObject, NSApplicationDelegate {
+final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
+    private let services = NeoYServiceRegistry.shared
     private let store = CaptureTourStore.shared
     private let runner = CaptureRunner()
     private var server: MCPServer?
@@ -26,6 +27,7 @@ final class NeoxTourAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         startServer()
+        startNativePhoneServices()
         observers.append(NotificationCenter.default.addObserver(
             forName: .captureTourStarted, object: nil, queue: .main
         ) { [weak self] _ in
@@ -56,6 +58,8 @@ final class NeoxTourAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
+        services.phone.stopDiscovery()
+        services.handoff.stop()
     }
 
     func showTourWindow() {
@@ -63,7 +67,7 @@ final class NeoxTourAppDelegate: NSObject, NSApplicationDelegate {
             let root = CaptureTourView(runner: runner).environmentObject(store)
             let controller = NSHostingController(rootView: root)
             let value = NSWindow(contentViewController: controller)
-            value.title = "Neox Tour"
+            value.title = "NeoY Capture Tour"
             value.setContentSize(NSSize(width: 860, height: 700))
             value.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             value.isReleasedWhenClosed = false
@@ -76,23 +80,30 @@ final class NeoxTourAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startServer() {
-        let value = MCPServer(name: "neox-tour-mac", version: "1.0.0", port: 9224,
-                              bonjourName: "neox-tour-mac")
+        let value = MCPServer(name: "NeoY", version: "1.0.0", port: 9224,
+                              bonjourName: "NeoY")
         value.register(tools: CaptureTourTools.tools())
         value.register(tools: DemoRecorderTools.tools())
-        let exports = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("NeoxTourMac/exports", isDirectory: true)
-        try? FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
-        value.setStaticFileRoot(exports)
+        value.register(tools: AccessibilityTools.tools())
+        value.register(tools: NeoXPhoneTools.tools(client: services.phone as! NeoXPhoneClient,
+                                                   handoff: services.handoff as! NativeNeoYPhoneHandoffReceiver))
+        try? services.files.prepare()
+        value.setStaticFileRoot(services.files.root)
         try? value.start()
         server = value
+    }
+
+    private func startNativePhoneServices() {
+        services.phone.startDiscovery()
+        do { try services.handoff.start() }
+        catch { NSLog("NeoY handoff listener failed: %@", error.localizedDescription) }
     }
 }
 
 extension Notification.Name {
-    static let captureTourStarted = Notification.Name("NeoxTour.captureTourStarted")
-    static let captureTourCompleted = Notification.Name("NeoxTour.captureTourCompleted")
-    static let captureTourCancelled = Notification.Name("NeoxTour.captureTourCancelled")
+    static let captureTourStarted = Notification.Name("NeoY.captureTourStarted")
+    static let captureTourCompleted = Notification.Name("NeoY.captureTourCompleted")
+    static let captureTourCancelled = Notification.Name("NeoY.captureTourCancelled")
 }
 
 @MainActor
@@ -202,8 +213,7 @@ final class CaptureRunner: NSObject, ObservableObject, AVCaptureFileOutputRecord
         guard let url = temporaryURL, let session = CaptureTourStore.shared.session,
               session.currentIndex < session.manifest.shots.count else { return }
         let shot = session.manifest.shots[session.currentIndex]
-        let exports = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("NeoxTourMac/exports", isDirectory: true)
+        let exports = NeoYPaths.exports
         let safeShotID = shot.id.replacingOccurrences(of: "/", with: "_")
         let takeNumber = session.results.filter { $0.shotID == shot.id }.count + 1
         let name = "\(session.sessionID)-\(safeShotID)-\(takeNumber).mov"
@@ -279,7 +289,7 @@ struct CaptureTourView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("Neox Tour").font(.largeTitle.bold())
+                Text("NeoY Capture Tour").font(.largeTitle.bold())
                 Spacer()
                 Circle().fill(runner.isConfigured ? .green : .orange).frame(width: 10, height: 10)
                 Text(runner.isConfigured ? "Camera ready" : "Waiting for camera")

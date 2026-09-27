@@ -4,12 +4,12 @@ description: >-
   Use an iPhone as a local MCP media server via the Neox app: search the
   phone's photo/video library by content (vision index), analyze on-device
   (classify/OCR/people/transcribe), and pull originals over WiFi with ranged
-  HTTP. Includes the Neoy bridge — a Bonjour-advertised HTTP endpoint
+  HTTP. Includes NeoY — the native macOS companion and Bonjour handoff endpoint
   you implement + run (via session hook) that receives "Run Agent Task"
   handoffs from the phone. Use when a task needs the user's phone media:
   "find photos of X", "pull recent videos off my phone", "build a vlog from
   my camera roll", "OCR my screenshots", or any macOS agent flow mentioning Neox.
-  The same skill also covers **Neox Tour Mac**, a native macOS MCP service for
+  The same skill also covers **NeoY**, the native macOS MCP companion for
   guided Capture Tours and agent-driven product-demo recording.
 ---
 
@@ -163,199 +163,85 @@ Prefer `preset=720p` for video drafts; `original` only when quality matters.
 - The phone is a personal device on a home LAN: LAN-only, no auth — never
   tunnel it to the public internet.
 
-## Neox Tour Mac
+## NeoY macOS companion
 
-Use **Neox Tour Mac** when the work happens on the Mac rather than on the
-iPhone. It is the native macOS counterpart to the phone Capture Tour runner and
-also provides an automated demo-recorder surface for agents.
+Use **NeoY** for Mac-side capture, demo automation, focused Accessibility actions,
+and NeoX phone media access. NeoY is the canonical replacement for Neox Tour Mac
+and the standalone Python Neoy bridge.
 
 - MCP endpoint: `http://127.0.0.1:9224/mcp`
-- Bonjour service: `_mcp._tcp`, instance `neox-tour-mac`
-- Accepted captures and demo recordings are served from `/files/<name>`.
-- The app uses the same version-1 Capture Tour manifest and `tour.start`,
-  `tour.status`, and `tour.cancel` tools as the phone runner.
-- Mac-only demo tools record the main display with ScreenCaptureKit and can
-  render click-through overlays that are included in the recording.
+- MCP Bonjour service: `_mcp._tcp`, instance `NeoY`
+- Phone handoff service: `_neoy._tcp`, TCP `8686`, `POST /agent`
+- Handoff queue: `GET /agent/next?timeout=0..30` and `GET /agent/peek`
+- Demo and phone exports: `~/Library/Application Support/NeoY/exports`
 
-For product-demo automation, use this flow:
+Before relying on a tool, call `tools/list`; the live schema is authoritative.
 
-    demo.start
-    → demo.overlay(highlight | spotlight | caption)
-    → operate the target app/browser
-    → update or clear overlays as the flow advances
-    → demo.stop
+### Demo workflow
 
-`demo.start` returns `display_width` and `display_height`. Overlay rectangles
-use main-display pixel coordinates with origin `(0, 0)` at the top-left.
-Keep every rectangle inside the returned display bounds.
+Use the shared demo primitives from `~/Workspace/demo/contracts/primitives.md`:
 
-Use `demo.overlay` to direct viewer attention without modifying the target
-application itself. Typical overlay kinds are `highlight`, `spotlight`,
-`caption`, and `clear`. Overlays are click-through and are intentionally
-captured in the final video.
+```text
+demo.start_recording
+  -> demo.step
+  -> demo.spotlight / demo.annotate / demo.caption / demo.say
+  -> demo.cursor / demo.highlight / demo.clear
+  -> demo.pause / demo.resume / demo.wait
+  -> demo.stop_recording
+```
 
-The recorder writes H.264 MOV output under
-`~/Library/Application Support/NeoxTourMac/exports`. Screen Recording
-permission is requested on demand when capture starts. Camera and microphone
-permissions are used only by guided Capture Tour recording.
+Visual primitives and UI-driving actions are separate. Use
+`accessibility.inspect` / `accessibility.resolve` to resolve UI targets, and
+`computer.click`, `computer.type`, `computer.set_value`, `computer.key`,
+`computer.scroll`, or `computer.drag` only when interaction is required.
 
-Before relying on any tool, call `tools/list` on the live Mac MCP endpoint.
-The running tool schema is authoritative.
+Screen Recording permission is required for real MOV capture. Accessibility
+permission is required for semantic UI inspection/actions. Explicit rectangle
+target resolution remains deterministic without Accessibility permission.
+
+### NeoX phone media
+
+NeoY discovers the phone's `_mcp._tcp` endpoint or uses the exact MCP URL from
+a phone handoff. Native wrapper tools are:
+
+- `phone.status`
+- `phone.media.search`
+- `phone.media.meta`
+- `phone.media.thumbnail`
+- `phone.media.export`
+
+`phone.media.export` delegates to NeoX `media.export` and downloads staged files
+to `~/Library/Application Support/NeoY/exports/phone/`. NeoY does not recreate
+the phone's media index.
 
 ## Capture Tour workflow
 
 For a human-guided recording session, call `tour.start` with a JSON-encoded
-version-1 manifest containing `tour_id`, `title`, and ordered `shots`. Each
-shot may specify `instruction`, `script`, `target_duration_s`, `camera`,
-`orientation`, `lens`, `framing`, and advisory `quality` preferences. The
-phone status screen exposes Start/Resume; the human records and reviews each
-shot with Retake, Accept, or Skip. Use `tour.status` to read progress and the
-accepted `shot_id` → `/files/...` references. Target duration and quality
-warnings are advisory; the runner never hard-stops or blocks acceptance. Use
+version-1 manifest containing `tour_id`, `title`, and ordered `shots`. Use
+`tour.status` for progress and accepted `/files/...` references, and
 `tour.cancel` to clear a pending or active tour without deleting unrelated
 media.
 
 ## Workflow recipes
 
-**Receiving "Run Agent Task" handoffs — run the bridge (do this at session start)**
+**Receiving "Run Agent Task" handoffs**
 
-The phone's **Run Agent Task** intent sends the handoff message (user
-instruction + the phone's MCP URL) to a small HTTP endpoint on this machine —
-the **bridge** (codename **Neoy**) — which it finds via Bonjour. Nothing is
-configured on the phone; if the bridge isn't running, the message falls back
-to the phone's clipboard.
+NeoY owns the handoff endpoint. Do not start `neoy-bridge.py`, a PM2 `neo-y`
+process, or a separate `dns-sd` bridge. The phone discovers `_neoy._tcp` and
+sends the complete handoff message to `POST /agent` as `text/plain`. HTTP 200
+means the native companion durably queued the handoff under `~/.neoy/inbox`.
 
-### The bridge contract
-
-Two one-way pipes. Both bodies are the complete handoff message as plain
-UTF-8 text (`Content-Type: text/plain`) — never parse it; it is already a
-valid user message.
-
-1. **Phone → bridge** — `POST /agent`. The phone discovers the bridge by
-   browsing `_neoy._tcp` on the LAN and reading its TXT records (`host=`
-   machine name, `port=`, `ip=` LAN address — `ip=` lets the phone skip mDNS
-   resolution, which stalls on iOS). A `200` response means delivered.
-   Advertise the machine name as the instance name so the user sees e.g.
-   "studio-mac" on the phone's status screen, not a cryptic "neox-agent".
-2. **Bridge → session (turn start)** — `GET /agent/next?timeout=25`.
-   Long-poll: responds with the oldest pending handoff as the body and
-   deletes it (FIFO, at-most-once), or `204` after `timeout` seconds when
-   nothing is pending. The session-side watcher loops on this endpoint; each
-   returned body starts exactly one new agent turn — as if the user had sent
-   it. `GET /agent/peek` returns the same body without consuming (debug /
-   recovery after a crashed watcher).
-
-Implementation notes: the server must hold the long-poll GET open without
-blocking POSTs (threaded server); pending handoffs live as one file each
-under `~/.neoy/inbox/`.
-
-### 1. Run it
-
-Check first — parallel sessions must not double-bind:
+Desktop consumers use:
 
 ```bash
-curl -s -m 2 -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8787/agent -d ping
-# 000 → not running → start it; anything else → already up
+curl -s 'http://127.0.0.1:8686/agent/peek'
+curl -s 'http://127.0.0.1:8686/agent/next?timeout=25'
 ```
 
-```bash
-mkdir -p ~/.neoy && cat > ~/.neoy/neox-bridge.py <<'PY'
-import glob, os, socket, socketserver, subprocess, time
-from http.server import BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
-
-PORT = 8787
-INBOX = os.path.expanduser("~/.neoy/inbox")   # one file per pending handoff
-os.makedirs(INBOX, exist_ok=True)
-
-def pending():
-    return sorted(glob.glob(os.path.join(INBOX, "*.txt")))
-
-class H(BaseHTTPRequestHandler):
-    def do_POST(self):                        # phone → bridge
-        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
-        if len(body) >= 8:                    # tiny bodies ("ping") are health checks
-            with open(os.path.join(INBOX, f"{time.time_ns()}.txt"), "wb") as f:
-                f.write(body)
-        self.send_response(200); self.end_headers(); self.wfile.write(b"ok")
-
-    def do_GET(self):                         # session → bridge (long-poll)
-        q = parse_qs(urlparse(self.path).query)
-        deadline = time.time() + float(q.get("timeout", ["0"])[0])
-        consume = "/next" in self.path
-        while True:
-            files = pending()
-            if files:
-                data = open(files[0], "rb").read()
-                if consume:
-                    os.unlink(files[0])
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers(); self.wfile.write(data)
-                return
-            if time.time() >= deadline:
-                self.send_response(204); self.end_headers(); return
-            time.sleep(0.5)
-
-    def log_message(self, *a): pass
-
-# Bonjour: the phone resolves _neoy._tcp to find us. Instance name and host=
-# TXT carry the machine name for display; ip= lets the phone skip mDNS
-# resolution entirely and connect directly (iOS stalls on .local).
-HOST = socket.gethostname().split(".")[0]
-try:                                          # best-effort LAN IP
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.connect(("8.8.8.8", 80)); IP = s.getsockname()[0]; s.close()
-except Exception:
-    IP = "127.0.0.1"
-subprocess.Popen(["dns-sd", "-R", HOST, "_neoy._tcp", ".", str(PORT),
-                  "path=/agent", f"host={HOST}", f"port={PORT}", f"ip={IP}"],
-                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-socketserver.ThreadingTCPServer.allow_reuse_address = True
-# ThreadingTCPServer, not TCPServer: a held-open long-poll GET must not block POSTs.
-socketserver.ThreadingTCPServer(("0.0.0.0", PORT), H).serve_forever()
-PY
-nohup python3 ~/.neoy/neox-bridge.py >/dev/null 2>&1 &
-sleep 1
-echo "bridge up — http://$(scutil --get LocalHostName).local:8787/agent"
-```
-
-Start both bridge and watcher from your session-start hook (a
-`SessionStart`/`session_start` hook config, a startup script, or your shell
-profile), so handoffs are receivable even when you're idle.
-
-### 2. Wire it to your turn loop (the watcher)
-
-The bridge only holds handoffs; *your harness* starts turns. Whatever
-mechanism your harness has for injecting a user message — a chat-input API,
-a headless one-shot prompt, a hook — point it at the bridge:
-
-```bash
-while true; do
-  msg=$(curl -s -m 30 "http://127.0.0.1:8787/agent/next?timeout=25")
-  [ -n "$msg" ] && start_agent_turn "$msg"    # ← your harness's injection point
-done
-```
-
-If your harness can't inject turns programmatically, poll `GET /agent/peek`
-whenever you get control and confirm with the user before acting on a
-pending handoff.
-
-### 3. Housekeeping
-
-- Multiple agent sessions running watchers on one machine: handoffs are
-  at-most-once — whichever session polls first consumes them.
-- Legacy apps: some installed versions use a Shortcuts "Get Contents of URL"
-  POST to `http://<mac>.local:8787/agent` (Method POST, Body = Provided
-  Input) — the same endpoint, so no bridge change is needed. The current
-  App Store release needs no Shortcut at all.
-- If the bridge is down, the message is also on the phone's clipboard —
-  the user can paste it into chat.
-- The bridge is a plain LAN-only HTTP endpoint: never expose it beyond the
-  home network. Stop it when the session's work ends (`pkill -f
-  neox-bridge.py`) unless the hook is meant to keep it alive for future
-  handoffs.
+`peek` is non-consuming; `next` consumes FIFO and returns 204 on timeout. A
+phone handoff may include the live NeoX MCP URL; NeoY remembers it for later
+media calls. Keep the endpoint LAN-only and never expose it to the public
+internet.
 
 **"Build a vlog from yesterday"**
 1. `media.search {"days":2}` (or the user's date range) → skim `vision` labels

@@ -12,6 +12,7 @@ final class DemoRecorder: NSObject {
     private(set) var outputReference: String?
     private(set) var displayWidth = 0
     private(set) var displayHeight = 0
+    private(set) var lastError: String?
 
     private var stream: SCStream?
     private var videoWriter: DemoVideoWriter?
@@ -20,6 +21,9 @@ final class DemoRecorder: NSObject {
     private var outputURL: URL?
     private var startedAt: Date?
     private var display: SCDisplay?
+    let timeline = DemoTimeline()
+    private var lastEvents: [DemoEvent] = []
+    private let speech = DemoSpeechSpeaker()
 
     func start() async -> String {
         guard state != "recording" else { return statusJSON() }
@@ -37,7 +41,7 @@ final class DemoRecorder: NSObject {
             let id = UUID().uuidString
             sessionID = id
             let exports = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("NeoxTourMac/exports", isDirectory: true)
+                .appendingPathComponent("NeoY/exports", isDirectory: true)
             try FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
             let name = "demo-\(id).mov"
             outputURL = exports.appendingPathComponent(name)
@@ -49,6 +53,10 @@ final class DemoRecorder: NSObject {
             configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
             configuration.queueDepth = 3
             configuration.showsCursor = true
+            // demo.say speaks from NeoY itself, so keep current-process audio in the
+            // system capture and persist narration in the resulting MOV.
+            configuration.capturesAudio = true
+            configuration.excludesCurrentProcessAudio = false
 
             guard let outputURL else { throw DemoRecorderError.message("Missing demo output URL") }
             let value = SCStream(filter: filter, configuration: configuration, delegate: nil)
@@ -65,6 +73,7 @@ final class DemoRecorder: NSObject {
             startedAt = Date()
             elapsed = 0
             state = "recording"
+            timeline.start()
             try await value.startCapture()
             return statusJSON()
         } catch {
@@ -112,15 +121,92 @@ final class DemoRecorder: NSObject {
         return statusJSON()
     }
 
+    func startSemanticRecording() async -> String {
+        if state == "recording" { return statusJSON() }
+        return await start()
+    }
+
+    func perform(
+        _ primitive: DemoPrimitive,
+        target: DemoTarget? = nil,
+        text: String? = nil,
+        durationMS: Int? = nil
+    ) async throws -> String {
+        guard state == "recording" else {
+            throw DemoRecorderError.message("start_recording is required before \(primitive.rawValue)")
+        }
+        let resolvedTarget = try target.map { try resolved(for: $0) }
+        switch primitive {
+        case .step:
+            break
+        case .spotlight:
+            try overlay(kind: primitive.rawValue, rect: resolvedTarget?.rect, text: text, durationMS: durationMS)
+        case .annotate:
+            try overlay(kind: primitive.rawValue, rect: resolvedTarget?.rect, text: text ?? "", durationMS: durationMS ?? 2_500)
+        case .caption:
+            try overlay(kind: "caption", rect: captionRect, text: text, durationMS: durationMS)
+        case .say:
+            try overlay(kind: "caption", rect: captionRect, text: text, durationMS: durationMS)
+            try await speech.speak(text ?? "")
+        case .cursor:
+            try overlay(kind: primitive.rawValue, rect: resolvedTarget?.rect, text: nil, durationMS: durationMS ?? 1_200)
+        case .highlight:
+            try overlay(kind: primitive.rawValue, rect: resolvedTarget?.rect, text: text, durationMS: durationMS ?? 1_200)
+        case .clear:
+            DemoOverlayController.shared.clear(width: displayWidth, height: displayHeight)
+        case .pause:
+            try timeline.record(.pause, status: "paused")
+            return statusJSON()
+        case .resume:
+            try timeline.record(.resume, status: "resumed")
+            return statusJSON()
+        case .wait:
+            let milliseconds = try durationMS ?? { throw DemoRecorderError.message("wait requires duration_ms") }()
+            try await Task.sleep(for: .milliseconds(max(0, milliseconds)))
+            try timeline.record(.wait, durationMS: milliseconds)
+            return statusJSON()
+        case .startRecording, .stopRecording:
+            break
+        }
+        try timeline.record(primitive, target: target, text: text, durationMS: durationMS)
+        return statusJSON()
+    }
+
+    func stopSemanticRecording() async -> String {
+        await stop()
+        guard state == "completed" else { return statusJSON() }
+        let events = timeline.finish(outputReference: outputReference)
+        lastEvents = events
+        if let outputURL {
+            let eventsURL = outputURL.deletingPathExtension().appendingPathExtension("events.json")
+            if let data = try? JSONEncoder().encode(events) {
+                try? data.write(to: eventsURL, options: .atomic)
+            }
+        }
+        return statusJSON()
+    }
+
     func statusJSON() -> String {
-        CaptureTourStore.json([
+        let baseJSON = CaptureTourStore.json([
             "state": state,
             "session_id": (sessionID ?? NSNull()) as Any,
             "elapsed_s": max(0, state == "recording" ? Date().timeIntervalSince(startedAt ?? Date()) : elapsed),
             "output_reference": outputReference ?? NSNull(),
             "display_width": displayWidth,
             "display_height": displayHeight,
+            "timeline_active": timeline.isActive,
+            "paused": timeline.isPaused,
+            "error": lastError ?? NSNull(),
         ])
+        var timelineValue: Any = NSNull()
+        if timeline.isActive {
+            timelineValue = (try? JSONEncoder().encode(timeline.events)).flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? NSNull()
+        } else if !lastEvents.isEmpty {
+            timelineValue = (try? JSONEncoder().encode(lastEvents)).flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? NSNull()
+        }
+        guard var object = (try? JSONSerialization.jsonObject(with: Data(baseJSON.utf8))) as? [String: Any] else { return baseJSON }
+        object["timeline"] = timelineValue
+        return CaptureTourStore.json(object)
     }
 
     private func mainDisplay(in displays: [SCDisplay]) -> SCDisplay? {
@@ -140,6 +226,34 @@ final class DemoRecorder: NSObject {
         display = nil
         displayWidth = 0
         displayHeight = 0
+        lastEvents = []
+        lastError = nil
+        timeline.start()
+        timeline.finish(outputReference: nil)
+    }
+
+    private func resolved(for target: DemoTarget) throws -> DemoTarget {
+        if target.rect != nil { return target }
+        let frame = try NeoYAccessibilityController.shared.resolve(target).frame
+        return DemoTarget(rect: frame, path: target.path, label: target.label, role: target.role)
+    }
+
+    private func overlay(kind: String, rect: CGRect?, text: String?, durationMS: Int?) throws {
+        try DemoOverlayController.shared.update(
+            kind: kind,
+            rect: rect,
+            text: text,
+            durationMS: durationMS,
+            width: displayWidth,
+            height: displayHeight
+        )
+    }
+
+    private var captionRect: CGRect {
+        let width = Double(displayWidth)
+        let height = Double(displayHeight)
+        let captionHeight = max(80.0, height * 0.09)
+        return CGRect(x: width * 0.12, y: height - captionHeight, width: width * 0.76, height: captionHeight)
     }
 
     private func fail(_ error: Error) {
@@ -153,7 +267,8 @@ final class DemoRecorder: NSObject {
         videoWriter?.cancel()
         videoWriter = nil
         outputReference = nil
-        NSLog("Neox demo recorder error: %@", error.localizedDescription)
+        lastError = error.localizedDescription
+        NSLog("NeoY demo recorder error: %@", error.localizedDescription)
     }
 
 }
@@ -302,7 +417,7 @@ final class DemoOverlayController {
     }
 
     func update(kind: String, rect: CGRect?, text: String?, durationMS: Int?, width: Int, height: Int) throws {
-        guard ["highlight", "spotlight", "caption", "clear"].contains(kind) else {
+        guard ["highlight", "spotlight", "annotate", "cursor", "caption", "clear"].contains(kind) else {
             throw DemoRecorderError.message("unknown overlay kind '\(kind)'")
         }
         if kind == "clear" {
@@ -399,8 +514,63 @@ private final class DemoOverlayView: NSView {
                     .paragraphStyle: paragraph,
                 ]
                 (item.text ?? "").draw(in: rect.insetBy(dx: 8, dy: 4), withAttributes: attributes)
+            case "annotate":
+                context.setStrokeColor(NSColor.controlAccentColor.cgColor)
+                context.setLineWidth(3)
+                context.stroke(rect.insetBy(dx: 1, dy: 1))
+                let text = (item.text ?? "") as NSString
+                let attributes: [NSAttributedString.Key: Any] = [
+                    .font: NSFont.systemFont(ofSize: 20, weight: .medium),
+                    .foregroundColor: NSColor.white,
+                    .backgroundColor: NSColor.black.withAlphaComponent(0.75),
+                ]
+                let size = text.size(withAttributes: attributes)
+                let labelRect = CGRect(x: rect.maxX + 12, y: rect.minY, width: size.width + 16, height: size.height + 12)
+                (attributes[.backgroundColor] as? NSColor)?.setFill()
+                context.fill(labelRect)
+                text.draw(in: labelRect.insetBy(dx: 8, dy: 6), withAttributes: attributes)
+            case "cursor":
+                let circle = CGRect(x: rect.midX - 10, y: rect.midY - 10, width: 20, height: 20)
+                context.setFillColor(NSColor.white.cgColor)
+                context.fillEllipse(in: circle)
+                context.setStrokeColor(NSColor.black.cgColor)
+                context.setLineWidth(2)
+                context.strokeEllipse(in: circle)
             default: break
             }
+        }
+    }
+}
+
+private final class DemoSpeechSpeaker: NSObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
+    private let synthesizer = AVSpeechSynthesizer()
+    private var continuation: CheckedContinuation<Void, Error>?
+
+    override init() {
+        super.init()
+        synthesizer.delegate = self
+    }
+
+    func speak(_ text: String) async throws {
+        guard !text.isEmpty else { return }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            self.continuation = continuation
+            self.synthesizer.stopSpeaking(at: .immediate)
+            self.synthesizer.speak(AVSpeechUtterance(string: text))
+        }
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        MainActor.assumeIsolated {
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        MainActor.assumeIsolated {
+            continuation?.resume()
+            continuation = nil
         }
     }
 }
@@ -413,8 +583,47 @@ enum DemoRecorderError: LocalizedError {
 enum DemoRecorderTools {
     static func tools() -> [ToolDefinition] {
         [
-            ToolDefinition(name: "demo.start", description: "Start main-display H.264 screen capture.", parameters: schema([:])) { _ in
-                await DemoRecorder.shared.start()
+            ToolDefinition(name: "demo.start_recording", description: "Reset the semantic timeline and start main-display H.264 recording.", parameters: schema([:])) { _ in
+                await DemoRecorder.shared.startSemanticRecording()
+            },
+            ToolDefinition(name: "demo.step", description: "Mark a narrative step and semantic timeline boundary.", parameters: schema(["title": stringProp("Step title")], required: ["title"])) { args in
+                try await DemoRecorderTools.run(.step, args: args)
+            },
+            ToolDefinition(name: "demo.spotlight", description: "Dim everything except the target.", parameters: targetSchema(text: true)) { args in
+                try await DemoRecorderTools.run(.spotlight, args: args)
+            },
+            ToolDefinition(name: "demo.annotate", description: "Explanatory text beside a target.", parameters: targetSchema(text: true, requiredText: true)) { args in
+                try await DemoRecorderTools.run(.annotate, args: args)
+            },
+            ToolDefinition(name: "demo.caption", description: "Show narration text.", parameters: schema(["text": stringProp("Caption text"), "duration_ms": integerProp()], required: ["text"])) { args in
+                try await DemoRecorderTools.run(.caption, args: args)
+            },
+            ToolDefinition(name: "demo.say", description: "Speak narration and show its caption.", parameters: schema(["text": stringProp("Narration text")], required: ["text"])) { args in
+                try await DemoRecorderTools.run(.say, args: args)
+            },
+            ToolDefinition(name: "demo.cursor", description: "Show a demo cursor at a target.", parameters: targetSchema()) { args in
+                try await DemoRecorderTools.run(.cursor, args: args)
+            },
+            ToolDefinition(name: "demo.highlight", description: "Briefly emphasize a target.", parameters: targetSchema(text: true)) { args in
+                try await DemoRecorderTools.run(.highlight, args: args)
+            },
+            ToolDefinition(name: "demo.clear", description: "Remove active demo overlays.", parameters: schema([:])) { args in
+                try await DemoRecorderTools.run(.clear, args: args)
+            },
+            ToolDefinition(name: "demo.pause", description: "Pause demo timeline progression.", parameters: schema([:])) { args in
+                try await DemoRecorderTools.run(.pause, args: args)
+            },
+            ToolDefinition(name: "demo.resume", description: "Resume demo timeline progression.", parameters: schema([:])) { args in
+                try await DemoRecorderTools.run(.resume, args: args)
+            },
+            ToolDefinition(name: "demo.wait", description: "Hold for a deterministic duration.", parameters: schema(["ms": integerProp()], required: ["ms"])) { args in
+                try await DemoRecorderTools.run(.wait, args: args)
+            },
+            ToolDefinition(name: "demo.stop_recording", description: "Stop capture and return the semantic timeline.", parameters: schema([:])) { _ in
+                await DemoRecorder.shared.stopSemanticRecording()
+            },
+            ToolDefinition(name: "demo.start", description: "Compatibility alias for demo.start_recording.", parameters: schema([:])) { _ in
+                await DemoRecorder.shared.startSemanticRecording()
             },
             ToolDefinition(name: "demo.overlay", description: "Show or clear a click-through demo overlay on the recorded main display.", parameters: schema([
                 "kind": stringProp("highlight, spotlight, caption, or clear"),
@@ -435,7 +644,7 @@ enum DemoRecorderTools {
                 await MainActor.run { DemoRecorder.shared.statusJSON() }
             },
             ToolDefinition(name: "demo.stop", description: "Stop capture and finalize the .mov export.", parameters: schema([:])) { _ in
-                await DemoRecorder.shared.stop()
+                await DemoRecorder.shared.stopSemanticRecording()
             },
             ToolDefinition(name: "demo.cancel", description: "Cancel capture and remove its unfinished export.", parameters: schema([:])) { _ in
                 await DemoRecorder.shared.cancel()
@@ -470,5 +679,44 @@ enum DemoRecorderTools {
         var value: [String: JSONValue] = ["type": .string("object"), "properties": .object(properties)]
         if !required.isEmpty { value["required"] = .array(required.map(JSONValue.string)) }
         return .object(value)
+    }
+
+    private static func integerProp() -> JSONValue {
+        .object(["type": .string("integer")])
+    }
+
+    private static func targetSchema(text: Bool = false, requiredText: Bool = false) -> JSONValue {
+        var properties: [String: JSONValue] = [
+            "target": .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "rect": .object(["type": .string("object")]),
+                    "path": .object(["type": .string("string")]),
+                    "label": .object(["type": .string("string")]),
+                    "role": .object(["type": .string("string")]),
+                ]),
+            ]),
+            "duration_ms": integerProp(),
+        ]
+        var required = ["target"]
+        if text {
+            properties["text"] = stringProp("Overlay text")
+            if requiredText { required.append("text") }
+        }
+        return schema(properties, required: required)
+    }
+
+    private static func run(_ primitive: DemoPrimitive, args: JSONValue) async throws -> String {
+        guard case .object(let object) = args else { throw DemoRecorderError.message("Invalid arguments") }
+        var target: DemoTarget?
+        if let raw = object["target"] {
+            let data = try JSONEncoder().encode(raw)
+            target = try JSONDecoder().decode(DemoTarget.self, from: data)
+        }
+        let text = object["text"].flatMap { if case .string(let value) = $0 { value } else { nil } }
+        let duration = object["duration_ms"].flatMap { if case .int(let value) = $0 { value } else { nil } }
+            ?? object["ms"].flatMap { if case .int(let value) = $0 { value } else { nil } }
+        if primitive == .step, let text { target = DemoTarget(label: text) }
+        return try await DemoRecorder.shared.perform(primitive, target: target, text: text, durationMS: duration)
     }
 }
