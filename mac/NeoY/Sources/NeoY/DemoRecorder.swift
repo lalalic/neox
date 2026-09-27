@@ -53,6 +53,10 @@ final class DemoRecorder: NSObject {
             configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
             configuration.queueDepth = 3
             configuration.showsCursor = true
+            // demo.say speaks from NeoY itself, so keep current-process audio in the
+            // system capture and persist narration in the resulting MOV.
+            configuration.capturesAudio = true
+            configuration.excludesCurrentProcessAudio = false
 
             guard let outputURL else { throw DemoRecorderError.message("Missing demo output URL") }
             let value = SCStream(filter: filter, configuration: configuration, delegate: nil)
