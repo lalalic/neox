@@ -85,7 +85,8 @@ final class VlogInboxStore: ObservableObject {
     @Published private(set) var folderName: String?
     @Published private(set) var status: String?
 
-    private let bookmarkKey = "vlogInboxBookmark"
+    static let bookmarkKey = "vlogInboxBookmark"
+    private let bookmarkKey = VlogInboxStore.bookmarkKey
 
     private init() {
         folderName = (try? resolvedFolder())?.lastPathComponent
@@ -134,7 +135,7 @@ final class VlogInboxStore: ObservableObject {
         return url.lastPathComponent
     }
 
-    private func resolvedFolder() throws -> URL {
+    func resolvedFolder() throws -> URL {
         guard let bookmark = UserDefaults.standard.data(forKey: bookmarkKey) else {
             throw NSError(domain: "Neox.Vlog", code: 6,
                           userInfo: [NSLocalizedDescriptionKey: "Choose your iCloud Drive Vlog Inbox first."])
@@ -153,6 +154,43 @@ final class VlogInboxStore: ObservableObject {
             UserDefaults.standard.set(refreshed, forKey: bookmarkKey)
         }
         return url
+    }
+}
+
+
+struct VlogInboxSnapshot: Equatable {
+    let path: String
+    let folderName: String
+    let exists: Bool
+    let isDirectory: Bool
+    let isUbiquitous: Bool
+    let entries: [String]
+    let readySubmissions: [String]
+}
+
+enum VlogInboxInspector {
+    static func inspect(folderURL: URL) throws -> VlogInboxSnapshot {
+        let fm = FileManager.default
+        var isDirectory: ObjCBool = false
+        let exists = fm.fileExists(atPath: folderURL.path, isDirectory: &isDirectory)
+        let entries = exists && isDirectory.boolValue
+            ? try fm.contentsOfDirectory(at: folderURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
+            : []
+        let names = entries.map(\.lastPathComponent).sorted()
+        let ready = entries.filter { entry in
+            var directory: ObjCBool = false
+            guard fm.fileExists(atPath: entry.path, isDirectory: &directory), directory.boolValue else { return false }
+            return fm.fileExists(atPath: entry.appendingPathComponent("manifest.json").path)
+        }.map(\.lastPathComponent).sorted()
+        return VlogInboxSnapshot(
+            path: folderURL.path,
+            folderName: folderURL.lastPathComponent,
+            exists: exists,
+            isDirectory: isDirectory.boolValue,
+            isUbiquitous: fm.isUbiquitousItem(at: folderURL),
+            entries: names,
+            readySubmissions: ready
+        )
     }
 }
 

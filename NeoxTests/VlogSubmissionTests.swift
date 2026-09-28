@@ -33,6 +33,30 @@ final class VlogSubmissionTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: result.appendingPathComponent("media/002.mov").path))
     }
 
+    func testInboxInspectorReportsReadySubmissions() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vlog-inbox-inspector-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        _ = try VlogSubmissionWriter.write(
+            inboxURL: root,
+            submissionID: "mcp-test-ready",
+            instruction: "[MCP SELF-TEST]",
+            payloads: [VlogSubmissionPayload(filename: "001.png", data: Data([0x89, 0x50, 0x4E, 0x47]))]
+        )
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("incomplete", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+
+        let snapshot = try VlogInboxInspector.inspect(folderURL: root)
+        XCTAssertTrue(snapshot.exists)
+        XCTAssertTrue(snapshot.isDirectory)
+        XCTAssertEqual(snapshot.entries, ["incomplete", "mcp-test-ready"])
+        XCTAssertEqual(snapshot.readySubmissions, ["mcp-test-ready"])
+    }
+
     func testWriterRejectsTraversalAndCleansIncompleteSubmission() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("vlog-submission-tests-\(UUID().uuidString)", isDirectory: true)

@@ -109,6 +109,7 @@ final class ServerController: ObservableObject {
         server.register(tools: CaptureTourTools.tools())
         server.register(tools: agentKit.tools)
         server.register(tools: DebugTools.tools())
+        server.register(tools: VlogDebugTools.tools())
         server.register(
             name: "media.clear",
             description: "Delete all files previously exported by media.export from the /files/ serving directory. Call this after finishing downloads to free space on the phone.",
