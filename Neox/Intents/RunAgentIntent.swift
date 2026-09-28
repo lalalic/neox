@@ -33,11 +33,12 @@ struct RunAgentIntent: AppIntent {
         let bridge = ServerController.shared
         bridge.ensureRunning()
 
-        // ensureRunning() restarts Bonjour browse; give mDNS a beat to
-        // populate so a freshly-started bridge is visible before we check.
-        if bridge.discoveredBridges.isEmpty {
-            try? await Task.sleep(for: .milliseconds(1500))
-        }
+        // NeoY is installed as a launchd-managed companion. If the first
+        // Bonjour snapshot is empty, refresh discovery and wait for launchd
+        // to create/restart NeoY instead of immediately falling back.
+        let discovered = bridge.discoveredBridges.isEmpty
+            ? await bridge.rediscoverNeoY()
+            : bridge.discoveredBridges
 
         // Photos preflight: an unattended automation must not discover a
         // permission wall only when the agent later calls media.search.
@@ -61,12 +62,12 @@ struct RunAgentIntent: AppIntent {
         // the handoff directly — no Shortcut hop. Falls back to clipboard +
         // output value when no bridge is on the LAN.
         let dialog: String
-        switch await AgentBridge.handoff(message, discovered: bridge.discoveredBridges,
+        switch await AgentBridge.handoff(message, discovered: discovered,
                                          preferred: bridge.preferredBridge) {
         case .posted:
             dialog = "Handed off to the agent bridge."
         case .bridgeNotFound:
-            dialog = "No agent bridge found — instruction and MCP URL copied to the clipboard; paste them into the agent chat."
+            dialog = "NeoY could not be started or discovered — instruction and MCP URL copied to the clipboard as fallback."
         case .failed(let why):
             dialog = "Bridge error (\(why)) — message copied to the clipboard as fallback."
         }
