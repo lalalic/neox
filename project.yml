@@ -15,6 +15,14 @@ targets:
       - Neox
     entitlements:
       path: Neox/Neox.entitlements
+      properties:
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.com.neox.app
+        com.apple.developer.icloud-services:
+          - CloudDocuments
+        com.apple.developer.ubiquity-container-identifiers:
+          - iCloud.com.neox.app
+        com.apple.developer.ubiquity-kvstore-identifier: JABNLDLN8G.com.neox.app
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.neox.app
