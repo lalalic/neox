@@ -43,25 +43,14 @@ enum VlogDebugTools {
 
 extension VlogInboxStore {
     func debugStatusJSON() -> String {
-        let bookmarkExists = UserDefaults.standard.data(forKey: Self.bookmarkKey) != nil
-        guard bookmarkExists else {
-            return MediaTools.jsonString([
-                "bookmark_exists": false,
-                "configured_folder_name": folderName ?? NSNull(),
-                "resolved": false,
-                "error": "Choose your iCloud Drive Vlog Inbox first.",
-            ])
-        }
-
         do {
             let folder = try resolvedFolder()
-            let accessed = folder.startAccessingSecurityScopedResource()
-            defer { if accessed { folder.stopAccessingSecurityScopedResource() } }
             let snapshot = try VlogInboxInspector.inspect(folderURL: folder)
             return MediaTools.jsonString([
-                "bookmark_exists": true,
+                "canonical": true,
+                "container_identifier": Self.ubiquityContainerIdentifier,
+                "relative_path": Self.inboxRelativePath,
                 "resolved": true,
-                "security_scope_accessed": accessed,
                 "folder_name": snapshot.folderName,
                 "path": snapshot.path,
                 "url": folder.absoluteString,
@@ -73,9 +62,10 @@ extension VlogInboxStore {
             ])
         } catch {
             return MediaTools.jsonString([
-                "bookmark_exists": true,
+                "canonical": true,
+                "container_identifier": Self.ubiquityContainerIdentifier,
+                "relative_path": Self.inboxRelativePath,
                 "resolved": false,
-                "configured_folder_name": folderName ?? NSNull(),
                 "error": error.localizedDescription,
             ])
         }
@@ -98,8 +88,6 @@ extension VlogInboxStore {
 
         do {
             let folder = try resolvedFolder()
-            let accessed = folder.startAccessingSecurityScopedResource()
-            defer { if accessed { folder.stopAccessingSecurityScopedResource() } }
             let message = instruction?.trimmingCharacters(in: .whitespacesAndNewlines)
             let url = try VlogSubmissionWriter.write(
                 inboxURL: folder,
@@ -113,7 +101,6 @@ extension VlogInboxStore {
                 "submission_path": url.path,
                 "manifest_path": url.appendingPathComponent("manifest.json").path,
                 "media_path": url.appendingPathComponent("media/001.png").path,
-                "security_scope_accessed": accessed,
             ])
         } catch {
             return "Error: \(error.localizedDescription)"
