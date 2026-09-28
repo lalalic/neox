@@ -81,36 +81,16 @@ enum VlogSubmissionWriter {
 @MainActor
 final class VlogInboxStore: ObservableObject {
     static let shared = VlogInboxStore()
+    static let ubiquityContainerIdentifier = "iCloud.com.neox.app"
+    static let inboxRelativePath = "Documents/Vlog Inbox"
 
-    @Published private(set) var folderName: String?
+    @Published private(set) var folderName: String? = "Vlog Inbox"
     @Published private(set) var status: String?
 
-    static let bookmarkKey = "vlogInboxBookmark"
-    private let bookmarkKey = VlogInboxStore.bookmarkKey
-
-    private init() {
-        folderName = (try? resolvedFolder())?.lastPathComponent
-    }
-
-    func configure(folderURL: URL) throws {
-        let accessed = folderURL.startAccessingSecurityScopedResource()
-        defer { if accessed { folderURL.stopAccessingSecurityScopedResource() } }
-
-        let bookmark = try folderURL.bookmarkData(
-            options: .minimalBookmark,
-            includingResourceValuesForKeys: nil,
-            relativeTo: nil
-        )
-        UserDefaults.standard.set(bookmark, forKey: bookmarkKey)
-        folderName = folderURL.lastPathComponent
-        status = "Vlog Inbox configured."
-    }
+    private init() {}
 
     func submit(items: [PhotosPickerItem], instruction: String) async throws -> String {
         let folder = try resolvedFolder()
-        let accessed = folder.startAccessingSecurityScopedResource()
-        defer { if accessed { folder.stopAccessingSecurityScopedResource() } }
-
         var payloads: [VlogSubmissionPayload] = []
         for (index, item) in items.enumerated() {
             guard let data = try await item.loadTransferable(type: Data.self) else {
@@ -136,24 +116,15 @@ final class VlogInboxStore: ObservableObject {
     }
 
     func resolvedFolder() throws -> URL {
-        guard let bookmark = UserDefaults.standard.data(forKey: bookmarkKey) else {
+        guard let container = FileManager.default.url(
+            forUbiquityContainerIdentifier: Self.ubiquityContainerIdentifier
+        ) else {
             throw NSError(domain: "Neox.Vlog", code: 6,
-                          userInfo: [NSLocalizedDescriptionKey: "Choose your iCloud Drive Vlog Inbox first."])
+                          userInfo: [NSLocalizedDescriptionKey: "Neox iCloud Drive is unavailable. Sign in to iCloud Drive and try again."])
         }
-        var stale = false
-        let url = try URL(
-            resolvingBookmarkData: bookmark,
-            options: [.withoutUI],
-            relativeTo: nil,
-            bookmarkDataIsStale: &stale
-        )
-        if stale {
-            let refreshed = try url.bookmarkData(options: .minimalBookmark,
-                                                 includingResourceValuesForKeys: nil,
-                                                 relativeTo: nil)
-            UserDefaults.standard.set(refreshed, forKey: bookmarkKey)
-        }
-        return url
+        let folder = container.appendingPathComponent(Self.inboxRelativePath, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
     }
 }
 
@@ -199,7 +170,6 @@ struct VlogSubmissionView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var items: [PhotosPickerItem] = []
     @State private var instruction = ""
-    @State private var showingFolderPicker = false
     @State private var isSubmitting = false
     @State private var errorText: String?
 
@@ -207,9 +177,10 @@ struct VlogSubmissionView: View {
         NavigationStack {
             Form {
                 Section("iCloud Inbox") {
-                    Text(store.folderName ?? "Not configured")
-                        .foregroundStyle(store.folderName == nil ? .secondary : .primary)
-                    Button("Choose Vlog Inbox") { showingFolderPicker = true }
+                    Label("Vlog Inbox", systemImage: "icloud")
+                    Text("Neox uses its fixed iCloud Drive inbox automatically.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("Media") {
@@ -256,25 +227,12 @@ struct VlogSubmissionView: View {
                         Text("Create Vlog Submission")
                     }
                 }
-                .disabled(isSubmitting || items.isEmpty || store.folderName == nil)
+                .disabled(isSubmitting || items.isEmpty)
             }
             .navigationTitle("Create Vlog")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
-                }
-            }
-            .fileImporter(
-                isPresented: $showingFolderPicker,
-                allowedContentTypes: [.folder],
-                allowsMultipleSelection: false
-            ) { result in
-                do {
-                    guard let folder = try result.get().first else { return }
-                    try store.configure(folderURL: folder)
-                    errorText = nil
-                } catch {
-                    errorText = error.localizedDescription
                 }
             }
         }

@@ -2,6 +2,11 @@ import XCTest
 @testable import NeoxApp
 
 final class VlogSubmissionTests: XCTestCase {
+    func testCanonicalInboxContract() {
+        XCTAssertEqual(VlogInboxStore.ubiquityContainerIdentifier, "iCloud.com.neox.app")
+        XCTAssertEqual(VlogInboxStore.inboxRelativePath, "Documents/Vlog Inbox")
+    }
+
     func testWriterProducesWatcherCompatibleManifest() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("vlog-submission-tests-\(UUID().uuidString)", isDirectory: true)
