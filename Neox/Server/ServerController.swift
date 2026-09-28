@@ -84,6 +84,20 @@ final class ServerController: ObservableObject {
     /// Keep a live Bonjour browse running for the handoff bridge — the status
     /// screen lists what's out there, and AgentBridge.handoff resolves fast
     /// because macOS/iOS cache mDNS answers seen recently.
+    /// Force a fresh Bonjour browse and wait briefly for NeoY to appear.
+    /// NeoY is kept alive by its macOS LaunchAgent, so an empty first snapshot
+    /// can simply mean launchd is still starting the companion.
+    func rediscoverNeoY(maxWaitMilliseconds: Int = 6000) async -> [AgentBridgeDiscovery.Entry] {
+        restartBridgeDiscovery()
+        if !discoveredBridges.isEmpty { return discoveredBridges }
+        let attempts = max(1, maxWaitMilliseconds / 250)
+        for _ in 0..<attempts {
+            try? await Task.sleep(for: .milliseconds(250))
+            if !discoveredBridges.isEmpty { return discoveredBridges }
+        }
+        return discoveredBridges
+    }
+
     private func startBridgeDiscovery() {
         guard bridgeBrowser == nil else { return }
         let browser = AgentBridgeDiscovery()

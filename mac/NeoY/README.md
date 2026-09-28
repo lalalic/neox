@@ -41,6 +41,6 @@ For iterative local installs, prefer:
 ./install-local.sh
 ```
 
-The helper builds NeoY, discovers a valid local **Apple Development** signing identity, re-signs the app with that stable identity, installs it at `/Applications/NeoY.app`, and launches it. This avoids ad-hoc signatures whose designated requirement is only a changing CDHash; with the stable identity, Screen Recording and Accessibility authorization can survive rebuilds after the one-time grant.
+The helper builds NeoY, discovers a valid local **Apple Development** signing identity, re-signs the app with that stable identity, installs it at `/Applications/NeoY.app`, and registers `com.neox.neoy.keepalive` as a per-user LaunchAgent (`RunAtLoad + KeepAlive`). If NeoY is missing or crashes, launchd recreates it automatically. This avoids ad-hoc signatures whose designated requirement is only a changing CDHash; with the stable identity, Screen Recording and Accessibility authorization can survive rebuilds after the one-time grant.
 
 Run `NeoY.app` as an app bundle so macOS can associate Screen Recording, Accessibility, and Local Network permissions with `com.neox.neoy`.

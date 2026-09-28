@@ -84,8 +84,6 @@ final class VlogInboxStore: ObservableObject {
     static let ubiquityContainerIdentifier = "iCloud.com.neox.app"
     static let inboxRelativePath = "Documents/Vlog Inbox"
 
-    @Published private(set) var folderName: String? = "Vlog Inbox"
-    @Published private(set) var status: String?
 
     private init() {}
 
@@ -111,7 +109,6 @@ final class VlogInboxStore: ObservableObject {
             instruction: instruction,
             payloads: payloads
         )
-        status = "Submitted \(items.count) item(s): \(id)"
         return url.lastPathComponent
     }
 
@@ -166,7 +163,7 @@ enum VlogInboxInspector {
 }
 
 struct VlogSubmissionView: View {
-    @ObservedObject private var store = VlogInboxStore.shared
+    private let store = VlogInboxStore.shared
     @Environment(\.dismiss) private var dismiss
     @State private var items: [PhotosPickerItem] = []
     @State private var instruction = ""
@@ -176,13 +173,6 @@ struct VlogSubmissionView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("iCloud Inbox") {
-                    Label("Vlog Inbox", systemImage: "icloud")
-                    Text("Neox uses its fixed iCloud Drive inbox automatically.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
                 Section("Media") {
                     PhotosPicker(
                         selection: $items,
@@ -198,14 +188,9 @@ struct VlogSubmissionView: View {
                     TextField("Optional vlog instruction", text: $instruction, axis: .vertical)
                 }
 
+
                 if let errorText {
-                    Section {
-                        Text(errorText).foregroundStyle(.red)
-                    }
-                } else if let status = store.status {
-                    Section {
-                        Text(status).foregroundStyle(.secondary)
-                    }
+                    Text(errorText).foregroundStyle(.red)
                 }
 
                 Button {
@@ -216,6 +201,7 @@ struct VlogSubmissionView: View {
                             _ = try await store.submit(items: items, instruction: instruction)
                             items = []
                             instruction = ""
+                            dismiss()
                         } catch {
                             errorText = error.localizedDescription
                         }
