@@ -9,9 +9,8 @@ struct NeoYDeploymentSettings: Codable, Equatable {
     static let defaultPort: UInt16 = 6767
     var mcpPort: UInt16 = Self.defaultPort
     var tunnelMode: NeoYTunnelMode = .off
-    var tunnelName: String = "neoy"
+    var tunnelName: String = ""
     var publicHostname: String = ""
-    var chatGPTPluginID: String = ""
 
     var localMCPURL: String { "http://127.0.0.1:\(mcpPort)/mcp" }
 
@@ -25,13 +24,11 @@ struct NeoYDeploymentSettings: Codable, Equatable {
 
     func validated() throws -> NeoYDeploymentSettings {
         if tunnelMode == .named {
-            guard !tunnelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw NSError(domain: "NeoY", code: 2,
-                              userInfo: [NSLocalizedDescriptionKey: "Named tunnel requires a tunnel name"])
-            }
-            guard publicHostname.contains("."), !publicHostname.contains("://"), !publicHostname.contains("/") else {
-                throw NSError(domain: "NeoY", code: 3,
-                              userInfo: [NSLocalizedDescriptionKey: "Public hostname must look like neoy.example.com"])
+            if !publicHostname.isEmpty {
+                guard publicHostname.contains("."), !publicHostname.contains("://"), !publicHostname.contains("/") else {
+                    throw NSError(domain: "NeoY", code: 3,
+                                  userInfo: [NSLocalizedDescriptionKey: "Public hostname must look like neoy.example.com"])
+                }
             }
         }
         return self

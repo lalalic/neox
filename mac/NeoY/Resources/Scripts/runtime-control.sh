@@ -28,7 +28,7 @@ PY
 
 PORT="$(read_json mcpPort 6767)"
 MODE="$(read_json tunnelMode off)"
-TUNNEL_NAME="$(read_json tunnelName neoy)"
+TUNNEL_NAME="$(read_json tunnelName '')"
 HOSTNAME="$(read_json publicHostname '')"
 
 need_pm2() { [[ -n "$PM2" ]] || { print -u2 "pm2 not found"; exit 69; }; }
@@ -77,9 +77,19 @@ tunnel_start() {
   if [[ "$MODE" == "quick" ]]; then
     "$PM2" start "$CLOUDFLARED" --name neoy-tunnel --interpreter none --log "$TUNNEL_LOG" --       tunnel --no-autoupdate --url "http://127.0.0.1:$PORT" >/dev/null
   else
-    [[ -n "$TUNNEL_NAME" && -n "$HOSTNAME" ]] || {
-      print -u2 "named tunnel requires tunnelName and publicHostname"; return 64
+    [[ -n "$HOSTNAME" ]] || {
+      print -u2 "named tunnel requires a public hostname"; return 64
     }
+    if [[ -z "$TUNNEL_NAME" ]]; then
+      TUNNEL_NAME="$(/usr/bin/python3 - "$HOSTNAME" <<'PY2'
+import hashlib, re, sys
+host=sys.argv[1].lower()
+slug=re.sub(r'[^a-z0-9]+', '-', host).strip('-')[:32]
+hash=hashlib.sha256(host.encode()).hexdigest()[:8]
+print(f"neoy-{slug}-{hash}")
+PY2
+)"
+    fi
     local tid
     tid="$("$CLOUDFLARED" tunnel list --output json | /usr/bin/python3 -c 'import json,sys; n=sys.argv[1]; x=json.load(sys.stdin); print(next((i["id"] for i in x if i["name"]==n),""))' "$TUNNEL_NAME")"
     [[ -n "$tid" ]] || { print -u2 "Cloudflare tunnel '$TUNNEL_NAME' does not exist"; return 66; }
@@ -113,9 +123,19 @@ EOF
 
 named_create() {
   need_cloudflared
-  [[ -n "$TUNNEL_NAME" && -n "$HOSTNAME" ]] || {
-    print -u2 "named tunnel requires tunnelName and publicHostname"; exit 64
+  [[ -n "$HOSTNAME" ]] || {
+    print -u2 "named tunnel requires a public hostname"; exit 64
   }
+  if [[ -z "$TUNNEL_NAME" ]]; then
+    TUNNEL_NAME="$(/usr/bin/python3 - "$HOSTNAME" <<'PY2'
+import hashlib, re, sys
+host=sys.argv[1].lower()
+slug=re.sub(r'[^a-z0-9]+', '-', host).strip('-')[:32]
+hash=hashlib.sha256(host.encode()).hexdigest()[:8]
+print(f"neoy-{slug}-{hash}")
+PY2
+)"
+  fi
   if ! "$CLOUDFLARED" tunnel list --output json | /usr/bin/python3 -c 'import json,sys; n=sys.argv[1]; x=json.load(sys.stdin); raise SystemExit(0 if any(i["name"]==n for i in x) else 1)' "$TUNNEL_NAME"; then
     "$CLOUDFLARED" tunnel create "$TUNNEL_NAME"
   fi
