@@ -94,6 +94,10 @@ final class NativeNeoYPhoneHandoffReceiver: NeoYPhoneHandoffReceiver, @unchecked
         updateState { $0.isRunning = false }
     }
 
+    var isRunning: Bool {
+        readState().isRunning
+    }
+
     func statusJSON() -> String {
         let snapshot = readState()
         return [

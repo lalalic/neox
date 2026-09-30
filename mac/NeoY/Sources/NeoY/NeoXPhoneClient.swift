@@ -380,6 +380,20 @@ final class NeoXPhoneClient: NeoYPhoneClient, @unchecked Sendable {
         oldDiscovery?.stop()
     }
 
+    var pairingSelection: NeoYPhonePairingSelection {
+        let (target, name) = targetStore.snapshot()
+        var url: String?
+        if case .http(let value) = target {
+            url = value.absoluteString
+        }
+        return NeoYPhonePairingSelection(
+            isSelected: target != nil,
+            name: name,
+            kind: target?.kind,
+            url: url
+        )
+    }
+
     func setHandoffURL(_ url: URL) {
         targetStore.set(.http(url), name: url.host(percentEncoded: false), replaceBonjour: true)
     }

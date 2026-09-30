@@ -1,6 +1,6 @@
-# NeoY macOS companion
+# NeoY macOS runtime
 
-NeoY is NeoX's native menu-bar companion for Mac Capture Tour, demo automation, focused Accessibility/computer-use actions, phone media access, and phone-to-Mac agent handoff.
+NeoY is NeoX's signed menu-bar/headless-first Mac runtime for native capture/demo, Accessibility/computer-use, phone media/handoff, trusted Mac setup, supervised local processes, and MCP federation.
 
 ## Runtime endpoints
 
@@ -10,37 +10,51 @@ NeoY is NeoX's native menu-bar companion for Mac Capture Tour, demo automation, 
 - Handoff persistence: `~/.neoy/inbox`
 - Local exports: `~/Library/Application Support/NeoY/exports`
 
-NeoY replaces both the old **Neox Tour** Mac app and the standalone Python `neoy-bridge.py` service. Only NeoY should own ports 9224 and 8686.
+NeoY replaces the old Neox Tour Mac app and standalone Python `neoy-bridge.py`. Only NeoY should own ports 9224 and 8686.
 
-## Demo runtime
+## One setup surface
 
-The Mac binding follows `~/Workspace/demo/contracts/primitives.md` and exposes:
+Agent-facing runtime configuration is intentionally concentrated in one MCP tool:
 
-`demo.start_recording`, `demo.step`, `demo.spotlight`, `demo.annotate`, `demo.caption`, `demo.say`, `demo.cursor`, `demo.highlight`, `demo.clear`, `demo.pause`, `demo.resume`, `demo.wait`, and `demo.stop_recording`.
+```text
+neoy.setup(command: String?)
+```
 
-The runtime records H.264 MOV output with ScreenCaptureKit and writes a semantic `.events.json` sidecar. Screen Recording permission is required for real capture.
+Run `help` or `help <topic>` at runtime for the authoritative command grammar. v2 covers status/config, diagnostics, native permission guidance, managed startup processes, configured HTTP MCP federation, and important NeoX event policy/delivery.
 
-UI actions stay separate from visual primitives: `accessibility.inspect`, `accessibility.resolve`, `computer.click`, `computer.type`, `computer.set_value`, `computer.key`, `computer.scroll`, and `computer.drag`. Semantic inspection/actions require macOS Accessibility permission.
+Configured remote MCP tools appear as `mcp.<server>.<tool>`. Local MCP servers can be started by the startup supervisor and then federated by URL.
 
-## NeoX phone media
+Control state is schema-versioned and validated. v1 diagnostics-only state migrates explicitly to v2. Malformed state is preserved and surfaced as degraded health rather than silently discarded.
 
-NeoY discovers NeoX on `_mcp._tcp` or accepts the exact MCP URL embedded in a phone handoff. It exposes `phone.status`, `phone.media.search`, `phone.media.meta`, `phone.media.thumbnail`, and `phone.media.export`. Exports are downloaded to `~/Library/Application Support/NeoY/exports/phone/`; indexing remains authoritative on the phone.
+See `docs/neoy-v2-architecture.md` and `docs/neoy-v2-migration-matrix.md`.
+
+## Existing native capabilities
+
+Demo/capture keeps the shared primitive contract and ScreenCaptureKit recording. Accessibility/computer-use stays native because macOS TCC permissions belong to the signed app identity. NeoX phone media discovery/export and phone-to-Mac handoff remain compatible with the existing protocol.
 
 ## Build and test
 
 ```bash
 cd mac/NeoY
 xcodegen generate
-xcodebuild -project NeoY.xcodeproj -scheme NeoY -configuration Debug build
-xcodebuild -project NeoY.xcodeproj -scheme NeoY -configuration Debug test
+xcodebuild -project NeoY.xcodeproj -scheme NeoY -configuration Debug test CODE_SIGNING_ALLOWED=NO
 ```
 
-For iterative local installs, prefer:
+NeoX compatibility build:
 
 ```bash
+cd ../..
+xcodegen generate
+xcodebuild -project Neox.xcodeproj -scheme NeoxApp -configuration Debug -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO build
+```
+
+For a real Mac installed-app E2E:
+
+```bash
+cd mac/NeoY
 ./install-local.sh
 ```
 
-The helper builds NeoY, discovers a valid local **Apple Development** signing identity, re-signs the app with that stable identity, installs it at `/Applications/NeoY.app`, and registers `com.neox.neoy.keepalive` as a per-user LaunchAgent (`RunAtLoad + KeepAlive`). If NeoY is missing or crashes, launchd recreates it automatically. This avoids ad-hoc signatures whose designated requirement is only a changing CDHash; with the stable identity, Screen Recording and Accessibility authorization can survive rebuilds after the one-time grant.
+The installer uses a valid Apple Development identity, installs `/Applications/NeoY.app`, and keeps it alive via the per-user `com.neox.neoy.keepalive` LaunchAgent. Stable signing lets macOS associate one-time TCC grants with `com.neox.neoy` across local rebuilds.
 
-Run `NeoY.app` as an app bundle so macOS can associate Screen Recording, Accessibility, and Local Network permissions with `com.neox.neoy`.
+NeoY can report/open permission settings, but Screen Recording, Accessibility, camera, microphone, notifications, and Local Network remain subject to macOS/user approval.
