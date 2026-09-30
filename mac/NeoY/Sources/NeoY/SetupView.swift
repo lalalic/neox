@@ -16,8 +16,8 @@ final class NeoYSetupModel: ObservableObject {
     @Published var serviceMode: ServiceMode = .local
     @Published var remoteMode: RemoteMode = .dynamic
     @Published var publicHostname = ""
-    @Published var oauthClientID = ""
-    @Published var oauthToken = ""
+    @Published private(set) var oauthClientID = ""
+    @Published private(set) var oauthToken = ""
     @Published var result = ""
     @Published var isBusy = false
 
@@ -28,7 +28,7 @@ final class NeoYSetupModel: ObservableObject {
         serviceMode = value.tunnelMode == .off ? .local : .remote
         remoteMode = value.tunnelMode == .named ? .ownDomain : .dynamic
         publicHostname = value.publicHostname
-        let credentials = NeoYMCPPluginCredentials.load()
+        let credentials = NeoYMCPPluginCredentials.current()
         oauthClientID = credentials.clientID
         oauthToken = credentials.token
     }
@@ -73,7 +73,6 @@ final class NeoYSetupModel: ObservableObject {
             value.tunnelMode = serviceMode == .local ? .off : (remoteMode == .ownDomain ? .named : .quick)
             value.publicHostname = publicHostname.trimmingCharacters(in: .whitespacesAndNewlines)
             try NeoYDeploymentSettingsStore.save(value)
-            NeoYMCPPluginCredentials.save(clientID: oauthClientID, token: oauthToken)
         } catch {
             result = error.localizedDescription
         }
@@ -224,17 +223,26 @@ struct NeoYSetupView: View {
     private var oauthCard: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 12) {
-                TextField("OAuth client ID", text: $model.oauthClientID)
-                    .onSubmit { model.autoApply() }
-                SecureField("OAuth token", text: $model.oauthToken)
-                    .onSubmit { model.autoApply() }
-                Text("Used by the MCP plugin connection.")
+                HStack {
+                    Text(model.oauthClientID)
+                        .textSelection(.enabled)
+                    Spacer()
+                    Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(model.oauthClientID, forType: .string) }
+                }
+                HStack {
+                    Text(model.oauthToken)
+                        .textSelection(.enabled)
+                        .lineLimit(1)
+                    Spacer()
+                    Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(model.oauthToken, forType: .string) }
+                }
+                Text("NeoY provides these credentials for creating the MCP app connection. The token is a secret and authorizes remote access.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             .padding(8)
         } label: {
-            Label("MCP OAuth", systemImage: "lock.shield")
+            Label("MCP app credentials", systemImage: "lock.shield")
                 .font(.headline)
         }
     }
@@ -255,7 +263,7 @@ struct NeoYSetupView: View {
                     Text("Enter the hostname only. NeoY manages the tunnel behind it.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Button("Configure domain") { model.autoApply(); model.configureDomain() }
+                    Button("Apply hostname") { model.autoApply(); model.startTunnel() }
                 } else {
                     Text("NeoY will create a temporary public MCP endpoint.")
                         .font(.caption)

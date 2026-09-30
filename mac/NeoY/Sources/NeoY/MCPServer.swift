@@ -333,10 +333,17 @@ public final class MCPServer {
         }
         let queryToken = URLComponents(string: "http://localhost\(requestTarget)")?
             .queryItems?.first(where: { $0.name == "token" })?.value
+        let bearerToken: String? = {
+            guard let value = headers["authorization"] else { return nil }
+            let parts = value.split(separator: " ", maxSplits: 1).map(String.init)
+            guard parts.count == 2, parts[0].caseInsensitiveCompare("Bearer") == .orderedSame else { return nil }
+            return parts[1]
+        }()
+        let presentedToken = bearerToken ?? queryToken
         let isCloudflareProxy = headers["cf-connecting-ip"] != nil || headers["cf-ray"] != nil
         let isDirectLoopback = Self.isLoopback(connection.endpoint) && !isCloudflareProxy
         let isPrivileged = isDirectLoopback ||
-            (_snapshotPrivilegedAccessToken != nil && queryToken == _snapshotPrivilegedAccessToken)
+            (_snapshotPrivilegedAccessToken != nil && presentedToken == _snapshotPrivilegedAccessToken)
 
         if let onRequest { onRequest("\(method) \(path)") }
 
