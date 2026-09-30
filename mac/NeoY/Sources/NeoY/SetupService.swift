@@ -1,7 +1,7 @@
 import Foundation
 
 enum NeoYSetupTopic: String, CaseIterable, Sendable {
-    case overview, status, configuration, deployment, diagnostics, permissions, startup, federation, events, roadmap
+    case overview, status, configuration, deployment, diagnostics, permissions, startup, federation, events, capabilities, auth, roadmap
 }
 
 enum NeoYSetupCommand: Equatable, Sendable {
@@ -32,6 +32,9 @@ enum NeoYSetupCommand: Equatable, Sendable {
     case eventsStatus
     case eventsSet(kind: NeoYImportantEventKind, enabled: Bool)
     case eventNotify(kind: NeoYImportantEventKind, title: String, body: String)
+    case capabilityList
+    case capabilitySet(NeoYOptionalCapability, enabled: Bool)
+    case authShow
 }
 
 enum NeoYSetupError: LocalizedError {
@@ -75,6 +78,8 @@ enum NeoYSetupParser {
         case "startup": return try startup(tokens)
         case "mcp": return try mcp(tokens)
         case "events": return try events(tokens)
+        case "capability", "capabilities": return try capability(tokens)
+        case "auth": return try auth(tokens)
         default: throw NeoYSetupError.unknownCommand(command)
         }
     }
@@ -239,6 +244,30 @@ enum NeoYSetupParser {
         }
     }
 
+    private static func capability(_ tokens: [String]) throws -> NeoYSetupCommand {
+        guard tokens.count >= 2 else { return .capabilityList }
+        switch tokens[1] {
+        case "list":
+            try exact(tokens, count: 2)
+            return .capabilityList
+        case "enable", "disable":
+            guard tokens.count == 3, let capability = NeoYOptionalCapability(rawValue: tokens[2]) else {
+                throw NeoYSetupError.invalidValue(
+                    "capability must be one of: " + NeoYOptionalCapability.allCases.map(\.rawValue).joined(separator: ", "))
+            }
+            return .capabilitySet(capability, enabled: tokens[1] == "enable")
+        default:
+            throw NeoYSetupError.unknownCommand(tokens.prefix(2).joined(separator: " "))
+        }
+    }
+
+    private static func auth(_ tokens: [String]) throws -> NeoYSetupCommand {
+        guard tokens == ["auth", "show"] else {
+            throw NeoYSetupError.unknownCommand(tokens.joined(separator: " "))
+        }
+        return .authShow
+    }
+
     private static func exact(_ tokens: [String], count: Int) throws {
         if tokens.count > count { throw NeoYSetupError.unexpectedArgument(tokens[count]) }
         if tokens.count < count { throw NeoYSetupError.missingArgument("argument") }
@@ -313,6 +342,7 @@ actor NeoYSetupService {
     private let controlPlane: NeoYControlPlaneService
     private let runtime: NeoYRuntimeControl?
     private let onDeploymentChanged: (@Sendable () async -> Void)?
+    private let onCapabilitiesChanged: (@Sendable (NeoYControlPlaneConfiguration) async -> Void)?
 
     init(
         makeStatus: @escaping @Sendable () async -> NeoYRuntimeStatus,
@@ -320,12 +350,14 @@ actor NeoYSetupService {
             store: NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)
         ),
         runtime: NeoYRuntimeControl? = nil,
-        onDeploymentChanged: (@Sendable () async -> Void)? = nil
+        onDeploymentChanged: (@Sendable () async -> Void)? = nil,
+        onCapabilitiesChanged: (@Sendable (NeoYControlPlaneConfiguration) async -> Void)? = nil
     ) {
         self.makeStatus = makeStatus
         self.controlPlane = controlPlane
         self.runtime = runtime
         self.onDeploymentChanged = onDeploymentChanged
+        self.onCapabilitiesChanged = onCapabilitiesChanged
     }
 
     func currentConfiguration() async -> NeoYControlPlaneConfiguration {
@@ -415,6 +447,35 @@ actor NeoYSetupService {
             } catch {
                 return Self.json(JSONValue.object(["delivered": .bool(false), "error": .string(error.localizedDescription)]))
             }
+        case .capabilityList:
+            let configuration = await controlPlane.currentConfiguration()
+            let rows = NeoYOptionalCapability.allCases.map { capability in
+                [
+                    "name": capability.rawValue,
+                    "enabled": configuration.capabilities.isEnabled(capability) ? "true" : "false",
+                    "kind": "optional"
+                ]
+            }
+            return Self.json(rows)
+        case .capabilitySet(let capability, let enabled):
+            let result = await mutate("capability.\(enabled ? "enable" : "disable")") {
+                try await self.controlPlane.setCapability(capability, enabled: enabled)
+            }
+            if let onCapabilitiesChanged {
+                let configuration = await controlPlane.currentConfiguration()
+                Task {
+                    try? await Task.sleep(for: .milliseconds(150))
+                    await onCapabilitiesChanged(configuration)
+                }
+            }
+            return result
+        case .authShow:
+            let settings = NeoYDeploymentSettingsStore.load()
+            return Self.json([
+                "local_core_url": NeoYCoreAuth.url(settings.localMCPURL),
+                "public_core_url": settings.publicMCPURL.map(NeoYCoreAuth.url) ?? "",
+                "token": NeoYCoreAuth.token()
+            ])
         }
     }
 
@@ -489,7 +550,7 @@ actor NeoYSetupService {
     }
 
     static func help(_ topic: NeoYSetupTopic?) -> String {
-        switch topic {
+        return switch topic {
         case .overview:
             "NeoY is Neo's signed menu-bar Mac runtime. One setup CLI configures native trust, supervised services, federated MCPs, diagnostics, and NeoX events."
         case .status:
@@ -533,6 +594,14 @@ actor NeoYSetupService {
             events notify <kind> "<title>" <body...>
             Only policy-enabled important events are forwarded to the paired NeoX runtime.
             """
+        case .capabilities:
+            """
+            capability list
+            capability enable|disable <accessibility-computer|demo-recording|capture-tour|phone-integration|public-tunnel>
+            Optional first-party capabilities are enabled by default. Core setup/exec/fs/codex/node capabilities cannot be disabled.
+            """
+        case .auth:
+            "auth show — return the trusted Core token and tokenized local/public MCP URLs. Direct-local or already trusted access only."
         case .roadmap:
             "v2 core is implemented around typed persistence, native permission guidance, supervised startup services, HTTP MCP federation, and pairing-aware NeoX important-event delivery. Signed installed-app permission/login E2E still requires the actual installed identity and human TCC approvals."
         case nil:
@@ -547,6 +616,8 @@ actor NeoYSetupService {
               startup list|add|remove|enable|disable|set ...
               mcp list|add|remove|enable|disable ...
               events status|enable|disable|notify ...
+              capability list|enable|disable ...
+              auth show
 
             Run 'help <topic>' for exact grammar. Runtime help is authoritative for the installed NeoY version.
             """
@@ -566,7 +637,7 @@ enum NeoYSetupTools {
     static func tools(service: NeoYSetupService) -> [ToolDefinition] {
         [ToolDefinition(
             name: "neoy.setup",
-            description: "NeoY setup/control CLI. Run without command or run 'help' for authoritative runtime commands covering status, permissions, supervised startup services, MCP federation, diagnostics, and important NeoX events.",
+            description: "NeoY setup/control CLI. Run without command or run 'help' for authoritative runtime commands covering status, permissions, supervised startup services, MCP federation, diagnostics, optional capabilities, Core auth, and important NeoX events.",
             parameters: .object([
                 "type": .string("object"),
                 "properties": .object([

@@ -1,7 +1,7 @@
 import Foundation
 
 enum NeoYControlPlaneSchema {
-    static let currentVersion = 2
+    static let currentVersion = 3
 }
 
 enum NeoYDiagnosticsLevel: String, Codable, CaseIterable, Sendable {
@@ -96,11 +96,33 @@ struct NeoYEventConfiguration: Codable, Equatable, Sendable {
     }
 }
 
+enum NeoYOptionalCapability: String, Codable, CaseIterable, Sendable {
+    case accessibilityComputer = "accessibility-computer"
+    case demoRecording = "demo-recording"
+    case captureTour = "capture-tour"
+    case phoneIntegration = "phone-integration"
+    case publicTunnel = "public-tunnel"
+}
+
+struct NeoYCapabilityConfiguration: Codable, Equatable, Sendable {
+    var disabled: Set<NeoYOptionalCapability> = []
+
+    func isEnabled(_ capability: NeoYOptionalCapability) -> Bool {
+        !disabled.contains(capability)
+    }
+
+    mutating func set(_ capability: NeoYOptionalCapability, enabled: Bool) {
+        if enabled { disabled.remove(capability) }
+        else { disabled.insert(capability) }
+    }
+}
+
 struct NeoYControlPlaneConfiguration: Codable, Equatable, Sendable {
     var diagnostics = NeoYDiagnosticsConfiguration()
     var startupServices: [NeoYStartupServiceConfiguration] = []
     var mcpServers: [NeoYMCPServerConfiguration] = []
     var events = NeoYEventConfiguration()
+    var capabilities = NeoYCapabilityConfiguration()
 
     func validate() throws {
         try diagnostics.validate()
@@ -239,6 +261,20 @@ struct NeoYFileControlPlaneStore: NeoYControlPlaneStoring {
                 try save(migrated)
                 return NeoYControlPlaneLoadOutcome(document: migrated)
             }
+            if envelope.schemaVersion == 2 {
+                let legacy = try decoder.decode(V2Document.self, from: data)
+                let migrated = NeoYControlPlaneDocument(
+                    configuration: NeoYControlPlaneConfiguration(
+                        diagnostics: legacy.configuration.diagnostics,
+                        startupServices: legacy.configuration.startupServices,
+                        mcpServers: legacy.configuration.mcpServers,
+                        events: legacy.configuration.events,
+                        capabilities: NeoYCapabilityConfiguration()
+                    )
+                )
+                try save(migrated)
+                return NeoYControlPlaneLoadOutcome(document: migrated)
+            }
             let document = try decoder.decode(NeoYControlPlaneDocument.self, from: data)
             try document.validate()
             return NeoYControlPlaneLoadOutcome(document: document)
@@ -271,6 +307,7 @@ struct NeoYFileControlPlaneStore: NeoYControlPlaneStoring {
             } else {
                 try FileManager.default.moveItem(at: temporaryURL, to: fileURL)
             }
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
         } catch let error as NeoYControlPlaneError { throw error }
         catch { throw NeoYControlPlaneError.saveFailed(error.localizedDescription) }
     }
@@ -292,6 +329,16 @@ struct NeoYFileControlPlaneStore: NeoYControlPlaneStoring {
         let configuration: V1Configuration
     }
     private struct V1Configuration: Codable { let diagnostics: NeoYDiagnosticsConfiguration }
+    private struct V2Document: Codable {
+        let schemaVersion: Int
+        let configuration: V2Configuration
+    }
+    private struct V2Configuration: Codable {
+        let diagnostics: NeoYDiagnosticsConfiguration
+        let startupServices: [NeoYStartupServiceConfiguration]
+        let mcpServers: [NeoYMCPServerConfiguration]
+        let events: NeoYEventConfiguration
+    }
 }
 
 actor NeoYControlPlaneService {
@@ -375,6 +422,10 @@ actor NeoYControlPlaneService {
 
     func setEvent(_ kind: NeoYImportantEventKind, enabled: Bool) throws -> NeoYControlPlaneConfiguration {
         try mutate { $0.events.set(kind, enabled: enabled) }
+    }
+
+    func setCapability(_ capability: NeoYOptionalCapability, enabled: Bool) throws -> NeoYControlPlaneConfiguration {
+        try mutate { $0.capabilities.set(capability, enabled: enabled) }
     }
 
     private func mutateExisting<T>(

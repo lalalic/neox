@@ -115,7 +115,7 @@ final class NeoYMCPFederation {
                         parameters: tool.schema
                     ) { arguments in
                         try await NeoYMCPRemoteClient.call(url: url, name: tool.name, arguments: arguments)
-                    }])
+                    }], protected: true)
                     names.append(localName)
                 }
                 exposedByServer[configuration.name] = names

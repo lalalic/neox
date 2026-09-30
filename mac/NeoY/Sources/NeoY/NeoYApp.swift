@@ -25,6 +25,10 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
     private var setupWindow: NSWindow?
     private var runtimeControl: NeoYRuntimeControl?
+    private let coreExec = NeoYExecService()
+    private let coreFiles = NeoYCoreFileService()
+    private let coreCodex = NeoYCodexThreadService()
+    private let coreNodes = NeoYNodeService()
     private var observers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -112,8 +116,12 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
 
     private func startServer() {
         let deployment = NeoYDeploymentSettingsStore.load()
-        let value = MCPServer(name: "NeoY", version: "2.1.0", port: deployment.mcpPort,
+        let value = MCPServer(name: "NeoY", version: NeoYCoreRuntime.version, port: deployment.mcpPort,
                               bonjourName: "NeoY")
+        value.setPrivilegedAccessToken(NeoYCoreAuth.token())
+
+        let configuration = (try? NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)
+            .loadOrCreate().document.configuration) ?? NeoYControlPlaneConfiguration()
         let phone = services.phone as! NeoXPhoneClient
         let runtimeControl = NeoYRuntimeControl(server: value, phone: phone)
         let setup = NeoYSetupService(
@@ -123,19 +131,45 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
             runtime: runtimeControl,
             onDeploymentChanged: { [weak self] in
                 await MainActor.run { self?.restartPrimaryMCPServer() }
-                await Self.restartTunnelRuntime()
+                await Self.controlTunnelRuntime(action: "tunnel-restart")
+            },
+            onCapabilitiesChanged: { [weak self] updated in
+                await MainActor.run { self?.restartPrimaryMCPServer() }
+                if updated.capabilities.isEnabled(.publicTunnel) {
+                    await Self.controlTunnelRuntime(action: "tunnel-restart")
+                } else {
+                    await Self.controlTunnelRuntime(action: "tunnel-stop")
+                }
             }
         )
         self.runtimeControl = runtimeControl
         Task {
             await runtimeControl.reconcile(await setup.currentConfiguration())
         }
-        value.register(tools: CaptureTourTools.tools())
-        value.register(tools: DemoRecorderTools.tools())
-        value.register(tools: AccessibilityTools.tools())
-        value.register(tools: NeoYSetupTools.tools(service: setup))
-        value.register(tools: NeoXPhoneTools.tools(client: phone,
-                                                   handoff: services.handoff as! NativeNeoYPhoneHandoffReceiver))
+
+        NeoYCoreRuntime.register(
+            on: value,
+            setup: setup,
+            exec: coreExec,
+            files: coreFiles,
+            codex: coreCodex,
+            node: coreNodes
+        )
+
+        if configuration.capabilities.isEnabled(.captureTour) {
+            value.register(tools: CaptureTourTools.tools())
+        }
+        if configuration.capabilities.isEnabled(.demoRecording) {
+            value.register(tools: DemoRecorderTools.tools())
+        }
+        if configuration.capabilities.isEnabled(.accessibilityComputer) {
+            value.register(tools: AccessibilityTools.tools())
+        }
+        if configuration.capabilities.isEnabled(.phoneIntegration) {
+            value.register(tools: NeoXPhoneTools.tools(client: phone,
+                                                       handoff: services.handoff as! NativeNeoYPhoneHandoffReceiver))
+        }
+
         try? services.files.prepare()
         value.setStaticFileRoot(services.files.root)
         try? value.start()
@@ -158,7 +192,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
 
         return NeoYRuntimeStatus(
             state: serverIsRunning && handoffError == nil ? .ready : .degraded,
-            version: "2.1.0",
+            version: NeoYCoreRuntime.version,
             bundleIdentifier: Bundle.main.bundleIdentifier ?? "com.neox.neoy",
             startupMode: FileManager.default.fileExists(
                 atPath: FileManager.default.homeDirectoryForCurrentUser
@@ -177,19 +211,32 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
                 isRunning: services.handoff.isRunning,
                 error: handoffError
             ),
-            capabilities: ["capture_tour", "demo", "accessibility", "phone_media", "permissions", "startup_supervisor", "mcp_federation", "neox_events"]
+            capabilities: Self.runtimeCapabilities()
         )
     }
 
-    nonisolated private static func restartTunnelRuntime() async {
+    nonisolated private static func controlTunnelRuntime(action: String) async {
         guard let script = Bundle.main.url(forResource: "runtime-control", withExtension: "sh") else { return }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = [script.path, "tunnel-restart"]
+        process.arguments = [script.path, action]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try? process.run()
         process.waitUntilExit()
+    }
+
+    private static func runtimeCapabilities() -> [String] {
+        let config = (try? NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)
+            .loadOrCreate().document.configuration) ?? NeoYControlPlaneConfiguration()
+        var result = ["core_setup", "core_exec", "core_files", "core_codex_threads", "core_nodes",
+                      "permissions", "startup_supervisor", "mcp_federation", "neox_events"]
+        if config.capabilities.isEnabled(.captureTour) { result.append("capture_tour") }
+        if config.capabilities.isEnabled(.demoRecording) { result.append("demo") }
+        if config.capabilities.isEnabled(.accessibilityComputer) { result.append("accessibility") }
+        if config.capabilities.isEnabled(.phoneIntegration) { result.append("phone_media") }
+        if config.capabilities.isEnabled(.publicTunnel) { result.append("public_tunnel") }
+        return result
     }
 
     private func startNativePhoneServices() {
