@@ -12,6 +12,8 @@ targets:
     platform: macOS
     sources:
       - Sources/NeoY
+    resources:
+      - Resources/Scripts
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.neox.neoy

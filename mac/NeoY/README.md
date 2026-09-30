@@ -4,13 +4,14 @@ NeoY is NeoX's signed menu-bar/headless-first Mac runtime for native capture/dem
 
 ## Runtime endpoints
 
-- MCP: `http://127.0.0.1:9224/mcp`, Bonjour `_mcp._tcp` / `NeoY`
+- MCP: configurable local port (default `http://127.0.0.1:9224/mcp`), Bonjour `_mcp._tcp` / `NeoY`
+- Public MCP: optional Cloudflare Temporary tunnel or named-domain tunnel; the Setup window can start, stop, and test either mode
 - Phone handoff: TCP `8686`, Bonjour `_neoy._tcp`, `POST /agent`
 - Handoff queue: `GET /agent/peek`, `GET /agent/next?timeout=0..30`
 - Handoff persistence: `~/.neoy/inbox`
 - Local exports: `~/Library/Application Support/NeoY/exports`
 
-NeoY replaces the old Neox Tour Mac app and standalone Python `neoy-bridge.py`. Only NeoY should own ports 9224 and 8686.
+NeoY replaces the old Neox Tour Mac app and standalone Python `neoy-bridge.py`.
 
 ## One setup surface
 
@@ -20,7 +21,17 @@ Agent-facing runtime configuration is intentionally concentrated in one MCP tool
 neoy.setup(command: String?)
 ```
 
-Run `help` or `help <topic>` at runtime for the authoritative command grammar. v2 covers status/config, diagnostics, native permission guidance, managed startup processes, configured HTTP MCP federation, and important NeoX event policy/delivery.
+Run `help` or `help <topic>` at runtime for the authoritative command grammar. Deployment values use the same model as the Setup window:
+
+```text
+deployment show
+deployment set port <1...65535>
+deployment set tunnel <off|quick|named>
+deployment set tunnel-name <name>
+deployment set hostname <host>
+```
+
+Changing deployment settings persists them, restarts the MCP listener after the current response completes, and reconciles the Cloudflare tunnel. The menu-bar **Setup…** window exposes the same port/tunnel values plus local/public test buttons and the ChatGPT plugin ID.
 
 Configured remote MCP tools appear as `mcp.<server>.<tool>`. Local MCP servers can be started by the startup supervisor and then federated by URL.
 
@@ -55,6 +66,8 @@ cd mac/NeoY
 ./install-local.sh
 ```
 
-The installer uses a valid Apple Development identity, installs `/Applications/NeoY.app`, and keeps it alive via the per-user `com.neox.neoy.keepalive` LaunchAgent. Stable signing lets macOS associate one-time TCC grants with `com.neox.neoy` across local rebuilds.
+The installer uses a valid Apple Development identity and installs `/Applications/NeoY.app`. When PM2 is available it becomes the primary supervisor for `neoy` (and `neoy-tunnel` when enabled); the legacy per-user LaunchAgent is only a fallback. PM2 state is saved so runtime/tunnel services survive daemon resurrection. Stable signing lets macOS associate one-time TCC grants with `com.neox.neoy` across local rebuilds.
+
+For ChatGPT, a private Agent Plugin can point its remote MCP entry at the stable HTTPS endpoint. NeoY's MCP tools are discovered dynamically rather than duplicated in the plugin manifest.
 
 NeoY can report/open permission settings, but Screen Recording, Accessibility, camera, microphone, notifications, and Local Network remain subject to macOS/user approval.
