@@ -18,13 +18,10 @@ final class SetupServiceTests: XCTestCase {
 
     func testParserRejectsUnknownCommandAndTopic() {
         XCTAssertThrowsError(try NeoYSetupParser.parse("startup add")) { error in
-            XCTAssertEqual(error.localizedDescription, "unknown command 'startup'; run 'help'")
+            XCTAssertEqual(error.localizedDescription, "missing argument: startup add <name> <absolute-executable> [args...]")
         }
-        XCTAssertThrowsError(try NeoYSetupParser.parse("help federation")) { error in
-            XCTAssertEqual(
-                error.localizedDescription,
-                "unknown topic 'federation'; supported topics: overview, status, roadmap, configuration, diagnostics"
-            )
+        XCTAssertThrowsError(try NeoYSetupParser.parse("help bogus")) { error in
+            XCTAssertTrue(error.localizedDescription.contains("unknown topic 'bogus'"))
         }
     }
 
@@ -40,6 +37,59 @@ final class SetupServiceTests: XCTestCase {
             try NeoYSetupParser.parse("diagnostics set retention-days 14"),
             .diagnosticsSet(.retentionDays(14))
         )
+    }
+
+    func testParserAcceptsV2RuntimeCommands() throws {
+        XCTAssertEqual(
+            try NeoYSetupParser.parse("startup add relay /usr/bin/env node server.js"),
+            .startupAdd(name: "relay", executable: "/usr/bin/env", arguments: ["node", "server.js"])
+        )
+        XCTAssertEqual(
+            try NeoYSetupParser.parse("startup set restart relay always"),
+            .startupSetRestart(name: "relay", policy: .always)
+        )
+        XCTAssertEqual(
+            try NeoYSetupParser.parse("mcp add tutor http://127.0.0.1:9333/mcp"),
+            .mcpAdd(name: "tutor", url: "http://127.0.0.1:9333/mcp")
+        )
+        XCTAssertEqual(
+            try NeoYSetupParser.parse("events notify blocked \"Need approval\" human action required"),
+            .eventNotify(kind: .blocked, title: "Need approval", body: "human action required")
+        )
+        XCTAssertEqual(try NeoYSetupParser.parse("permissions status"), .permissionsStatus)
+    }
+
+    func testV1ControlPlaneMigratesToV2WithoutLosingDiagnostics() throws {
+        let directory = Self.makeDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let legacy = """
+        {"schemaVersion":1,"configuration":{"diagnostics":{"isEnabled":true,"level":"warning","retentionDays":21}}}
+        """
+        try Data(legacy.utf8).write(to: directory.appendingPathComponent("control-plane.json"))
+
+        let outcome = try NeoYFileControlPlaneStore(directory: directory).loadOrCreate()
+
+        XCTAssertEqual(outcome.document.schemaVersion, 2)
+        XCTAssertTrue(outcome.document.configuration.diagnostics.isEnabled)
+        XCTAssertEqual(outcome.document.configuration.diagnostics.level, .warning)
+        XCTAssertEqual(outcome.document.configuration.diagnostics.retentionDays, 21)
+        XCTAssertEqual(outcome.document.configuration.startupServices, [])
+        XCTAssertEqual(outcome.document.configuration.mcpServers, [])
+    }
+
+    func testV2ConfigurationPersistsStartupFederationAndEventPolicy() async throws {
+        let store = NeoYFileControlPlaneStore(directory: Self.makeDirectory())
+        let control = NeoYControlPlaneService(store: store)
+
+        _ = try await control.upsertStartup(.init(
+            name: "echo", executable: "/bin/echo", arguments: ["hello"], restartPolicy: .never))
+        _ = try await control.upsertMCP(.init(name: "local", url: "http://127.0.0.1:9999/mcp"))
+        _ = try await control.setEvent(.completed, enabled: false)
+
+        let persisted = try store.loadOrCreate().document.configuration
+        XCTAssertEqual(persisted.startupServices.first?.name, "echo")
+        XCTAssertEqual(persisted.mcpServers.first?.name, "local")
+        XCTAssertFalse(persisted.events.completed)
     }
 
     func testParserValidatesDiagnosticsSettings() {
