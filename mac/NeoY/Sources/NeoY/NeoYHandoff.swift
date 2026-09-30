@@ -64,7 +64,7 @@ final class NativeNeoYPhoneHandoffReceiver: NeoYPhoneHandoffReceiver, @unchecked
         return NeoXPhoneClient.jsonString([
             "service": "_neoy._tcp",
             "path": "/agent",
-            "port": Int(NeoYDeploymentSettings.defaultPort),
+            "port": Int(NeoYDeploymentSettingsStore.load().mcpPort),
             "inbox": inbox.path,
             "running": snapshot.isRunning,
             "pending": pendingFiles().count,
@@ -156,7 +156,7 @@ final class NativeNeoYPhoneHandoffReceiver: NeoYPhoneHandoffReceiver, @unchecked
         for item in [
             "path=/agent",
             "host=\(Self.hostName)",
-            "port=\(NeoYDeploymentSettings.defaultPort)",
+            "port=\(NeoYDeploymentSettingsStore.load().mcpPort)",
             "ip=\(Self.lanIPv4 ?? "127.0.0.1")"
         ] {
             let data = Data(item.utf8)
@@ -169,7 +169,7 @@ final class NativeNeoYPhoneHandoffReceiver: NeoYPhoneHandoffReceiver, @unchecked
         let result: DNSServiceErrorType = txt.withUnsafeBytes { raw in
             DNSServiceRegister(
                 &ref, 0, 0, Self.hostName, "_neoy._tcp", nil, nil,
-                NeoYDeploymentSettings.defaultPort.bigEndian,
+                NeoYDeploymentSettingsStore.load().mcpPort.bigEndian,
                 UInt16(raw.count), raw.baseAddress, nil, nil
             )
         }

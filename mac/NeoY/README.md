@@ -102,14 +102,13 @@ canonical Core tools rather than maintaining per-node wrapper tools.
 
 ### MCP setup
 
-The Setup window is centered on the MCP connection settings:
-choose **Local** (the default) or **Remote**. Remote has two modes: **Dynamic**
-for a temporary public address, or **Own domain** for a stable hostname. The
-NeoY local service uses the single fixed ingress port **6767**; the port is not a
-user setting.
+The Setup window has three tabs: **MCP**, **Remote**, and **Advanced**. MCP shows
+the local endpoint, editable service port (default **6767**), and the client ID/token
+needed to create an MCP app connection. The token can be revoked/rotated at any time;
+rotation invalidates the previous token while preserving the client ID.
 
-The Setup window shows the resulting MCP endpoint prominently with a Copy and
-Test connection action. It also shows the MCP app client ID and secret token generated
-by NeoY; these are provided to the user when creating the MCP app connection.
-The token can be revoked/rotated at any time; rotation immediately invalidates the
-previous token while preserving the client ID. Operational details remain under Advanced.
+Remote access can use a temporary Cloudflare address or a hostname managed by the
+user's Cloudflare account. Own-domain addresses remain stable across restarts;
+temporary addresses may change and can require the MCP app to be reconfigured.
+Local access always receives every enabled NeoY feature. Remote access is authenticated
+and `tools/list`/`tools/call` are filtered by the Features selected in the Remote tab.

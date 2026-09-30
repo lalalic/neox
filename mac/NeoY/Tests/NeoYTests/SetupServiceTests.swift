@@ -254,6 +254,16 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertEqual(decoded.controlPlane.errorCode, "configuration_save_failed")
     }
 
+    func testRemoteFeatureClassification() {
+        XCTAssertTrue(NeoYRemoteFeature.terminal.matches(toolName: "mac.exec"))
+        XCTAssertTrue(NeoYRemoteFeature.files.matches(toolName: "mac.fs"))
+        XCTAssertTrue(NeoYRemoteFeature.computer.matches(toolName: "computer.click"))
+        XCTAssertTrue(NeoYRemoteFeature.computer.matches(toolName: "accessibility.inspect"))
+        XCTAssertTrue(NeoYRemoteFeature.phone.matches(toolName: "phone.media.search"))
+        XCTAssertTrue(NeoYRemoteFeature.mcpServices.matches(toolName: "mcp.calendar.events"))
+        XCTAssertFalse(NeoYRemoteFeature.files.matches(toolName: "mac.exec"))
+    }
+
     private static func makeDirectory() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("neoy-control-plane-tests", isDirectory: true)

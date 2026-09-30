@@ -3,19 +3,24 @@ import SwiftUI
 
 @MainActor
 final class NeoYSetupModel: ObservableObject {
-    enum ServiceMode: String, CaseIterable, Identifiable {
-        case local, remote
+    enum Tab: String, CaseIterable, Identifiable {
+        case mcp = "MCP"
+        case remote = "Remote"
+        case advanced = "Advanced"
         var id: String { rawValue }
     }
 
     enum RemoteMode: String, CaseIterable, Identifiable {
-        case dynamic, ownDomain
+        case temporary, ownDomain
         var id: String { rawValue }
     }
 
-    @Published var serviceMode: ServiceMode = .local
-    @Published var remoteMode: RemoteMode = .dynamic
+    @Published var tab: Tab = .mcp
+    @Published var portText = String(NeoYDeploymentSettings.defaultPort)
+    @Published var remoteEnabled = false
+    @Published var remoteMode: RemoteMode = .temporary
     @Published var publicHostname = ""
+    @Published var remoteFeatures: Set<NeoYRemoteFeature> = []
     @Published private(set) var oauthClientID = ""
     @Published private(set) var oauthToken = ""
     @Published var result = ""
@@ -25,93 +30,179 @@ final class NeoYSetupModel: ObservableObject {
 
     func reload() {
         let value = NeoYDeploymentSettingsStore.load()
-        serviceMode = value.tunnelMode == .off ? .local : .remote
-        remoteMode = value.tunnelMode == .named ? .ownDomain : .dynamic
+        portText = String(value.mcpPort)
+        remoteEnabled = value.tunnelMode != .off
+        remoteMode = value.tunnelMode == .named ? .ownDomain : .temporary
         publicHostname = value.publicHostname
+        remoteFeatures = value.enabledRemoteFeatures
         let credentials = NeoYMCPPluginCredentials.current()
         oauthClientID = credentials.clientID
         oauthToken = credentials.token
     }
 
-    var mcpURL: String {
+    var localMCPURL: String {
+        "http://127.0.0.1:\(portText)/mcp"
+    }
+
+    var remoteMCPURL: String {
         let value = NeoYDeploymentSettingsStore.load()
-        switch serviceMode {
-        case .local:
-            return value.localMCPURL
-        case .remote:
-            return value.publicMCPURL ?? "Not connected"
-        }
+        return value.publicMCPURL ?? "Not connected"
     }
 
-    var serviceDescription: String {
-        switch serviceMode {
-        case .local:
-            return "Use NeoY directly from this Mac."
-        case .remote:
-            return remoteMode == .ownDomain
-                ? "Use a stable hostname for remote access."
-                : "Use a temporary public address. No domain setup required."
-        }
+    func copy(_ value: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
     }
 
-    func testService() {
-        let url = mcpURL
-        guard url.hasPrefix("http") else {
-            result = "MCP service is not connected."
+    func applyPort() {
+        guard let port = UInt16(portText), port > 0 else {
+            result = "Port must be 1–65535."
+            reload()
             return
         }
-        Task { await probe(url) }
-    }
-
-    func startTunnel() { Task { await runRuntimeControl("tunnel-start") } }
-    func stopTunnel() { Task { await runRuntimeControl("tunnel-stop") } }
-    func configureDomain() { Task { await runRuntimeControl("named-create") } }
-
-    func autoApply() {
         do {
             var value = NeoYDeploymentSettingsStore.load()
-            value.tunnelMode = serviceMode == .local ? .off : (remoteMode == .ownDomain ? .named : .quick)
-            value.publicHostname = publicHostname.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard value.mcpPort != port else { return }
+            value.mcpPort = port
             try NeoYDeploymentSettingsStore.save(value)
+            NotificationCenter.default.post(name: .neoYDeploymentSettingsChanged, object: nil)
+            if value.tunnelMode != .off {
+                Task { await runRuntimeControl("tunnel-restart") }
+            }
+            result = "MCP port changed to \(port)."
         } catch {
             result = error.localizedDescription
         }
     }
 
+    func setRemoteEnabled(_ enabled: Bool) {
+        remoteEnabled = enabled
+        do {
+            var value = NeoYDeploymentSettingsStore.load()
+            value.tunnelMode = enabled ? (remoteMode == .ownDomain ? .named : .quick) : .off
+            try NeoYDeploymentSettingsStore.save(value)
+            if enabled {
+                if remoteMode == .ownDomain && publicHostname.isEmpty {
+                    result = "Enter a hostname to enable your own domain."
+                    return
+                }
+                Task {
+                    if remoteMode == .ownDomain {
+                        await runRuntimeControl("named-apply")
+                    } else {
+                        await runRuntimeControl("tunnel-start")
+                    }
+                }
+            } else {
+                Task { await runRuntimeControl("tunnel-stop") }
+            }
+        } catch {
+            result = error.localizedDescription
+        }
+    }
+
+    func setRemoteMode(_ mode: RemoteMode) {
+        remoteMode = mode
+        guard remoteEnabled else {
+            persistRemoteSettings()
+            return
+        }
+        persistRemoteSettings()
+        if mode == .ownDomain && publicHostname.isEmpty {
+            result = "Enter a hostname to use your own domain."
+            return
+        }
+        Task {
+            if mode == .ownDomain {
+                await runRuntimeControl("named-apply")
+            } else {
+                await runRuntimeControl("tunnel-restart")
+            }
+        }
+    }
+
+    func applyHostname() {
+        let hostname = publicHostname.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !hostname.isEmpty else {
+            result = "Enter a hostname."
+            return
+        }
+        publicHostname = hostname
+        remoteEnabled = true
+        remoteMode = .ownDomain
+        persistRemoteSettings()
+        Task { await runRuntimeControl("named-apply") }
+    }
+
+    func setRemoteFeature(_ feature: NeoYRemoteFeature, enabled: Bool) {
+        if enabled { remoteFeatures.insert(feature) }
+        else { remoteFeatures.remove(feature) }
+        persistRemoteSettings(restartServer: true)
+    }
+
+    func setAllRemoteFeatures(_ enabled: Bool) {
+        remoteFeatures = enabled ? Set(NeoYRemoteFeature.allCases) : []
+        persistRemoteSettings(restartServer: true)
+    }
+
     func revokeToken() {
-        let replacement = NeoYCoreAuth.rotateToken()
-        oauthToken = replacement
+        oauthToken = NeoYCoreAuth.rotateToken()
         NotificationCenter.default.post(name: .neoYDeploymentSettingsChanged, object: nil)
         result = "Previous token revoked. New token issued."
     }
 
-    func applyServiceMode() {
-        autoApply()
-        if serviceMode == .remote && remoteMode == .ownDomain && publicHostname.isEmpty {
+    func testLocal() {
+        Task { await probe(localMCPURL, token: nil) }
+    }
+
+    func testRemote() {
+        guard remoteMCPURL.hasPrefix("https://") else {
+            result = "Remote MCP is not connected."
             return
         }
-        if serviceMode == .local {
-            Task { await runRuntimeControl("tunnel-stop") }
-        } else {
-            Task { await runRuntimeControl("tunnel-restart") }
+        Task { await probe(remoteMCPURL, token: oauthToken) }
+    }
+
+    private func persistRemoteSettings(restartServer: Bool = false) {
+        do {
+            var value = NeoYDeploymentSettingsStore.load()
+            value.tunnelMode = remoteEnabled ? (remoteMode == .ownDomain ? .named : .quick) : .off
+            value.publicHostname = publicHostname.trimmingCharacters(in: .whitespacesAndNewlines)
+            value.remoteFeatures = Set(remoteFeatures.map(\.rawValue))
+            try NeoYDeploymentSettingsStore.save(value)
+            if restartServer {
+                NotificationCenter.default.post(name: .neoYDeploymentSettingsChanged, object: nil)
+            }
+        } catch {
+            result = error.localizedDescription
         }
     }
 
-    private func probe(_ urlString: String) async {
+    private func probe(_ urlString: String, token: String?) async {
         isBusy = true
         defer { isBusy = false }
         guard let url = URL(string: urlString) else {
-            result = "Invalid MCP URL"
+            result = "Invalid MCP URL."
             return
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let token {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
         request.httpBody = #"{"jsonrpc":"2.0","id":"setup-test","method":"tools/list","params":{}}"#.data(using: .utf8)
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            result = status == 200 ? "MCP service is reachable." : "MCP service returned HTTP \(status)."
+            if status == 200,
+               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let rpc = object["result"] as? [String: Any],
+               let tools = rpc["tools"] as? [[String: Any]] {
+                result = "Connected. \(tools.count) tools available."
+            } else {
+                result = "MCP returned HTTP \(status)."
+            }
         } catch {
             result = "Connection failed: \(error.localizedDescription)"
         }
@@ -136,7 +227,9 @@ final class NeoYSetupModel: ObservableObject {
             process.waitUntilExit()
             let output = String(decoding: data, as: UTF8.self)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            result = process.terminationStatus == 0 ? (output.isEmpty ? "Done." : output) : "Failed: \(output)"
+            result = process.terminationStatus == 0
+                ? (output.isEmpty ? "Done." : output)
+                : "Failed: \(output)"
             reload()
         } catch {
             result = error.localizedDescription
@@ -148,171 +241,191 @@ struct NeoYSetupView: View {
     @StateObject private var model = NeoYSetupModel()
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                header
-                mcpCard
-                oauthCard
-                if model.serviceMode == .remote {
-                    remoteCard
-                }
-                advancedCard
-                if !model.result.isEmpty {
-                    resultCard
+        VStack(spacing: 0) {
+            Picker("", selection: $model.tab) {
+                ForEach(NeoYSetupModel.Tab.allCases) { tab in
+                    Text(tab.rawValue).tag(tab)
                 }
             }
-            .padding(28)
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 24)
+            .padding(.top, 20)
+
+            Divider().padding(.top, 16)
+
+            ScrollView {
+                Group {
+                    switch model.tab {
+                    case .mcp: mcpTab
+                    case .remote: remoteTab
+                    case .advanced: advancedTab
+                    }
+                }
+                .padding(24)
+            }
+
+            if !model.result.isEmpty {
+                Divider()
+                Text(model.result)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+            }
         }
-        .frame(width: 620, height: 560)
+        .frame(width: 660, height: 610)
         .background(Color(nsColor: .windowBackgroundColor))
         .disabled(model.isBusy)
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text("NeoY")
-                .font(.system(size: 28, weight: .semibold))
-            Text("Mac agent")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-    }
+    private var mcpTab: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            heading("MCP", "Local service and the values needed to create an MCP app.")
 
-    private var mcpCard: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 16) {
-                Picker("MCP service", selection: $model.serviceMode) {
-                    Text("Local").tag(NeoYSetupModel.ServiceMode.local)
-                    Text("Remote").tag(NeoYSetupModel.ServiceMode.remote)
-                }
-                .pickerStyle(.segmented)
-                .onChange(of: model.serviceMode) { _ in model.applyServiceMode() }
-
-                HStack(spacing: 12) {
-                    Image(systemName: model.serviceMode == .local ? "desktopcomputer" : "globe")
-                        .font(.title2)
-                        .frame(width: 30)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(model.serviceMode == .local ? "Local MCP" : "Remote MCP")
-                            .font(.headline)
-                        Text(model.serviceDescription)
+            GroupBox("Local service") {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Port")
+                        Spacer()
+                        TextField("", text: $model.portText)
+                            .frame(width: 90)
+                            .multilineTextAlignment(.trailing)
+                            .onSubmit { model.applyPort() }
+                        Button("Apply") { model.applyPort() }
+                    }
+                    Divider()
+                    valueRow("Endpoint", value: model.localMCPURL)
+                    HStack {
+                        Button("Test local") { model.testLocal() }
+                        Spacer()
+                        Text("All enabled features are available locally.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
+                .padding(8)
+            }
 
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("MCP endpoint")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    HStack {
-                        Text(model.mcpURL)
-                            .font(.system(.body, design: .monospaced))
-                            .textSelection(.enabled)
-                            .lineLimit(1)
+            GroupBox("MCP app configuration") {
+                VStack(alignment: .leading, spacing: 12) {
+                    valueRow("Client ID", value: model.oauthClientID)
+                    valueRow("Token", value: model.oauthToken)
+                    HStack(alignment: .top) {
+                        Text("Use these values when creating the MCP app connection. The token is a secret.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         Spacer()
-                        Button("Copy") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(model.mcpURL, forType: .string)
-                        }
+                        Button("Revoke token", role: .destructive) { model.revokeToken() }
                     }
                 }
-
-                Button("Test connection") { model.testService() }
+                .padding(8)
             }
-            .padding(8)
-        } label: {
-            Label("MCP", systemImage: "link")
-                .font(.headline)
         }
     }
 
-    private var oauthCard: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text(model.oauthClientID)
-                        .textSelection(.enabled)
-                    Spacer()
-                    Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(model.oauthClientID, forType: .string) }
+    private var remoteTab: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            heading("Remote", "Expose only the features you choose.")
+
+            Toggle("Enable remote MCP", isOn: Binding(
+                get: { model.remoteEnabled },
+                set: { model.setRemoteEnabled($0) }
+            ))
+
+            GroupBox("Address") {
+                VStack(alignment: .leading, spacing: 14) {
+                    Picker("Address", selection: Binding(
+                        get: { model.remoteMode },
+                        set: { model.setRemoteMode($0) }
+                    )) {
+                        Text("Temporary").tag(NeoYSetupModel.RemoteMode.temporary)
+                        Text("Own domain").tag(NeoYSetupModel.RemoteMode.ownDomain)
+                    }
+                    .pickerStyle(.segmented)
+
+                    if model.remoteMode == .temporary {
+                        Text("No domain is required. The public address can change after NeoY or the tunnel restarts, so the MCP app may need to be reconfigured.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        TextField("Hostname, e.g. neoy.qili2.com", text: $model.publicHostname)
+                            .onSubmit { model.applyHostname() }
+                        Text("Use a hostname managed by your Cloudflare account. Once configured, this address remains stable across restarts.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button("Apply hostname") { model.applyHostname() }
+                    }
+
+                    if model.remoteEnabled {
+                        Divider()
+                        valueRow("Remote endpoint", value: model.remoteMCPURL)
+                        Button("Test remote") { model.testRemote() }
+                    }
                 }
-                HStack {
-                    Text(model.oauthToken)
-                        .textSelection(.enabled)
-                        .lineLimit(1)
-                    Spacer()
-                    Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(model.oauthToken, forType: .string) }
-                }
-                HStack {
-                    Text("NeoY provides these credentials for creating the MCP app connection. The token is a secret and authorizes remote access.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Revoke token", role: .destructive) { model.revokeToken() }
-                }
+                .padding(8)
             }
-            .padding(8)
-        } label: {
-            Label("MCP app credentials", systemImage: "lock.shield")
-                .font(.headline)
+
+            GroupBox("Remote features") {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("Local access is unchanged. These switches only control remote access.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("All") { model.setAllRemoteFeatures(true) }
+                        Button("None") { model.setAllRemoteFeatures(false) }
+                    }
+                    Divider()
+                    ForEach(NeoYRemoteFeature.allCases) { feature in
+                        Toggle(feature.title, isOn: Binding(
+                            get: { model.remoteFeatures.contains(feature) },
+                            set: { model.setRemoteFeature(feature, enabled: $0) }
+                        ))
+                    }
+                }
+                .padding(8)
+            }
         }
     }
 
-    private var remoteCard: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 14) {
-                Picker("Remote service", selection: $model.remoteMode) {
-                    Text("Dynamic").tag(NeoYSetupModel.RemoteMode.dynamic)
-                    Text("Own domain").tag(NeoYSetupModel.RemoteMode.ownDomain)
-                }
-                .pickerStyle(.segmented)
-                .onChange(of: model.remoteMode) { _ in model.applyServiceMode() }
+    private var advancedTab: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            heading("Advanced", "Runtime details and operational settings.")
 
-                if model.remoteMode == .ownDomain {
-                    TextField("Hostname, e.g. neoy.qili2.com", text: $model.publicHostname)
-                        .onSubmit { model.autoApply(); model.configureDomain() }
-                    Text("Enter the hostname only. NeoY manages the tunnel behind it.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button("Apply hostname") { model.autoApply(); model.startTunnel() }
-                } else {
-                    Text("NeoY will create a temporary public MCP endpoint.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            GroupBox("Runtime") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("NeoY uses one MCP listener. Agent handoff, MCP and health routes share the configured port.")
+                    Text("Remote transport is provided by Cloudflare when enabled.")
+                    Text("Permissions, startup services, diagnostics and MCP federation remain available through neoy.setup.")
                 }
-
-                HStack {
-                    Button("Start") { model.startTunnel() }
-                    Button("Stop") { model.stopTunnel() }
-                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(8)
             }
-            .padding(8)
-        } label: {
-            Label("Remote MCP", systemImage: "network")
-                .font(.headline)
         }
     }
 
-    private var advancedCard: some View {
-        DisclosureGroup("Advanced") {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("NeoY uses one fixed local service port: \(NeoYDeploymentSettings.defaultPort).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text("Permissions, startup services, federation, Core tools and diagnostics are configured by the native MCP setup tool.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.top, 8)
+    private func heading(_ title: String, _ subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.system(size: 26, weight: .semibold))
+            Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var resultCard: some View {
-        Text(model.result)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
+    private func valueRow(_ title: String, value: String) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.caption).foregroundStyle(.secondary)
+                Text(value)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button("Copy") { model.copy(value) }
+        }
     }
 }
 

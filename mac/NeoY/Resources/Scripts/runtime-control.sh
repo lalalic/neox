@@ -149,6 +149,7 @@ case "$ACTION" in
   tunnel-stop) tunnel_stop; print "Tunnel stopped" ;;
   tunnel-restart) tunnel_start ;;
   named-create) named_create ;;
+  named-apply) named_create; tunnel_start ;;
   status)
     print "port=$PORT mode=$MODE"
     [[ -f "$PUBLIC" ]] && print "public=$(cat "$PUBLIC")/mcp"

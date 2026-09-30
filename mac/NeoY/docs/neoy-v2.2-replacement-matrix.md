@@ -29,7 +29,7 @@ surface.
 
 - NeoY XCTest: **21/21 passed**.
 - Signed installed app: `/Applications/NeoY.app`, stable `com.neox.neoy` identity.
-- Runtime version: **2.2.1**.
+- Runtime version: **2.2.2**.
 - Local Core E2E: shell, background jobs, PTY, filesystem, Codex history.
 - Optional capability E2E: `demo-recording` changed from 18 visible demo tools
   to 0 when disabled, then restored to 18 after re-enable.

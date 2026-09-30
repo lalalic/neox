@@ -229,7 +229,7 @@ actor NeoYNodeService {
         return NeoYCoreJSON.encode(Identity(
             host: Host.current().localizedName ?? ProcessInfo.processInfo.hostName,
             bundle: Bundle.main.bundleIdentifier ?? "com.neox.neoy",
-            version: "2.2.1",
+            version: "2.2.2",
             coreURL: NeoYCoreAuth.url(base)
         ))
     }
