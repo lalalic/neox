@@ -11,6 +11,11 @@ struct NeoYDeploymentSettings: Codable, Equatable {
     var tunnelMode: NeoYTunnelMode = .off
     var tunnelName: String = ""
     var publicHostname: String = ""
+    var remoteFeatures: Set<String>? = nil
+
+    var enabledRemoteFeatures: Set<NeoYRemoteFeature> {
+        Set((remoteFeatures ?? []).compactMap(NeoYRemoteFeature.init(rawValue:)))
+    }
 
     var localMCPURL: String { "http://127.0.0.1:\(mcpPort)/mcp" }
 
@@ -48,10 +53,19 @@ enum NeoYDeploymentSettingsStore {
 
         // 9224 was NeoY's pre-v2.2 default. There was no explicit-port marker
         // in that schema, so preserve every non-legacy value and migrate 9224.
+        var migrated = false
         if value.mcpPort == 9224 {
             value.mcpPort = NeoYDeploymentSettings.defaultPort
-            try? save(value)
+            migrated = true
         }
+        // Existing remote installs had no per-feature policy and historically exposed
+        // the whole authenticated surface. Preserve that behavior once, while new
+        // remote configurations start with an explicit empty selection.
+        if value.tunnelMode != .off && value.remoteFeatures == nil {
+            value.remoteFeatures = Set(NeoYRemoteFeature.allCases.map(\.rawValue))
+            migrated = true
+        }
+        if migrated { try? save(value) }
         return value
     }
 

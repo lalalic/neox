@@ -54,6 +54,7 @@ public final class MCPServer {
     private var mcpTools: [[String: Any]] = []
     private var protectedToolNames: Set<String> = []
     private var privilegedAccessToken: String?
+    private var remoteAllowedFeatures: Set<NeoYRemoteFeature> = []
     private var httpRoutes: [String: HTTPRouteHandler] = [:]
     // Dedicated queue for all network I/O — avoids blocking on MainActor
     private let httpQueue = DispatchQueue(label: "mcp-server-http", qos: .userInitiated)
@@ -66,6 +67,7 @@ public final class MCPServer {
     nonisolated(unsafe) private var _snapshotToolNames: [String] = []
     nonisolated(unsafe) private var _snapshotProtectedToolNames: Set<String> = []
     nonisolated(unsafe) private var _snapshotPrivilegedAccessToken: String?
+    nonisolated(unsafe) private var _snapshotRemoteAllowedFeatures: Set<NeoYRemoteFeature> = []
     nonisolated(unsafe) private var _snapshotHTTPRoutes: [String: HTTPRouteHandler] = [:]
 
     /// Whether the server is currently listening.
@@ -146,6 +148,11 @@ public final class MCPServer {
         refreshSnapshots()
     }
 
+    func setRemoteAllowedFeatures(_ features: Set<NeoYRemoteFeature>) {
+        remoteAllowedFeatures = features
+        refreshSnapshots()
+    }
+
     private func refreshSnapshots() {
         _snapshotName = name
         _snapshotVersion = version
@@ -154,6 +161,7 @@ public final class MCPServer {
         _snapshotToolNames = toolNames
         _snapshotProtectedToolNames = protectedToolNames
         _snapshotPrivilegedAccessToken = privilegedAccessToken
+        _snapshotRemoteAllowedFeatures = remoteAllowedFeatures
         _snapshotHTTPRoutes = httpRoutes
     }
 
@@ -182,6 +190,7 @@ public final class MCPServer {
         _snapshotToolNames = toolNames
         _snapshotProtectedToolNames = protectedToolNames
         _snapshotPrivilegedAccessToken = privilegedAccessToken
+        _snapshotRemoteAllowedFeatures = remoteAllowedFeatures
         _snapshotHTTPRoutes = httpRoutes
 
         let parameters = NWParameters.tcp
@@ -378,7 +387,12 @@ public final class MCPServer {
 
         switch (method, path) {
         case ("POST", "/mcp"):
-            handleMCPPostNonisolated(body: body, connection: connection, privileged: isPrivileged)
+            handleMCPPostNonisolated(
+                body: body,
+                connection: connection,
+                isLocal: isDirectLoopback,
+                authorized: isPrivileged
+            )
 
         case ("GET", "/mcp"):
             sendHTTP(connection: connection, status: 405, body: nil)
@@ -421,7 +435,9 @@ public final class MCPServer {
 
     // MARK: - MCP JSON-RPC Handler (nonisolated)
 
-    nonisolated private func handleMCPPostNonisolated(body: Data?, connection: NWConnection, privileged: Bool) {
+    nonisolated private func handleMCPPostNonisolated(
+        body: Data?, connection: NWConnection, isLocal: Bool, authorized: Bool
+    ) {
         guard let body,
               let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
             sendJSONRPCError(connection: connection, id: nil, code: -32700, message: "Parse error")
@@ -452,9 +468,16 @@ public final class MCPServer {
             sendJSONRPCResult(connection: connection, id: id, result: result)
 
         case "tools/list":
-            let visibleTools = privileged ? _snapshotTools : _snapshotTools.filter {
-                guard let name = $0["name"] as? String else { return true }
-                return !_snapshotProtectedToolNames.contains(name)
+            let visibleTools: [[String: Any]]
+            if isLocal {
+                visibleTools = _snapshotTools
+            } else if authorized {
+                visibleTools = _snapshotTools.filter {
+                    guard let name = $0["name"] as? String else { return false }
+                    return _snapshotRemoteAllowedFeatures.contains { $0.matches(toolName: name) }
+                }
+            } else {
+                visibleTools = []
             }
             sendJSONRPCResult(connection: connection, id: id, result: ["tools": visibleTools])
 
@@ -463,10 +486,17 @@ public final class MCPServer {
                 sendJSONRPCError(connection: connection, id: id, code: -32602, message: "Missing tool name")
                 return
             }
-            if _snapshotProtectedToolNames.contains(toolName) && !privileged {
-                sendJSONRPCError(connection: connection, id: id, code: -32001,
-                    message: "Tool '\(toolName)' requires direct-local access or a trusted NeoY token")
-                return
+            if !isLocal {
+                guard authorized else {
+                    sendJSONRPCError(connection: connection, id: id, code: -32001,
+                        message: "Remote MCP requires a valid NeoY token")
+                    return
+                }
+                guard _snapshotRemoteAllowedFeatures.contains(where: { $0.matches(toolName: toolName) }) else {
+                    sendJSONRPCError(connection: connection, id: id, code: -32003,
+                        message: "Tool '\(toolName)' is not enabled for remote access")
+                    return
+                }
             }
             guard let handler = _snapshotHandlers[toolName] else {
                 sendJSONRPCError(connection: connection, id: id, code: -32602,

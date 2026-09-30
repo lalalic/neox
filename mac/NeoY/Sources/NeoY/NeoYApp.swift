@@ -119,6 +119,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
         let value = MCPServer(name: "NeoY", version: NeoYCoreRuntime.version, port: deployment.mcpPort,
                               bonjourName: "NeoY")
         value.setPrivilegedAccessToken(NeoYCoreAuth.token())
+        value.setRemoteAllowedFeatures(deployment.enabledRemoteFeatures)
 
         let configuration = (try? NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)
             .loadOrCreate().document.configuration) ?? NeoYControlPlaneConfiguration()
@@ -208,7 +209,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
             neoXPairing: (services.phone as? NeoXPhoneClient)?.pairingSelection ?? .unavailable,
             handoff: NeoYRuntimeEndpoint(
                 name: "_neoy._tcp",
-                url: "http://127.0.0.1:\(NeoYDeploymentSettings.defaultPort)/agent",
+                url: "http://127.0.0.1:\(NeoYDeploymentSettingsStore.load().mcpPort)/agent",
                 isRunning: services.handoff.isRunning,
                 error: handoffError
             ),
