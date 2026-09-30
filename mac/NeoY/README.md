@@ -9,7 +9,8 @@ NeoY is NeoX's native menu-bar companion for Mac Capture Tour, demo automation, 
 - Handoff queue: `GET /agent/peek`, `GET /agent/next?timeout=0..30`
 - Handoff persistence: `~/.neoy/inbox`
 - Local exports: `~/Library/Application Support/NeoY/exports`
-- Setup/control: MCP tool `neoy.setup` with `help`, `help overview|status|roadmap`, and read-only `status`.
+- Setup/control: MCP tool `neoy.setup` with `help`, `status`, durable `config show`, and validated diagnostics settings.
+- Control-plane state: schema-versioned JSON in the NeoY Application Support directory; malformed state is preserved and reported, never silently discarded.
 
 NeoY replaces both the old **Neox Tour** Mac app and the standalone Python `neoy-bridge.py` service. Only NeoY should own ports 9224 and 8686.
 

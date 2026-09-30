@@ -26,24 +26,34 @@ flowchart TD
   Control --> Events[NeoX event bridge]
 ```
 
-The foundation adds only the setup edge and typed status boundary. Later edges are implementation boundaries, not invitations to expose more top-level tools.
+The control-plane edge adds durable configuration and typed status. Later edges are implementation boundaries, not invitations to expose more top-level tools.
 
 ## `neoy.setup`
 
-NeoY deliberately uses one small control tool instead of adding one MCP tool per setup feature. Version 1 is intentionally read-only:
+NeoY deliberately uses one small control tool instead of adding one MCP tool per setup feature. The current schema version is intentionally small:
 
 ```text
 neoy.setup(command: String?)
 
 help
-help overview | status | roadmap
+help overview | status | roadmap | configuration | diagnostics
 status
+config show
+diagnostics enable | disable
+diagnostics set level <info|warning|error>
+diagnostics set retention-days <1...365>
 ```
 
 - `help` is authoritative for the installed version.
-- `status` returns compact JSON for overall state, app identity, MCP state, NeoX pairing selection, handoff state, startup mode, and enabled capabilities.
+- `status` returns compact JSON for overall state, app identity, MCP state, NeoX pairing selection, handoff state, startup mode, enabled capabilities, and control-plane health.
+- `config show` returns validated configuration with persistence health without exposing storage paths as the primary interface.
+- Diagnostics commands pass through a typed parser, validate enum/range constraints, atomically persist versioned JSON, and return deterministic structured results.
 - Unknown commands and topics fail explicitly. Future capability is not advertised until its service exists.
-- The parser is pure and tested. A later command router delegates verbs to typed services; the outer MCP schema remains stable.
+- The parser and store are pure, focused-test seams. Typed service methods are ready for later milestones to consume without depending on MCP transport.
+
+### Durable state
+
+Control-plane state is JSON schema version 1 in the NeoY Application Support directory. Saves validate the document first and replace the destination atomically. A malformed file is copied to a timestamped invalid-state file before validated defaults are installed; runtime health reports the decode failure and recovery action. A newer schema version is likewise preserved and reported rather than silently downgraded. Future schema migrations must convert older supported versions explicitly and retain their incompatibility reporting path.
 
 Future commands may cover permissions, startup services, MCP federation, diagnostics, pairing, and events, but only after each service can validate, persist, reconcile, and report health.
 
@@ -82,8 +92,8 @@ A future important-event bridge must use the same explicit pairing trust model, 
 
 ## Milestones
 
-1. **Foundation (current):** source audit, typed setup parser/status, stable help, and focused tests.
-2. **Control persistence:** versioned durable configuration, diagnostics, and safe mutation commands.
+1. **Foundation (complete):** source audit, typed setup parser/status, stable help, and focused tests.
+2. **Control persistence (current):** versioned durable configuration, diagnostics settings, persistence health, and safe mutation commands.
 3. **Permissions:** native permission inventory, guided recovery, and no child permission assumptions.
 4. **Startup supervisor:** managed service definitions and reconciliation.
 5. **Federation:** user-added MCP hosting, health, and unified exposure.
@@ -92,7 +102,7 @@ A future important-event bridge must use the same explicit pairing trust model, 
 
 ## Unresolved decisions
 
-- Final durable configuration file format and schema version.
+- Scope of schema version 1. Diagnostics is the only implemented configuration section; permissions, startup, federation, and event sections must be added through explicit schema migrations and typed validation.
 - Supported federation transports and process model.
 - Supervisor restart/backoff policy and log retention.
 - Event trust/pairing handshake and notification user controls.

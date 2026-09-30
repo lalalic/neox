@@ -4,11 +4,17 @@ enum NeoYSetupTopic: String, CaseIterable, Sendable {
     case overview
     case status
     case roadmap
+    case configuration
+    case diagnostics
 }
 
 enum NeoYSetupCommand: Equatable, Sendable {
     case help(topic: NeoYSetupTopic?)
     case status
+    case configuration
+    case diagnosticsEnable
+    case diagnosticsDisable
+    case diagnosticsSet(NeoYDiagnosticsSetting)
 }
 
 enum NeoYSetupError: LocalizedError {
@@ -16,6 +22,7 @@ enum NeoYSetupError: LocalizedError {
     case unknownTopic(String)
     case unexpectedArgument(String)
     case unmatchedQuote
+    case invalidDiagnosticsSubcommand(String)
 
     var errorDescription: String? {
         switch self {
@@ -27,6 +34,8 @@ enum NeoYSetupError: LocalizedError {
             return "unexpected argument '\(value)'"
         case .unmatchedQuote:
             return "unmatched quote"
+        case .invalidDiagnosticsSubcommand(let value):
+            return "unknown diagnostics subcommand '\(value)'; supported subcommands: enable, disable, set"
         }
     }
 }
@@ -63,8 +72,56 @@ enum NeoYSetupParser {
                 throw NeoYSetupError.unexpectedArgument(tokens[1])
             }
             return .status
+        case "config":
+            guard tokens.count == 2, tokens[1] == "show" else {
+                throw NeoYSetupError.unknownCommand(tokens.joined(separator: " "))
+            }
+            return .configuration
+        case "diagnostics":
+            guard tokens.count >= 2 else {
+                throw NeoYSetupError.unexpectedArgument("diagnostics")
+            }
+            switch tokens[1] {
+            case "enable":
+                guard tokens.count == 2 else {
+                    throw NeoYSetupError.unexpectedArgument(tokens[2])
+                }
+                return .diagnosticsEnable
+            case "disable":
+                guard tokens.count == 2 else {
+                    throw NeoYSetupError.unexpectedArgument(tokens[2])
+                }
+                return .diagnosticsDisable
+            case "set":
+                guard tokens.count == 4 else {
+                    throw NeoYSetupError.unexpectedArgument(tokens[min(tokens.count, 4)])
+                }
+                return .diagnosticsSet(try Self.diagnosticsSetting(tokens[2], value: tokens[3]))
+            default:
+                throw NeoYSetupError.invalidDiagnosticsSubcommand(tokens[1])
+            }
         default:
             throw NeoYSetupError.unknownCommand(command)
+        }
+    }
+
+    private static func diagnosticsSetting(_ property: String, value: String) throws -> NeoYDiagnosticsSetting {
+        switch property {
+        case "level":
+            guard let level = NeoYDiagnosticsLevel(rawValue: value) else {
+                throw NeoYControlPlaneError.invalidDiagnosticsLevel(value)
+            }
+            return .level(level)
+        case "retention-days":
+            guard let days = Int(value) else {
+                throw NeoYControlPlaneError.invalidRetentionDays(0)
+            }
+            guard (1...365).contains(days) else {
+                throw NeoYControlPlaneError.invalidRetentionDays(days)
+            }
+            return .retentionDays(days)
+        default:
+            throw NeoYControlPlaneError.invalidDiagnosticsProperty(property)
         }
     }
 
@@ -134,13 +191,21 @@ struct NeoYRuntimeStatus: Codable, Equatable, Sendable {
     let neoXPairing: NeoYPhonePairingSelection
     let handoff: NeoYRuntimeEndpoint
     let capabilities: [String]
+    var controlPlane: NeoYControlPlaneHealth?
 }
 
 actor NeoYSetupService {
     private let makeStatus: @Sendable () async -> NeoYRuntimeStatus
+    private let controlPlane: NeoYControlPlaneService
 
-    init(makeStatus: @escaping @Sendable () async -> NeoYRuntimeStatus) {
+    init(
+        makeStatus: @escaping @Sendable () async -> NeoYRuntimeStatus,
+        controlPlane: NeoYControlPlaneService = NeoYControlPlaneService(
+            store: NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)
+        )
+    ) {
         self.makeStatus = makeStatus
+        self.controlPlane = controlPlane
     }
 
     func execute(_ command: NeoYSetupCommand) async -> String {
@@ -148,7 +213,28 @@ actor NeoYSetupService {
         case .help(let topic):
             return Self.help(topic)
         case .status:
-            return Self.statusJSON(await makeStatus())
+            var status = await makeStatus()
+            status.controlPlane = await controlPlane.currentHealth()
+            return Self.json(status)
+        case .configuration:
+            return Self.json(
+                NeoYConfigurationSnapshot(
+                    configuration: await controlPlane.currentConfiguration(),
+                    controlPlane: await controlPlane.currentHealth()
+                )
+            )
+        case .diagnosticsEnable:
+            return await mutationResult(operation: "diagnostics.enable") {
+                try await controlPlane.setDiagnosticsEnabled(true)
+            }
+        case .diagnosticsDisable:
+            return await mutationResult(operation: "diagnostics.disable") {
+                try await controlPlane.setDiagnosticsEnabled(false)
+            }
+        case .diagnosticsSet(let setting):
+            return await mutationResult(operation: "diagnostics.set") {
+                try await controlPlane.setDiagnostics(setting)
+            }
         }
     }
 
@@ -166,12 +252,25 @@ actor NeoYSetupService {
             endpoint state, NeoX pairing selection, phone handoff state, and \
             enabled native capabilities.
             """
+        case .configuration:
+            return """
+            'config show' returns the validated control-plane configuration \
+            and its persistence health.
+            """
+        case .diagnostics:
+            return """
+            Diagnostics commands persist validated local settings:
+              diagnostics enable
+              diagnostics disable
+              diagnostics set level <info|warning|error>
+              diagnostics set retention-days <1...365>
+            """
         case .roadmap:
             return """
-            Current milestone: typed setup foundation. Deferred milestones: \
-            permissions, startup supervision, MCP federation, diagnostics, \
-            notification bridging, and mutation commands. Deferred commands are \
-            intentionally absent until their services are implemented.
+            Current milestone: versioned control-plane persistence and \
+            diagnostics settings. Deferred milestones: permissions, startup \
+            supervision, MCP federation, and NeoX event bridging. Deferred \
+            commands are intentionally absent until their services exist.
             """
         case nil:
             return """
@@ -179,25 +278,72 @@ actor NeoYSetupService {
 
             Commands:
               help                     Show this command reference.
-              help <topic>             Show overview, status, or roadmap.
+              help <topic>             Show overview, status, roadmap, config, or diagnostics.
               status                   Return runtime status as compact JSON.
+              config show              Return durable configuration and health.
+              diagnostics enable       Enable local diagnostics.
+              diagnostics disable      Disable local diagnostics.
+              diagnostics set level    Set info, warning, or error.
+              diagnostics set retention-days
+                                       Set retention from 1 through 365 days.
 
-            This milestone is read-only. Help is authoritative for commands \
+            Help is authoritative for commands \
             implemented by the installed runtime version.
             """
         }
     }
 
-    private static func statusJSON(_ status: NeoYRuntimeStatus) -> String {
+    private func mutationResult(
+        operation: String,
+        _ mutation: @Sendable () async throws -> NeoYControlPlaneConfiguration
+    ) async -> String {
+        do {
+            let configuration = try await mutation()
+            return Self.json(
+                NeoYConfigurationMutationResult(
+                    ok: true,
+                    operation: operation,
+                    error: nil,
+                    configuration: configuration,
+                    controlPlane: await controlPlane.currentHealth()
+                )
+            )
+        } catch {
+            return Self.json(
+                NeoYConfigurationMutationResult(
+                    ok: false,
+                    operation: operation,
+                    error: error.localizedDescription,
+                    configuration: await controlPlane.currentConfiguration(),
+                    controlPlane: await controlPlane.currentHealth()
+                )
+            )
+        }
+    }
+
+    private static func json(_ value: some Encodable & Sendable) -> String {
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
 
-        guard let data = try? encoder.encode(status) else {
-            return "{\"state\":\"degraded\",\"error\":\"status encoding failed\"}"
+        guard let data = try? encoder.encode(value) else {
+            return "{\"state\":\"degraded\",\"error\":\"configuration encoding failed\"}"
         }
         return String(decoding: data, as: UTF8.self)
     }
+}
+
+struct NeoYConfigurationSnapshot: Codable, Equatable, Sendable {
+    let configuration: NeoYControlPlaneConfiguration
+    let controlPlane: NeoYControlPlaneHealth
+}
+
+struct NeoYConfigurationMutationResult: Codable, Equatable, Sendable {
+    let ok: Bool
+    let operation: String
+    let error: String?
+    let configuration: NeoYControlPlaneConfiguration
+    let controlPlane: NeoYControlPlaneHealth
 }
 
 enum NeoYSetupTools {
@@ -205,7 +351,10 @@ enum NeoYSetupTools {
         [
             ToolDefinition(
                 name: "neoy.setup",
-                description: "NeoY setup/control CLI. Read-only commands: help [overview|status|roadmap], status.",
+                description: """
+                    NeoY setup/control CLI. Commands: help [overview|status|roadmap|configuration|diagnostics], \
+                    status, config show, diagnostics enable|disable, diagnostics set level|retention-days.
+                    """,
                 parameters: schema()
             ) { args in
                 let raw: String?
