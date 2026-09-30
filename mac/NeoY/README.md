@@ -31,7 +31,7 @@ deployment set tunnel-name <name>
 deployment set hostname <host>
 ```
 
-Changing deployment settings persists them, restarts the MCP listener after the current response completes, and reconciles the Cloudflare tunnel. The menu-bar **Setup…** window exposes the same port/tunnel values plus local/public test buttons and the ChatGPT plugin ID.
+Changing deployment settings persists them, restarts the MCP listener after the current response completes, and reconciles the Cloudflare tunnel. The menu-bar **Setup…** window exposes the same port/tunnel values plus local/public test buttons and MCP OAuth settings.
 
 Configured remote MCP tools appear as `mcp.<server>.<tool>`. Local MCP servers can be started by the startup supervisor and then federated by URL.
 
@@ -68,7 +68,7 @@ cd mac/NeoY
 
 The installer uses a valid Apple Development identity and installs `/Applications/NeoY.app`. When PM2 is available it becomes the primary supervisor for `neoy` (and `neoy-tunnel` when enabled); the legacy per-user LaunchAgent is only a fallback. PM2 state is saved so runtime/tunnel services survive daemon resurrection. Stable signing lets macOS associate one-time TCC grants with `com.neox.neoy` across local rebuilds.
 
-For ChatGPT, a private Agent Plugin can point its remote MCP entry at the stable HTTPS endpoint. NeoY's MCP tools are discovered dynamically rather than duplicated in the plugin manifest.
+An MCP client can point its remote entry at the stable HTTPS endpoint. NeoY's MCP tools are discovered dynamically rather than duplicated in a client manifest.
 
 NeoY can report/open permission settings, but Screen Recording, Accessibility, camera, microphone, notifications, and Local Network remain subject to macOS/user approval.
 
@@ -100,9 +100,9 @@ Remote Macs run NeoY too. `node discover` browses `_mcp._tcp`, `node pair`
 stores an explicit trusted peer, and `node invoke` forwards one of the same
 canonical Core tools rather than maintaining per-node wrapper tools.
 
-### ChatGPT MCP setup
+### MCP setup
 
-The Setup window is centered on the connection ChatGPT/agents actually need:
+The Setup window is centered on the MCP connection settings:
 choose **Local** (the default) or **Remote**. Remote has two modes: **Dynamic**
 for a temporary public address, or **Own domain** for a stable hostname. The
 NeoY local service uses the single fixed ingress port **6767**; the port is not a

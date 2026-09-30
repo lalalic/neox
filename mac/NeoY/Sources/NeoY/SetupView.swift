@@ -15,8 +15,9 @@ final class NeoYSetupModel: ObservableObject {
 
     @Published var serviceMode: ServiceMode = .local
     @Published var remoteMode: RemoteMode = .dynamic
-    @Published var tunnelName = ""
     @Published var publicHostname = ""
+    @Published var oauthClientID = ""
+    @Published var oauthToken = ""
     @Published var result = ""
     @Published var isBusy = false
 
@@ -26,8 +27,10 @@ final class NeoYSetupModel: ObservableObject {
         let value = NeoYDeploymentSettingsStore.load()
         serviceMode = value.tunnelMode == .off ? .local : .remote
         remoteMode = value.tunnelMode == .named ? .ownDomain : .dynamic
-        tunnelName = value.tunnelName
         publicHostname = value.publicHostname
+        let credentials = NeoYMCPPluginCredentials.load()
+        oauthClientID = credentials.clientID
+        oauthToken = credentials.token
     }
 
     var mcpURL: String {
@@ -46,41 +49,8 @@ final class NeoYSetupModel: ObservableObject {
             return "Use NeoY directly from this Mac."
         case .remote:
             return remoteMode == .ownDomain
-                ? "Use your own domain for ChatGPT and other remote agents."
+                ? "Use a stable hostname for remote access."
                 : "Use a temporary public address. No domain setup required."
-        }
-    }
-
-    func applyService() {
-        let current = NeoYDeploymentSettingsStore.load()
-        let mode: NeoYTunnelMode
-        switch serviceMode {
-        case .local:
-            mode = .off
-        case .remote:
-            mode = remoteMode == .ownDomain ? .named : .quick
-        }
-
-        let value = NeoYDeploymentSettings(
-            mcpPort: NeoYDeploymentSettings.defaultPort,
-            tunnelMode: mode,
-            tunnelName: tunnelName,
-            publicHostname: publicHostname,
-            chatGPTPluginID: current.chatGPTPluginID
-        )
-        do {
-            try NeoYDeploymentSettingsStore.save(value)
-            result = mode == .off
-                ? "MCP service is now local."
-                : "MCP service updated. Restarting NeoY…"
-            NotificationCenter.default.post(name: .neoYDeploymentSettingsChanged, object: nil)
-            if mode == .off {
-                Task { await runRuntimeControl("tunnel-stop") }
-            } else {
-                Task { await runRuntimeControl("tunnel-restart") }
-            }
-        } catch {
-            result = error.localizedDescription
         }
     }
 
@@ -95,7 +65,31 @@ final class NeoYSetupModel: ObservableObject {
 
     func startTunnel() { Task { await runRuntimeControl("tunnel-start") } }
     func stopTunnel() { Task { await runRuntimeControl("tunnel-stop") } }
-    func createNamedTunnel() { Task { await runRuntimeControl("named-create") } }
+    func configureDomain() { Task { await runRuntimeControl("named-create") } }
+
+    func autoApply() {
+        do {
+            var value = NeoYDeploymentSettingsStore.load()
+            value.tunnelMode = serviceMode == .local ? .off : (remoteMode == .ownDomain ? .named : .quick)
+            value.publicHostname = publicHostname.trimmingCharacters(in: .whitespacesAndNewlines)
+            try NeoYDeploymentSettingsStore.save(value)
+            NeoYMCPPluginCredentials.save(clientID: oauthClientID, token: oauthToken)
+        } catch {
+            result = error.localizedDescription
+        }
+    }
+
+    func applyServiceMode() {
+        autoApply()
+        if serviceMode == .remote && remoteMode == .ownDomain && publicHostname.isEmpty {
+            return
+        }
+        if serviceMode == .local {
+            Task { await runRuntimeControl("tunnel-stop") }
+        } else {
+            Task { await runRuntimeControl("tunnel-restart") }
+        }
+    }
 
     private func probe(_ urlString: String) async {
         isBusy = true
@@ -152,6 +146,7 @@ struct NeoYSetupView: View {
             VStack(alignment: .leading, spacing: 18) {
                 header
                 mcpCard
+                oauthCard
                 if model.serviceMode == .remote {
                     remoteCard
                 }
@@ -185,6 +180,7 @@ struct NeoYSetupView: View {
                     Text("Remote").tag(NeoYSetupModel.ServiceMode.remote)
                 }
                 .pickerStyle(.segmented)
+                .onChange(of: model.serviceMode) { _ in model.applyServiceMode() }
 
                 HStack(spacing: 12) {
                     Image(systemName: model.serviceMode == .local ? "desktopcomputer" : "globe")
@@ -200,7 +196,7 @@ struct NeoYSetupView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Endpoint for ChatGPT / agents")
+                    Text("MCP endpoint")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     HStack {
@@ -216,16 +212,29 @@ struct NeoYSetupView: View {
                     }
                 }
 
-                HStack {
-                    Button("Test connection") { model.testService() }
-                    Spacer()
-                    Button("Save") { model.applyService() }
-                        .keyboardShortcut(.defaultAction)
-                }
+                Button("Test connection") { model.testService() }
             }
             .padding(8)
         } label: {
-            Label("ChatGPT MCP", systemImage: "link")
+            Label("MCP", systemImage: "link")
+                .font(.headline)
+        }
+    }
+
+    private var oauthCard: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                TextField("OAuth client ID", text: $model.oauthClientID)
+                    .onSubmit { model.autoApply() }
+                SecureField("OAuth token", text: $model.oauthToken)
+                    .onSubmit { model.autoApply() }
+                Text("Used by the MCP plugin connection.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(8)
+        } label: {
+            Label("MCP OAuth", systemImage: "lock.shield")
                 .font(.headline)
         }
     }
@@ -238,11 +247,15 @@ struct NeoYSetupView: View {
                     Text("Own domain").tag(NeoYSetupModel.RemoteMode.ownDomain)
                 }
                 .pickerStyle(.segmented)
+                .onChange(of: model.remoteMode) { _ in model.applyServiceMode() }
 
                 if model.remoteMode == .ownDomain {
-                    TextField("Tunnel name", text: $model.tunnelName)
-                    TextField("Hostname, e.g. neoy.example.com", text: $model.publicHostname)
-                    Button("Create / route domain") { model.createNamedTunnel() }
+                    TextField("Hostname, e.g. neoy.qili2.com", text: $model.publicHostname)
+                        .onSubmit { model.autoApply(); model.configureDomain() }
+                    Text("Enter the hostname only. NeoY manages the tunnel behind it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Configure domain") { model.autoApply(); model.configureDomain() }
                 } else {
                     Text("NeoY will create a temporary public MCP endpoint.")
                         .font(.caption)
