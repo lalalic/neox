@@ -78,6 +78,13 @@ final class NeoYSetupModel: ObservableObject {
         }
     }
 
+    func revokeToken() {
+        let replacement = NeoYCoreAuth.rotateToken()
+        oauthToken = replacement
+        NotificationCenter.default.post(name: .neoYDeploymentSettingsChanged, object: nil)
+        result = "Previous token revoked. New token issued."
+    }
+
     func applyServiceMode() {
         autoApply()
         if serviceMode == .remote && remoteMode == .ownDomain && publicHostname.isEmpty {
@@ -236,9 +243,13 @@ struct NeoYSetupView: View {
                     Spacer()
                     Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(model.oauthToken, forType: .string) }
                 }
-                Text("NeoY provides these credentials for creating the MCP app connection. The token is a secret and authorizes remote access.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack {
+                    Text("NeoY provides these credentials for creating the MCP app connection. The token is a secret and authorizes remote access.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Revoke token", role: .destructive) { model.revokeToken() }
+                }
             }
             .padding(8)
         } label: {

@@ -35,6 +35,7 @@ enum NeoYSetupCommand: Equatable, Sendable {
     case capabilityList
     case capabilitySet(NeoYOptionalCapability, enabled: Bool)
     case authShow
+    case authRotate
 }
 
 enum NeoYSetupError: LocalizedError {
@@ -262,10 +263,9 @@ enum NeoYSetupParser {
     }
 
     private static func auth(_ tokens: [String]) throws -> NeoYSetupCommand {
-        guard tokens == ["auth", "show"] else {
-            throw NeoYSetupError.unknownCommand(tokens.joined(separator: " "))
-        }
-        return .authShow
+        if tokens == ["auth", "show"] { return .authShow }
+        if tokens == ["auth", "rotate"] || tokens == ["auth", "revoke"] { return .authRotate }
+        throw NeoYSetupError.unknownCommand(tokens.joined(separator: " "))
     }
 
     private static func exact(_ tokens: [String], count: Int) throws {
@@ -476,6 +476,18 @@ actor NeoYSetupService {
                 "public_core_url": settings.publicMCPURL.map(NeoYCoreAuth.url) ?? "",
                 "token": NeoYCoreAuth.token()
             ])
+        case .authRotate:
+            let token = NeoYCoreAuth.rotateToken()
+            if let onDeploymentChanged {
+                Task {
+                    try? await Task.sleep(for: .milliseconds(150))
+                    await onDeploymentChanged()
+                }
+            }
+            return Self.json([
+                "revoked": "true",
+                "token": token
+            ])
         }
     }
 
@@ -601,7 +613,11 @@ actor NeoYSetupService {
             Optional first-party capabilities are enabled by default. Core setup/exec/fs/codex/node capabilities cannot be disabled.
             """
         case .auth:
-            "auth show — return the trusted Core token and tokenized local/public MCP URLs. Direct-local or already trusted access only."
+            """
+            auth show — return the current Core token and tokenized local/public MCP URLs.
+            auth rotate — revoke the current token and issue a replacement immediately.
+            auth revoke — alias for auth rotate.
+            """
         case .roadmap:
             "v2 core is implemented around typed persistence, native permission guidance, supervised startup services, HTTP MCP federation, and pairing-aware NeoX important-event delivery. Signed installed-app permission/login E2E still requires the actual installed identity and human TCC approvals."
         case nil:
@@ -617,7 +633,7 @@ actor NeoYSetupService {
               mcp list|add|remove|enable|disable ...
               events status|enable|disable|notify ...
               capability list|enable|disable ...
-              auth show
+              auth show|rotate|revoke
 
             Run 'help <topic>' for exact grammar. Runtime help is authoritative for the installed NeoY version.
             """
