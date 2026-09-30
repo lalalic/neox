@@ -111,4 +111,5 @@ user setting.
 The Setup window shows the resulting MCP endpoint prominently with a Copy and
 Test connection action. It also shows the MCP app client ID and secret token generated
 by NeoY; these are provided to the user when creating the MCP app connection.
-Operational details remain under Advanced.
+The token can be revoked/rotated at any time; rotation immediately invalidates the
+previous token while preserving the client ID. Operational details remain under Advanced.

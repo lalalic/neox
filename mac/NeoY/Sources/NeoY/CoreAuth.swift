@@ -28,6 +28,13 @@ enum NeoYCoreAuth {
         return value
     }
 
+
+
+    @discardableResult
+    static func rotateToken() -> String {
+        try? FileManager.default.removeItem(at: file)
+        return token()
+    }
     static func url(_ base: String) -> String {
         guard var components = URLComponents(string: base) else { return base }
         var items = components.queryItems ?? []
