@@ -270,9 +270,9 @@ final class SetupServiceTests: XCTestCase {
             version: "test",
             bundleIdentifier: "com.neox.neoy.tests",
             startupMode: "test",
-            mcp: NeoYRuntimeEndpoint(name: "MCP", url: "http://127.0.0.1:9224/mcp", isRunning: true, error: nil),
+            mcp: NeoYRuntimeEndpoint(name: "MCP", url: "http://127.0.0.1:6767/mcp", isRunning: true, error: nil),
             neoXPairing: .unavailable,
-            handoff: NeoYRuntimeEndpoint(name: "Handoff", url: "http://127.0.0.1:8686/agent", isRunning: true, error: nil),
+            handoff: NeoYRuntimeEndpoint(name: "Handoff", url: "http://127.0.0.1:6767/agent", isRunning: true, error: nil),
             capabilities: ["test"],
             controlPlane: nil
         )

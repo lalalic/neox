@@ -108,7 +108,7 @@ actor NeoYCodexThreadService {
             "id": 0,
             "method": "initialize",
             "params": [
-                "clientInfo": ["name": "NeoY", "title": "NeoY", "version": "2.2.0"],
+                "clientInfo": ["name": "NeoY", "title": "NeoY", "version": "2.2.1"],
                 "capabilities": ["experimentalApi": true]
             ]
         ])

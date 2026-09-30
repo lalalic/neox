@@ -170,6 +170,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
                                                        handoff: services.handoff as! NativeNeoYPhoneHandoffReceiver))
         }
 
+        (services.handoff as? NativeNeoYPhoneHandoffReceiver)?.registerRoutes(on: value)
         try? services.files.prepare()
         value.setStaticFileRoot(services.files.root)
         try? value.start()
@@ -207,7 +208,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
             neoXPairing: (services.phone as? NeoXPhoneClient)?.pairingSelection ?? .unavailable,
             handoff: NeoYRuntimeEndpoint(
                 name: "_neoy._tcp",
-                url: "http://127.0.0.1:8686/agent",
+                url: "http://127.0.0.1:\(NeoYDeploymentSettings.defaultPort)/agent",
                 isRunning: services.handoff.isRunning,
                 error: handoffError
             ),
@@ -242,7 +243,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
     private func startNativePhoneServices() {
         services.phone.startDiscovery()
         do { try services.handoff.start() }
-        catch { NSLog("NeoY handoff listener failed: %@", error.localizedDescription) }
+        catch { NSLog("NeoY handoff Bonjour registration failed: %@", error.localizedDescription) }
     }
 }
 
