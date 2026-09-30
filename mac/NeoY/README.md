@@ -31,7 +31,7 @@ deployment set tunnel-name <name>
 deployment set hostname <host>
 ```
 
-Changing deployment settings persists them, restarts the MCP listener after the current response completes, and reconciles the Cloudflare tunnel. The menu-bar **Setup…** window exposes the same port/tunnel values plus local/public test buttons and MCP OAuth settings.
+Changing deployment settings persists them, restarts the MCP listener after the current response completes, and reconciles the Cloudflare tunnel. The menu-bar **Setup…** window exposes the same port/tunnel values plus local/public test buttons and MCP app credentials.
 
 Configured remote MCP tools appear as `mcp.<server>.<tool>`. Local MCP servers can be started by the startup supervisor and then federated by URL.
 
@@ -109,4 +109,6 @@ NeoY local service uses the single fixed ingress port **6767**; the port is not 
 user setting.
 
 The Setup window shows the resulting MCP endpoint prominently with a Copy and
-Test connection action. Operational details remain under Advanced.
+Test connection action. It also shows the MCP app client ID and secret token generated
+by NeoY; these are provided to the user when creating the MCP app connection.
+Operational details remain under Advanced.
