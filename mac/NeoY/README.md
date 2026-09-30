@@ -99,3 +99,14 @@ secret.
 Remote Macs run NeoY too. `node discover` browses `_mcp._tcp`, `node pair`
 stores an explicit trusted peer, and `node invoke` forwards one of the same
 canonical Core tools rather than maintaining per-node wrapper tools.
+
+### ChatGPT MCP setup
+
+The Setup window is centered on the connection ChatGPT/agents actually need:
+choose **Local** (the default) or **Remote**. Remote has two modes: **Dynamic**
+for a temporary public address, or **Own domain** for a stable hostname. The
+NeoY local service uses the single fixed ingress port **6767**; the port is not a
+user setting.
+
+The Setup window shows the resulting MCP endpoint prominently with a Copy and
+Test connection action. Operational details remain under Advanced.

@@ -26,7 +26,7 @@ print(v)
 PY
 }
 
-PORT="$(read_json mcpPort 9224)"
+PORT="$(read_json mcpPort 6767)"
 MODE="$(read_json tunnelMode off)"
 TUNNEL_NAME="$(read_json tunnelName neoy)"
 HOSTNAME="$(read_json publicHostname '')"

@@ -18,6 +18,22 @@ import Combine
 /// ```json
 /// { "servers": { "my-app": { "url": "http://localhost:9223/mcp" } } }
 /// ```
+public struct HTTPRouteResponse: Sendable {
+    public let status: Int
+    public let body: Data?
+    public let contentType: String?
+
+    public init(status: Int, body: Data? = nil, contentType: String? = nil) {
+        self.status = status
+        self.body = body
+        self.contentType = contentType
+    }
+}
+
+public typealias HTTPRouteHandler = @Sendable (
+    String, [String: String], [String: String], Data?
+) async -> HTTPRouteResponse
+
 @MainActor
 public final class MCPServer {
 
@@ -38,6 +54,7 @@ public final class MCPServer {
     private var mcpTools: [[String: Any]] = []
     private var protectedToolNames: Set<String> = []
     private var privilegedAccessToken: String?
+    private var httpRoutes: [String: HTTPRouteHandler] = [:]
     // Dedicated queue for all network I/O — avoids blocking on MainActor
     private let httpQueue = DispatchQueue(label: "mcp-server-http", qos: .userInitiated)
     // Snapshot of state for nonisolated access from httpQueue
@@ -49,6 +66,7 @@ public final class MCPServer {
     nonisolated(unsafe) private var _snapshotToolNames: [String] = []
     nonisolated(unsafe) private var _snapshotProtectedToolNames: Set<String> = []
     nonisolated(unsafe) private var _snapshotPrivilegedAccessToken: String?
+    nonisolated(unsafe) private var _snapshotHTTPRoutes: [String: HTTPRouteHandler] = [:]
 
     /// Whether the server is currently listening.
     @Published public private(set) var isRunning = false
@@ -103,6 +121,18 @@ public final class MCPServer {
         refreshSnapshots()
     }
 
+    /// Register an HTTP route on this server. Routes share the same listener/port as MCP.
+    public func registerHTTPRoute(method: String, path: String, handler: @escaping HTTPRouteHandler) {
+        httpRoutes["\(method.uppercased()) \(path)"] = handler
+        refreshSnapshots()
+    }
+
+    /// Remove an HTTP route.
+    public func unregisterHTTPRoute(method: String, path: String) {
+        httpRoutes.removeValue(forKey: "\(method.uppercased()) \(path)")
+        refreshSnapshots()
+    }
+
     /// Unregister a tool by name.
     public func unregister(name: String) {
         toolHandlers.removeValue(forKey: name)
@@ -124,6 +154,7 @@ public final class MCPServer {
         _snapshotToolNames = toolNames
         _snapshotProtectedToolNames = protectedToolNames
         _snapshotPrivilegedAccessToken = privilegedAccessToken
+        _snapshotHTTPRoutes = httpRoutes
     }
 
     /// All registered tool names.
@@ -151,6 +182,7 @@ public final class MCPServer {
         _snapshotToolNames = toolNames
         _snapshotProtectedToolNames = protectedToolNames
         _snapshotPrivilegedAccessToken = privilegedAccessToken
+        _snapshotHTTPRoutes = httpRoutes
 
         let parameters = NWParameters.tcp
         let listener = try NWListener(using: parameters, on: NWEndpoint.Port(integerLiteral: port))
@@ -315,6 +347,20 @@ public final class MCPServer {
             if !bodyStr.isEmpty {
                 body = bodyStr.data(using: .utf8)
             }
+        }
+
+        if let route = _snapshotHTTPRoutes["\(method) \(path)"] {
+            let query = URLComponents(string: "http://localhost\(requestTarget)")?.queryItems ?? []
+            var queryValues: [String: String] = [:]
+            for item in query {
+                if let value = item.value { queryValues[item.name] = value }
+            }
+            Task {
+                let response = await route(method, headers, queryValues, body)
+                sendHTTP(connection: connection, status: response.status, body: response.body,
+                          contentType: response.contentType ?? "application/json")
+            }
+            return
         }
 
         // CORS preflight (kept for completeness — MCP clients are not browsers)

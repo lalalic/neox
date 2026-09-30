@@ -6,7 +6,8 @@ enum NeoYTunnelMode: String, Codable, CaseIterable, Identifiable {
 }
 
 struct NeoYDeploymentSettings: Codable, Equatable {
-    var mcpPort: UInt16 = 9224
+    static let defaultPort: UInt16 = 6767
+    var mcpPort: UInt16 = Self.defaultPort
     var tunnelMode: NeoYTunnelMode = .off
     var tunnelName: String = "neoy"
     var publicHostname: String = ""
@@ -45,8 +46,15 @@ enum NeoYDeploymentSettingsStore {
 
     static func load() -> NeoYDeploymentSettings {
         guard let data = try? Data(contentsOf: file),
-              let value = try? JSONDecoder().decode(NeoYDeploymentSettings.self, from: data)
+              var value = try? JSONDecoder().decode(NeoYDeploymentSettings.self, from: data)
         else { return NeoYDeploymentSettings() }
+
+        // 9224 was NeoY's pre-v2.2 default. There was no explicit-port marker
+        // in that schema, so preserve every non-legacy value and migrate 9224.
+        if value.mcpPort == 9224 {
+            value.mcpPort = NeoYDeploymentSettings.defaultPort
+            try? save(value)
+        }
         return value
     }
 
