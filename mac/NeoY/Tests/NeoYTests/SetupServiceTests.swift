@@ -7,6 +7,7 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertEqual(try NeoYSetupParser.parse("neoy.setup status"), .status)
         XCTAssertEqual(try NeoYSetupParser.parse("neoy.setup"), .help(topic: nil))
         XCTAssertEqual(try NeoYSetupParser.parse(" setup  "), .help(topic: nil))
+        XCTAssertEqual(try NeoYSetupParser.parse("help"), .help(topic: nil))
     }
 
     func testParserDefaultsToOverviewHelpAndResolvesTopics() throws {

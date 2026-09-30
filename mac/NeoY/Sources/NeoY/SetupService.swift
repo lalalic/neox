@@ -60,6 +60,9 @@ enum NeoYSetupParser {
             guard tokens.count <= 2 else {
                 throw NeoYSetupError.unexpectedArgument(tokens[2])
             }
+            guard tokens.count == 2 else {
+                return .help(topic: nil)
+            }
             guard let topic = tokens.last else {
                 return .help(topic: nil)
             }
