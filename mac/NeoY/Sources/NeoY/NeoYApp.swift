@@ -82,15 +82,57 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
     private func startServer() {
         let value = MCPServer(name: "NeoY", version: "1.0.0", port: 9224,
                               bonjourName: "NeoY")
+        let setup = NeoYSetupService { [weak value] in
+            await MainActor.run {
+                NeoYAppDelegate.runtimeStatus(server: value)
+            }
+        }
         value.register(tools: CaptureTourTools.tools())
         value.register(tools: DemoRecorderTools.tools())
         value.register(tools: AccessibilityTools.tools())
+        value.register(tools: NeoYSetupTools.tools(service: setup))
         value.register(tools: NeoXPhoneTools.tools(client: services.phone as! NeoXPhoneClient,
                                                    handoff: services.handoff as! NativeNeoYPhoneHandoffReceiver))
         try? services.files.prepare()
         value.setStaticFileRoot(services.files.root)
         try? value.start()
         server = value
+    }
+
+    @MainActor
+    private static func runtimeStatus(server: MCPServer?) -> NeoYRuntimeStatus {
+        let services = NeoYServiceRegistry.shared
+        let serverIsRunning = server?.isRunning == true
+        let handoff = services.handoff as? NativeNeoYPhoneHandoffReceiver
+        let handoffError: String?
+        if let handoff, handoff.isRunning {
+            handoffError = nil
+        } else if handoff == nil {
+            handoffError = "handoff service is unavailable"
+        } else {
+            handoffError = "handoff listener is not running"
+        }
+
+        return NeoYRuntimeStatus(
+            state: serverIsRunning && handoffError == nil ? .ready : .degraded,
+            version: "1.0.0",
+            bundleIdentifier: Bundle.main.bundleIdentifier ?? "com.neox.neoy",
+            startupMode: "launch-agent-keepalive",
+            mcp: NeoYRuntimeEndpoint(
+                name: "NeoY",
+                url: "http://127.0.0.1:9224/mcp",
+                isRunning: serverIsRunning,
+                error: serverIsRunning ? nil : "MCP listener is not running"
+            ),
+            neoXPairing: (services.phone as? NeoXPhoneClient)?.pairingSelection ?? .unavailable,
+            handoff: NeoYRuntimeEndpoint(
+                name: "_neoy._tcp",
+                url: "http://127.0.0.1:8686/agent",
+                isRunning: services.handoff.isRunning,
+                error: handoffError
+            ),
+            capabilities: ["capture_tour", "demo", "accessibility", "phone_media"]
+        )
     }
 
     private func startNativePhoneServices() {

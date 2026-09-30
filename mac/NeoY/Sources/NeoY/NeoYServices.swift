@@ -21,6 +21,7 @@ protocol NeoYPhoneClient: AnyObject {
 }
 
 protocol NeoYPhoneHandoffReceiver: AnyObject {
+    var isRunning: Bool { get }
     func start() throws
     func stop()
 }
