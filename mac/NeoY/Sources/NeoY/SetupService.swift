@@ -1,13 +1,18 @@
 import Foundation
 
 enum NeoYSetupTopic: String, CaseIterable, Sendable {
-    case overview, status, configuration, diagnostics, permissions, startup, federation, events, roadmap
+    case overview, status, configuration, deployment, diagnostics, permissions, startup, federation, events, roadmap
 }
 
 enum NeoYSetupCommand: Equatable, Sendable {
     case help(topic: NeoYSetupTopic?)
     case status
     case configuration
+    case deploymentShow
+    case deploymentSetPort(UInt16)
+    case deploymentSetTunnel(NeoYTunnelMode)
+    case deploymentSetTunnelName(String)
+    case deploymentSetHostname(String)
     case diagnosticsEnable
     case diagnosticsDisable
     case diagnosticsSet(NeoYDiagnosticsSetting)
@@ -64,6 +69,7 @@ enum NeoYSetupParser {
         case "config":
             guard tokens == ["config", "show"] else { throw NeoYSetupError.unknownCommand(tokens.joined(separator: " ")) }
             return .configuration
+        case "deployment": return try deployment(tokens)
         case "diagnostics": return try diagnostics(tokens)
         case "permissions": return try permissions(tokens)
         case "startup": return try startup(tokens)
@@ -78,6 +84,39 @@ enum NeoYSetupParser {
         guard tokens.count == 2 else { return .help(topic: nil) }
         guard let topic = NeoYSetupTopic(rawValue: tokens[1]) else { throw NeoYSetupError.unknownTopic(tokens[1]) }
         return .help(topic: topic)
+    }
+
+    private static func deployment(_ tokens: [String]) throws -> NeoYSetupCommand {
+        guard tokens.count >= 2 else { return .deploymentShow }
+        switch tokens[1] {
+        case "show":
+            try exact(tokens, count: 2)
+            return .deploymentShow
+        case "set":
+            guard tokens.count == 4 else {
+                throw NeoYSetupError.missingArgument("deployment set <port|tunnel|tunnel-name|hostname> <value>")
+            }
+            switch tokens[2] {
+            case "port":
+                guard let value = UInt16(tokens[3]), value > 0 else {
+                    throw NeoYSetupError.invalidValue("port must be 1...65535")
+                }
+                return .deploymentSetPort(value)
+            case "tunnel":
+                guard let value = NeoYTunnelMode(rawValue: tokens[3]) else {
+                    throw NeoYSetupError.invalidValue("tunnel must be off, quick, or named")
+                }
+                return .deploymentSetTunnel(value)
+            case "tunnel-name":
+                return .deploymentSetTunnelName(tokens[3])
+            case "hostname":
+                return .deploymentSetHostname(tokens[3])
+            default:
+                throw NeoYSetupError.unknownCommand(tokens.prefix(3).joined(separator: " "))
+            }
+        default:
+            throw NeoYSetupError.unknownCommand(tokens.prefix(2).joined(separator: " "))
+        }
     }
 
     private static func diagnostics(_ tokens: [String]) throws -> NeoYSetupCommand {
@@ -273,17 +312,20 @@ actor NeoYSetupService {
     private let makeStatus: @Sendable () async -> NeoYRuntimeStatus
     private let controlPlane: NeoYControlPlaneService
     private let runtime: NeoYRuntimeControl?
+    private let onDeploymentChanged: (@Sendable () async -> Void)?
 
     init(
         makeStatus: @escaping @Sendable () async -> NeoYRuntimeStatus,
         controlPlane: NeoYControlPlaneService = NeoYControlPlaneService(
             store: NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)
         ),
-        runtime: NeoYRuntimeControl? = nil
+        runtime: NeoYRuntimeControl? = nil,
+        onDeploymentChanged: (@Sendable () async -> Void)? = nil
     ) {
         self.makeStatus = makeStatus
         self.controlPlane = controlPlane
         self.runtime = runtime
+        self.onDeploymentChanged = onDeploymentChanged
     }
 
     func currentConfiguration() async -> NeoYControlPlaneConfiguration {
@@ -299,6 +341,16 @@ actor NeoYSetupService {
             return Self.json(status)
         case .configuration:
             return Self.json(await snapshot())
+        case .deploymentShow:
+            return Self.json(NeoYDeploymentSettingsStore.load())
+        case .deploymentSetPort(let port):
+            return deploymentMutation("deployment.set.port") { $0.mcpPort = port }
+        case .deploymentSetTunnel(let mode):
+            return deploymentMutation("deployment.set.tunnel") { $0.tunnelMode = mode }
+        case .deploymentSetTunnelName(let name):
+            return deploymentMutation("deployment.set.tunnel-name") { $0.tunnelName = name }
+        case .deploymentSetHostname(let hostname):
+            return deploymentMutation("deployment.set.hostname") { $0.publicHostname = hostname }
         case .diagnosticsEnable:
             return await mutate("diagnostics.enable") { try await self.controlPlane.setDiagnosticsEnabled(true) }
         case .diagnosticsDisable:
@@ -366,6 +418,35 @@ actor NeoYSetupService {
         }
     }
 
+    private func deploymentMutation(
+        _ operation: String,
+        mutation: (inout NeoYDeploymentSettings) -> Void
+    ) -> String {
+        do {
+            var settings = NeoYDeploymentSettingsStore.load()
+            mutation(&settings)
+            try NeoYDeploymentSettingsStore.save(settings)
+            if let onDeploymentChanged {
+                Task {
+                    try? await Task.sleep(for: .milliseconds(250))
+                    await onDeploymentChanged()
+                }
+            }
+            return Self.json(JSONValue.object([
+                "ok": .bool(true),
+                "operation": .string(operation),
+                "local_mcp_url": .string(settings.localMCPURL),
+                "public_mcp_url": settings.publicMCPURL.map(JSONValue.string) ?? .null
+            ]))
+        } catch {
+            return Self.json(JSONValue.object([
+                "ok": .bool(false),
+                "operation": .string(operation),
+                "error": .string(error.localizedDescription)
+            ]))
+        }
+    }
+
     private func snapshot() async -> NeoYConfigurationSnapshot {
         NeoYConfigurationSnapshot(
             configuration: await controlPlane.currentConfiguration(),
@@ -415,6 +496,15 @@ actor NeoYSetupService {
             "'status' returns runtime, MCP, NeoX pairing/handoff, capability, and control-plane health."
         case .configuration:
             "'config show' returns versioned validated configuration without making storage paths part of the normal UX."
+        case .deployment:
+            """
+            deployment show
+            deployment set port <1...65535>
+            deployment set tunnel <off|quick|named>
+            deployment set tunnel-name <name>
+            deployment set hostname <host>
+            Changes are persisted and the MCP/tunnel runtime is reconciled automatically.
+            """
         case .diagnostics:
             "diagnostics enable|disable; diagnostics set level <info|warning|error>; diagnostics set retention-days <1...365>"
         case .permissions:
@@ -451,6 +541,7 @@ actor NeoYSetupService {
               help [topic]
               status
               config show
+              deployment show|set ...
               diagnostics ...
               permissions status|open ...
               startup list|add|remove|enable|disable|set ...

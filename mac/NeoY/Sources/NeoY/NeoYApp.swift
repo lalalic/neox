@@ -9,6 +9,7 @@ struct NeoYApp: App {
     var body: some Scene {
         MenuBarExtra("NeoY", systemImage: "video") {
             Button("Open Current Tour") { appDelegate.showTourWindow() }
+            Button("Setup…") { appDelegate.showSetupWindow() }
             Divider()
             Button("Quit NeoY") { NSApp.terminate(nil) }
         }
@@ -22,6 +23,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
     private let runner = CaptureRunner()
     private var server: MCPServer?
     private var window: NSWindow?
+    private var setupWindow: NSWindow?
     private var runtimeControl: NeoYRuntimeControl?
     private var observers: [NSObjectProtocol] = []
 
@@ -55,6 +57,11 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
                 self?.runner.releaseCapture()
             }
         })
+        observers.append(NotificationCenter.default.addObserver(
+            forName: .neoYDeploymentSettingsChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.restartPrimaryMCPServer() }
+        })
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -81,8 +88,31 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    func showSetupWindow() {
+        if setupWindow == nil {
+            let controller = NSHostingController(rootView: NeoYSetupView())
+            let value = NSWindow(contentViewController: controller)
+            value.title = "NeoY Setup"
+            value.styleMask = [.titled, .closable, .miniaturizable]
+            value.isReleasedWhenClosed = false
+            value.center()
+            setupWindow = value
+        }
+        setupWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func restartPrimaryMCPServer() {
+        runtimeControl?.stop()
+        server?.stop()
+        runtimeControl = nil
+        server = nil
+        startServer()
+    }
+
     private func startServer() {
-        let value = MCPServer(name: "NeoY", version: "2.0.0", port: 9224,
+        let deployment = NeoYDeploymentSettingsStore.load()
+        let value = MCPServer(name: "NeoY", version: "2.1.0", port: deployment.mcpPort,
                               bonjourName: "NeoY")
         let phone = services.phone as! NeoXPhoneClient
         let runtimeControl = NeoYRuntimeControl(server: value, phone: phone)
@@ -90,7 +120,11 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
             makeStatus: { [weak value] in
                 await MainActor.run { NeoYAppDelegate.runtimeStatus(server: value) }
             },
-            runtime: runtimeControl
+            runtime: runtimeControl,
+            onDeploymentChanged: { [weak self] in
+                await MainActor.run { self?.restartPrimaryMCPServer() }
+                await Self.restartTunnelRuntime()
+            }
         )
         self.runtimeControl = runtimeControl
         Task {
@@ -124,12 +158,15 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
 
         return NeoYRuntimeStatus(
             state: serverIsRunning && handoffError == nil ? .ready : .degraded,
-            version: "2.0.0",
+            version: "2.1.0",
             bundleIdentifier: Bundle.main.bundleIdentifier ?? "com.neox.neoy",
-            startupMode: "launch-agent-keepalive",
+            startupMode: FileManager.default.fileExists(
+                atPath: FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent("Library/Application Support/NeoY/neoy-pm2.config.cjs").path
+            ) ? "pm2" : "launch-agent-keepalive",
             mcp: NeoYRuntimeEndpoint(
                 name: "NeoY",
-                url: "http://127.0.0.1:9224/mcp",
+                url: NeoYDeploymentSettingsStore.load().localMCPURL,
                 isRunning: serverIsRunning,
                 error: serverIsRunning ? nil : "MCP listener is not running"
             ),
@@ -142,6 +179,17 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
             ),
             capabilities: ["capture_tour", "demo", "accessibility", "phone_media", "permissions", "startup_supervisor", "mcp_federation", "neox_events"]
         )
+    }
+
+    nonisolated private static func restartTunnelRuntime() async {
+        guard let script = Bundle.main.url(forResource: "runtime-control", withExtension: "sh") else { return }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = [script.path, "tunnel-restart"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try? process.run()
+        process.waitUntilExit()
     }
 
     private func startNativePhoneServices() {

@@ -25,6 +25,10 @@ xcodegen generate --spec "$HERE/project.yml"
 xcodebuild -project "$PROJECT" -scheme NeoY -configuration Debug \
   -derivedDataPath "$DERIVED" build
 
+mkdir -p "$APP/Contents/Resources"
+cp "$HERE/Resources/Scripts/runtime-control.sh" "$APP/Contents/Resources/runtime-control.sh"
+chmod 755 "$APP/Contents/Resources/runtime-control.sh"
+
 codesign --force --deep --sign "$identity" \
   --entitlements "$ENTITLEMENTS" --timestamp=none "$APP"
 codesign --verify --deep --strict "$APP"
@@ -35,8 +39,15 @@ rm -rf "$DEST.new"
 ditto "$APP" "$DEST.new"
 rm -rf "$DEST"
 mv "$DEST.new" "$DEST"
-mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.neoy"
-cat > "$LAUNCH_PLIST" <<PLIST
+
+RUNTIME="$DEST/Contents/Resources/runtime-control.sh"
+if command -v pm2 >/dev/null 2>&1 && [[ -f "$RUNTIME" ]]; then
+  rm -f "$LAUNCH_PLIST"
+  /bin/zsh "$RUNTIME" pm2-setup
+  STARTUP_MODE="pm2"
+else
+  mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.neoy"
+  cat > "$LAUNCH_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -50,9 +61,11 @@ cat > "$LAUNCH_PLIST" <<PLIST
   <key>StandardErrorPath</key><string>$HOME/.neoy/launchd.err.log</string>
 </dict></plist>
 PLIST
-plutil -lint "$LAUNCH_PLIST" >/dev/null
-launchctl bootstrap "gui/$UID" "$LAUNCH_PLIST"
-launchctl kickstart -k "gui/$UID/$LAUNCH_LABEL"
+  plutil -lint "$LAUNCH_PLIST" >/dev/null
+  launchctl bootstrap "gui/$UID" "$LAUNCH_PLIST"
+  launchctl kickstart -k "gui/$UID/$LAUNCH_LABEL"
+  STARTUP_MODE="launch-agent-keepalive"
+fi
 
-echo "Installed $DEST and enabled $LAUNCH_LABEL"
+echo "Installed $DEST; startup mode: $STARTUP_MODE"
 codesign -d -r- "$DEST" 2>&1 | tail -1
