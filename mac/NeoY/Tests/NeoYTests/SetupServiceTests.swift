@@ -59,7 +59,7 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertEqual(try NeoYSetupParser.parse("permissions status"), .permissionsStatus)
     }
 
-    func testV1ControlPlaneMigratesToV2WithoutLosingDiagnostics() throws {
+    func testV1ControlPlaneMigratesToV3WithoutLosingDiagnostics() throws {
         let directory = Self.makeDirectory()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let legacy = """
@@ -69,7 +69,7 @@ final class SetupServiceTests: XCTestCase {
 
         let outcome = try NeoYFileControlPlaneStore(directory: directory).loadOrCreate()
 
-        XCTAssertEqual(outcome.document.schemaVersion, 2)
+        XCTAssertEqual(outcome.document.schemaVersion, 3)
         XCTAssertTrue(outcome.document.configuration.diagnostics.isEnabled)
         XCTAssertEqual(outcome.document.configuration.diagnostics.level, .warning)
         XCTAssertEqual(outcome.document.configuration.diagnostics.retentionDays, 21)
@@ -90,6 +90,66 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertEqual(persisted.startupServices.first?.name, "echo")
         XCTAssertEqual(persisted.mcpServers.first?.name, "local")
         XCTAssertFalse(persisted.events.completed)
+    }
+
+
+
+    func testV2ControlPlaneMigratesToV3WithCapabilitiesEnabledByDefault() throws {
+        let directory = Self.makeDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let legacy = """
+        {"schemaVersion":2,"configuration":{"diagnostics":{"isEnabled":true,"level":"info","retentionDays":14},"startupServices":[],"mcpServers":[],"events":{"blocked":true,"failure":true,"completed":true}}}
+        """
+        try Data(legacy.utf8).write(to: directory.appendingPathComponent("control-plane.json"))
+
+        let outcome = try NeoYFileControlPlaneStore(directory: directory).loadOrCreate()
+
+        XCTAssertEqual(outcome.document.schemaVersion, 3)
+        XCTAssertTrue(NeoYOptionalCapability.allCases.allSatisfy {
+            outcome.document.configuration.capabilities.isEnabled($0)
+        })
+    }
+
+    func testCapabilityParserAndPersistence() async throws {
+        XCTAssertEqual(
+            try NeoYSetupParser.parse("capability disable demo-recording"),
+            .capabilitySet(.demoRecording, enabled: false)
+        )
+        XCTAssertEqual(try NeoYSetupParser.parse("help capabilities"), .help(topic: .capabilities))
+
+        let store = NeoYFileControlPlaneStore(directory: Self.makeDirectory())
+        let setup = NeoYSetupService(
+            makeStatus: { Self.makeStatus() },
+            controlPlane: NeoYControlPlaneService(store: store)
+        )
+        _ = await setup.execute(.capabilitySet(.demoRecording, enabled: false))
+        XCTAssertFalse(try store.loadOrCreate().document.configuration.capabilities.isEnabled(.demoRecording))
+    }
+
+    func testCoreCommandTokenizerPreservesQuotedArgumentsAndRemainder() throws {
+        let parsed = try NeoYCommandLine.parse(#"run --cwd "/tmp/a b" -- echo hello world"#)
+        XCTAssertEqual(parsed.tokens, ["run", "--cwd", "/tmp/a b"])
+        XCTAssertEqual(parsed.remainder, "echo hello world")
+    }
+
+    func testCoreExecRunAndFileRoundTrip() async throws {
+        let exec = NeoYExecService()
+        let result = try await exec.execute("run -- printf neoy-v22")
+        XCTAssertTrue(result.contains("neoy-v22"))
+
+        let files = NeoYCoreFileService()
+        let path = Self.makeDirectory().appendingPathComponent("nested/test.txt").path
+        _ = try await files.execute("write '\(path)' -- hello")
+        let read = try await files.execute("read '\(path)'")
+        XCTAssertTrue(read.contains("hello"))
+        _ = try await files.execute("remove '\(path)'")
+    }
+
+    func testCanonicalCoreToolSetIsSmallAndStable() {
+        XCTAssertEqual(
+            NeoYCoreRuntime.toolNames,
+            Set(["neoy.setup", "mac.exec", "mac.fs", "codex.threads", "node"])
+        )
     }
 
     func testParserValidatesDiagnosticsSettings() {

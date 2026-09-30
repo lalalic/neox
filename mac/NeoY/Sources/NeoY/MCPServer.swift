@@ -36,6 +36,8 @@ public final class MCPServer {
     private var listener: NWListener?
     private var toolHandlers: [String: ToolHandler] = [:]
     private var mcpTools: [[String: Any]] = []
+    private var protectedToolNames: Set<String> = []
+    private var privilegedAccessToken: String?
     // Dedicated queue for all network I/O — avoids blocking on MainActor
     private let httpQueue = DispatchQueue(label: "mcp-server-http", qos: .userInitiated)
     // Snapshot of state for nonisolated access from httpQueue
@@ -45,6 +47,8 @@ public final class MCPServer {
     nonisolated(unsafe) private var _snapshotTools: [[String: Any]] = []
     nonisolated(unsafe) private var _snapshotHandlers: [String: ToolHandler] = [:]
     nonisolated(unsafe) private var _snapshotToolNames: [String] = []
+    nonisolated(unsafe) private var _snapshotProtectedToolNames: Set<String> = []
+    nonisolated(unsafe) private var _snapshotPrivilegedAccessToken: String?
 
     /// Whether the server is currently listening.
     @Published public private(set) var isRunning = false
@@ -75,10 +79,11 @@ public final class MCPServer {
     // MARK: - Tool Registration
 
     /// Register tools from CopilotSDK `ToolDefinition` array.
-    public func register(tools: [ToolDefinition]) {
+    public func register(tools: [ToolDefinition], protected: Bool = false) {
         for tool in tools {
             toolHandlers[tool.name] = tool.handler
             mcpTools.append(buildMCPSchema(tool))
+            if protected { protectedToolNames.insert(tool.name) }
         }
         refreshSnapshots()
     }
@@ -86,6 +91,7 @@ public final class MCPServer {
     /// Register a single tool by name, description, schema, and handler.
     public func register(name: String, description: String,
                          inputSchema: [String: Any] = ["type": "object", "properties": [String: Any]()],
+                         protected: Bool = false,
                          handler: @escaping ToolHandler) {
         toolHandlers[name] = handler
         mcpTools.append([
@@ -93,6 +99,7 @@ public final class MCPServer {
             "description": description,
             "inputSchema": inputSchema
         ])
+        if protected { protectedToolNames.insert(name) }
         refreshSnapshots()
     }
 
@@ -100,6 +107,12 @@ public final class MCPServer {
     public func unregister(name: String) {
         toolHandlers.removeValue(forKey: name)
         mcpTools.removeAll { ($0["name"] as? String) == name }
+        protectedToolNames.remove(name)
+        refreshSnapshots()
+    }
+
+    public func setPrivilegedAccessToken(_ token: String?) {
+        privilegedAccessToken = token
         refreshSnapshots()
     }
 
@@ -109,6 +122,8 @@ public final class MCPServer {
         _snapshotTools = mcpTools
         _snapshotHandlers = toolHandlers
         _snapshotToolNames = toolNames
+        _snapshotProtectedToolNames = protectedToolNames
+        _snapshotPrivilegedAccessToken = privilegedAccessToken
     }
 
     /// All registered tool names.
@@ -134,6 +149,8 @@ public final class MCPServer {
         _snapshotTools = mcpTools
         _snapshotHandlers = toolHandlers
         _snapshotToolNames = toolNames
+        _snapshotProtectedToolNames = protectedToolNames
+        _snapshotPrivilegedAccessToken = privilegedAccessToken
 
         let parameters = NWParameters.tcp
         let listener = try NWListener(using: parameters, on: NWEndpoint.Port(integerLiteral: port))
@@ -270,17 +287,24 @@ public final class MCPServer {
         }
 
         let method = String(parts[0])
-        let path = String(parts[1])
+        let requestTarget = String(parts[1])
+        let path = String(requestTarget.split(separator: "?", maxSplits: 1).first ?? "")
 
-        // Extract Range header (case-insensitive) for static file requests
         var rangeHeader: String?
+        var headers: [String: String] = [:]
         for line in lines.dropFirst() {
-            if line.lowercased().hasPrefix("range:") {
-                rangeHeader = line.split(separator: ":", maxSplits: 1).last
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                break
-            }
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let key = line[..<colon].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespacesAndNewlines)
+            headers[key] = value
+            if key == "range" { rangeHeader = value }
         }
+        let queryToken = URLComponents(string: "http://localhost\(requestTarget)")?
+            .queryItems?.first(where: { $0.name == "token" })?.value
+        let isCloudflareProxy = headers["cf-connecting-ip"] != nil || headers["cf-ray"] != nil
+        let isDirectLoopback = Self.isLoopback(connection.endpoint) && !isCloudflareProxy
+        let isPrivileged = isDirectLoopback ||
+            (_snapshotPrivilegedAccessToken != nil && queryToken == _snapshotPrivilegedAccessToken)
 
         if let onRequest { onRequest("\(method) \(path)") }
 
@@ -301,7 +325,7 @@ public final class MCPServer {
 
         switch (method, path) {
         case ("POST", "/mcp"):
-            handleMCPPostNonisolated(body: body, connection: connection)
+            handleMCPPostNonisolated(body: body, connection: connection, privileged: isPrivileged)
 
         case ("GET", "/mcp"):
             sendHTTP(connection: connection, status: 405, body: nil)
@@ -337,9 +361,14 @@ public final class MCPServer {
         }
     }
 
+    nonisolated private static func isLoopback(_ endpoint: NWEndpoint) -> Bool {
+        let value = String(describing: endpoint).lowercased()
+        return value.contains("127.0.0.1") || value.contains("::1") || value.contains("localhost")
+    }
+
     // MARK: - MCP JSON-RPC Handler (nonisolated)
 
-    nonisolated private func handleMCPPostNonisolated(body: Data?, connection: NWConnection) {
+    nonisolated private func handleMCPPostNonisolated(body: Data?, connection: NWConnection, privileged: Bool) {
         guard let body,
               let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
             sendJSONRPCError(connection: connection, id: nil, code: -32700, message: "Parse error")
@@ -370,11 +399,20 @@ public final class MCPServer {
             sendJSONRPCResult(connection: connection, id: id, result: result)
 
         case "tools/list":
-            sendJSONRPCResult(connection: connection, id: id, result: ["tools": _snapshotTools])
+            let visibleTools = privileged ? _snapshotTools : _snapshotTools.filter {
+                guard let name = $0["name"] as? String else { return true }
+                return !_snapshotProtectedToolNames.contains(name)
+            }
+            sendJSONRPCResult(connection: connection, id: id, result: ["tools": visibleTools])
 
         case "tools/call":
             guard let toolName = params["name"] as? String else {
                 sendJSONRPCError(connection: connection, id: id, code: -32602, message: "Missing tool name")
+                return
+            }
+            if _snapshotProtectedToolNames.contains(toolName) && !privileged {
+                sendJSONRPCError(connection: connection, id: id, code: -32001,
+                    message: "Tool '\(toolName)' requires direct-local access or a trusted NeoY token")
                 return
             }
             guard let handler = _snapshotHandlers[toolName] else {

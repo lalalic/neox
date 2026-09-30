@@ -71,3 +71,31 @@ The installer uses a valid Apple Development identity and installs `/Application
 For ChatGPT, a private Agent Plugin can point its remote MCP entry at the stable HTTPS endpoint. NeoY's MCP tools are discovered dynamically rather than duplicated in the plugin manifest.
 
 NeoY can report/open permission settings, but Screen Recording, Accessibility, camera, microphone, notifications, and Local Network remain subject to macOS/user approval.
+
+
+## NeoY 2.2 Core Agent Runtime
+
+NeoY 2.2 keeps the privileged agent surface intentionally small:
+
+```text
+neoy.setup(command)    configuration/control
+mac.exec(command)      shell, background jobs, PTY
+mac.fs(command)        filesystem read/write/manage
+codex.threads(command) read-only Codex history
+node(command)          trusted remote NeoY Core invocation
+```
+
+Each tool documents its current grammar through `command=help`. The five Core
+surfaces are always available on trusted/local connections. First-party
+specialized capabilities remain enabled by default but can be hidden at runtime
+with `neoy.setup("capability disable <name>")`.
+
+Core tools are privileged. Direct loopback MCP calls are trusted. Requests
+arriving through the public Cloudflare tunnel do not see or invoke Core tools
+unless they carry the NeoY Core token. `neoy.setup("auth show")` returns the
+trusted Core URL for an already-trusted local agent; treat that URL/token as a
+secret.
+
+Remote Macs run NeoY too. `node discover` browses `_mcp._tcp`, `node pair`
+stores an explicit trusted peer, and `node invoke` forwards one of the same
+canonical Core tools rather than maintaining per-node wrapper tools.

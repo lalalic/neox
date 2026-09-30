@@ -119,3 +119,40 @@ The standalone Python handoff bridge and old Neox Tour app remain retired. Gener
 Automated validation covers schema migration, parser/config behavior, NeoY macOS build/tests, and NeoX simulator compilation. Installed-app E2E validates the signed `/Applications/NeoY.app` MCP surface, process supervision, permission reporting, and federation on a real Mac.
 
 Actual TCC grants and an end-to-end notification shown on a physical paired NeoX device remain inherently dependent on human approval/device availability; NeoY reports these states instead of claiming them.
+
+
+## v2.2 Core runtime
+
+NeoY v2.2 separates control, execution, and optional product capabilities:
+
+```text
+trusted agent
+    |
+    +-- neoy.setup -------- control plane
+    +-- mac.exec ---------- shell / jobs / PTY
+    +-- mac.fs ------------ filesystem
+    +-- codex.threads ----- read-only local Codex history
+    +-- node -------------- same Core contract on trusted NeoY peers
+
+optional registry (default enabled)
+    +-- accessibility/computer
+    +-- demo/recording
+    +-- capture tour
+    +-- phone integration
+    +-- public tunnel
+```
+
+The canonical Core tool-name set lives in one runtime definition and is reused
+by remote-node invocation. Adding a future Core surface must not require adding
+per-machine wrappers.
+
+Core execution is implemented in Swift/Foundation/Darwin and does not depend on
+PM2. PM2 remains the product deployment/keepalive supervisor for NeoY and the
+Cloudflare tunnel. `runtime-control.sh` remains deployment/tunnel glue only.
+
+### Public transport
+
+The v2.1 public MCP endpoint stays usable for ChatGPT/plugin discovery of
+non-privileged optional tools. Privileged Core tools and configured federated
+MCP tools are hidden on untrusted/public requests. A trusted token can authorize
+Core access; the token is generated locally and stored with mode `0600`.
