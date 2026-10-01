@@ -112,3 +112,26 @@ user's Cloudflare account. Own-domain addresses remain stable across restarts;
 temporary addresses may change and can require the MCP app to be reconfigured.
 Local access always receives every enabled NeoY feature. Remote access is authenticated
 and `tools/list`/`tools/call` are filtered by the Features selected in the Remote tab.
+
+
+## Family Tutor workspace
+
+NeoY 2.3 includes a fixed **Tutor** workspace. It is intentionally not a general browser-automation feature.
+
+The MCP surface is:
+
+```text
+tutor.workspace
+  action=status
+  action=bind    learner=<id> thread_url=https://chatgpt.com/...
+  action=unbind  learner=<id>
+  action=turn    learner=<id> prompt=<text> files=[...]
+```
+
+Each learner is bound to one persistent ChatGPT thread. NeoY stores only the learner/thread/target binding at `~/Library/Application Support/NeoY/tutor-workspace.json`; it does not persist the ChatGPT transcript.
+
+ChatGPT page mechanics are owned by the standalone `browser-platforms` skill / `@lalalic/browser-platforms` package, specifically `platforms/chatgpt/bin/chatgpt-thread-turn`. NeoY invokes that platform surface and does not contain ChatGPT selectors or DOM automation. The runtime uses `NEOY_BROWSER_PLATFORMS_ROOT` when explicitly set, otherwise the installed global skill at `~/.agents/skills/browser-platforms`.
+
+The Setup window has a **Tutor** tab for platform readiness and learner/thread binding. Remote exposure is independently controlled by the **Family Tutor** switch in Remote features. Local Tutor access remains available regardless of that remote switch.
+
+This path does not require the Family Tutor Chrome extension.

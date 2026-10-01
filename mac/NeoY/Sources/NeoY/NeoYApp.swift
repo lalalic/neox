@@ -170,6 +170,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
             value.register(tools: NeoXPhoneTools.tools(client: phone,
                                                        handoff: services.handoff as! NativeNeoYPhoneHandoffReceiver))
         }
+        value.register(tools: NeoYTutorTools.tools())
 
         (services.handoff as? NativeNeoYPhoneHandoffReceiver)?.registerRoutes(on: value)
         try? services.files.prepare()
@@ -238,6 +239,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
         if config.capabilities.isEnabled(.accessibilityComputer) { result.append("accessibility") }
         if config.capabilities.isEnabled(.phoneIntegration) { result.append("phone_media") }
         if config.capabilities.isEnabled(.publicTunnel) { result.append("public_tunnel") }
+        result.append("tutor_workspace")
         return result
     }
 

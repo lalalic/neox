@@ -1,7 +1,7 @@
 import Foundation
 
 enum NeoYCoreRuntime {
-    static let version = "2.2.2"
+    static let version = "2.3.0"
     static let toolNames: Set<String> = [
         "neoy.setup",
         "mac.exec",
