@@ -11,6 +11,7 @@ enum NeoYRemoteFeature: String, CaseIterable, Identifiable, Codable, Sendable {
     case tour
     case phone
     case tutor
+    case events
     case mcpServices = "mcp-services"
 
     var id: String { rawValue }
@@ -27,13 +28,14 @@ enum NeoYRemoteFeature: String, CaseIterable, Identifiable, Codable, Sendable {
         case .tour: "Capture Tour"
         case .phone: "Phone"
         case .tutor: "Family Tutor"
+        case .events: "Events Bus"
         case .mcpServices: "Connected MCP Services"
         }
     }
 
     func matches(toolName: String) -> Bool {
         switch self {
-        case .setup: toolName == "neoy.setup"
+        case .setup: toolName == "neoy.setup" || toolName == "feature.bootstrap"
         case .terminal: toolName == "mac.exec"
         case .files: toolName == "mac.fs"
         case .codex: toolName == "codex.threads"
@@ -43,6 +45,7 @@ enum NeoYRemoteFeature: String, CaseIterable, Identifiable, Codable, Sendable {
         case .tour: toolName.hasPrefix("tour.")
         case .phone: toolName.hasPrefix("phone.")
         case .tutor: toolName.hasPrefix("tutor.")
+        case .events: toolName.hasPrefix("events.")
         case .mcpServices: toolName.hasPrefix("mcp.")
         }
     }
