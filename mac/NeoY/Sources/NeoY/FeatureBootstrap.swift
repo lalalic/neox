@@ -42,6 +42,9 @@ actor NeoYFeatureBootstrapService {
 
     func start(feature rawFeature: String) async throws -> String {
         let feature = rawFeature.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let existing = states[feature] {
+            return Self.json(Self.object(existing))
+        }
         guard feature == "tutor" else {
             throw NeoYTutorError.platformFailed("unsupported bootstrap feature '\(feature)'")
         }
