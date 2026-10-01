@@ -21,6 +21,8 @@ final class TutorWorkspaceTests: XCTestCase {
 
         let snapshot = await workspace.snapshot()
         XCTAssertEqual(snapshot.bindings["maggie"]?.threadURL, "https://chatgpt.com/c/test-thread")
+        XCTAssertNil(snapshot.bindings["maggie"]?.projectID)
+        XCTAssertNil(snapshot.bindings["maggie"]?.projectURL)
         XCTAssertNil(snapshot.bindings["maggie"]?.targetID)
 
         let bytes = try Data(contentsOf: stateURL)
@@ -81,6 +83,18 @@ final class TutorWorkspaceTests: XCTestCase {
         XCTAssertEqual(runner.workspaceName, "Tutor")
         XCTAssertEqual(runner.workspacePoolSize, 4)
         XCTAssertEqual(runner.helper.path, agentWorkspace.appendingPathComponent("agent_helpers.py").path)
+    }
+
+    func testRunnerExposesProjectSetupExecutable() {
+        let root = URL(fileURLWithPath: "/tmp/browser-platforms", isDirectory: true)
+        let runner = NeoYChatGPTPlatformRunner(
+            root: root,
+            agentWorkspace: URL(fileURLWithPath: "/tmp/agent-workspace", isDirectory: true)
+        )
+        XCTAssertEqual(
+            runner.projectSetupExecutable.path,
+            root.appendingPathComponent("platforms/chatgpt/bin/chatgpt-project-setup").path
+        )
     }
 
     func testRemoteFeatureMatchesTutorTools() {
