@@ -16,14 +16,17 @@ actor NeoYFeatureBootstrapService {
 
     private let stateURL: URL
     private let events: NeoYEventsBusClient
+    private let tutorConnectorOrigin: URL
     private var states: [String: NeoYFeatureBootstrapState]
 
     init(
         stateURL: URL = NeoYPaths.supportDirectory.appendingPathComponent("feature-bootstrap.json"),
-        events: NeoYEventsBusClient = NeoYEventsBusClient()
+        events: NeoYEventsBusClient = NeoYEventsBusClient(),
+        tutorConnectorOrigin: URL? = nil
     ) {
         self.stateURL = stateURL
         self.events = events
+        self.tutorConnectorOrigin = tutorConnectorOrigin ?? Self.defaultTutorConnectorOrigin()
         self.states = Self.load(stateURL)
     }
 
@@ -41,8 +44,9 @@ actor NeoYFeatureBootstrapService {
         }
 
         let sessionID = "bootstrap-" + UUID().uuidString.lowercased()
-        let actionURL = ProcessInfo.processInfo.environment["NEOY_TUTOR_DISCORD_INSTALL_URL"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        var connect = URLComponents(url: tutorConnectorOrigin.appendingPathComponent("connect"), resolvingAgainstBaseURL: false)!
+        connect.queryItems = [URLQueryItem(name: "session", value: sessionID)]
+        let actionURL = connect.url?.absoluteString
 
         let prompt = """
         You are the temporary setup assistant for NeoY's Family Tutor feature.
@@ -59,13 +63,11 @@ actor NeoYFeatureBootstrapService {
         var state = NeoYFeatureBootstrapState(
             feature: feature,
             sessionID: sessionID,
-            phase: actionURL?.isEmpty == false ? "waiting_user_action" : "blocked",
+            phase: "waiting_user_action",
             threadURL: nil,
             targetID: nil,
             actionURL: actionURL,
-            message: actionURL?.isEmpty == false
-                ? "Connect Discord to continue."
-                : "Official Discord install URL is not configured.",
+            message: "Connect Discord to continue.",
             updatedAt: Date()
         )
 
@@ -75,7 +77,38 @@ actor NeoYFeatureBootstrapService {
         }
         states[feature] = state
         try persist()
-        try? await publish(state, type: "feature.bootstrap.started", status: state.phase == "blocked" ? "blocked" : "waiting")
+        try? await publish(state, type: "feature.bootstrap.started", status: "waiting")
+        return Self.json(Self.object(state))
+    }
+
+    func check(feature rawFeature: String) async throws -> String {
+        let feature = rawFeature.lowercased()
+        guard let state = states[feature] else {
+            throw NeoYTutorError.platformFailed("bootstrap for '\(feature)' has not started")
+        }
+        guard feature == "tutor" else { return Self.json(Self.object(state)) }
+        guard state.phase == "waiting_user_action" else { return Self.json(Self.object(state)) }
+
+        let url = tutorConnectorOrigin
+            .appendingPathComponent("v1")
+            .appendingPathComponent("sessions")
+            .appendingPathComponent(state.sessionID)
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard let http = response as? HTTPURLResponse else {
+            throw NeoYTutorError.platformFailed("Discord connector returned an invalid response")
+        }
+        if http.statusCode == 410 { return Self.json(Self.object(state)) }
+        guard (200..<300).contains(http.statusCode),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw NeoYTutorError.platformFailed("Discord connector status failed with HTTP \(http.statusCode)")
+        }
+        if object["discord_connected"] as? Bool == true {
+            return try await receive(
+                feature: feature,
+                type: "discord.connected",
+                data: ["connector": .string("cloudflare")]
+            )
+        }
         return Self.json(Self.object(state))
     }
 
@@ -110,6 +143,16 @@ actor NeoYFeatureBootstrapService {
         states.removeValue(forKey: feature)
         try persist()
         return Self.json(["status": "reset", "feature": feature])
+    }
+
+    private static func defaultTutorConnectorOrigin() -> URL {
+        if let value = ProcessInfo.processInfo.environment["NEOY_TUTOR_DISCORD_CONNECTOR_URL"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !value.isEmpty,
+           let url = URL(string: value) {
+            return url
+        }
+        return URL(string: "https://family-tutor-discord-setup.lalalic-48f.workers.dev")!
     }
 
     private func startTemporaryThread(instructions: String) async throws -> (threadURL: String, targetID: String?)? {
@@ -205,7 +248,7 @@ enum NeoYFeatureBootstrapTools {
         [
             ToolDefinition(
                 name: "feature.bootstrap",
-                description: "Initialize and advance a NeoY feature through its temporary ChatGPT bootstrap flow. Actions: start, status, event, reset.",
+                description: "Initialize and advance a NeoY feature through its temporary ChatGPT bootstrap flow. Actions: start, status, check, event, reset.",
                 parameters: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -229,6 +272,9 @@ enum NeoYFeatureBootstrapTools {
                 case "start":
                     guard let feature else { throw NeoYTutorError.platformFailed("start requires feature") }
                     return try await service.start(feature: feature)
+                case "check":
+                    guard let feature else { throw NeoYTutorError.platformFailed("check requires feature") }
+                    return try await service.check(feature: feature)
                 case "event":
                     guard let feature, case .string(let type)? = object["event_type"] else {
                         throw NeoYTutorError.platformFailed("event requires feature and event_type")
