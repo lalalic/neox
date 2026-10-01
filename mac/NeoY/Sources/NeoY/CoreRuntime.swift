@@ -7,7 +7,13 @@ enum NeoYCoreRuntime {
         "mac.exec",
         "mac.fs",
         "codex.threads",
-        "node"
+        "node",
+        "events.health",
+        "events.status",
+        "events.history",
+        "events.wait",
+        "events.publish",
+        "feature.bootstrap"
     ]
 
     @MainActor
@@ -17,12 +23,15 @@ enum NeoYCoreRuntime {
         exec: NeoYExecService,
         files: NeoYCoreFileService,
         codex: NeoYCodexThreadService,
-        node: NeoYNodeService
+        node: NeoYNodeService,
+        events: NeoYEventsBusClient = NeoYEventsBusClient()
     ) {
         server.register(tools: NeoYSetupTools.tools(service: setup), protected: true)
         server.register(tools: NeoYExecTools.tools(service: exec), protected: true)
         server.register(tools: NeoYFileTools.tools(service: files), protected: true)
         server.register(tools: NeoYCodexThreadTools.tools(service: codex), protected: true)
         server.register(tools: NeoYNodeTools.tools(service: node), protected: true)
+        server.register(tools: NeoYEventsTools.tools(client: events), protected: true)
+        server.register(tools: NeoYFeatureBootstrapTools.tools(), protected: true)
     }
 }

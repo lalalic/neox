@@ -233,7 +233,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
         let config = (try? NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)
             .loadOrCreate().document.configuration) ?? NeoYControlPlaneConfiguration()
         var result = ["core_setup", "core_exec", "core_files", "core_codex_threads", "core_nodes",
-                      "permissions", "startup_supervisor", "mcp_federation", "neox_events"]
+                      "events_bus", "feature_bootstrap", "permissions", "startup_supervisor", "mcp_federation", "neox_events"]
         if config.capabilities.isEnabled(.captureTour) { result.append("capture_tour") }
         if config.capabilities.isEnabled(.demoRecording) { result.append("demo") }
         if config.capabilities.isEnabled(.accessibilityComputer) { result.append("accessibility") }
