@@ -11,7 +11,7 @@ final class TutorWorkspaceTests: XCTestCase {
         let stateURL = root.appendingPathComponent("tutor-workspace.json")
         let workspace = NeoYTutorWorkspace(
             stateURL: stateURL,
-            runner: NeoYChatGPTPlatformRunner(root: root.appendingPathComponent("missing-platform"))
+            runner: NeoYChatGPTPlatformRunner()
         )
 
         _ = try await workspace.bind(
@@ -38,7 +38,7 @@ final class TutorWorkspaceTests: XCTestCase {
             .appendingPathComponent("neoy-tutor-tests-\(UUID().uuidString)", isDirectory: true)
         let workspace = NeoYTutorWorkspace(
             stateURL: root.appendingPathComponent("state.json"),
-            runner: NeoYChatGPTPlatformRunner(root: root)
+            runner: NeoYChatGPTPlatformRunner()
         )
         do {
             _ = try await workspace.bind(learner: "sammy", threadURL: "https://example.com/c/test")
@@ -48,41 +48,26 @@ final class TutorWorkspaceTests: XCTestCase {
         }
     }
 
-    func testTurnReportsMissingPlatformDeterministically() async throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("neoy-tutor-tests-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-
-        let workspace = NeoYTutorWorkspace(
-            stateURL: root.appendingPathComponent("state.json"),
-            runner: NeoYChatGPTPlatformRunner(root: root.appendingPathComponent("missing-platform"))
-        )
-        _ = try await workspace.bind(
-            learner: "maggie",
-            threadURL: "https://chatgpt.com/c/test-thread"
-        )
-
-        do {
-            _ = try await workspace.turn(learner: "maggie", prompt: "hello", files: [])
-            XCTFail("expected platform unavailable")
-        } catch {
-            XCTAssertTrue(error.localizedDescription.contains("ChatGPT browser platform is unavailable"))
-        }
+    func testBrowserWorkspaceSessionLifecycleIsExplicit() {
+        let source = try! String(contentsOfFile: #filePath.replacingOccurrences(
+            of: "/Tests/NeoYTests/TutorWorkspaceTests.swift",
+            with: "/Sources/NeoY/BrowserWorkspace.swift"
+        ))
+        XCTAssertTrue(source.contains("browser-workspace create"))
+        XCTAssertTrue(source.contains("browser-workspace session start"))
+        XCTAssertTrue(source.contains("browser-workspace session exec"))
+        XCTAssertTrue(source.contains("browser-workspace session stop"))
+        XCTAssertTrue(source.contains("from platform_runner import action_path, prepare_action"))
     }
 
     func testRunnerUsesFixedTutorBrowserWorkspace() {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("neoy-tutor-platform-\(UUID().uuidString)", isDirectory: true)
-        let agentWorkspace = root.appendingPathComponent("agent-workspace", isDirectory: true)
         let runner = NeoYChatGPTPlatformRunner(
-            root: root,
-            agentWorkspace: agentWorkspace,
             workspaceName: "Tutor",
             workspacePoolSize: 4
         )
         XCTAssertEqual(runner.workspaceName, "Tutor")
         XCTAssertEqual(runner.workspacePoolSize, 4)
-        XCTAssertEqual(runner.helper.path, agentWorkspace.appendingPathComponent("agent_helpers.py").path)
+        XCTAssertEqual(runner.platformCommand, "browser-workspace")
     }
 
     func testTutorRunnerUsesFamilyTutorAppName() {
@@ -90,19 +75,17 @@ final class TutorWorkspaceTests: XCTestCase {
             of: "/Tests/NeoYTests/TutorWorkspaceTests.swift",
             with: "/Sources/NeoY/TutorWorkspace.swift"
         ))
-        XCTAssertTrue(source.contains("\"--app\", \"tutor\""))
+        XCTAssertTrue(source.contains("\"app\": \"tutor\""))
     }
 
-    func testRunnerExposesProjectSetupExecutable() {
-        let root = URL(fileURLWithPath: "/tmp/browser-platforms", isDirectory: true)
-        let runner = NeoYChatGPTPlatformRunner(
-            root: root,
-            agentWorkspace: URL(fileURLWithPath: "/tmp/agent-workspace", isDirectory: true)
-        )
-        XCTAssertEqual(
-            runner.projectSetupExecutable.path,
-            root.appendingPathComponent("platforms/chatgpt/bin/chatgpt-project-setup").path
-        )
+    func testRunnerDoesNotPersistSessionScopedTarget() {
+        let source = try! String(contentsOfFile: #filePath.replacingOccurrences(
+            of: "/Tests/NeoYTests/TutorWorkspaceTests.swift",
+            with: "/Sources/NeoY/TutorWorkspace.swift"
+        ))
+        XCTAssertTrue(source.contains("targetID: nil"))
+        XCTAssertFalse(source.contains("BH_AGENT_WORKSPACE"))
+        XCTAssertFalse(source.contains("browser-platforms"))
     }
 
     func testRemoteFeatureMatchesTutorTools() {

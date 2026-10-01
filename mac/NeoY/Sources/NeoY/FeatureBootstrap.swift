@@ -77,7 +77,7 @@ actor NeoYFeatureBootstrapService {
             updatedAt: Date()
         )
 
-        if let result = try await startTemporaryThread(instructions: prompt) {
+        if let result = try? await startTemporaryThread(instructions: prompt) {
             state.threadURL = result.threadURL
             state.targetID = result.targetID
         }
@@ -253,38 +253,16 @@ actor NeoYFeatureBootstrapService {
     }
 
     private func startTemporaryThread(instructions: String) async throws -> (threadURL: String, targetID: String?)? {
-        let root: URL
-        if let override = ProcessInfo.processInfo.environment["NEOY_BROWSER_PLATFORMS_ROOT"], !override.isEmpty {
-            root = URL(fileURLWithPath: NSString(string: override).expandingTildeInPath, isDirectory: true)
-        } else {
-            root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".agents/skills/browser-platforms", isDirectory: true)
+        let object = try await NeoYBrowserWorkspace().run(
+            action: "bootstrap-start",
+            config: ["instructions": instructions],
+            workspace: "Bootstrap",
+            poolSize: 3
+        )
+        guard let threadURL = object["thread_url"] as? String else {
+            throw NeoYTutorError.invalidPlatformResponse
         }
-        let executable = root.appendingPathComponent("platforms/chatgpt/bin/chatgpt-bootstrap-start")
-        guard FileManager.default.isExecutableFile(atPath: executable.path) else { return nil }
-
-        return try await Task.detached {
-            let process = Process()
-            process.executableURL = executable
-            process.arguments = ["--instructions", instructions]
-            var env = ProcessInfo.processInfo.environment
-            env["BH_AGENT_WORKSPACE"] = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".config/browser-harness/agent-workspace").path
-            env["BH_WORKSPACE_NAME"] = "Bootstrap"
-            env["BH_WORKSPACE_POOL_SIZE"] = "3"
-            process.environment = env
-            let stdout = Pipe()
-            process.standardOutput = stdout
-            process.standardError = Pipe()
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return nil }
-            let text = String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            guard let line = text.split(separator: "\n").last,
-                  let data = String(line).data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let threadURL = object["thread_url"] as? String else { return nil }
-            return (threadURL, object["target_id"] as? String)
-        }.value
+        return (threadURL, nil)
     }
 
     private func publish(

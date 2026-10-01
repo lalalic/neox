@@ -533,7 +533,7 @@ struct NeoYSetupView: View {
 
             GroupBox("ChatGPT platform") {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("ChatGPT page mechanics come from browser-platforms. NeoY stores learner/thread bindings only; transcripts remain in ChatGPT.")
+                    Text("ChatGPT page mechanics run through Browser Workspace sessions. NeoY stores learner/thread bindings only; transcripts remain in ChatGPT.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Text(model.tutorStatus)

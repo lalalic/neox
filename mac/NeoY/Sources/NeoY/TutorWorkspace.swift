@@ -61,36 +61,25 @@ struct NeoYChatGPTTurnResult: Codable, Equatable, Sendable {
 }
 
 struct NeoYChatGPTPlatformRunner: Sendable {
-    let root: URL
-    let agentWorkspace: URL
+    let browserWorkspace: NeoYBrowserWorkspace
     let workspaceName: String
     let workspacePoolSize: Int
 
     init(
-        root: URL? = nil,
-        agentWorkspace: URL? = nil,
+        browserWorkspace: NeoYBrowserWorkspace = NeoYBrowserWorkspace(),
         workspaceName: String? = nil,
         workspacePoolSize: Int? = nil
     ) {
-        if let agentWorkspace {
-            self.agentWorkspace = agentWorkspace
-        } else if let override = ProcessInfo.processInfo.environment["NEOY_TUTOR_BH_AGENT_WORKSPACE"]?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !override.isEmpty {
-            self.agentWorkspace = URL(fileURLWithPath: NSString(string: override).expandingTildeInPath, isDirectory: true)
-        } else {
-            self.agentWorkspace = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".config/browser-harness/agent-workspace", isDirectory: true)
-        }
-
+        self.browserWorkspace = browserWorkspace
         if let workspaceName {
             self.workspaceName = workspaceName
-        } else if let override = ProcessInfo.processInfo.environment["NEOY_TUTOR_BROWSER_WORKSPACE_NAME"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+        } else if let override = ProcessInfo.processInfo.environment["NEOY_TUTOR_BROWSER_WORKSPACE_NAME"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
                   !override.isEmpty {
             self.workspaceName = override
         } else {
             self.workspaceName = "Tutor"
         }
-
         if let workspacePoolSize {
             self.workspacePoolSize = max(1, workspacePoolSize)
         } else if let raw = ProcessInfo.processInfo.environment["NEOY_TUTOR_BROWSER_POOL_SIZE"],
@@ -99,188 +88,76 @@ struct NeoYChatGPTPlatformRunner: Sendable {
         } else {
             self.workspacePoolSize = 8
         }
-
-        if let root {
-            self.root = root
-            return
-        }
-        let environment = ProcessInfo.processInfo.environment["NEOY_BROWSER_PLATFORMS_ROOT"]?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let environment, !environment.isEmpty {
-            self.root = URL(fileURLWithPath: NSString(string: environment).expandingTildeInPath, isDirectory: true)
-        } else {
-            self.root = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".agents/skills/browser-platforms", isDirectory: true)
-        }
     }
 
-    var executable: URL {
-        root.appendingPathComponent("platforms/chatgpt/bin/chatgpt-thread-turn")
-    }
-
-    var projectSetupExecutable: URL {
-        root.appendingPathComponent("platforms/chatgpt/bin/chatgpt-project-setup")
-    }
-
-    var helper: URL {
-        agentWorkspace.appendingPathComponent("agent_helpers.py")
-    }
-
-    var isAvailable: Bool {
-        FileManager.default.isExecutableFile(atPath: executable.path)
-            && FileManager.default.isExecutableFile(atPath: projectSetupExecutable.path)
-            && FileManager.default.fileExists(atPath: helper.path)
-    }
-
-    private func configuredEnvironment() throws -> [String: String] {
-        guard FileManager.default.fileExists(atPath: helper.path) else {
-            throw NeoYTutorError.platformUnavailable("Browser Workspace helper missing at \(helper.path)")
-        }
-        var environment = ProcessInfo.processInfo.environment
-        environment["BH_AGENT_WORKSPACE"] = agentWorkspace.path
-        environment["BH_WORKSPACE_NAME"] = workspaceName
-        environment["BH_WORKSPACE_POOL_SIZE"] = String(workspacePoolSize)
-        return environment
-    }
+    var platformCommand: String { "browser-workspace" }
 
     func setupProject(
         projectName: String,
         instructions: String,
         initialPrompt: String
     ) async throws -> NeoYChatGPTProjectSetupResult {
-        let executable = projectSetupExecutable
-        guard FileManager.default.isExecutableFile(atPath: executable.path) else {
-            throw NeoYTutorError.platformUnavailable(executable.path)
+        let object = try await browserWorkspace.run(
+            action: "project-setup",
+            config: [
+                "project_name": projectName,
+                "instructions": instructions,
+                "initial_prompt": initialPrompt,
+            ],
+            workspace: workspaceName,
+            poolSize: workspacePoolSize
+        )
+        guard let status = object["status"] as? String,
+              let projectID = object["project_id"] as? String,
+              let projectURL = object["project_url"] as? String,
+              let threadURL = object["thread_url"] as? String else {
+            throw NeoYTutorError.invalidPlatformResponse
         }
-        let environment = try configuredEnvironment()
-
-        return try await Task.detached(priority: .userInitiated) {
-            let process = Process()
-            process.executableURL = executable
-            process.arguments = [
-                "--project-name", projectName,
-                "--instructions", instructions,
-                "--initial-prompt", initialPrompt,
-            ]
-            process.environment = environment
-            let stdout = Pipe()
-            let stderr = Pipe()
-            process.standardOutput = stdout
-            process.standardError = stderr
-            do { try process.run() }
-            catch { throw NeoYTutorError.platformUnavailable(error.localizedDescription) }
-            process.waitUntilExit()
-
-            let output = String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let errorOutput = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let lastLine = output.split(separator: "\n").last,
-                  let data = String(lastLine).data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                throw NeoYTutorError.platformFailed([errorOutput, output].filter { !$0.isEmpty }.joined(separator: "\n").ifEmpty("invalid project setup response"))
-            }
-            if process.terminationStatus != 0 || (object["status"] as? String) == "error" {
-                throw NeoYTutorError.platformFailed((object["error"] as? String) ?? errorOutput.ifEmpty("exit \(process.terminationStatus)"))
-            }
-            guard let status = object["status"] as? String,
-                  let projectID = object["project_id"] as? String,
-                  let projectURL = object["project_url"] as? String,
-                  let threadURL = object["thread_url"] as? String else {
-                throw NeoYTutorError.invalidPlatformResponse
-            }
-            return NeoYChatGPTProjectSetupResult(
-                status: status,
-                projectID: projectID,
-                projectURL: projectURL,
-                projectReused: object["project_reused"] as? Bool ?? false,
-                memory: object["memory"] as? String ?? "unavailable",
-                threadURL: threadURL,
-                targetID: object["target_id"] as? String
-            )
-        }.value
+        return NeoYChatGPTProjectSetupResult(
+            status: status,
+            projectID: projectID,
+            projectURL: projectURL,
+            projectReused: object["project_reused"] as? Bool ?? false,
+            memory: object["memory"] as? String ?? "unavailable",
+            threadURL: threadURL,
+            targetID: nil
+        )
     }
 
     func turn(
         threadURL: String,
-        targetID: String?,
+        targetID _: String?,
         prompt: String,
         files: [String],
         timeout: Int = 240
     ) async throws -> NeoYChatGPTTurnResult {
-        let executable = self.executable
-        guard FileManager.default.isExecutableFile(atPath: executable.path) else {
-            throw NeoYTutorError.platformUnavailable(executable.path)
+        let object = try await browserWorkspace.run(
+            action: "thread-turn",
+            config: [
+                "thread_url": threadURL,
+                "prompt": prompt,
+                "file": files,
+                "result_timeout": timeout,
+                "app": "tutor",
+            ],
+            workspace: workspaceName,
+            poolSize: workspacePoolSize
+        )
+        guard let status = object["status"] as? String,
+              let returnedThreadURL = object["thread_url"] as? String,
+              let text = object["text"] as? String else {
+            throw NeoYTutorError.invalidPlatformResponse
         }
-        let environment = try configuredEnvironment()
-
-        return try await Task.detached(priority: .userInitiated) {
-            let process = Process()
-            process.executableURL = executable
-            var arguments = [
-                "--thread-url", threadURL,
-                "--prompt", prompt,
-                "--result-timeout", String(timeout),
-                "--app", "tutor",
-            ]
-            if let targetID, !targetID.isEmpty {
-                arguments += ["--target-id", targetID]
-            }
-            for file in files {
-                arguments += ["--file", file]
-            }
-            process.arguments = arguments
-            process.environment = environment
-
-            let stdout = Pipe()
-            let stderr = Pipe()
-            process.standardOutput = stdout
-            process.standardError = stderr
-
-            do {
-                try process.run()
-            } catch {
-                throw NeoYTutorError.platformUnavailable(error.localizedDescription)
-            }
-
-            process.waitUntilExit()
-            let output = String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let errorOutput = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-
-            guard let lastLine = output.split(separator: "\n").last,
-                  let data = String(lastLine).data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                let message = [errorOutput, output].filter { !$0.isEmpty }.joined(separator: "\n")
-                if process.terminationStatus != 0 {
-                    throw NeoYTutorError.platformFailed(message.isEmpty ? "exit \(process.terminationStatus)" : message)
-                }
-                throw NeoYTutorError.invalidPlatformResponse
-            }
-
-            if process.terminationStatus != 0 || (object["status"] as? String) == "error" {
-                throw NeoYTutorError.platformFailed(
-                    (object["error"] as? String) ?? errorOutput.ifEmpty("exit \(process.terminationStatus)")
-                )
-            }
-
-            guard let status = object["status"] as? String,
-                  let returnedThreadURL = object["thread_url"] as? String,
-                  let text = object["text"] as? String else {
-                throw NeoYTutorError.invalidPlatformResponse
-            }
-
-            return NeoYChatGPTTurnResult(
-                status: status,
-                threadURL: returnedThreadURL,
-                targetID: object["target_id"] as? String,
-                recovered: object["recovered"] as? Bool ?? false,
-                text: text,
-                assistantMessageID: object["assistant_message_id"] as? String,
-                userMessageID: object["user_message_id"] as? String,
-                verifiedBy: object["verified_by"] as? String
-            )
-        }.value
+        return NeoYChatGPTTurnResult(
+            status: status,
+            threadURL: returnedThreadURL,
+            targetID: nil,
+            recovered: object["recovered"] as? Bool ?? false,
+            text: text,
+            assistantMessageID: object["assistant_message_id"] as? String,
+            userMessageID: object["user_message_id"] as? String,
+            verifiedBy: object["verified_by"] as? String
+        )
     }
 }
 
@@ -316,9 +193,7 @@ actor NeoYTutorWorkspace {
         return Self.jsonString([
             "feature": "tutor",
             "platform": "chatgpt",
-            "platform_available": runner.isAvailable,
-            "platform_executable": runner.executable.path,
-            "browser_agent_workspace": runner.agentWorkspace.path,
+            "platform": runner.platformCommand,
             "browser_workspace_name": runner.workspaceName,
             "browser_workspace_pool_size": runner.workspacePoolSize,
             "bindings": bindings,
