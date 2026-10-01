@@ -41,15 +41,21 @@ rm -rf "$DEST"
 mv "$DEST.new" "$DEST"
 
 RUNTIME="$DEST/Contents/Resources/runtime-control.sh"
-if command -v pm2 >/dev/null 2>&1 && [[ -f "$RUNTIME" ]]; then
-  rm -f "$LAUNCH_PLIST"
-  /bin/zsh "$RUNTIME" pm2-setup
-  STARTUP_MODE="pm2"
+mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.neoy"
+
+# NeoY itself is always supervised by macOS launchd. PM2 is reserved for
+# NeoY-managed background/feature services and is invoked through npx.
+if command -v npx >/dev/null 2>&1; then
+  npx --yes pm2 delete neoy >/dev/null 2>&1 || true
+  npx --yes pm2 save --force >/dev/null 2>&1 || true
 else
-  mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.neoy"
-  cat > "$LAUNCH_PLIST" <<PLIST
+  print -u2 "warning: npx not found; NeoY will run, but PM2-managed feature services are unavailable"
+fi
+rm -f "$HOME/Library/Application Support/NeoY/neoy-pm2.config.cjs"
+
+cat > "$LAUNCH_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>$LAUNCH_LABEL</string>
   <key>ProgramArguments</key><array><string>$DEST/Contents/MacOS/NeoY</string></array>
@@ -61,11 +67,10 @@ else
   <key>StandardErrorPath</key><string>$HOME/.neoy/launchd.err.log</string>
 </dict></plist>
 PLIST
-  plutil -lint "$LAUNCH_PLIST" >/dev/null
-  launchctl bootstrap "gui/$UID" "$LAUNCH_PLIST"
-  launchctl kickstart -k "gui/$UID/$LAUNCH_LABEL"
-  STARTUP_MODE="launch-agent-keepalive"
-fi
+plutil -lint "$LAUNCH_PLIST" >/dev/null
+launchctl bootstrap "gui/$UID" "$LAUNCH_PLIST"
+launchctl kickstart -k "gui/$UID/$LAUNCH_LABEL"
+STARTUP_MODE="launch-agent-keepalive"
 
 echo "Installed $DEST; startup mode: $STARTUP_MODE"
 codesign -d -r- "$DEST" 2>&1 | tail -1

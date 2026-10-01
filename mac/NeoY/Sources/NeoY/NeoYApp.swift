@@ -197,10 +197,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
             state: serverIsRunning && handoffError == nil ? .ready : .degraded,
             version: NeoYCoreRuntime.version,
             bundleIdentifier: Bundle.main.bundleIdentifier ?? "com.neox.neoy",
-            startupMode: FileManager.default.fileExists(
-                atPath: FileManager.default.homeDirectoryForCurrentUser
-                    .appendingPathComponent("Library/Application Support/NeoY/neoy-pm2.config.cjs").path
-            ) ? "pm2" : "launch-agent-keepalive",
+            startupMode: "launch-agent-keepalive",
             mcp: NeoYRuntimeEndpoint(
                 name: "NeoY",
                 url: NeoYDeploymentSettingsStore.load().localMCPURL,
