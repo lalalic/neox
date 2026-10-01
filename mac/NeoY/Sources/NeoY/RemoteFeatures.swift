@@ -10,6 +10,7 @@ enum NeoYRemoteFeature: String, CaseIterable, Identifiable, Codable, Sendable {
     case demo
     case tour
     case phone
+    case tutor
     case mcpServices = "mcp-services"
 
     var id: String { rawValue }
@@ -25,6 +26,7 @@ enum NeoYRemoteFeature: String, CaseIterable, Identifiable, Codable, Sendable {
         case .demo: "Demo Recording"
         case .tour: "Capture Tour"
         case .phone: "Phone"
+        case .tutor: "Family Tutor"
         case .mcpServices: "Connected MCP Services"
         }
     }
@@ -40,6 +42,7 @@ enum NeoYRemoteFeature: String, CaseIterable, Identifiable, Codable, Sendable {
         case .demo: toolName.hasPrefix("demo.")
         case .tour: toolName.hasPrefix("tour.")
         case .phone: toolName.hasPrefix("phone.")
+        case .tutor: toolName.hasPrefix("tutor.")
         case .mcpServices: toolName.hasPrefix("mcp.")
         }
     }

@@ -6,6 +6,7 @@ final class NeoYSetupModel: ObservableObject {
     enum Tab: String, CaseIterable, Identifiable {
         case mcp = "MCP"
         case remote = "Remote"
+        case tutor = "Tutor"
         case advanced = "Advanced"
         var id: String { rawValue }
     }
@@ -21,6 +22,9 @@ final class NeoYSetupModel: ObservableObject {
     @Published var remoteMode: RemoteMode = .temporary
     @Published var publicHostname = ""
     @Published var remoteFeatures: Set<NeoYRemoteFeature> = []
+    @Published var tutorLearner = ""
+    @Published var tutorThreadURL = ""
+    @Published private(set) var tutorStatus = "Loading…"
     @Published private(set) var oauthClientID = ""
     @Published private(set) var oauthToken = ""
     @Published var result = ""
@@ -38,6 +42,40 @@ final class NeoYSetupModel: ObservableObject {
         let credentials = NeoYMCPPluginCredentials.current()
         oauthClientID = credentials.clientID
         oauthToken = credentials.token
+        Task { tutorStatus = await NeoYTutorWorkspace.shared.statusJSON() }
+    }
+
+    func bindTutorLearner() {
+        let learner = tutorLearner
+        let threadURL = tutorThreadURL
+        Task {
+            isBusy = true
+            defer { isBusy = false }
+            do {
+                result = try await NeoYTutorWorkspace.shared.bind(learner: learner, threadURL: threadURL)
+                tutorStatus = await NeoYTutorWorkspace.shared.statusJSON()
+            } catch {
+                result = error.localizedDescription
+            }
+        }
+    }
+
+    func unbindTutorLearner() {
+        let learner = tutorLearner
+        Task {
+            isBusy = true
+            defer { isBusy = false }
+            do {
+                result = try await NeoYTutorWorkspace.shared.unbind(learner: learner)
+                tutorStatus = await NeoYTutorWorkspace.shared.statusJSON()
+            } catch {
+                result = error.localizedDescription
+            }
+        }
+    }
+
+    func refreshTutor() {
+        Task { tutorStatus = await NeoYTutorWorkspace.shared.statusJSON() }
     }
 
     var localMCPURL: String {
@@ -258,6 +296,7 @@ struct NeoYSetupView: View {
                     switch model.tab {
                     case .mcp: mcpTab
                     case .remote: remoteTab
+                    case .tutor: tutorTab
                     case .advanced: advancedTab
                     }
                 }
@@ -383,6 +422,42 @@ struct NeoYSetupView: View {
                             set: { model.setRemoteFeature(feature, enabled: $0) }
                         ))
                     }
+                }
+                .padding(8)
+            }
+        }
+    }
+
+    private var tutorTab: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            heading("Tutor", "Fixed Family Tutor workspace backed by persistent ChatGPT threads.")
+
+            GroupBox("ChatGPT platform") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("ChatGPT page mechanics come from browser-platforms. NeoY stores learner/thread bindings only; transcripts remain in ChatGPT.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(model.tutorStatus)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .lineLimit(8)
+                    Button("Refresh") { model.refreshTutor() }
+                }
+                .padding(8)
+            }
+
+            GroupBox("Learner binding") {
+                VStack(alignment: .leading, spacing: 12) {
+                    TextField("Learner id, e.g. maggie", text: $model.tutorLearner)
+                    TextField("Existing ChatGPT thread URL", text: $model.tutorThreadURL)
+                    HStack {
+                        Button("Bind") { model.bindTutorLearner() }
+                        Button("Unbind", role: .destructive) { model.unbindTutorLearner() }
+                        Spacer()
+                    }
+                    Text("A learner keeps one durable thread binding. If the browser target disappears, the ChatGPT platform recovers from the saved thread URL.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 .padding(8)
             }
