@@ -17,16 +17,19 @@ actor NeoYFeatureBootstrapService {
     private let stateURL: URL
     private let events: NeoYEventsBusClient
     private let tutorConnectorOrigin: URL
+    private let tutorBootstrapControlOrigin: URL
     private var states: [String: NeoYFeatureBootstrapState]
 
     init(
         stateURL: URL = NeoYPaths.supportDirectory.appendingPathComponent("feature-bootstrap.json"),
         events: NeoYEventsBusClient = NeoYEventsBusClient(),
-        tutorConnectorOrigin: URL? = nil
+        tutorConnectorOrigin: URL? = nil,
+        tutorBootstrapControlOrigin: URL? = nil
     ) {
         self.stateURL = stateURL
         self.events = events
         self.tutorConnectorOrigin = tutorConnectorOrigin ?? Self.defaultTutorConnectorOrigin()
+        self.tutorBootstrapControlOrigin = tutorBootstrapControlOrigin ?? Self.defaultTutorBootstrapControlOrigin()
         self.states = Self.load(stateURL)
     }
 
@@ -83,33 +86,82 @@ actor NeoYFeatureBootstrapService {
 
     func check(feature rawFeature: String) async throws -> String {
         let feature = rawFeature.lowercased()
-        guard let state = states[feature] else {
+        guard var state = states[feature] else {
             throw NeoYTutorError.platformFailed("bootstrap for '\(feature)' has not started")
         }
         guard feature == "tutor" else { return Self.json(Self.object(state)) }
-        guard state.phase == "waiting_user_action" else { return Self.json(Self.object(state)) }
+        if state.phase == "ready" || state.phase == "finalizing" {
+            return Self.json(Self.object(state))
+        }
 
-        let url = tutorConnectorOrigin
-            .appendingPathComponent("v1")
-            .appendingPathComponent("sessions")
-            .appendingPathComponent(state.sessionID)
-        let (data, response) = try await URLSession.shared.data(from: url)
-        guard let http = response as? HTTPURLResponse else {
-            throw NeoYTutorError.platformFailed("Discord connector returned an invalid response")
-        }
-        if http.statusCode == 410 { return Self.json(Self.object(state)) }
-        guard (200..<300).contains(http.statusCode),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw NeoYTutorError.platformFailed("Discord connector status failed with HTTP \(http.statusCode)")
-        }
-        if object["discord_connected"] as? Bool == true {
-            return try await receive(
+        if state.phase == "waiting_user_action" {
+            let url = tutorConnectorOrigin
+                .appendingPathComponent("v1")
+                .appendingPathComponent("sessions")
+                .appendingPathComponent(state.sessionID)
+            let status = try await fetchJSONObject(url)
+            if status["discord_connected"] as? Bool != true {
+                return Self.json(Self.object(state))
+            }
+            _ = try await receive(
                 feature: feature,
                 type: "discord.connected",
                 data: ["connector": .string("cloudflare")]
             )
+            state = states[feature] ?? state
         }
-        return Self.json(Self.object(state))
+
+        guard state.phase == "discovering" else {
+            return Self.json(Self.object(state))
+        }
+
+        let internalURL = tutorConnectorOrigin
+            .appendingPathComponent("v1")
+            .appendingPathComponent("internal")
+            .appendingPathComponent("sessions")
+            .appendingPathComponent(state.sessionID)
+        let internalStatus = try await fetchJSONObject(internalURL)
+        guard internalStatus["discord_connected"] as? Bool == true,
+              let guildID = internalStatus["guild_id"] as? String,
+              !guildID.isEmpty else {
+            return Self.json(Self.object(state))
+        }
+
+        var request = URLRequest(url: tutorBootstrapControlOrigin.appendingPathComponent("bootstrap/discover"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "session_id": state.sessionID,
+            "guild_id": guildID,
+        ])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              let result = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw NeoYTutorError.platformFailed("Family Tutor bootstrap control returned an invalid response")
+        }
+        if http.statusCode == 409 {
+            let family = Self.logicalFamilyJSONValue(result["family"])
+            return try await receive(
+                feature: feature,
+                type: "family.needs_review",
+                data: family.map { ["family": $0] } ?? [:]
+            )
+        }
+        guard (200..<300).contains(http.statusCode), result["status"] as? String == "ready" else {
+            throw NeoYTutorError.platformFailed("Family Tutor bootstrap finalize failed with HTTP \(http.statusCode)")
+        }
+
+        let family = Self.logicalFamilyJSONValue(result["family"])
+        _ = try await receive(
+            feature: feature,
+            type: "family.discovered",
+            data: family.map { ["family": $0] } ?? [:]
+        )
+        return try await receive(
+            feature: feature,
+            type: "bootstrap.completed",
+            data: family.map { ["family": $0] } ?? [:]
+        )
     }
 
     func receive(feature rawFeature: String, type: String, data: [String: JSONValue]) async throws -> String {
@@ -124,6 +176,9 @@ actor NeoYFeatureBootstrapService {
         case ("tutor", "family.discovered"):
             state.phase = "finalizing"
             state.message = "Family discovered. Creating learner Tutor workspaces."
+        case ("tutor", "family.needs_review"):
+            state.phase = "waiting"
+            state.message = "Discord connected, but family channels need confirmation."
         case ("tutor", "bootstrap.completed"):
             state.phase = "ready"
             state.message = "Family Tutor is ready."
@@ -143,6 +198,45 @@ actor NeoYFeatureBootstrapService {
         states.removeValue(forKey: feature)
         try persist()
         return Self.json(["status": "reset", "feature": feature])
+    }
+
+    private func fetchJSONObject(_ url: URL) async throws -> [String: Any] {
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard let http = response as? HTTPURLResponse else {
+            throw NeoYTutorError.platformFailed("HTTP service returned an invalid response")
+        }
+        if http.statusCode == 410 { return [:] }
+        guard (200..<300).contains(http.statusCode),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw NeoYTutorError.platformFailed("HTTP service failed with status \(http.statusCode)")
+        }
+        return object
+    }
+
+    private static func logicalFamilyJSONValue(_ raw: Any?) -> JSONValue? {
+        guard let object = raw as? [String: Any] else { return nil }
+        func value(_ raw: Any) -> JSONValue {
+            switch raw {
+            case let string as String: return .string(string)
+            case let number as NSNumber:
+                if CFGetTypeID(number) == CFBooleanGetTypeID() { return .bool(number.boolValue) }
+                return .double(number.doubleValue)
+            case let array as [Any]: return .array(array.map(value))
+            case let dictionary as [String: Any]: return .object(dictionary.mapValues(value))
+            default: return .null
+            }
+        }
+        return .object(object.mapValues(value))
+    }
+
+    private static func defaultTutorBootstrapControlOrigin() -> URL {
+        if let value = ProcessInfo.processInfo.environment["NEOY_TUTOR_BOOTSTRAP_CONTROL_URL"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !value.isEmpty,
+           let url = URL(string: value) {
+            return url
+        }
+        return URL(string: "http://127.0.0.1:43118")!
     }
 
     private static func defaultTutorConnectorOrigin() -> URL {
