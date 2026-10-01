@@ -50,8 +50,17 @@ struct NeoYChatGPTTurnResult: Codable, Equatable, Sendable {
 
 struct NeoYChatGPTPlatformRunner: Sendable {
     let root: URL
+    let agentWorkspace: URL
 
-    init(root: URL? = nil) {
+    init(root: URL? = nil, agentWorkspace: URL? = nil) {
+        if let agentWorkspace {
+            self.agentWorkspace = agentWorkspace
+        } else if let override = ProcessInfo.processInfo.environment["NEOY_TUTOR_BH_AGENT_WORKSPACE"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !override.isEmpty {
+            self.agentWorkspace = URL(fileURLWithPath: NSString(string: override).expandingTildeInPath, isDirectory: true)
+        } else {
+            self.agentWorkspace = NeoYPaths.supportDirectory.appendingPathComponent("browser-harness-tutor", isDirectory: true)
+        }
         if let root {
             self.root = root
             return
@@ -100,6 +109,14 @@ struct NeoYChatGPTPlatformRunner: Sendable {
                 arguments += ["--file", file]
             }
             process.arguments = arguments
+            do {
+                try FileManager.default.createDirectory(at: agentWorkspace, withIntermediateDirectories: true)
+            } catch {
+                throw NeoYTutorError.platformUnavailable("could not create Tutor Browser Harness workspace: \(error.localizedDescription)")
+            }
+            var environment = ProcessInfo.processInfo.environment
+            environment["BH_AGENT_WORKSPACE"] = agentWorkspace.path
+            process.environment = environment
 
             let stdout = Pipe()
             let stderr = Pipe()
@@ -186,6 +203,7 @@ actor NeoYTutorWorkspace {
             "platform": "chatgpt",
             "platform_available": runner.isAvailable,
             "platform_executable": runner.executable.path,
+            "browser_agent_workspace": runner.agentWorkspace.path,
             "bindings": bindings,
         ])
     }
