@@ -85,6 +85,14 @@ final class TutorWorkspaceTests: XCTestCase {
         XCTAssertEqual(runner.helper.path, agentWorkspace.appendingPathComponent("agent_helpers.py").path)
     }
 
+    func testTutorRunnerUsesFamilyTutorAppName() {
+        let source = try! String(contentsOfFile: #filePath.replacingOccurrences(
+            of: "/Tests/NeoYTests/TutorWorkspaceTests.swift",
+            with: "/Sources/NeoY/TutorWorkspace.swift"
+        ))
+        XCTAssertTrue(source.contains("\"--app\", \"tutor\""))
+    }
+
     func testRunnerExposesProjectSetupExecutable() {
         let root = URL(fileURLWithPath: "/tmp/browser-platforms", isDirectory: true)
         let runner = NeoYChatGPTPlatformRunner(

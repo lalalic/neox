@@ -220,6 +220,7 @@ struct NeoYChatGPTPlatformRunner: Sendable {
                 "--thread-url", threadURL,
                 "--prompt", prompt,
                 "--result-timeout", String(timeout),
+                "--app", "tutor",
             ]
             if let targetID, !targetID.isEmpty {
                 arguments += ["--target-id", targetID]
