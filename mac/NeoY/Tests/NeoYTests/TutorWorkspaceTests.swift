@@ -68,6 +68,21 @@ final class TutorWorkspaceTests: XCTestCase {
         }
     }
 
+    func testRunnerUsesFixedTutorBrowserWorkspace() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("neoy-tutor-platform-\(UUID().uuidString)", isDirectory: true)
+        let agentWorkspace = root.appendingPathComponent("agent-workspace", isDirectory: true)
+        let runner = NeoYChatGPTPlatformRunner(
+            root: root,
+            agentWorkspace: agentWorkspace,
+            workspaceName: "Tutor",
+            workspacePoolSize: 4
+        )
+        XCTAssertEqual(runner.workspaceName, "Tutor")
+        XCTAssertEqual(runner.workspacePoolSize, 4)
+        XCTAssertEqual(runner.helper.path, agentWorkspace.appendingPathComponent("agent_helpers.py").path)
+    }
+
     func testRemoteFeatureMatchesTutorTools() {
         XCTAssertTrue(NeoYRemoteFeature.tutor.matches(toolName: "tutor.workspace"))
         XCTAssertFalse(NeoYRemoteFeature.tutor.matches(toolName: "phone.status"))

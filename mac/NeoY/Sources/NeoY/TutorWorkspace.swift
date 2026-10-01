@@ -51,16 +51,43 @@ struct NeoYChatGPTTurnResult: Codable, Equatable, Sendable {
 struct NeoYChatGPTPlatformRunner: Sendable {
     let root: URL
     let agentWorkspace: URL
+    let workspaceName: String
+    let workspacePoolSize: Int
 
-    init(root: URL? = nil, agentWorkspace: URL? = nil) {
+    init(
+        root: URL? = nil,
+        agentWorkspace: URL? = nil,
+        workspaceName: String? = nil,
+        workspacePoolSize: Int? = nil
+    ) {
         if let agentWorkspace {
             self.agentWorkspace = agentWorkspace
         } else if let override = ProcessInfo.processInfo.environment["NEOY_TUTOR_BH_AGENT_WORKSPACE"]?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !override.isEmpty {
             self.agentWorkspace = URL(fileURLWithPath: NSString(string: override).expandingTildeInPath, isDirectory: true)
         } else {
-            self.agentWorkspace = NeoYPaths.supportDirectory.appendingPathComponent("browser-harness-tutor", isDirectory: true)
+            self.agentWorkspace = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".config/browser-harness/agent-workspace", isDirectory: true)
         }
+
+        if let workspaceName {
+            self.workspaceName = workspaceName
+        } else if let override = ProcessInfo.processInfo.environment["NEOY_TUTOR_BROWSER_WORKSPACE_NAME"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !override.isEmpty {
+            self.workspaceName = override
+        } else {
+            self.workspaceName = "Tutor"
+        }
+
+        if let workspacePoolSize {
+            self.workspacePoolSize = max(1, workspacePoolSize)
+        } else if let raw = ProcessInfo.processInfo.environment["NEOY_TUTOR_BROWSER_POOL_SIZE"],
+                  let parsed = Int(raw), parsed > 0 {
+            self.workspacePoolSize = parsed
+        } else {
+            self.workspacePoolSize = 8
+        }
+
         if let root {
             self.root = root
             return
@@ -78,8 +105,13 @@ struct NeoYChatGPTPlatformRunner: Sendable {
         root.appendingPathComponent("platforms/chatgpt/bin/chatgpt-thread-turn")
     }
 
+    var helper: URL {
+        agentWorkspace.appendingPathComponent("agent_helpers.py")
+    }
+
     var isAvailable: Bool {
         FileManager.default.isExecutableFile(atPath: executable.path)
+            && FileManager.default.fileExists(atPath: helper.path)
     }
 
     func turn(
@@ -92,6 +124,9 @@ struct NeoYChatGPTPlatformRunner: Sendable {
         let executable = self.executable
         guard FileManager.default.isExecutableFile(atPath: executable.path) else {
             throw NeoYTutorError.platformUnavailable(executable.path)
+        }
+        guard FileManager.default.fileExists(atPath: helper.path) else {
+            throw NeoYTutorError.platformUnavailable("Browser Workspace helper missing at \(helper.path)")
         }
 
         return try await Task.detached(priority: .userInitiated) {
@@ -116,6 +151,8 @@ struct NeoYChatGPTPlatformRunner: Sendable {
             }
             var environment = ProcessInfo.processInfo.environment
             environment["BH_AGENT_WORKSPACE"] = agentWorkspace.path
+            environment["BH_WORKSPACE_NAME"] = workspaceName
+            environment["BH_WORKSPACE_POOL_SIZE"] = String(workspacePoolSize)
             process.environment = environment
 
             let stdout = Pipe()
@@ -204,6 +241,8 @@ actor NeoYTutorWorkspace {
             "platform_available": runner.isAvailable,
             "platform_executable": runner.executable.path,
             "browser_agent_workspace": runner.agentWorkspace.path,
+            "browser_workspace_name": runner.workspaceName,
+            "browser_workspace_pool_size": runner.workspacePoolSize,
             "bindings": bindings,
         ])
     }
