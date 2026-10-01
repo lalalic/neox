@@ -2,6 +2,8 @@ import Foundation
 
 struct NeoYTutorBinding: Codable, Equatable, Sendable {
     let learner: String
+    var projectID: String?
+    var projectURL: String?
     var threadURL: String
     var targetID: String?
     var updatedAt: Date
@@ -35,6 +37,16 @@ enum NeoYTutorError: LocalizedError {
             "ChatGPT browser platform returned an invalid response"
         }
     }
+}
+
+struct NeoYChatGPTProjectSetupResult: Codable, Equatable, Sendable {
+    let status: String
+    let projectID: String
+    let projectURL: String
+    let projectReused: Bool
+    let memory: String
+    let threadURL: String
+    let targetID: String?
 }
 
 struct NeoYChatGPTTurnResult: Codable, Equatable, Sendable {
@@ -105,13 +117,87 @@ struct NeoYChatGPTPlatformRunner: Sendable {
         root.appendingPathComponent("platforms/chatgpt/bin/chatgpt-thread-turn")
     }
 
+    var projectSetupExecutable: URL {
+        root.appendingPathComponent("platforms/chatgpt/bin/chatgpt-project-setup")
+    }
+
     var helper: URL {
         agentWorkspace.appendingPathComponent("agent_helpers.py")
     }
 
     var isAvailable: Bool {
         FileManager.default.isExecutableFile(atPath: executable.path)
+            && FileManager.default.isExecutableFile(atPath: projectSetupExecutable.path)
             && FileManager.default.fileExists(atPath: helper.path)
+    }
+
+    private func configuredEnvironment() throws -> [String: String] {
+        guard FileManager.default.fileExists(atPath: helper.path) else {
+            throw NeoYTutorError.platformUnavailable("Browser Workspace helper missing at \(helper.path)")
+        }
+        var environment = ProcessInfo.processInfo.environment
+        environment["BH_AGENT_WORKSPACE"] = agentWorkspace.path
+        environment["BH_WORKSPACE_NAME"] = workspaceName
+        environment["BH_WORKSPACE_POOL_SIZE"] = String(workspacePoolSize)
+        return environment
+    }
+
+    func setupProject(
+        projectName: String,
+        instructions: String,
+        initialPrompt: String
+    ) async throws -> NeoYChatGPTProjectSetupResult {
+        let executable = projectSetupExecutable
+        guard FileManager.default.isExecutableFile(atPath: executable.path) else {
+            throw NeoYTutorError.platformUnavailable(executable.path)
+        }
+        let environment = try configuredEnvironment()
+
+        return try await Task.detached(priority: .userInitiated) {
+            let process = Process()
+            process.executableURL = executable
+            process.arguments = [
+                "--project-name", projectName,
+                "--instructions", instructions,
+                "--initial-prompt", initialPrompt,
+            ]
+            process.environment = environment
+            let stdout = Pipe()
+            let stderr = Pipe()
+            process.standardOutput = stdout
+            process.standardError = stderr
+            do { try process.run() }
+            catch { throw NeoYTutorError.platformUnavailable(error.localizedDescription) }
+            process.waitUntilExit()
+
+            let output = String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let errorOutput = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let lastLine = output.split(separator: "\n").last,
+                  let data = String(lastLine).data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw NeoYTutorError.platformFailed([errorOutput, output].filter { !$0.isEmpty }.joined(separator: "\n").ifEmpty("invalid project setup response"))
+            }
+            if process.terminationStatus != 0 || (object["status"] as? String) == "error" {
+                throw NeoYTutorError.platformFailed((object["error"] as? String) ?? errorOutput.ifEmpty("exit \(process.terminationStatus)"))
+            }
+            guard let status = object["status"] as? String,
+                  let projectID = object["project_id"] as? String,
+                  let projectURL = object["project_url"] as? String,
+                  let threadURL = object["thread_url"] as? String else {
+                throw NeoYTutorError.invalidPlatformResponse
+            }
+            return NeoYChatGPTProjectSetupResult(
+                status: status,
+                projectID: projectID,
+                projectURL: projectURL,
+                projectReused: object["project_reused"] as? Bool ?? false,
+                memory: object["memory"] as? String ?? "unavailable",
+                threadURL: threadURL,
+                targetID: object["target_id"] as? String
+            )
+        }.value
     }
 
     func turn(
@@ -125,9 +211,7 @@ struct NeoYChatGPTPlatformRunner: Sendable {
         guard FileManager.default.isExecutableFile(atPath: executable.path) else {
             throw NeoYTutorError.platformUnavailable(executable.path)
         }
-        guard FileManager.default.fileExists(atPath: helper.path) else {
-            throw NeoYTutorError.platformUnavailable("Browser Workspace helper missing at \(helper.path)")
-        }
+        let environment = try configuredEnvironment()
 
         return try await Task.detached(priority: .userInitiated) {
             let process = Process()
@@ -144,15 +228,6 @@ struct NeoYChatGPTPlatformRunner: Sendable {
                 arguments += ["--file", file]
             }
             process.arguments = arguments
-            do {
-                try FileManager.default.createDirectory(at: agentWorkspace, withIntermediateDirectories: true)
-            } catch {
-                throw NeoYTutorError.platformUnavailable("could not create Tutor Browser Harness workspace: \(error.localizedDescription)")
-            }
-            var environment = ProcessInfo.processInfo.environment
-            environment["BH_AGENT_WORKSPACE"] = agentWorkspace.path
-            environment["BH_WORKSPACE_NAME"] = workspaceName
-            environment["BH_WORKSPACE_POOL_SIZE"] = String(workspacePoolSize)
             process.environment = environment
 
             let stdout = Pipe()
@@ -230,6 +305,8 @@ actor NeoYTutorWorkspace {
         let bindings = state.bindings.values.sorted { $0.learner < $1.learner }.map { binding in
             [
                 "learner": binding.learner,
+                "project_id": binding.projectID ?? NSNull(),
+                "project_url": binding.projectURL ?? NSNull(),
                 "thread_url": binding.threadURL,
                 "target_id": binding.targetID ?? NSNull(),
                 "updated_at": ISO8601DateFormatter().string(from: binding.updatedAt),
@@ -255,12 +332,67 @@ actor NeoYTutorWorkspace {
 
         state.bindings[learner] = NeoYTutorBinding(
             learner: learner,
+            projectID: nil,
+            projectURL: nil,
             threadURL: threadURL,
             targetID: nil,
             updatedAt: Date()
         )
         try persist()
         return Self.jsonString(["status": "bound", "learner": learner, "thread_url": threadURL])
+    }
+
+    func setup(
+        learner rawLearner: String,
+        projectName: String,
+        instructions: String,
+        initialPrompt: String
+    ) async throws -> String {
+        let learner = rawLearner.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !learner.isEmpty else { throw NeoYTutorError.invalidLearner }
+        let name = projectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw NeoYTutorError.platformFailed("project_name is required") }
+        let instructions = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !instructions.isEmpty else { throw NeoYTutorError.platformFailed("instructions are required") }
+
+        let result = try await runner.setupProject(
+            projectName: name,
+            instructions: instructions,
+            initialPrompt: initialPrompt
+        )
+        state.bindings[learner] = NeoYTutorBinding(
+            learner: learner,
+            projectID: result.projectID,
+            projectURL: result.projectURL,
+            threadURL: result.threadURL,
+            targetID: result.targetID,
+            updatedAt: Date()
+        )
+        try persist()
+        return Self.jsonString([
+            "status": result.status,
+            "learner": learner,
+            "project_id": result.projectID,
+            "project_url": result.projectURL,
+            "project_reused": result.projectReused,
+            "memory": result.memory,
+            "thread_url": result.threadURL,
+            "target_id": result.targetID ?? NSNull(),
+        ])
+    }
+
+    func resetThread(
+        learner: String,
+        projectName: String,
+        instructions: String,
+        initialPrompt: String
+    ) async throws -> String {
+        try await setup(
+            learner: learner,
+            projectName: projectName,
+            instructions: instructions,
+            initialPrompt: initialPrompt
+        )
     }
 
     func unbind(learner rawLearner: String) throws -> String {
@@ -344,14 +476,17 @@ enum NeoYTutorTools {
             ToolDefinition(
                 name: "tutor.workspace",
                 description: """
-                Manage NeoY's fixed Family Tutor workspace. Actions: status, bind, unbind, turn.                 Each learner is bound to one persistent ChatGPT thread. NeoY stores only binding state, never transcripts.
+                Manage NeoY's fixed Family Tutor workspace. Actions: status, setup, bind, unbind, turn, reset_thread. Each learner is bound to one ChatGPT Project and current thread. NeoY stores only binding state, never transcripts.
                 """,
                 parameters: .object([
                     "type": .string("object"),
                     "properties": .object([
-                        "action": .object(["type": .string("string"), "description": .string("status, bind, unbind, or turn")]),
+                        "action": .object(["type": .string("string"), "description": .string("status, setup, bind, unbind, turn, or reset_thread")]),
                         "learner": .object(["type": .string("string"), "description": .string("Stable learner id")]),
                         "thread_url": .object(["type": .string("string"), "description": .string("Existing https://chatgpt.com thread URL")]),
+                        "project_name": .object(["type": .string("string"), "description": .string("ChatGPT Project name for setup/reset_thread")]),
+                        "instructions": .object(["type": .string("string"), "description": .string("Project Instructions for setup/reset_thread")]),
+                        "initial_prompt": .object(["type": .string("string"), "description": .string("Optional first-thread prompt")]),
                         "prompt": .object(["type": .string("string"), "description": .string("Turn text for action=turn")]),
                         "files": .object([
                             "type": .string("array"),
@@ -369,6 +504,28 @@ enum NeoYTutorTools {
                 switch action {
                 case "status", "list":
                     return await workspace.statusJSON()
+                case "setup", "reset_thread":
+                    guard case .string(let learner)? = object["learner"],
+                          case .string(let projectName)? = object["project_name"],
+                          case .string(let instructions)? = object["instructions"] else {
+                        throw NeoYTutorError.platformFailed("\(action) requires learner, project_name, and instructions")
+                    }
+                    let initialPrompt: String
+                    if case .string(let value)? = object["initial_prompt"] { initialPrompt = value } else { initialPrompt = "" }
+                    if action == "setup" {
+                        return try await workspace.setup(
+                            learner: learner,
+                            projectName: projectName,
+                            instructions: instructions,
+                            initialPrompt: initialPrompt
+                        )
+                    }
+                    return try await workspace.resetThread(
+                        learner: learner,
+                        projectName: projectName,
+                        instructions: instructions,
+                        initialPrompt: initialPrompt
+                    )
                 case "bind":
                     guard case .string(let learner)? = object["learner"],
                           case .string(let threadURL)? = object["thread_url"] else {
