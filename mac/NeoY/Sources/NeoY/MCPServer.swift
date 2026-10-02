@@ -58,6 +58,7 @@ public final class MCPServer {
     private var mcpResources: [[String: Any]] = []
     private var resourceHandlers: [String: MCPResourceHandler] = [:]
     private var privilegedAccessToken: String?
+    private var oauthService: NeoYOAuthService?
     private var remoteAllowedFeatures: Set<NeoYRemoteFeature> = []
     private var httpRoutes: [String: HTTPRouteHandler] = [:]
     // Dedicated queue for all network I/O — avoids blocking on MainActor
@@ -73,6 +74,7 @@ public final class MCPServer {
     nonisolated(unsafe) private var _snapshotResources: [[String: Any]] = []
     nonisolated(unsafe) private var _snapshotResourceHandlers: [String: MCPResourceHandler] = [:]
     nonisolated(unsafe) private var _snapshotPrivilegedAccessToken: String?
+    nonisolated(unsafe) private var _snapshotOAuthService: NeoYOAuthService?
     nonisolated(unsafe) private var _snapshotRemoteAllowedFeatures: Set<NeoYRemoteFeature> = []
     nonisolated(unsafe) private var _snapshotHTTPRoutes: [String: HTTPRouteHandler] = [:]
 
@@ -181,6 +183,11 @@ public final class MCPServer {
         refreshSnapshots()
     }
 
+    public func configureOAuth(clientID: String, consentToken: String, stateURL: URL) {
+        oauthService = NeoYOAuthService(clientID: clientID, consentToken: consentToken, stateURL: stateURL)
+        refreshSnapshots()
+    }
+
     func setRemoteAllowedFeatures(_ features: Set<NeoYRemoteFeature>) {
         remoteAllowedFeatures = features
         refreshSnapshots()
@@ -196,6 +203,7 @@ public final class MCPServer {
         _snapshotResources = mcpResources
         _snapshotResourceHandlers = resourceHandlers
         _snapshotPrivilegedAccessToken = privilegedAccessToken
+        _snapshotOAuthService = oauthService
         _snapshotRemoteAllowedFeatures = remoteAllowedFeatures
         _snapshotHTTPRoutes = httpRoutes
     }
@@ -231,6 +239,7 @@ public final class MCPServer {
         _snapshotResources = mcpResources
         _snapshotResourceHandlers = resourceHandlers
         _snapshotPrivilegedAccessToken = privilegedAccessToken
+        _snapshotOAuthService = oauthService
         _snapshotRemoteAllowedFeatures = remoteAllowedFeatures
         _snapshotHTTPRoutes = httpRoutes
 
@@ -393,7 +402,8 @@ public final class MCPServer {
         let isCloudflareProxy = headers["cf-connecting-ip"] != nil || headers["cf-ray"] != nil
         let isDirectLoopback = Self.isLoopback(connection.endpoint) && !isCloudflareProxy
         let isPrivileged = isDirectLoopback ||
-            (_snapshotPrivilegedAccessToken != nil && presentedToken == _snapshotPrivilegedAccessToken)
+            (_snapshotPrivilegedAccessToken != nil && presentedToken == _snapshotPrivilegedAccessToken) ||
+            (_snapshotOAuthService?.isAuthorizedBearer(presentedToken) == true)
 
         if let onRequest { onRequest("\(method) \(path)") }
 
@@ -403,6 +413,22 @@ public final class MCPServer {
             let bodyStr = String(raw[bodyStart.upperBound...])
             if !bodyStr.isEmpty {
                 body = bodyStr.data(using: .utf8)
+            }
+        }
+
+        if let oauth = _snapshotOAuthService,
+           let response = oauth.handle(method: method, path: path, requestTarget: requestTarget, headers: headers, body: body) {
+            sendHTTP(connection: connection, status: response.status, body: response.body,
+                     contentType: response.contentType, extraHeaders: response.headers)
+            return
+        }
+
+        if !isDirectLoopback, path == "/mcp", !isPrivileged, let oauth = _snapshotOAuthService {
+            let scheme = headers["x-forwarded-proto"]?.lowercased() == "https" || isCloudflareProxy ? "https" : "http"
+            if let host = headers["host"] {
+                sendHTTP(connection: connection, status: 401, body: nil,
+                         extraHeaders: oauth.challengeHeaders(origin: "\(scheme)://\(host)"))
+                return
             }
         }
 
@@ -679,7 +705,9 @@ public final class MCPServer {
         case 200: statusText = "OK"
         case 202: statusText = "Accepted"
         case 204: statusText = "No Content"
+        case 302: statusText = "Found"
         case 400: statusText = "Bad Request"
+        case 401: statusText = "Unauthorized"
         case 404: statusText = "Not Found"
         case 403: statusText = "Forbidden"
         case 405: statusText = "Method Not Allowed"

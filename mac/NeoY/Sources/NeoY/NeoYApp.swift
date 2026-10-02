@@ -118,7 +118,14 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
         let deployment = NeoYDeploymentSettingsStore.load()
         let value = MCPServer(name: "NeoY", version: NeoYCoreRuntime.version, port: deployment.mcpPort,
                               bonjourName: "NeoY")
-        value.setPrivilegedAccessToken(NeoYCoreAuth.token())
+        let coreToken = NeoYCoreAuth.token()
+        value.setPrivilegedAccessToken(coreToken)
+        let oauthCredentials = NeoYMCPPluginCredentials.current()
+        value.configureOAuth(
+            clientID: oauthCredentials.clientID,
+            consentToken: coreToken,
+            stateURL: NeoYPaths.supportDirectory.appendingPathComponent("oauth-state.json")
+        )
         value.setRemoteAllowedFeatures(deployment.enabledRemoteFeatures)
 
         let configuration = (try? NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)
