@@ -130,7 +130,7 @@ tutor.workspace
 
 Each learner is bound to one persistent ChatGPT thread. NeoY stores only the learner/thread/target binding at `~/Library/Application Support/NeoY/tutor-workspace.json`; it does not persist the ChatGPT transcript.
 
-ChatGPT page mechanics run through the Browser Workspace session API. NeoY creates or reuses the configured Browser Workspace, starts a short-lived session for each ChatGPT action, executes the shared ChatGPT platform action inside that session, and stops the session afterward. NeoY keeps learner/thread bindings only and does not contain ChatGPT selectors or DOM automation.
+ChatGPT page mechanics run through the fixed `Tutor` Browser Workspace session API. NeoY creates or reuses that workspace, starts a short-lived session for each ChatGPT action, executes the shared ChatGPT platform action inside that session, and stops the session afterward. NeoY keeps learner/thread bindings only and does not contain ChatGPT selectors or DOM automation.
 
 The Setup window has a **Tutor** tab for platform readiness and learner/thread binding. Remote exposure is independently controlled by the **Family Tutor** switch in Remote features. Local Tutor access remains available regardless of that remote switch.
 

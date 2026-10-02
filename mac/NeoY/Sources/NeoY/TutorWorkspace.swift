@@ -62,24 +62,14 @@ struct NeoYChatGPTTurnResult: Codable, Equatable, Sendable {
 
 struct NeoYChatGPTPlatformRunner: Sendable {
     let browserWorkspace: NeoYBrowserWorkspace
-    let workspaceName: String
+    let workspaceName = "Tutor"
     let workspacePoolSize: Int
 
     init(
         browserWorkspace: NeoYBrowserWorkspace = NeoYBrowserWorkspace(),
-        workspaceName: String? = nil,
         workspacePoolSize: Int? = nil
     ) {
         self.browserWorkspace = browserWorkspace
-        if let workspaceName {
-            self.workspaceName = workspaceName
-        } else if let override = ProcessInfo.processInfo.environment["NEOY_TUTOR_BROWSER_WORKSPACE_NAME"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-                  !override.isEmpty {
-            self.workspaceName = override
-        } else {
-            self.workspaceName = "Tutor"
-        }
         if let workspacePoolSize {
             self.workspacePoolSize = max(1, workspacePoolSize)
         } else if let raw = ProcessInfo.processInfo.environment["NEOY_TUTOR_BROWSER_POOL_SIZE"],

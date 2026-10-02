@@ -61,13 +61,20 @@ final class TutorWorkspaceTests: XCTestCase {
     }
 
     func testRunnerUsesFixedTutorBrowserWorkspace() {
-        let runner = NeoYChatGPTPlatformRunner(
-            workspaceName: "Tutor",
-            workspacePoolSize: 4
-        )
+        let runner = NeoYChatGPTPlatformRunner(workspacePoolSize: 4)
         XCTAssertEqual(runner.workspaceName, "Tutor")
         XCTAssertEqual(runner.workspacePoolSize, 4)
         XCTAssertEqual(runner.platformCommand, "browser-workspace")
+    }
+
+    func testRunnerDoesNotReadBrowserWorkspaceNameOverride() {
+        let source = try! String(contentsOfFile: #filePath.replacingOccurrences(
+            of: "/Tests/NeoYTests/TutorWorkspaceTests.swift",
+            with: "/Sources/NeoY/TutorWorkspace.swift"
+        ))
+        XCTAssertTrue(source.contains("let workspaceName = \"Tutor\""))
+        XCTAssertFalse(source.contains("NEOY_TUTOR_BROWSER_WORKSPACE_NAME"))
+        XCTAssertFalse(source.contains("workspaceName: String?"))
     }
 
     func testTutorRunnerUsesFamilyTutorAppName() {
