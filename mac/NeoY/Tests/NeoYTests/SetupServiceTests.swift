@@ -223,10 +223,19 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertEqual(decoded.controlPlane.errorCode, "configuration_save_failed")
     }
 
+    func testClusterIsCanonicalNodeToolName() {
+        let service = NeoYNodeService()
+        let names = NeoYNodeTools.tools(service: service).map(\.name)
+        XCTAssertEqual(names, ["cluster"])
+        XCTAssertFalse(names.contains("node"))
+    }
+
     func testRemoteFeatureClassification() {
         XCTAssertTrue(NeoYRemoteFeature.mcpServices.matches(toolName: "events.watch"))
         XCTAssertTrue(NeoYRemoteFeature.mcpServices.matches(toolName: "mcp.mac.exec"))
         XCTAssertTrue(NeoYRemoteFeature.computer.matches(toolName: "computer.click"))
+        XCTAssertTrue(NeoYRemoteFeature.nodes.matches(toolName: "cluster"))
+        XCTAssertFalse(NeoYRemoteFeature.nodes.matches(toolName: "node"))
         XCTAssertFalse(NeoYRemoteFeature.computer.matches(toolName: "mcp.mac.exec"))
     }
 
