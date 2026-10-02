@@ -428,7 +428,8 @@ async function ensureLocalBridgeInitialized() {
 // Memory only. A code or a half-finished consent that survived a restart would
 // be a security regression, and a 60s/300s lifetime makes a restart mid-flow a
 // retry rather than a broken connector.
-const authReqs = new Map(); // rid -> validated authorization request
+const authReqs = new Map();
+const localApprovals = new Set(); // rid -> validated authorization request
 const codes = new Map(); // sha256hex(code) -> issued authorization code
 
 // Rotating the bearer token must revoke every OAuth session. Persisting a digest
@@ -932,8 +933,9 @@ async function authorizePost(req, res) {
   // Proof of possession of the static bearer is the whole gate in front of an
   // otherwise unauthenticated /token. Never accept it in a query string: URLs
   // land in browser history, referrers and logs.
+  const locallyApproved = localApprovals.delete(rid);
   const got = crypto.createHash("sha256").update(form.get("bearer") || "", "latin1").digest();
-  if (!crypto.timingSafeEqual(got, TOKEN_DIGEST)) {
+  if (!locallyApproved && !crypto.timingSafeEqual(got, TOKEN_DIGEST)) {
     log(`POST /authorize refused from ${req.socket.remoteAddress}`);
     // Delay only the failure, and hold no state across requests. A correct token
     // is therefore never slowed and never refused, no matter how many wrong ones
@@ -970,6 +972,32 @@ async function authorizePost(req, res) {
   const params = { code, iss: areq.iss };
   if (areq.state !== null) params.state = areq.state;
   return redirectTo(res, areq.redirectUri, params);
+}
+
+function isLoopbackAddress(value) {
+  const v = String(value || "").toLowerCase();
+  return v === "127.0.0.1" || v === "::1" || v === "::ffff:127.0.0.1";
+}
+
+async function localApprove(req, res) {
+  if (!isLoopbackAddress(req.socket.remoteAddress)) {
+    return send(res, 403, { error: "loopback_only" });
+  }
+  let raw;
+  try {
+    raw = await readBody(req);
+  } catch (e) {
+    return send(res, e?.httpStatus || 400, { error: String(e.message || e) });
+  }
+  const form = new URLSearchParams(raw);
+  const rid = form.get("rid") || "";
+  const areq = authReqs.get(rid);
+  if (!areq || areq.exp <= Date.now()) {
+    return send(res, 404, { error: "unknown_or_expired_request" });
+  }
+  localApprovals.add(rid);
+  log("local OAuth approval granted for " + areq.clientId);
+  return send(res, 200, { approved: true });
 }
 
 // Lenient by design. No verbatim capture of a real ChatGPT POST /token exists,
@@ -1720,6 +1748,11 @@ async function handle(req, res) {
     const origin = publicOrigin(req);
     if (origin === null) return send(res, 400, { error: "cannot determine public origin" });
     return send(res, 200, discovery(origin), DISCOVERY_HEADERS);
+  }
+
+  if (pathname === "/oauth/local-approve") {
+    if (req.method === "POST") return localApprove(req, res);
+    return send(res, 405, { error: "method_not_allowed" }, { allow: "POST" });
   }
 
   if (pathname === "/authorize") {
