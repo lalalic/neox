@@ -55,7 +55,7 @@ enum NeoYSetupError: LocalizedError {
 enum NeoYSetupParser {
     static func parse(_ raw: String?) throws -> NeoYSetupCommand {
         var tokens = try tokenize(raw ?? "")
-        while tokens.first == "neoy.setup" || tokens.first == "setup" { tokens.removeFirst() }
+        while tokens.first == "setup" || tokens.first == "setup" { tokens.removeFirst() }
         guard let command = tokens.first else { return .help(topic: nil) }
 
         switch command {
@@ -568,7 +568,7 @@ actor NeoYSetupService {
 enum NeoYSetupTools {
     static func tools(service: NeoYSetupService) -> [ToolDefinition] {
         [ToolDefinition(
-            name: "neoy.setup",
+            name: "setup",
             description: "NeoY setup/control CLI. Run without command or run 'help' for authoritative runtime commands covering status, permissions, MCP federation, diagnostics, optional capabilities, Core auth, and important NeoX events.",
             parameters: .object([
                 "type": .string("object"),
