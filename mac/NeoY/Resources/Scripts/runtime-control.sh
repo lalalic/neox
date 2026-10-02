@@ -8,7 +8,15 @@ SCRIPT_DIR="${0:A:h}"
 DATA="$HOME/Library/Application Support/NeoY"
 RUNTIME_MANIFEST="$SCRIPT_DIR/runtime.json"
 RUNTIME_PACKAGE="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["package"])' "$RUNTIME_MANIFEST")"
-NODE_RUNTIME_DIR="$DATA/runtime/node_modules/$RUNTIME_PACKAGE"
+INSTALLED_RUNTIME_DIR="$DATA/runtime/node_modules/$RUNTIME_PACKAGE"
+RUNTIME_SOURCE_FILE="$DATA/runtime-source"
+NODE_RUNTIME_DIR="$INSTALLED_RUNTIME_DIR"
+if [[ -s "$RUNTIME_SOURCE_FILE" ]]; then
+  candidate="$(cat "$RUNTIME_SOURCE_FILE")"
+  if [[ -f "$candidate/src/mcp-gateway.mjs" && -f "$candidate/src/stdio-proxy.mjs" ]]; then
+    NODE_RUNTIME_DIR="$candidate"
+  fi
+fi
 SETTINGS="$DATA/deployment.json"
 LOGDIR="$HOME/Library/Logs/NeoY"
 PUBLIC="$DATA/public-url"
