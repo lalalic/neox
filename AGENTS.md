@@ -8,6 +8,64 @@ Instructions for coding agents (and humans) modifying this repo.
 desktop agents over MCP. One app target, zero external SPM dependencies,
 27 tracked files (18 Swift). Source of truth for behavior: `Neox/Server/`.
 
+## NeoY v2 architecture rules
+
+These are architectural constraints, not implementation suggestions. New Mac-side
+work should be reviewed against them before adding code to `mac/NeoY`.
+
+- **NeoY is the authenticated external MCP gateway plus native/TCC capability
+  host.** Keep one public auth boundary at NeoY. Do not make every federated
+  service independently public or independently authenticated just because it is
+  reachable through NeoY. Trusted provider MCPs should bind to loopback unless
+  there is a separate product requirement for public access.
+- **Default to federation.** Before implementing a new tool in NeoY, ask whether
+  an existing service/runtime already owns that capability. If it does, register
+  or discover that MCP provider and federate it. Do not copy its implementation
+  into NeoY. Provider registration/discovery errors must be caught and isolated;
+  an optional provider must never make the NeoY app fail to launch.
+- **Native NeoY code is reserved for capabilities that need the NeoY process or
+  macOS privileges.** Typical examples are Accessibility/Screen Recording/TCC
+  computer use, capture/demo/tour UI, direct local device control, and app
+  lifecycle integration. Generic workflow engines, browser platforms, tutoring,
+  posting, event services, and similar product logic belong outside NeoY.
+- **Browser Workspace owns the browser.** Never add ChatGPT-specific URLs, DOM
+  selectors, tab grouping, target reuse, Chrome state, or site-specific submit
+  logic to NeoY. Use Browser Workspace platform contracts instead. If a caller
+  needs a long-lived tab/session, the caller owns that session lifecycle and
+  passes the session handle to the platform action. The action itself must remain
+  submission-oriented and must not grow a `persistent` business semantic.
+- **Persist stable business identity, not UI identity.** Product runtimes may store
+  IDs such as `project_id`, `thread_id`, child/user IDs, correlation IDs, and
+  explicit workflow state. Do not persist canonicalized page URLs, DOM selectors,
+  Chrome target IDs, or other platform internals as product state when stable IDs
+  exist. The platform reconstructs URLs and UI state from stable IDs.
+- **Separate submit acknowledgement from final completion.** A synchronous MCP
+  ingress that kicks off ChatGPT/browser work should return after the platform has
+  verified that the turn was accepted. It must not hold the request open waiting
+  for the assistant/web page to finish. The eventual answer must come back through
+  an explicit tool/event/callback contract keyed by an opaque correlation ID.
+- **Do not scrape a result when the result can be delivered.** Prefer the remote
+  agent/model actively calling a narrow result-delivery tool (or emitting a typed
+  event) over polling assistant DOM text. DOM completion scraping is a platform
+  fallback/debug technique, not the product protocol.
+- **Keep ownership visible in names.** Federated provider tools remain namespaced
+  as `mcp.<provider>.*`. Do not flatten generic provider tools into native NeoY
+  names merely to make them look local. Native NeoY tools may use concise stable
+  names because NeoY itself owns those capabilities.
+- **Thin gateway, explicit contracts.** Authentication, authorization, provider
+  federation, native privileged capabilities, and routing belong at the gateway.
+  Product rules, workflow state, platform automation, and delivery semantics stay
+  with their owning service. Prefer small typed contracts between those layers to
+  shared code or hidden cross-repo dependencies.
+
+Decision rule for any proposed NeoY v2 feature:
+
+```text
+Does it require NeoY's process, TCC/native privilege, or device-local lifecycle?
+  yes -> native NeoY capability
+  no  -> product/runtime-owned MCP -> federate through NeoY
+```
+
 ## Repo layout
 
 ```
