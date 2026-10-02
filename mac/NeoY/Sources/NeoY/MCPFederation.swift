@@ -6,19 +6,38 @@ struct NeoYFederatedServerStatus: Codable, Equatable, Sendable {
     let enabled: Bool
     let healthy: Bool
     let exposedTools: [String]
+    let exposedResources: [String]
     let error: String?
 }
 
 fileprivate struct NeoYRemoteTool: Sendable {
     let name: String
-    let description: String?
-    let schema: JSONValue?
+    let descriptor: JSONValue
+}
+
+fileprivate struct NeoYRemoteResource: Sendable {
+    let uri: String
+    let descriptor: JSONValue
 }
 
 enum NeoYMCPHTTPClient {
     fileprivate static func tools(url: URL) async throws -> [NeoYRemoteTool] {
         let result = try await rpc(url: url, method: "tools/list", params: [:])
         return try decodeTools(result)
+    }
+
+    fileprivate static func resources(url: URL) async -> [NeoYRemoteResource] {
+        do {
+            let result = try await rpc(url: url, method: "resources/list", params: [:])
+            return decodeResources(result)
+        } catch {
+            return []
+        }
+    }
+
+    static func readResource(url: URL, uri: String) async throws -> String {
+        let result = try await rpc(url: url, method: "resources/read", params: ["uri": uri])
+        return try encodeFederatedResult(result)
     }
 
     static func call(url: URL, name: String, arguments: JSONValue) async throws -> String {
@@ -77,6 +96,20 @@ actor NeoYMCPStdioClient {
     fileprivate func tools() throws -> [NeoYRemoteTool] {
         let result = try rpc(method: "tools/list", params: [:])
         return try decodeTools(result)
+    }
+
+    fileprivate func resources() -> [NeoYRemoteResource] {
+        do {
+            let result = try rpc(method: "resources/list", params: [:])
+            return decodeResources(result)
+        } catch {
+            return []
+        }
+    }
+
+    func readResource(uri: String) throws -> String {
+        let result = try rpc(method: "resources/read", params: ["uri": uri])
+        return try encodeFederatedResult(result)
     }
 
     func call(name: String, arguments: JSONValue) throws -> String {
@@ -207,6 +240,7 @@ actor NeoYMCPStdioClient {
 final class NeoYMCPFederation {
     private let server: MCPServer
     private var exposedByServer: [String: [String]] = [:]
+    private var resourcesByServer: [String: [String]] = [:]
     private var statusesByServer: [String: NeoYFederatedServerStatus] = [:]
     private var stdioClients: [String: NeoYMCPStdioClient] = [:]
 
@@ -216,7 +250,7 @@ final class NeoYMCPFederation {
 
     func reconcile(_ configurations: [NeoYMCPServerConfiguration]) async {
         let desiredNames = Set(configurations.map(\.name))
-        for name in Array(exposedByServer.keys) where !desiredNames.contains(name) {
+        for name in Set(exposedByServer.keys).union(resourcesByServer.keys) where !desiredNames.contains(name) {
             await clear(name)
             statusesByServer.removeValue(forKey: name)
         }
@@ -226,7 +260,7 @@ final class NeoYMCPFederation {
             guard configuration.isEnabled else {
                 statusesByServer[configuration.name] = .init(
                     name: configuration.name, url: configuration.url, enabled: false,
-                    healthy: true, exposedTools: [], error: nil)
+                    healthy: true, exposedTools: [], exposedResources: [], error: nil)
                 continue
             }
             guard let url = URL(string: configuration.url),
@@ -237,41 +271,65 @@ final class NeoYMCPFederation {
 
             do {
                 let tools: [NeoYRemoteTool]
+                let resources: [NeoYRemoteResource]
                 let invoke: @Sendable (String, JSONValue) async throws -> String
+                let readResource: @Sendable (String) async throws -> String
 
                 switch scheme {
                 case "http", "https":
                     tools = try await NeoYMCPHTTPClient.tools(url: url)
+                    resources = await NeoYMCPHTTPClient.resources(url: url)
                     invoke = { name, arguments in
                         try await NeoYMCPHTTPClient.call(url: url, name: name, arguments: arguments)
+                    }
+                    readResource = { uri in
+                        try await NeoYMCPHTTPClient.readResource(url: url, uri: uri)
                     }
                 case "stdio":
                     let client = try NeoYMCPStdioClient.from(url: url)
                     tools = try await client.tools()
+                    resources = await client.resources()
                     stdioClients[configuration.name] = client
                     invoke = { name, arguments in
                         try await client.call(name: name, arguments: arguments)
+                    }
+                    readResource = { uri in
+                        try await client.readResource(uri: uri)
                     }
                 default:
                     throw NeoYRuntimeControlError.federation("unsupported MCP transport '\(scheme)'")
                 }
 
+
+                var resourceURIs: [String] = []
+                for resource in resources {
+                    let proxied = proxyFederatedResourceURI(provider: configuration.name, original: resource.uri)
+                    var descriptor = resource.descriptor
+                    if case .object(var object) = descriptor {
+                        object["uri"] = .string(proxied)
+                        descriptor = .object(object)
+                    }
+                    server.registerFederatedResource(descriptor: descriptor, uri: proxied) { _ in
+                        let result = try await readResource(resource.uri)
+                        return try rewriteFederatedResourceResult(result, provider: configuration.name)
+                    }
+                    resourceURIs.append(proxied)
+                }
+
                 var names: [String] = []
                 for tool in tools {
                     let localName = "mcp.\(configuration.name).\(tool.name)"
-                    server.register(tools: [ToolDefinition(
-                        name: localName,
-                        description: "[\(configuration.name)] \(tool.description ?? tool.name)",
-                        parameters: tool.schema
-                    ) { arguments in
+                    let descriptor = rewriteToolResourceMetadata(tool.descriptor, provider: configuration.name)
+                    server.registerFederatedTool(descriptor: descriptor, name: localName, protected: true) { arguments in
                         try await invoke(tool.name, arguments)
-                    }], protected: true)
+                    }
                     names.append(localName)
                 }
                 exposedByServer[configuration.name] = names
+                resourcesByServer[configuration.name] = resourceURIs
                 statusesByServer[configuration.name] = .init(
                     name: configuration.name, url: configuration.url, enabled: true,
-                    healthy: true, exposedTools: names.sorted(), error: nil)
+                    healthy: true, exposedTools: names.sorted(), exposedResources: resourceURIs.sorted(), error: nil)
             } catch {
                 if let client = stdioClients.removeValue(forKey: configuration.name) {
                     await client.stop()
@@ -285,12 +343,12 @@ final class NeoYMCPFederation {
         configurations.sorted { $0.name < $1.name }.map {
             statusesByServer[$0.name] ?? .init(
                 name: $0.name, url: $0.url, enabled: $0.isEnabled,
-                healthy: !$0.isEnabled, exposedTools: [], error: $0.isEnabled ? "not reconciled" : nil)
+                healthy: !$0.isEnabled, exposedTools: [], exposedResources: [], error: $0.isEnabled ? "not reconciled" : nil)
         }
     }
 
     func stop() {
-        for name in Array(exposedByServer.keys) { unregister(name) }
+        for name in Set(exposedByServer.keys).union(resourcesByServer.keys) { unregister(name) }
         let clients = Array(stdioClients.values)
         stdioClients.removeAll()
         for client in clients { Task { await client.stop() } }
@@ -308,12 +366,15 @@ final class NeoYMCPFederation {
         for tool in exposedByServer.removeValue(forKey: name) ?? [] {
             server.unregister(name: tool)
         }
+        for uri in resourcesByServer.removeValue(forKey: name) ?? [] {
+            server.unregisterResource(uri: uri)
+        }
     }
 
     private func failed(_ configuration: NeoYMCPServerConfiguration, _ error: String) -> NeoYFederatedServerStatus {
         .init(
             name: configuration.name, url: configuration.url, enabled: configuration.isEnabled,
-            healthy: false, exposedTools: [], error: error)
+            healthy: false, exposedTools: [], exposedResources: [], error: error)
     }
 }
 
@@ -323,12 +384,57 @@ private func decodeTools(_ result: [String: Any]) throws -> [NeoYRemoteTool] {
     }
     return tools.compactMap { value in
         guard let name = value["name"] as? String else { return nil }
-        return NeoYRemoteTool(
-            name: name,
-            description: value["description"] as? String,
-            schema: value["inputSchema"].map(JSONValue.from(any:))
-        )
+        return NeoYRemoteTool(name: name, descriptor: .from(any: value))
     }
+}
+
+private func decodeResources(_ result: [String: Any]) -> [NeoYRemoteResource] {
+    guard let resources = result["resources"] as? [[String: Any]] else { return [] }
+    return resources.compactMap { value in
+        guard let uri = value["uri"] as? String, !uri.isEmpty else { return nil }
+        return NeoYRemoteResource(uri: uri, descriptor: .from(any: value))
+    }
+}
+
+private func proxyFederatedResourceURI(provider: String, original: String) -> String {
+    let encoded = Data(original.utf8).base64EncodedString()
+        .replacingOccurrences(of: "+", with: "-")
+        .replacingOccurrences(of: "/", with: "_")
+        .replacingOccurrences(of: "=", with: "")
+    return original.hasPrefix("ui://")
+        ? "ui://\(provider)/\(encoded)"
+        : "mcp-federation://\(provider)/\(encoded)"
+}
+
+private func rewriteToolResourceMetadata(_ descriptor: JSONValue, provider: String) -> JSONValue {
+    guard case .object(var object) = descriptor else { return descriptor }
+    guard case .object(var meta)? = object["_meta"] else { return .object(object) }
+    if case .object(var ui)? = meta["ui"], case .string(let uri)? = ui["resourceUri"] {
+        ui["resourceUri"] = .string(proxyFederatedResourceURI(provider: provider, original: uri))
+        meta["ui"] = .object(ui)
+    }
+    if case .string(let uri)? = meta["openai/outputTemplate"] {
+        meta["openai/outputTemplate"] = .string(proxyFederatedResourceURI(provider: provider, original: uri))
+    }
+    object["_meta"] = .object(meta)
+    return .object(object)
+}
+
+private func rewriteFederatedResourceResult(_ encoded: String, provider: String) throws -> String {
+    guard encoded.hasPrefix(federatedResultPrefix),
+          let data = Data(base64Encoded: String(encoded.dropFirst(federatedResultPrefix.count))),
+          var result = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        throw NeoYRuntimeControlError.federation("remote resource result is invalid")
+    }
+    if var contents = result["contents"] as? [[String: Any]] {
+        for index in contents.indices {
+            if let uri = contents[index]["uri"] as? String {
+                contents[index]["uri"] = proxyFederatedResourceURI(provider: provider, original: uri)
+            }
+        }
+        result["contents"] = contents
+    }
+    return try encodeFederatedResult(result)
 }
 
 private let federatedResultPrefix = "mcpresult:"

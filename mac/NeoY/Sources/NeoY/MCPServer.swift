@@ -34,6 +34,8 @@ public typealias HTTPRouteHandler = @Sendable (
     String, [String: String], [String: String], Data?
 ) async -> HTTPRouteResponse
 
+public typealias MCPResourceHandler = @Sendable (String) async throws -> String
+
 @MainActor
 public final class MCPServer {
 
@@ -53,6 +55,8 @@ public final class MCPServer {
     private var toolHandlers: [String: ToolHandler] = [:]
     private var mcpTools: [[String: Any]] = []
     private var protectedToolNames: Set<String> = []
+    private var mcpResources: [[String: Any]] = []
+    private var resourceHandlers: [String: MCPResourceHandler] = [:]
     private var privilegedAccessToken: String?
     private var remoteAllowedFeatures: Set<NeoYRemoteFeature> = []
     private var httpRoutes: [String: HTTPRouteHandler] = [:]
@@ -66,6 +70,8 @@ public final class MCPServer {
     nonisolated(unsafe) private var _snapshotHandlers: [String: ToolHandler] = [:]
     nonisolated(unsafe) private var _snapshotToolNames: [String] = []
     nonisolated(unsafe) private var _snapshotProtectedToolNames: Set<String> = []
+    nonisolated(unsafe) private var _snapshotResources: [[String: Any]] = []
+    nonisolated(unsafe) private var _snapshotResourceHandlers: [String: MCPResourceHandler] = [:]
     nonisolated(unsafe) private var _snapshotPrivilegedAccessToken: String?
     nonisolated(unsafe) private var _snapshotRemoteAllowedFeatures: Set<NeoYRemoteFeature> = []
     nonisolated(unsafe) private var _snapshotHTTPRoutes: [String: HTTPRouteHandler] = [:]
@@ -123,6 +129,33 @@ public final class MCPServer {
         refreshSnapshots()
     }
 
+    /// Register a federated MCP tool while preserving its full descriptor metadata.
+    public func registerFederatedTool(descriptor: JSONValue, name: String, protected: Bool = true, handler: @escaping ToolHandler) {
+        guard case .object(var object) = descriptor else { return }
+        object["name"] = .string(name)
+        toolHandlers[name] = handler
+        mcpTools.removeAll { ($0["name"] as? String) == name }
+        mcpTools.append(object.mapValues(Self.jsonValueToAny))
+        if protected { protectedToolNames.insert(name) }
+        refreshSnapshots()
+    }
+
+    /// Register one MCP resource descriptor and its resources/read handler.
+    public func registerFederatedResource(descriptor: JSONValue, uri: String, handler: @escaping MCPResourceHandler) {
+        guard case .object(var object) = descriptor else { return }
+        object["uri"] = .string(uri)
+        resourceHandlers[uri] = handler
+        mcpResources.removeAll { ($0["uri"] as? String) == uri }
+        mcpResources.append(object.mapValues(Self.jsonValueToAny))
+        refreshSnapshots()
+    }
+
+    public func unregisterResource(uri: String) {
+        resourceHandlers.removeValue(forKey: uri)
+        mcpResources.removeAll { ($0["uri"] as? String) == uri }
+        refreshSnapshots()
+    }
+
     /// Register an HTTP route on this server. Routes share the same listener/port as MCP.
     public func registerHTTPRoute(method: String, path: String, handler: @escaping HTTPRouteHandler) {
         httpRoutes["\(method.uppercased()) \(path)"] = handler
@@ -160,6 +193,8 @@ public final class MCPServer {
         _snapshotHandlers = toolHandlers
         _snapshotToolNames = toolNames
         _snapshotProtectedToolNames = protectedToolNames
+        _snapshotResources = mcpResources
+        _snapshotResourceHandlers = resourceHandlers
         _snapshotPrivilegedAccessToken = privilegedAccessToken
         _snapshotRemoteAllowedFeatures = remoteAllowedFeatures
         _snapshotHTTPRoutes = httpRoutes
@@ -168,6 +203,10 @@ public final class MCPServer {
     /// All registered tool names.
     public var toolNames: [String] {
         Array(toolHandlers.keys).sorted()
+    }
+
+    public var resourceURIs: [String] {
+        Array(resourceHandlers.keys).sorted()
     }
 
     /// Optional root directory for serving static files at `/assets/`.
@@ -189,6 +228,8 @@ public final class MCPServer {
         _snapshotHandlers = toolHandlers
         _snapshotToolNames = toolNames
         _snapshotProtectedToolNames = protectedToolNames
+        _snapshotResources = mcpResources
+        _snapshotResourceHandlers = resourceHandlers
         _snapshotPrivilegedAccessToken = privilegedAccessToken
         _snapshotRemoteAllowedFeatures = remoteAllowedFeatures
         _snapshotHTTPRoutes = httpRoutes
@@ -462,10 +503,57 @@ public final class MCPServer {
         case "initialize":
             let result: [String: Any] = [
                 "protocolVersion": "2025-03-26",
-                "capabilities": ["tools": ["listChanged": false]],
+                "capabilities": [
+                    "tools": ["listChanged": false],
+                    "resources": ["listChanged": false, "subscribe": false],
+                ],
                 "serverInfo": ["name": _snapshotName, "version": _snapshotVersion]
             ]
             sendJSONRPCResult(connection: connection, id: id, result: result)
+
+        case "resources/list":
+            let visibleResources: [[String: Any]]
+            if isLocal {
+                visibleResources = _snapshotResources
+            } else if authorized && _snapshotRemoteAllowedFeatures.contains(.mcpServices) {
+                visibleResources = _snapshotResources
+            } else {
+                visibleResources = []
+            }
+            sendJSONRPCResult(connection: connection, id: id, result: ["resources": visibleResources])
+
+        case "resources/read":
+            guard let uri = params["uri"] as? String, !uri.isEmpty else {
+                sendJSONRPCError(connection: connection, id: id, code: -32602, message: "Missing resource uri")
+                return
+            }
+            if !isLocal {
+                guard authorized else {
+                    sendJSONRPCError(connection: connection, id: id, code: -32001, message: "Remote MCP requires a valid NeoY token")
+                    return
+                }
+                guard _snapshotRemoteAllowedFeatures.contains(.mcpServices) else {
+                    sendJSONRPCError(connection: connection, id: id, code: -32003, message: "MCP resources are not enabled for remote access")
+                    return
+                }
+            }
+            guard let handler = _snapshotResourceHandlers[uri] else {
+                sendJSONRPCError(connection: connection, id: id, code: -32002, message: "Unknown resource: \(uri)")
+                return
+            }
+            Task.detached { [weak self] in
+                do {
+                    let encoded = try await handler(uri)
+                    guard encoded.hasPrefix("mcpresult:"),
+                          let data = Data(base64Encoded: String(encoded.dropFirst("mcpresult:".count))),
+                          let forwarded = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                        throw NeoYRuntimeControlError.federation("federated resource result is invalid")
+                    }
+                    self?.sendJSONRPCResult(connection: connection, id: id, result: forwarded)
+                } catch {
+                    self?.sendJSONRPCError(connection: connection, id: id, code: -32002, message: error.localizedDescription)
+                }
+            }
 
         case "tools/list":
             let visibleTools: [[String: Any]]
