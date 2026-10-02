@@ -5,12 +5,29 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.volta/bin:$HOME/.local/bin:
 SCRIPT_DIR="${0:A:h}"
 DATA="$HOME/Library/Application Support/NeoY"
 RUNTIME_ROOT="$DATA/runtime"
-RUNTIME_SOURCE="$SCRIPT_DIR/neoy-runtime"
-RUNTIME_DIR="$RUNTIME_ROOT/neoy-runtime"
+RUNTIME_MANIFEST="$SCRIPT_DIR/runtime.json"
 SKILLS_ROOT="$HOME/.agents/skills"
 EVENTS_DIR="$SKILLS_ROOT/events-bus"
 BROWSER_WORKSPACE_DIR="$SKILLS_ROOT/browser-workspace"
 CONTROL_PLANE="$DATA/control-plane.json"
+LOCK_DIR="$DATA/bootstrap.lock"
+
+acquire_lock() {
+  mkdir -p "$DATA"
+  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+    if [[ -f "$LOCK_DIR/pid" ]]; then
+      local owner
+      owner="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
+      if [[ -n "$owner" ]] && ! kill -0 "$owner" 2>/dev/null; then
+        rm -rf "$LOCK_DIR"
+        continue
+      fi
+    fi
+    sleep 1
+  done
+  print -r -- "$$" > "$LOCK_DIR/pid"
+  trap 'rm -rf "$LOCK_DIR"' EXIT INT TERM HUP
+}
 
 log() { print -r -- "[NeoY bootstrap] $*"; }
 fail() { print -u2 -r -- "[NeoY bootstrap] $*"; exit 1; }
@@ -85,25 +102,42 @@ install_required_skills() {
 }
 
 install_neoy_runtime() {
-  [[ -f "$RUNTIME_SOURCE/package.json" ]] || fail "NeoY runtime source is missing: $RUNTIME_SOURCE"
-  [[ -f "$RUNTIME_SOURCE/package-lock.json" ]] || fail "NeoY runtime lockfile is missing: $RUNTIME_SOURCE/package-lock.json"
+  [[ -f "$RUNTIME_MANIFEST" ]] || fail "NeoY runtime manifest is missing: $RUNTIME_MANIFEST"
 
-  if [[ -f "$RUNTIME_DIR/package-lock.json" && -f "$RUNTIME_DIR/node_modules/mac-developer-bridge/bridge.mjs" ]] && \
-     cmp -s "$RUNTIME_SOURCE/package-lock.json" "$RUNTIME_DIR/package-lock.json"; then
-    log "NeoY Node runtime ready"
+  local runtime_package runtime_version desired_spec installed_name installed_version runtime_package_dir
+  runtime_package="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["package"])' "$RUNTIME_MANIFEST")"
+  runtime_package_dir="$RUNTIME_ROOT/node_modules/$runtime_package"
+  runtime_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$RUNTIME_MANIFEST")"
+  desired_spec="${NEO_RUNTIME_SPEC:-${runtime_package}@${runtime_version}}"
+  installed_name="$(node -p 'try { require(process.argv[1]).name } catch { "" }' "$runtime_package_dir/package.json" 2>/dev/null || true)"
+  installed_version="$(node -p 'try { require(process.argv[1]).version } catch { "" }' "$runtime_package_dir/package.json" 2>/dev/null || true)"
+
+  if [[ "$installed_name" == "$runtime_package" && "$installed_version" == "$runtime_version" && \
+        -f "$RUNTIME_ROOT/node_modules/mac-developer-bridge/bridge.mjs" ]]; then
+    log "Neo runtime ready: $runtime_package@$runtime_version"
     return
   fi
 
-  local stage="$RUNTIME_ROOT/neoy-runtime.new"
-  log "Installing NeoY Node runtime and dependencies"
-  mkdir -p "$RUNTIME_ROOT"
+  local stage="$DATA/runtime.new"
+  log "Installing Neo runtime: $desired_spec"
   rm -rf "$stage"
-  /usr/bin/ditto "$RUNTIME_SOURCE" "$stage"
-  rm -rf "$stage/node_modules"
-  (cd "$stage" && npm ci --omit=dev)
-  [[ -f "$stage/node_modules/mac-developer-bridge/bridge.mjs" ]] || fail "NeoY runtime dependency mac-developer-bridge is missing"
-  rm -rf "$RUNTIME_DIR"
-  mv "$stage" "$RUNTIME_DIR"
+  mkdir -p "$stage"
+  (cd "$stage" && npm init -y >/dev/null && npm install --omit=dev --save-exact "$desired_spec")
+
+  local staged_name staged_version staged_package_dir
+  staged_package_dir="$stage/node_modules/$runtime_package"
+  staged_name="$(node -p 'require(process.argv[1]).name' "$staged_package_dir/package.json")"
+  staged_version="$(node -p 'require(process.argv[1]).version' "$staged_package_dir/package.json")"
+  [[ "$staged_name" == "$runtime_package" ]] || fail "Installed runtime package mismatch: expected $runtime_package, got $staged_name"
+  [[ "$staged_version" == "$runtime_version" ]] || fail "Installed runtime version mismatch: expected $runtime_version, got $staged_version"
+  [[ -f "$stage/node_modules/mac-developer-bridge/bridge.mjs" ]] || fail "Neo runtime dependency mac-developer-bridge is missing"
+  [[ -f "$staged_package_dir/src/mcp-gateway.mjs" ]] || fail "Neo runtime gateway is missing"
+
+  rm -rf "$RUNTIME_ROOT.old"
+  [[ ! -d "$RUNTIME_ROOT" ]] || mv "$RUNTIME_ROOT" "$RUNTIME_ROOT.old"
+  mv "$stage" "$RUNTIME_ROOT"
+  rm -rf "$RUNTIME_ROOT.old"
+  log "Neo runtime installed: $runtime_package@$runtime_version"
 }
 
 configure_events_provider() {
@@ -138,6 +172,7 @@ print(f"Configured NeoY MCP provider events -> {url}")
 PYCONFIG
 }
 
+acquire_lock
 ensure_node_toolchain
 install_required_skills
 install_neoy_runtime
@@ -146,4 +181,5 @@ configure_events_provider
 log "Runtime ready"
 log "  events-bus: $EVENTS_DIR"
 log "  browser-workspace: $BROWSER_WORKSPACE_DIR"
-log "  neoy-runtime: $RUNTIME_DIR"
+runtime_package="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["package"])' "$RUNTIME_MANIFEST")"
+log "  runtime: $RUNTIME_ROOT/node_modules/$runtime_package"

@@ -21,9 +21,10 @@ work should be reviewed against them before adding code to `mac/NeoY`.
 - **Default to federation.** Before implementing a new tool in NeoY, ask whether
   an existing service/runtime already owns that capability. If it does, register
   or discover that MCP provider and federate it. Do not copy its implementation
-  into NeoY. A core provider may be a version-pinned dependency of
-  `mac/NeoY/Runtime/package.json`, but bootstrap installs it under Application Support
-  instead of embedding its package in `NeoY.app`; do not put such a core provider in mutable user control-plane state. Provider registration/discovery
+  into NeoY. A core provider may be a version-pinned dependency of the published `@lalalic/neo`
+  package. `Resources/runtime.json` pins the runtime version and bootstrap installs it
+  under Application Support instead of embedding packages in `NeoY.app`; do not put
+  such a core provider in mutable user control-plane state. Provider registration/discovery
   errors must be caught and isolated; an optional provider must never make the NeoY
   app fail to launch.
 - **Native NeoY code is reserved for capabilities that need the NeoY process or

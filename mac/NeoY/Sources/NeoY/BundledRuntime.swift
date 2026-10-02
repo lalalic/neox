@@ -5,8 +5,7 @@ enum NeoYBundledRuntime {
 
     static func coreMCPServers(
         runtimeURL: URL = NeoYPaths.supportDirectory
-            .appendingPathComponent("runtime", isDirectory: true)
-            .appendingPathComponent("neoy-runtime", isDirectory: true),
+            .appendingPathComponent("runtime", isDirectory: true),
         fileManager: FileManager = .default
     ) -> [NeoYMCPServerConfiguration] {
         let bridge = runtimeURL
@@ -42,8 +41,7 @@ enum NeoYBundledRuntime {
     static func resolvedMCPServers(
         userServers: [NeoYMCPServerConfiguration],
         runtimeURL: URL = NeoYPaths.supportDirectory
-            .appendingPathComponent("runtime", isDirectory: true)
-            .appendingPathComponent("neoy-runtime", isDirectory: true),
+            .appendingPathComponent("runtime", isDirectory: true),
         fileManager: FileManager = .default
     ) -> [NeoYMCPServerConfiguration] {
         let external = userServers.filter { $0.name != macBridgeProviderName }
