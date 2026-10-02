@@ -26,9 +26,12 @@ enum NeoYBundledRuntime {
     }
 
     static func exposedToolName(provider: String, tool: String) -> String? {
-        guard provider == macBridgeProviderName else { return "mcp.\(provider).\(tool)" }
-        if tool.hasPrefix("chrome_") || tool.hasPrefix("chatgpt_") { return nil }
-        return tool
+        if provider == macBridgeProviderName {
+            if tool.hasPrefix("chrome_") || tool.hasPrefix("chatgpt_") { return nil }
+            return tool
+        }
+        if provider == "events" { return "events.\(tool)" }
+        return "mcp.\(provider).\(tool)"
     }
 
     static func resolvedMCPServers(

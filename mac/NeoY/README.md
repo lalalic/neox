@@ -84,7 +84,7 @@ neoy.setup(command)    configuration/control
 mac.exec(command)      shell, background jobs, PTY
 mac.fs(command)        filesystem read/write/manage
 codex.threads(command) read-only Codex history
-node(command)          trusted remote NeoY Core invocation
+cluster(command)          trusted remote NeoY Core invocation
 ```
 
 Each tool documents its current grammar through `command=help`. The five Core
@@ -98,8 +98,8 @@ unless they carry the NeoY Core token. `neoy.setup("auth show")` returns the
 trusted Core URL for an already-trusted local agent; treat that URL/token as a
 secret.
 
-Remote Macs run NeoY too. `node discover` browses `_mcp._tcp`, `node pair`
-stores an explicit trusted peer, and `node invoke` forwards one of the same
+Remote Macs run NeoY too. `cluster discover` browses `_mcp._tcp`, `cluster pair`
+stores an explicit trusted peer, and `cluster invoke` forwards one of the same
 canonical Core tools rather than maintaining per-node wrapper tools.
 
 ### MCP setup

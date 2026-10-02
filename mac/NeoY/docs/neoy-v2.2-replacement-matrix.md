@@ -11,7 +11,7 @@ surface.
 | generic filesystem | `mac.fs` | installed-app E2E write/read plus focused tests |
 | Codex thread list/read/turns | `codex.threads` | installed-app real `codex app-server` thread list |
 | setup/configuration | `neoy.setup` | existing v2.1 surface extended with capabilities/auth |
-| work/home node wrapper tools | `node` canonical Core forwarding | implementation + local canonical-contract tests; real second-node E2E still required before retiring DevMacBridge |
+| work/home node wrapper tools | `cluster` canonical Core forwarding | implementation + local canonical-contract tests; real second-node E2E still required before retiring DevMacBridge |
 | browser/Chrome/ChatGPT UI glue | outside Core | skill/plugin/federated MCP |
 | SaaS-specific APIs | outside Core | connectors/federated MCP |
 

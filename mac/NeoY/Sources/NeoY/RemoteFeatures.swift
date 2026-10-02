@@ -35,12 +35,12 @@ enum NeoYRemoteFeature: String, CaseIterable, Identifiable, Codable, Sendable {
         case .terminal: toolName == "exec"
         case .files: toolName == "fs"
         case .codex: toolName == "codex.threads"
-        case .nodes: toolName == "node"
+        case .nodes: toolName == "cluster"
         case .computer: toolName.hasPrefix("computer.") || toolName.hasPrefix("accessibility.")
         case .demo: toolName.hasPrefix("demo.")
         case .tour: toolName.hasPrefix("tour.")
         case .phone: toolName.hasPrefix("phone.")
-        case .mcpServices: toolName.hasPrefix("mcp.")
+        case .mcpServices: toolName.hasPrefix("mcp.") || toolName.hasPrefix("events.")
         }
     }
 }
