@@ -100,10 +100,18 @@ unless they carry the NeoY Core token. `neoy.setup("auth show")` returns the
 trusted Core URL for an already-trusted local agent; treat that URL/token as a
 secret.
 
-Remote Macs are `neo-node`s and do not need NeoY installed. `cluster pair` can attach
-to the existing node MCP endpoint and auto-detect its capabilities; `cluster invoke`
-then exposes the canonical `exec` / `fs` contract while adapting to the node transport.
-NeoY-to-NeoY peers are also supported, but they are a separate `neoy-peer` kind.
+Remote Macs are `neo-node`s and do not need NeoY installed. The normal bootstrap
+contract is `cluster add <name> --ssh <user>@<host>[#port=<port>]`; port 22 is the
+default. NeoY connects over that SSH endpoint, copies its bundled mini node runtime,
+starts the node MCP runtime, establishes the node-to-NeoY MCP tunnel, verifies it, and
+registers the node. For an outbound-only Mac, the user first creates an SSH reverse
+tunnel that exposes the Mac's SSH port on the NeoY machine, then calls the same command
+with that loopback endpoint, for example `cluster add work --ssh chengli@127.0.0.1#port=22022`.
+Reverse-SSH bootstrap uses the session lifecycle, so it does not require LaunchAgent;
+the mini runtime supervisor maintains its own reverse MCP tunnel after bootstrap.
+`cluster pair` remains the low-level operation for an already-running MCP endpoint, and
+`cluster invoke` exposes the canonical `exec` / `fs` contract while adapting to the node
+transport. NeoY-to-NeoY peers are supported separately as `neoy-peer`.
 
 ### MCP setup
 

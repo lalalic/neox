@@ -79,6 +79,8 @@ actor NeoYNodeService {
             return NeoYCoreJSON.encode(await store.list().map { PublicNode($0) })
         case "pair":
             return try await pair(parsed.tokens)
+        case "add":
+            return try await add(parsed.tokens)
         case "remove":
             guard parsed.tokens.count == 2 else { throw NeoYCoreError.invalidCommand("usage: remove <name>") }
             try await store.remove(parsed.tokens[1])
@@ -182,6 +184,166 @@ actor NeoYNodeService {
         let node = NeoYNodeConfiguration(name: tokens[1], url: tokens[2], kind: kind, token: token)
         try await store.upsert(node)
         return NeoYCoreJSON.encode(PublicNode(node))
+    }
+
+    private func add(_ tokens: [String]) async throws -> String {
+        guard tokens.count == 4, tokens[2] == "--ssh" else {
+            throw NeoYCoreError.invalidCommand("usage: add <name> --ssh <user>@<host>[#port=<port>]")
+        }
+        let name = tokens[1]
+        let ssh = try NeoYSSHAddress.parse(tokens[3])
+        let reverseBootstrap = ssh.isLoopback && ssh.port != 22
+
+        let probe = try NeoYSSHBootstrap.ssh(
+            ssh,
+            command: "printf 'NEOY_HOME=%s\\nNEOY_CONN=%s\\n' \"$HOME\" \"$SSH_CONNECTION\""
+        )
+        guard probe.exitCode == 0 else {
+            throw NeoYCoreError.operationFailed("SSH bootstrap failed: \(probe.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
+        }
+        let probeValues = Dictionary(uniqueKeysWithValues: probe.stdout.split(separator: "\n").compactMap { line -> (String, String)? in
+            guard let split = line.firstIndex(of: "=") else { return nil }
+            return (String(line[..<split]), String(line[line.index(after: split)...]))
+        })
+        guard let remoteHome = probeValues["NEOY_HOME"], !remoteHome.isEmpty else {
+            throw NeoYCoreError.operationFailed("SSH bootstrap could not determine remote home directory")
+        }
+
+        let hub: NeoYSSHBootstrap.ReverseSSH
+        if reverseBootstrap {
+            let processes = try NeoYSSHBootstrap.ssh(
+                ssh,
+                command: "ps ax -o command= | grep '[s]sh ' | grep -- '-R' || true"
+            )
+            guard let detected = NeoYSSHBootstrap.parseReverseSSH(from: processes.stdout) else {
+                throw NeoYCoreError.operationFailed("reverse SSH bootstrap detected, but the node's outbound reverse SSH process could not be identified")
+            }
+            hub = detected
+        } else {
+            let clientIP = probeValues["NEOY_CONN"]?.split(separator: " ").first.map(String.init) ?? ""
+            guard !clientIP.isEmpty else {
+                throw NeoYCoreError.operationFailed("SSH bootstrap could not determine NeoY address from SSH_CONNECTION")
+            }
+            hub = .init(target: "\(NSUserName())@\(clientIP)", port: 22, identityFile: nil)
+        }
+
+        let hubMCPPort = try allocateHubPort()
+        let localMCPPort = 8789
+        let remoteRoot = "\(remoteHome)/.local/share/neo-node"
+        let remoteConfig = "\(remoteHome)/.config/neo-node"
+        let mkdir = try NeoYSSHBootstrap.ssh(
+            ssh,
+            command: "mkdir -p \(shellQuote(remoteRoot)) \(shellQuote(remoteConfig)) \(shellQuote(remoteHome + "/.local/bin"))"
+        )
+        guard mkdir.exitCode == 0 else {
+            throw NeoYCoreError.operationFailed("failed to prepare neo-node directories: \(mkdir.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
+        }
+
+        let oldBootstrap = remoteRoot + "/bootstrap-mac-node.sh"
+        let oldConfig = remoteConfig + "/node.env"
+        _ = try NeoYSSHBootstrap.ssh(
+            ssh,
+            command: "if test -f \(shellQuote(oldBootstrap)) && test -f \(shellQuote(oldConfig)); then /bin/zsh \(shellQuote(oldBootstrap)) stop >/dev/null 2>&1 || true; /bin/zsh \(shellQuote(oldBootstrap)) uninstall-persistence >/dev/null 2>&1 || true; fi"
+        )
+
+        let server = try nodeRuntimeResource("mac-node-server.py")
+        let bootstrap = try nodeRuntimeResource("bootstrap-mac-node.sh")
+        for (source, destination) in [
+            (server, "\(remoteRoot)/mac-node-server.py"),
+            (bootstrap, "\(remoteRoot)/bootstrap-mac-node.sh")
+        ] {
+            let copied = try NeoYSSHBootstrap.scp(source, to: ssh, remotePath: destination)
+            guard copied.exitCode == 0 else {
+                throw NeoYCoreError.operationFailed("failed to copy neo-node runtime: \(copied.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
+            }
+        }
+
+        var identityFile = hub.identityFile
+        if !reverseBootstrap {
+            let keyPath = "\(remoteConfig)/id_ed25519"
+            let key = try NeoYSSHBootstrap.ssh(
+                ssh,
+                command: "test -f \(shellQuote(keyPath)) || ssh-keygen -q -t ed25519 -N '' -f \(shellQuote(keyPath)); cat \(shellQuote(keyPath + ".pub"))"
+            )
+            guard key.exitCode == 0 else {
+                throw NeoYCoreError.operationFailed("failed to create neo-node SSH identity: \(key.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
+            }
+            try authorizeNodePublicKey(key.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+            identityFile = keyPath
+        }
+
+        let mode = reverseBootstrap ? "session" : "persistent"
+        let env = [
+            "NODE_NAME=\(name)",
+            "NODE_MODE=\(mode)",
+            "HUB_SSH_TARGET=\(hub.target)",
+            "HUB_SSH_PORT=\(hub.port)",
+            "HUB_MCP_PORT=\(hubMCPPort)",
+            "LOCAL_MCP_PORT=\(localMCPPort)",
+            "NODE_ROOT=\(remoteRoot)",
+            "NODE_SSH_KEY=\(identityFile ?? "")"
+        ].joined(separator: "\n") + "\n"
+        let encoded = Data(env.utf8).base64EncodedString()
+        let install = try NeoYSSHBootstrap.ssh(
+            ssh,
+            command: "printf %s \(shellQuote(encoded)) | base64 -D > \(shellQuote(remoteConfig + "/node.env")); chmod 755 \(shellQuote(remoteRoot + "/bootstrap-mac-node.sh")) \(shellQuote(remoteRoot + "/mac-node-server.py")); /bin/zsh \(shellQuote(remoteRoot + "/bootstrap-mac-node.sh")) install; /bin/zsh \(shellQuote(remoteRoot + "/bootstrap-mac-node.sh")) start"
+        )
+        guard install.exitCode == 0 else {
+            throw NeoYCoreError.operationFailed("failed to install/start neo-node: \(install.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
+        }
+
+        let mcpURL = "http://127.0.0.1:\(hubMCPPort)/mcp"
+        var lastError = "neo-node MCP did not become reachable"
+        for _ in 0..<20 {
+            do {
+                return try await pair(["pair", name, mcpURL])
+            } catch {
+                lastError = error.localizedDescription
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
+        throw NeoYCoreError.operationFailed(lastError)
+    }
+
+    private func allocateHubPort() throws -> Int {
+        for port in 28780...29779 {
+            let result = try NeoYSSHBootstrap.run("/usr/sbin/lsof", ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN"])
+            if result.exitCode != 0 { return port }
+        }
+        throw NeoYCoreError.operationFailed("no available local port for neo-node MCP tunnel")
+    }
+
+    private func nodeRuntimeResource(_ name: String) throws -> URL {
+        guard let resources = Bundle.main.resourceURL else {
+            throw NeoYCoreError.operationFailed("NeoY bundle resources are unavailable")
+        }
+        let candidates = [
+            resources.appendingPathComponent("Scripts/neo-node/\(name)"),
+            resources.appendingPathComponent("neo-node/\(name)"),
+            resources.appendingPathComponent(name)
+        ]
+        guard let url = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
+            throw NeoYCoreError.operationFailed("bundled neo-node runtime is missing \(name)")
+        }
+        return url
+    }
+
+    private func authorizeNodePublicKey(_ key: String) throws {
+        guard !key.isEmpty else { throw NeoYCoreError.operationFailed("neo-node returned an empty SSH public key") }
+        let sshDirectory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ssh")
+        let authorized = sshDirectory.appendingPathComponent("authorized_keys")
+        try FileManager.default.createDirectory(at: sshDirectory, withIntermediateDirectories: true)
+        var current = (try? String(contentsOf: authorized, encoding: .utf8)) ?? ""
+        if !current.split(separator: "\n").contains(where: { String($0) == key }) {
+            if !current.isEmpty && !current.hasSuffix("\n") { current += "\n" }
+            current += key + "\n"
+            try current.write(to: authorized, atomically: true, encoding: .utf8)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: authorized.path)
+        }
+    }
+
+    private func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     private func status(_ node: NeoYNodeConfiguration) async throws -> String {
@@ -375,11 +537,12 @@ actor NeoYNodeService {
       token
       discover [--seconds N]
       list
+      add <name> --ssh <user>@<host>[#port=<port>]
       pair <name> <mcp-url> [core-token]
       remove <name>
       status <name>
       invoke <name> <setup|exec|fs|codex.threads|cluster> -- <command>
-    Pairing auto-detects NeoY peers and neo-node endpoints. Tokens are optional and stored mode-0600 when supplied. Remote responses always identify the executing node.
+    SSH port defaults to 22. 'add' bootstraps the bundled mini neo-node runtime over SSH, starts its MCP tunnel, then pairs it. A loopback SSH target on a non-default port is treated as reverse-SSH bootstrap and uses session mode without LaunchAgent. Pairing remains available for already-running endpoints.
     """
 }
 
