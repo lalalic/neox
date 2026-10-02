@@ -13,6 +13,28 @@ struct AccessibilityNodeSnapshot: Codable, Equatable, Sendable {
     var children: [AccessibilityNodeSnapshot] = []
 }
 
+
+struct ComputerElementSnapshot: Codable, Equatable, Sendable {
+    var index: String
+    var role: String?
+    var title: String?
+    var value: String?
+    var bounds: CGRect?
+    var actions: [String]
+    var settable: Bool
+}
+
+struct ComputerAppSnapshot: Codable, Equatable, Sendable {
+    var stateID: String
+    var appName: String
+    var bundleID: String
+    var pid: Int32
+    var elements: [ComputerElementSnapshot]
+    var treeText: String
+    var screenshotPNGBase64: String?
+    var createdAt: Date
+}
+
 final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Sendable {
     static let shared = NeoYAccessibilityController()
 
@@ -241,7 +263,7 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
         return Self.json(["apps": apps])
     }
 
-    func getAppState(_ appRef: String) async throws -> String {
+    func snapshot(appRef: String) async throws -> ComputerAppSnapshot {
         guard AXIsProcessTrusted() else {
             throw DemoRecorderError.message("NeoY needs macOS Accessibility permission")
         }
@@ -250,7 +272,7 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
         }
         let root = accessibilityRoot(for: app)
         var visited = Set<CFHashCode>()
-        var elements: [[String: Any]] = []
+        var elements: [ComputerElementSnapshot] = []
         var lines: [String] = []
         var next = 0
         cacheLock.withLock { computerElementsByIndex.removeAll() }
@@ -266,20 +288,24 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
             let id = String(next)
             next += 1
             cacheLock.withLock { computerElementsByIndex[id] = element }
-            var item: [String: Any] = ["index": id]
-            if let role { item["role"] = role }
-            if let title { item["title"] = title }
-            if let value { item["value"] = value }
-            if let rect { item["bounds"] = rect }
             var actions: CFArray?
-            if AXUIElementCopyActionNames(element, &actions) == .success, let names = actions as? [String], !names.isEmpty {
-                item["actions"] = names
+            let actionNames: [String]
+            if AXUIElementCopyActionNames(element, &actions) == .success, let names = actions as? [String] {
+                actionNames = names
+            } else {
+                actionNames = []
             }
             var settable = DarwinBoolean(false)
-            if AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &settable) == .success {
-                item["settable"] = settable.boolValue
-            }
-            elements.append(item)
+            let canSetValue = AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &settable) == .success && settable.boolValue
+            elements.append(ComputerElementSnapshot(
+                index: id,
+                role: role,
+                title: title,
+                value: value,
+                bounds: rect,
+                actions: actionNames,
+                settable: canSetValue
+            ))
             let label = title ?? value ?? ""
             lines.append("\(String(repeating: "\t", count: depth))\(id) \(role ?? "element") \(label)")
             for child in (Self.array(element, kAXChildrenAttribute) ?? []).prefix(160) {
@@ -289,24 +315,63 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
         }
         walk(root, depth: 0)
 
-        let screenshot = await captureWindowScreenshot(for: app)
+        return ComputerAppSnapshot(
+            stateID: UUID().uuidString,
+            appName: app.localizedName ?? "",
+            bundleID: app.bundleIdentifier ?? "",
+            pid: app.processIdentifier,
+            elements: elements,
+            treeText: lines.joined(separator: "\n"),
+            screenshotPNGBase64: await captureWindowScreenshot(for: app),
+            createdAt: Date()
+        )
+    }
+
+    func getAppState(_ appRef: String) async throws -> String {
+        let snapshot = try await snapshot(appRef: appRef)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let snapshotObject = try JSONSerialization.jsonObject(with: encoder.encode(snapshot)) as! [String: Any]
         var structured: [String: Any] = [
-            "app": ["name": app.localizedName ?? "", "bundleId": app.bundleIdentifier ?? "", "pid": Int(app.processIdentifier)],
-            "snapshot": ["elements": elements, "text": lines.joined(separator: "\n")],
+            "state_id": snapshot.stateID,
+            "app": ["name": snapshot.appName, "bundleId": snapshot.bundleID, "pid": Int(snapshot.pid)],
+            "snapshot": [
+                "elements": snapshotObject["elements"] ?? [],
+                "text": snapshot.treeText,
+                "created_at": snapshotObject["createdAt"] ?? "",
+            ],
         ]
-        if let screenshot {
+        if let screenshot = snapshot.screenshotPNGBase64 {
             structured["artifacts"] = ["screenshotMimeType": "image/png", "screenshotBase64": screenshot]
         }
         guard let safeStructured = Self.jsonSafe(structured) as? [String: Any] else {
             throw DemoRecorderError.message("Could not encode computer state")
         }
         var content: [[String: Any]] = [["type": "text", "text": Self.json(safeStructured)]]
-        if let screenshot {
+        if let screenshot = snapshot.screenshotPNGBase64 {
             content.append(["type": "image", "data": screenshot, "mimeType": "image/png"])
         }
         let result: [String: Any] = ["content": content, "structuredContent": safeStructured, "isError": false]
         let data = try JSONSerialization.data(withJSONObject: result)
         return "mcpresult:" + data.base64EncodedString()
+    }
+
+    func elementSnapshot(index: String) -> ComputerElementSnapshot? {
+        let element = cacheLock.withLock { computerElementsByIndex[index] }
+        guard let element else { return nil }
+        var actions: CFArray?
+        let names = AXUIElementCopyActionNames(element, &actions) == .success ? (actions as? [String] ?? []) : []
+        var settable = DarwinBoolean(false)
+        let canSet = AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &settable) == .success && settable.boolValue
+        return ComputerElementSnapshot(
+            index: index,
+            role: Self.string(element, kAXRoleAttribute),
+            title: Self.string(element, kAXTitleAttribute),
+            value: Self.string(element, kAXValueAttribute),
+            bounds: frame(for: element),
+            actions: names,
+            settable: canSet
+        )
     }
 
     func selectText(appRef: String, elementIndex: String, text: String, prefix: String?, suffix: String?, selection: String) throws -> String {
