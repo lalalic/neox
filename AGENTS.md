@@ -51,10 +51,10 @@ work should be reviewed against them before adding code to `mac/NeoY`.
   agent/model actively calling a narrow result-delivery tool (or emitting a typed
   event) over polling assistant DOM text. DOM completion scraping is a platform
   fallback/debug technique, not the product protocol.
-- **Keep ownership visible in names.** Federated provider tools remain namespaced
-  as `mcp.<provider>.*`. Do not flatten generic provider tools into native NeoY
-  names merely to make them look local. Native NeoY tools may use concise stable
-  names because NeoY itself owns those capabilities.
+- **Keep external ownership visible in names.** Optional/product federated tools
+  remain namespaced as `mcp.<provider>.*`. Bundled core Node runtime dependencies
+  are part of NeoY's core surface and preserve their original tool names; do not
+  wrap MacBridge core tools in `mcp.macbridge.*`.
 - **Thin gateway, explicit contracts.** Authentication, authorization, provider
   federation, native privileged capabilities, and routing belong at the gateway.
   Product rules, workflow state, platform automation, and delivery semantics stay

@@ -65,8 +65,8 @@ gateway_start() {
   need_npx
   need_node
   [[ -s "$TOKEN_FILE" ]] || { print -u2 "NeoY core token is missing"; return 69; }
-  [[ -f "$NODE_RUNTIME_DIR/src/neoy-mcp-gateway.mjs" ]] || { print -u2 "NeoY MCP gateway script is missing"; return 69; }
-  [[ -f "$NODE_RUNTIME_DIR/src/neoy-stdio-proxy.mjs" ]] || { print -u2 "NeoY MCP proxy script is missing"; return 69; }
+  [[ -f "$NODE_RUNTIME_DIR/src/mcp-gateway.mjs" ]] || { print -u2 "NeoY MCP gateway script is missing"; return 69; }
+  [[ -f "$NODE_RUNTIME_DIR/src/stdio-proxy.mjs" ]] || { print -u2 "NeoY MCP proxy script is missing"; return 69; }
   ensure_client_id
   gateway_stop
   : > "$GATEWAY_LOG"
@@ -74,7 +74,7 @@ gateway_start() {
   export NEOY_HTTP_TOKEN_FILE="$TOKEN_FILE"
   export NEOY_TOKEN_FILE="$TOKEN_FILE"
   export NEOY_DATA_DIR="$DATA"
-  export NEOY_ENTRY="$NODE_RUNTIME_DIR/src/neoy-stdio-proxy.mjs"
+  export NEOY_ENTRY="$NODE_RUNTIME_DIR/src/stdio-proxy.mjs"
   export NEOY_UPSTREAM="http://127.0.0.1:$PORT/mcp"
   export NEOY_OAUTH_CLIENT_ID="$(cat "$CLIENT_ID_FILE")"
   if [[ -n "$HOSTNAME" ]]; then
@@ -82,7 +82,7 @@ gateway_start() {
   else
     unset NEOY_PUBLIC_URL 2>/dev/null || true
   fi
-  pm2 start "$NODE_RUNTIME_DIR/src/neoy-mcp-gateway.mjs" --name neoy-mcp-gateway --interpreter "$NODE" --log "$GATEWAY_LOG" --update-env >/dev/null
+  pm2 start "$NODE_RUNTIME_DIR/src/mcp-gateway.mjs" --name neoy-mcp-gateway --interpreter "$NODE" --log "$GATEWAY_LOG" --update-env >/dev/null
 }
 
 tunnel_stop() {

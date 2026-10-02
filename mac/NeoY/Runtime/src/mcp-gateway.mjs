@@ -27,7 +27,7 @@ import {
 } from "./chatgpt-responses-adapter.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const BRIDGE = process.env.NEOY_ENTRY || path.join(HERE, "neoy-stdio-proxy.mjs");
+const BRIDGE = process.env.NEOY_ENTRY || path.join(HERE, "stdio-proxy.mjs");
 const HOST = "127.0.0.1"; // never bind wider; the only intended peer is cloudflared on loopback
 const MCP_PATH = "/mcp";
 const EXPERIMENTAL_CHATGPT_PATH = "/experimental/chatgpt/conversation";

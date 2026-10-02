@@ -25,6 +25,12 @@ enum NeoYBundledRuntime {
         return [.init(name: macBridgeProviderName, url: url, isEnabled: true)]
     }
 
+    static func exposedToolName(provider: String, tool: String) -> String? {
+        guard provider == macBridgeProviderName else { return "mcp.\(provider).\(tool)" }
+        if tool.hasPrefix("chrome_") || tool.hasPrefix("chatgpt_") { return nil }
+        return tool
+    }
+
     static func resolvedMCPServers(
         userServers: [NeoYMCPServerConfiguration],
         resourceURL: URL? = Bundle.main.resourceURL,
