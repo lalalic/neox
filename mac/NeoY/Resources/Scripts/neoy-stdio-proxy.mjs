@@ -4,6 +4,14 @@ import readline from "node:readline";
 
 const UPSTREAM = process.env.NEOY_UPSTREAM || "http://127.0.0.1:6767/mcp";
 const TOKEN_FILE = process.env.NEOY_TOKEN_FILE || ((process.env.HOME || "") + "/Library/Application Support/NeoY/core-token");
+const MODERN_PROTOCOL = "2026-07-28";
+const SERVER_INFO = {
+  name: "NeoY",
+  title: "neo",
+  version: "2.3.0",
+  description: "Privileged NeoY runtime for the host Mac."
+};
+
 let token = "";
 try {
   token = fs.readFileSync(TOKEN_FILE, "utf8").trim();
@@ -29,8 +37,50 @@ function parseResponse(text, contentType) {
   return JSON.parse(text);
 }
 
+function modernRequest(msg) {
+  return msg && msg.params && msg.params._meta &&
+    msg.params._meta["io.modelcontextprotocol/protocolVersion"] === MODERN_PROTOCOL;
+}
+
+function completeModern(result) {
+  const base = result && typeof result === "object" ? result : {};
+  return {
+    resultType: "complete",
+    ...base,
+    _meta: {
+      ...(base._meta || {}),
+      "io.modelcontextprotocol/serverInfo": SERVER_INFO
+    }
+  };
+}
+
+function write(message) {
+  process.stdout.write(JSON.stringify(message) + "\n");
+}
+
 async function forward(msg) {
   const hasID = Object.prototype.hasOwnProperty.call(msg, "id");
+
+  if (msg && msg.method === "server/discover" && hasID) {
+    write({
+      jsonrpc: "2.0",
+      id: msg.id,
+      result: {
+        resultType: "complete",
+        supportedVersions: [MODERN_PROTOCOL, "2025-11-25", "2025-06-18"],
+        capabilities: {
+          tools: { listChanged: false },
+          resources: { listChanged: false, subscribe: false }
+        },
+        instructions: "NeoY has privileged access as the logged-in macOS user.",
+        ttlMs: 3600000,
+        cacheScope: "private",
+        _meta: { "io.modelcontextprotocol/serverInfo": SERVER_INFO }
+      }
+    });
+    return;
+  }
+
   try {
     const response = await fetch(UPSTREAM, {
       method: "POST",
@@ -45,22 +95,25 @@ async function forward(msg) {
     const text = await response.text();
     if (!hasID) return;
     if (!response.ok) {
-      process.stdout.write(JSON.stringify({
+      write({
         jsonrpc: "2.0",
         id: msg.id ?? null,
         error: { code: -32603, message: "NeoY upstream HTTP " + response.status }
-      }) + "\n");
+      });
       return;
     }
     const parsed = parseResponse(text, response.headers.get("content-type") || "");
-    process.stdout.write(JSON.stringify(parsed) + "\n");
+    if (modernRequest(msg) && parsed && !parsed.error && parsed.result && msg.method !== "initialize") {
+      parsed.result = completeModern(parsed.result);
+    }
+    write(parsed);
   } catch (error) {
     if (!hasID) return;
-    process.stdout.write(JSON.stringify({
+    write({
       jsonrpc: "2.0",
       id: msg.id ?? null,
       error: { code: -32603, message: "NeoY upstream failed: " + error.message }
-    }) + "\n");
+    });
   }
 }
 
