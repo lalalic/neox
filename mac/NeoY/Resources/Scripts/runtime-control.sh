@@ -5,7 +5,7 @@ NPX="${NPX_BIN:-$(command -v npx 2>/dev/null || true)}"
 NODE="${NODE_BIN:-$(command -v node 2>/dev/null || true)}"
 CLOUDFLARED="${CLOUDFLARED_BIN:-$(command -v cloudflared 2>/dev/null || true)}"
 SCRIPT_DIR="${0:A:h}"
-NODE_RUNTIME_DIR="$SCRIPT_DIR/neoy-runtime"
+NODE_RUNTIME_DIR="$HOME/Library/Application Support/NeoY/runtime/neoy-runtime"
 DATA="$HOME/Library/Application Support/NeoY"
 SETTINGS="$DATA/deployment.json"
 LOGDIR="$HOME/Library/Logs/NeoY"
@@ -82,7 +82,8 @@ gateway_start() {
   else
     unset NEOY_PUBLIC_URL 2>/dev/null || true
   fi
-  pm2 start "$NODE_RUNTIME_DIR/src/mcp-gateway.mjs" --name neoy-mcp-gateway --interpreter "$NODE" --log "$GATEWAY_LOG" --update-env >/dev/null
+  pm2 start "$NODE" --name neoy-mcp-gateway --interpreter none --log "$GATEWAY_LOG" --update-env -- \
+    "$NODE_RUNTIME_DIR/src/mcp-gateway.mjs" >/dev/null
 }
 
 tunnel_stop() {

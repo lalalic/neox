@@ -4,17 +4,22 @@ enum NeoYBundledRuntime {
     static let macBridgeProviderName = "macbridge"
 
     static func coreMCPServers(
-        resourceURL: URL? = Bundle.main.resourceURL,
+        runtimeURL: URL = NeoYPaths.supportDirectory
+            .appendingPathComponent("runtime", isDirectory: true)
+            .appendingPathComponent("neoy-runtime", isDirectory: true),
         fileManager: FileManager = .default
     ) -> [NeoYMCPServerConfiguration] {
-        guard let resourceURL else { return [] }
-        let bridge = resourceURL
-            .appendingPathComponent("neoy-runtime", isDirectory: true)
+        let bridge = runtimeURL
             .appendingPathComponent("node_modules", isDirectory: true)
             .appendingPathComponent("mac-developer-bridge", isDirectory: true)
             .appendingPathComponent("bridge.mjs")
         guard fileManager.isReadableFile(atPath: bridge.path) else { return [] }
-        let nodeCandidates = ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"]
+        let nodeCandidates = [
+            "/opt/homebrew/bin/node",
+            "/usr/local/bin/node",
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".volta/bin/node").path,
+            "/usr/bin/node",
+        ]
         guard let node = nodeCandidates.first(where: fileManager.isExecutableFile(atPath:)) else { return [] }
 
         var components = URLComponents()
@@ -36,10 +41,12 @@ enum NeoYBundledRuntime {
 
     static func resolvedMCPServers(
         userServers: [NeoYMCPServerConfiguration],
-        resourceURL: URL? = Bundle.main.resourceURL,
+        runtimeURL: URL = NeoYPaths.supportDirectory
+            .appendingPathComponent("runtime", isDirectory: true)
+            .appendingPathComponent("neoy-runtime", isDirectory: true),
         fileManager: FileManager = .default
     ) -> [NeoYMCPServerConfiguration] {
         let external = userServers.filter { $0.name != macBridgeProviderName }
-        return coreMCPServers(resourceURL: resourceURL, fileManager: fileManager) + external
+        return coreMCPServers(runtimeURL: runtimeURL, fileManager: fileManager) + external
     }
 }

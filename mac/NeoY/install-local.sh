@@ -21,8 +21,9 @@ if [[ -z "$identity" ]]; then
   exit 1
 fi
 
-npm ci --ignore-scripts --prefix "$HERE/Runtime"
-npm test --prefix "$HERE/Runtime"
+if command -v node >/dev/null 2>&1; then
+  npm test --prefix "$HERE/Runtime"
+fi
 
 xcodegen generate --spec "$HERE/project.yml"
 rm -rf "$APP"
@@ -31,16 +32,13 @@ xcodebuild -project "$PROJECT" -scheme NeoY -configuration Debug \
 
 mkdir -p "$APP/Contents/Resources"
 cp "$HERE/Resources/Scripts/runtime-control.sh" "$APP/Contents/Resources/runtime-control.sh"
-cp "$HERE/Resources/Scripts/bootstrap-skills.sh" "$APP/Contents/Resources/bootstrap-skills.sh"
+cp "$HERE/Resources/Scripts/bootstrap-runtime.sh" "$APP/Contents/Resources/bootstrap-runtime.sh"
 rm -rf "$APP/Contents/Resources/neoy-runtime"
 ditto "$HERE/Runtime" "$APP/Contents/Resources/neoy-runtime"
-chmod 755 "$APP/Contents/Resources/runtime-control.sh" "$APP/Contents/Resources/bootstrap-skills.sh" \
+rm -rf "$APP/Contents/Resources/neoy-runtime/node_modules"
+chmod 755 "$APP/Contents/Resources/runtime-control.sh" "$APP/Contents/Resources/bootstrap-runtime.sh" \
   "$APP/Contents/Resources/neoy-runtime/src/mcp-gateway.mjs" \
   "$APP/Contents/Resources/neoy-runtime/src/stdio-proxy.mjs"
-
-# NeoY depends on the reusable events-bus skill.
-# Install/update it before launching NeoY, then federate it through MCP.
-"$HERE/Resources/Scripts/bootstrap-skills.sh"
 
 codesign --force --deep --sign "$identity" \
   --entitlements "$ENTITLEMENTS" --timestamp=none "$APP"
@@ -52,6 +50,8 @@ rm -rf "$DEST.new"
 ditto "$APP" "$DEST.new"
 rm -rf "$DEST"
 mv "$DEST.new" "$DEST"
+
+"$DEST/Contents/Resources/bootstrap-runtime.sh"
 
 RUNTIME="$DEST/Contents/Resources/runtime-control.sh"
 mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.neoy"

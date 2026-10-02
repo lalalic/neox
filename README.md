@@ -38,8 +38,8 @@ The rules are:
    lifecycle, or direct device control belong in NeoY. Generic services do not.
 3. **Federate; do not duplicate.** If a capability already has a good MCP server
    or product-owned runtime, NeoY should federate it and preserve that service as
-   the source of truth. Core providers may be bundled as version-pinned Node.js
-   package dependencies (for example MacBridge) and auto-registered at startup;
+   the source of truth. Core external runtime providers are version-pinned but installed by NeoY
+   bootstrap into the user runtime directory rather than embedded in the app bundle;
    optional/product providers remain control-plane configuration. Provider failure
    must be isolated and must not prevent NeoY itself from starting.
 4. **Browser automation belongs to Browser Workspace.** NeoY and product services
