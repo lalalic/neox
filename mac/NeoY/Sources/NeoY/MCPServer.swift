@@ -522,6 +522,12 @@ public final class MCPServer {
                     let result = try await handler(jsonArgs)
                     // Image results come back as "b64:<mime>,<base64>"; everything else is text.
                     // (Never infer from length/newlines — a long single-line JSON result is text.)
+                    if result.hasPrefix("mcpresult:"),
+                       let data = Data(base64Encoded: String(result.dropFirst("mcpresult:".count))),
+                       let forwarded = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        self?.sendJSONRPCResult(connection: connection, id: id, result: forwarded)
+                        return
+                    }
                     let content: [[String: Any]]
                     if result.hasPrefix("b64:"), let comma = result.firstIndex(of: ",") {
                         let mime = String(result[result.index(result.startIndex, offsetBy: 4)..<comma])

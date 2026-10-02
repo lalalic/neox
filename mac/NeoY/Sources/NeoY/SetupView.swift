@@ -6,7 +6,6 @@ final class NeoYSetupModel: ObservableObject {
     enum Tab: String, CaseIterable, Identifiable {
         case mcp = "MCP"
         case remote = "Remote"
-        case tutor = "Tutor"
         case advanced = "Advanced"
         var id: String { rawValue }
     }
@@ -22,13 +21,6 @@ final class NeoYSetupModel: ObservableObject {
     @Published var remoteMode: RemoteMode = .temporary
     @Published var publicHostname = ""
     @Published var remoteFeatures: Set<NeoYRemoteFeature> = []
-    @Published var tutorLearner = ""
-    @Published var tutorThreadURL = ""
-    @Published private(set) var tutorStatus = "Loading…"
-    @Published private(set) var tutorBootstrapPhase = "not_initialized"
-    @Published private(set) var tutorBootstrapMessage = "Initialize Family Tutor to connect Discord."
-    @Published private(set) var tutorBootstrapActionURL = ""
-    @Published private(set) var tutorBootstrapThreadURL = ""
     @Published private(set) var oauthClientID = ""
     @Published private(set) var oauthToken = ""
     @Published var result = ""
@@ -46,112 +38,6 @@ final class NeoYSetupModel: ObservableObject {
         let credentials = NeoYMCPPluginCredentials.current()
         oauthClientID = credentials.clientID
         oauthToken = credentials.token
-        Task {
-            tutorStatus = await NeoYTutorWorkspace.shared.statusJSON()
-            refreshTutorBootstrap()
-        }
-    }
-
-    func bindTutorLearner() {
-        let learner = tutorLearner
-        let threadURL = tutorThreadURL
-        Task {
-            isBusy = true
-            defer { isBusy = false }
-            do {
-                result = try await NeoYTutorWorkspace.shared.bind(learner: learner, threadURL: threadURL)
-                tutorStatus = await NeoYTutorWorkspace.shared.statusJSON()
-            } catch {
-                result = error.localizedDescription
-            }
-        }
-    }
-
-    func unbindTutorLearner() {
-        let learner = tutorLearner
-        Task {
-            isBusy = true
-            defer { isBusy = false }
-            do {
-                result = try await NeoYTutorWorkspace.shared.unbind(learner: learner)
-                tutorStatus = await NeoYTutorWorkspace.shared.statusJSON()
-            } catch {
-                result = error.localizedDescription
-            }
-        }
-    }
-
-    func refreshTutor() {
-        Task { tutorStatus = await NeoYTutorWorkspace.shared.statusJSON() }
-    }
-
-    func initializeTutorBootstrap() {
-        Task {
-            isBusy = true
-            defer { isBusy = false }
-            do {
-                let value = try await NeoYFeatureBootstrapService.shared.start(feature: "tutor")
-                applyTutorBootstrap(value)
-                result = "Tutor bootstrap initialized."
-            } catch {
-                result = error.localizedDescription
-            }
-        }
-    }
-
-    func refreshTutorBootstrap() {
-        Task {
-            let value = await NeoYFeatureBootstrapService.shared.status(feature: "tutor")
-            applyTutorBootstrapStatus(value)
-        }
-    }
-
-    func connectTutorDiscord() {
-        guard let url = URL(string: tutorBootstrapActionURL), !tutorBootstrapActionURL.isEmpty else {
-            result = "Initialize Tutor first."
-            return
-        }
-        NSWorkspace.shared.open(url)
-        result = "Discord authorization opened. NeoY will continue automatically after it completes."
-        Task {
-            for _ in 0..<300 {
-                try? await Task.sleep(for: .seconds(2))
-                do {
-                    let value = try await NeoYFeatureBootstrapService.shared.check(feature: "tutor")
-                    applyTutorBootstrap(value)
-                    if tutorBootstrapPhase != "waiting_user_action" { return }
-                } catch {
-                    result = error.localizedDescription
-                    return
-                }
-            }
-        }
-    }
-
-    func openTutorBootstrapThread() {
-        guard let url = URL(string: tutorBootstrapThreadURL), !tutorBootstrapThreadURL.isEmpty else { return }
-        NSWorkspace.shared.open(url)
-    }
-
-    private func applyTutorBootstrapStatus(_ json: String) {
-        guard let data = json.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let features = object["features"] as? [[String: Any]],
-              let first = features.first else { return }
-        applyTutorBootstrapObject(first)
-    }
-
-    private func applyTutorBootstrap(_ json: String) {
-        guard let data = json.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-        applyTutorBootstrapObject(object)
-    }
-
-    private func applyTutorBootstrapObject(_ object: [String: Any]) {
-        tutorBootstrapPhase = object["phase"] as? String ?? "not_initialized"
-        tutorBootstrapMessage = object["message"] as? String ?? ""
-        tutorBootstrapActionURL = object["action_url"] as? String ?? ""
-        tutorBootstrapThreadURL = object["thread_url"] as? String ?? ""
     }
 
     var localMCPURL: String {
@@ -372,7 +258,6 @@ struct NeoYSetupView: View {
                     switch model.tab {
                     case .mcp: mcpTab
                     case .remote: remoteTab
-                    case .tutor: tutorTab
                     case .advanced: advancedTab
                     }
                 }
@@ -504,65 +389,6 @@ struct NeoYSetupView: View {
         }
     }
 
-    private var tutorTab: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            heading("Tutor", "Connect Discord once; NeoY discovers the family and creates each learner's Tutor workspace automatically.")
-
-            GroupBox("Bootstrap") {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Text(model.tutorBootstrapPhase.replacingOccurrences(of: "_", with: " ").capitalized)
-                            .font(.headline)
-                        Spacer()
-                        Button("Initialize") { model.initializeTutorBootstrap() }
-                        Button("Refresh") { model.refreshTutorBootstrap() }
-                    }
-                    Text(model.tutorBootstrapMessage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    HStack {
-                        Button("Connect Discord") { model.connectTutorDiscord() }
-                            .disabled(model.tutorBootstrapActionURL.isEmpty)
-                        Button("Open setup chat") { model.openTutorBootstrapThread() }
-                            .disabled(model.tutorBootstrapThreadURL.isEmpty)
-                        Spacer()
-                    }
-                }
-                .padding(8)
-            }
-
-            GroupBox("ChatGPT platform") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("ChatGPT page mechanics run through Browser Workspace sessions. NeoY stores learner/thread bindings only; transcripts remain in ChatGPT.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(model.tutorStatus)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                        .lineLimit(8)
-                    Button("Refresh") { model.refreshTutor() }
-                }
-                .padding(8)
-            }
-
-            GroupBox("Advanced recovery: learner binding") {
-                VStack(alignment: .leading, spacing: 12) {
-                    TextField("Learner id, e.g. maggie", text: $model.tutorLearner)
-                    TextField("Existing ChatGPT thread URL", text: $model.tutorThreadURL)
-                    HStack {
-                        Button("Bind") { model.bindTutorLearner() }
-                        Button("Unbind", role: .destructive) { model.unbindTutorLearner() }
-                        Spacer()
-                    }
-                    Text("A learner keeps one durable thread binding. If the browser target disappears, the ChatGPT platform recovers from the saved thread URL.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(8)
-            }
-        }
-    }
-
     private var advancedTab: some View {
         VStack(alignment: .leading, spacing: 20) {
             heading("Advanced", "Runtime details and operational settings.")
@@ -571,7 +397,7 @@ struct NeoYSetupView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("NeoY uses one MCP listener. Agent handoff, MCP and health routes share the configured port.")
                     Text("Remote transport is provided by Cloudflare when enabled.")
-                    Text("Permissions, startup services, diagnostics and MCP federation remain available through neoy.setup.")
+                    Text("Permissions, diagnostics and MCP federation remain available through neoy.setup.")
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)

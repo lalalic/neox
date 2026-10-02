@@ -1,7 +1,7 @@
 import Foundation
 
 enum NeoYSetupTopic: String, CaseIterable, Sendable {
-    case overview, status, configuration, deployment, diagnostics, permissions, startup, federation, events, capabilities, auth, roadmap
+    case overview, status, configuration, deployment, diagnostics, permissions, federation, events, capabilities, auth, roadmap
 }
 
 enum NeoYSetupCommand: Equatable, Sendable {
@@ -18,13 +18,6 @@ enum NeoYSetupCommand: Equatable, Sendable {
     case diagnosticsSet(NeoYDiagnosticsSetting)
     case permissionsStatus
     case permissionOpen(NeoYPermissionKind)
-    case startupList
-    case startupAdd(name: String, executable: String, arguments: [String])
-    case startupRemove(String)
-    case startupEnable(name: String, enabled: Bool)
-    case startupSetCWD(name: String, path: String?)
-    case startupSetRestart(name: String, policy: NeoYRestartPolicy)
-    case startupSetEnvironment(name: String, key: String, value: String?)
     case mcpList
     case mcpAdd(name: String, url: String)
     case mcpRemove(String)
@@ -76,7 +69,6 @@ enum NeoYSetupParser {
         case "deployment": return try deployment(tokens)
         case "diagnostics": return try diagnostics(tokens)
         case "permissions": return try permissions(tokens)
-        case "startup": return try startup(tokens)
         case "mcp": return try mcp(tokens)
         case "events": return try events(tokens)
         case "capability", "capabilities": return try capability(tokens)
@@ -168,44 +160,6 @@ enum NeoYSetupParser {
         }
     }
 
-    private static func startup(_ tokens: [String]) throws -> NeoYSetupCommand {
-        guard tokens.count >= 2 else { throw NeoYSetupError.missingArgument("startup subcommand") }
-        switch tokens[1] {
-        case "list":
-            try exact(tokens, count: 2)
-            return .startupList
-        case "add":
-            guard tokens.count >= 4 else { throw NeoYSetupError.missingArgument("startup add <name> <absolute-executable> [args...]") }
-            return .startupAdd(name: tokens[2], executable: tokens[3], arguments: Array(tokens.dropFirst(4)))
-        case "remove":
-            guard tokens.count == 3 else { throw NeoYSetupError.missingArgument("startup remove <name>") }
-            return .startupRemove(tokens[2])
-        case "enable", "disable":
-            guard tokens.count == 3 else { throw NeoYSetupError.missingArgument("startup \(tokens[1]) <name>") }
-            return .startupEnable(name: tokens[2], enabled: tokens[1] == "enable")
-        case "set":
-            guard tokens.count >= 4 else { throw NeoYSetupError.missingArgument("startup set <cwd|restart|env|unset-env> ...") }
-            switch tokens[2] {
-            case "cwd":
-                guard tokens.count == 5 else { throw NeoYSetupError.missingArgument("startup set cwd <name> <absolute-path|none>") }
-                return .startupSetCWD(name: tokens[3], path: tokens[4] == "none" ? nil : tokens[4])
-            case "restart":
-                guard tokens.count == 5, let policy = NeoYRestartPolicy(rawValue: tokens[4]) else {
-                    throw NeoYSetupError.invalidValue("restart must be never, on-failure, or always")
-                }
-                return .startupSetRestart(name: tokens[3], policy: policy)
-            case "env":
-                guard tokens.count == 6 else { throw NeoYSetupError.missingArgument("startup set env <name> <KEY> <VALUE>") }
-                return .startupSetEnvironment(name: tokens[3], key: tokens[4], value: tokens[5])
-            case "unset-env":
-                guard tokens.count == 5 else { throw NeoYSetupError.missingArgument("startup set unset-env <name> <KEY>") }
-                return .startupSetEnvironment(name: tokens[3], key: tokens[4], value: nil)
-            default: throw NeoYSetupError.unknownCommand(tokens.prefix(3).joined(separator: " "))
-            }
-        default: throw NeoYSetupError.unknownCommand(tokens.prefix(2).joined(separator: " "))
-        }
-    }
-
     private static func mcp(_ tokens: [String]) throws -> NeoYSetupCommand {
         guard tokens.count >= 2 else { throw NeoYSetupError.missingArgument("mcp subcommand") }
         switch tokens[1] {
@@ -213,7 +167,7 @@ enum NeoYSetupParser {
             try exact(tokens, count: 2)
             return .mcpList
         case "add":
-            guard tokens.count == 4 else { throw NeoYSetupError.missingArgument("mcp add <name> <http(s)-url>") }
+            guard tokens.count == 4 else { throw NeoYSetupError.missingArgument("mcp add <name> <http(s)-url|stdio-url>") }
             return .mcpAdd(name: tokens[2], url: tokens[3])
         case "remove":
             guard tokens.count == 3 else { throw NeoYSetupError.missingArgument("mcp remove <name>") }
@@ -393,33 +347,6 @@ actor NeoYSetupService {
             return Self.json(await runtime?.permissions() ?? [])
         case .permissionOpen(let kind):
             return Self.json(JSONValue.object(["opened": .bool(await runtime?.openPermission(kind) ?? false), "permission": .string(kind.rawValue)]))
-        case .startupList:
-            let configuration = await controlPlane.currentConfiguration()
-            return Self.json(await runtime?.startupStatus(configuration) ?? [])
-        case .startupAdd(let name, let executable, let arguments):
-            return await mutateAndReconcile("startup.add") {
-                try await self.controlPlane.upsertStartup(.init(name: name, executable: executable, arguments: arguments))
-            }
-        case .startupRemove(let name):
-            return await mutateAndReconcile("startup.remove") { try await self.controlPlane.removeStartup(name) }
-        case .startupEnable(let name, let enabled):
-            return await mutateAndReconcile("startup.\(enabled ? "enable" : "disable")") {
-                try await self.controlPlane.updateStartup(name) { $0.isEnabled = enabled }
-            }
-        case .startupSetCWD(let name, let path):
-            return await mutateAndReconcile("startup.set.cwd") {
-                try await self.controlPlane.updateStartup(name) { $0.workingDirectory = path }
-            }
-        case .startupSetRestart(let name, let policy):
-            return await mutateAndReconcile("startup.set.restart") {
-                try await self.controlPlane.updateStartup(name) { $0.restartPolicy = policy }
-            }
-        case .startupSetEnvironment(let name, let key, let value):
-            return await mutateAndReconcile("startup.set.environment") {
-                try await self.controlPlane.updateStartup(name) {
-                    if let value { $0.environment[key] = value } else { $0.environment.removeValue(forKey: key) }
-                }
-            }
         case .mcpList:
             let configuration = await controlPlane.currentConfiguration()
             return Self.json(await runtime?.federationStatus(configuration) ?? [])
@@ -582,22 +509,12 @@ actor NeoYSetupService {
             "diagnostics enable|disable; diagnostics set level <info|warning|error>; diagnostics set retention-days <1...365>"
         case .permissions:
             "permissions status; permissions open <accessibility|screen-recording|camera|microphone|notifications|local-network>. Human approval remains required."
-        case .startup:
-            """
-            startup list
-            startup add <name> <absolute-executable> [args...]
-            startup remove|enable|disable <name>
-            startup set cwd <name> <absolute-path|none>
-            startup set restart <name> <never|on-failure|always>
-            startup set env <name> <KEY> <VALUE>
-            startup set unset-env <name> <KEY>
-            """
         case .federation:
             """
             mcp list
-            mcp add <name> <http(s)-mcp-url>
+            mcp add <name> <http(s)-mcp-url|stdio:///absolute/executable?arg=...>
             mcp remove|enable|disable <name>
-            Enabled remote tools appear as mcp.<server>.<tool>. Use startup services to supervise local MCP server processes.
+            Enabled tools appear as mcp.<server>.<tool>. HTTP MCPs connect by URL; stdio MCPs are launched and supervised by federation itself.
             """
         case .events:
             """
@@ -619,7 +536,7 @@ actor NeoYSetupService {
             auth revoke — alias for auth rotate.
             """
         case .roadmap:
-            "v2 core is implemented around typed persistence, native permission guidance, supervised startup services, HTTP MCP federation, and pairing-aware NeoX important-event delivery. Signed installed-app permission/login E2E still requires the actual installed identity and human TCC approvals."
+            "v2 core is implemented around typed persistence, native permission guidance, HTTP/stdio MCP federation, and pairing-aware NeoX important-event delivery. Signed installed-app permission/login E2E still requires the actual installed identity and human TCC approvals."
         case nil:
             """
             NeoY setup CLI
@@ -629,7 +546,6 @@ actor NeoYSetupService {
               deployment show|set ...
               diagnostics ...
               permissions status|open ...
-              startup list|add|remove|enable|disable|set ...
               mcp list|add|remove|enable|disable ...
               events status|enable|disable|notify ...
               capability list|enable|disable ...
@@ -653,7 +569,7 @@ enum NeoYSetupTools {
     static func tools(service: NeoYSetupService) -> [ToolDefinition] {
         [ToolDefinition(
             name: "neoy.setup",
-            description: "NeoY setup/control CLI. Run without command or run 'help' for authoritative runtime commands covering status, permissions, supervised startup services, MCP federation, diagnostics, optional capabilities, Core auth, and important NeoX events.",
+            description: "NeoY setup/control CLI. Run without command or run 'help' for authoritative runtime commands covering status, permissions, MCP federation, diagnostics, optional capabilities, Core auth, and important NeoX events.",
             parameters: .object([
                 "type": .string("object"),
                 "properties": .object([

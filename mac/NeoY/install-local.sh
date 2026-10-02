@@ -22,6 +22,7 @@ if [[ -z "$identity" ]]; then
 fi
 
 xcodegen generate --spec "$HERE/project.yml"
+rm -rf "$APP"
 xcodebuild -project "$PROJECT" -scheme NeoY -configuration Debug \
   -derivedDataPath "$DERIVED" build
 

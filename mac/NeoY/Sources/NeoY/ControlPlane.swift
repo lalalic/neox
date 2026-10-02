@@ -62,11 +62,20 @@ struct NeoYMCPServerConfiguration: Codable, Equatable, Sendable {
     func validate() throws {
         try NeoYControlPlaneValidation.name(name)
         guard let parsed = URL(string: url),
-              let scheme = parsed.scheme?.lowercased(),
-              ["http", "https"].contains(scheme),
-              parsed.host != nil else {
+              let scheme = parsed.scheme?.lowercased() else {
             throw NeoYControlPlaneError.invalidMCPURL(url)
         }
+        if ["http", "https"].contains(scheme) {
+            guard parsed.host != nil else { throw NeoYControlPlaneError.invalidMCPURL(url) }
+            return
+        }
+        if scheme == "stdio" {
+            guard parsed.path.hasPrefix("/"), !parsed.path.isEmpty else {
+                throw NeoYControlPlaneError.invalidMCPURL(url)
+            }
+            return
+        }
+        throw NeoYControlPlaneError.invalidMCPURL(url)
     }
 }
 
@@ -208,7 +217,7 @@ enum NeoYControlPlaneError: LocalizedError {
         case .invalidExecutable(let value): "executable must be an absolute path; got '\(value)'"
         case .invalidWorkingDirectory(let value): "working directory must be an absolute path; got '\(value)'"
         case .invalidEnvironmentKey(let value): "invalid environment key '\(value)'"
-        case .invalidMCPURL(let value): "MCP URL must be http(s) with a host; got '\(value)'"
+        case .invalidMCPURL(let value): "MCP URL must be http(s) or stdio with an absolute executable path; got '\(value)'"
         case .missingItem(let kind, let name): "\(kind) '\(name)' does not exist"
         case .saveFailed(let reason): "configuration state could not be saved: \(reason)"
         case .unsupportedWhileDegraded(let reason): reason

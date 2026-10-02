@@ -25,10 +25,6 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
     private var setupWindow: NSWindow?
     private var runtimeControl: NeoYRuntimeControl?
-    private let coreExec = NeoYExecService()
-    private let coreFiles = NeoYCoreFileService()
-    private let coreCodex = NeoYCodexThreadService()
-    private let coreNodes = NeoYNodeService()
     private var observers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -148,14 +144,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
             await runtimeControl.reconcile(await setup.currentConfiguration())
         }
 
-        NeoYCoreRuntime.register(
-            on: value,
-            setup: setup,
-            exec: coreExec,
-            files: coreFiles,
-            codex: coreCodex,
-            node: coreNodes
-        )
+        NeoYCoreRuntime.register(on: value, setup: setup)
 
         if configuration.capabilities.isEnabled(.captureTour) {
             value.register(tools: CaptureTourTools.tools())
@@ -170,7 +159,6 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
             value.register(tools: NeoXPhoneTools.tools(client: phone,
                                                        handoff: services.handoff as! NativeNeoYPhoneHandoffReceiver))
         }
-        value.register(tools: NeoYTutorTools.tools())
 
         (services.handoff as? NativeNeoYPhoneHandoffReceiver)?.registerRoutes(on: value)
         try? services.files.prepare()
@@ -229,14 +217,12 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
     private static func runtimeCapabilities() -> [String] {
         let config = (try? NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)
             .loadOrCreate().document.configuration) ?? NeoYControlPlaneConfiguration()
-        var result = ["core_setup", "core_exec", "core_files", "core_codex_threads", "core_nodes",
-                      "events_bus", "feature_bootstrap", "permissions", "startup_supervisor", "mcp_federation", "neox_events"]
+        var result = ["core_setup", "permissions", "mcp_federation", "stdio_federation", "neox_events"]
         if config.capabilities.isEnabled(.captureTour) { result.append("capture_tour") }
         if config.capabilities.isEnabled(.demoRecording) { result.append("demo") }
         if config.capabilities.isEnabled(.accessibilityComputer) { result.append("accessibility") }
         if config.capabilities.isEnabled(.phoneIntegration) { result.append("phone_media") }
         if config.capabilities.isEnabled(.publicTunnel) { result.append("public_tunnel") }
-        result.append("tutor_workspace")
         return result
     }
 

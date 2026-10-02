@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import Foundation
+import ScreenCaptureKit
 
 struct AccessibilityNodeSnapshot: Codable, Equatable, Sendable {
     var path: String
@@ -17,6 +18,7 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
 
     private let cacheLock = NSLock()
     private var elementsByPath: [String: AXUIElement] = [:]
+    private var computerElementsByIndex: [String: AXUIElement] = [:]
     private var lastSnapshot: AccessibilityNodeSnapshot?
 
     func inspect(maxDepth: Int = 8, maxNodes: Int = 400) async throws -> String {
@@ -224,6 +226,170 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
         return CGRect(origin: point, size: cgSize)
     }
 
+
+    func listApps() -> String {
+        let apps = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+            .map { app in
+                [
+                    "name": app.localizedName ?? "",
+                    "bundleId": app.bundleIdentifier ?? "",
+                    "pid": Int(app.processIdentifier),
+                    "active": app.isActive,
+                ] as [String: Any]
+            }
+        return Self.json(["apps": apps])
+    }
+
+    func getAppState(_ appRef: String) async throws -> String {
+        guard AXIsProcessTrusted() else {
+            throw DemoRecorderError.message("NeoY needs macOS Accessibility permission")
+        }
+        guard let app = runningApplication(appRef) else {
+            throw DemoRecorderError.message("App not found: \(appRef)")
+        }
+        let root = accessibilityRoot(for: app)
+        var visited = Set<CFHashCode>()
+        var elements: [[String: Any]] = []
+        var lines: [String] = []
+        var next = 0
+        cacheLock.withLock { computerElementsByIndex.removeAll() }
+
+        func walk(_ element: AXUIElement, depth: Int) {
+            guard next < 500, depth <= 14 else { return }
+            let hash = CFHash(element)
+            guard visited.insert(hash).inserted else { return }
+            let role = Self.string(element, kAXRoleAttribute)
+            let title = Self.string(element, kAXTitleAttribute)
+            let value = Self.string(element, kAXValueAttribute)
+            let rect = frame(for: element)
+            let id = String(next)
+            next += 1
+            cacheLock.withLock { computerElementsByIndex[id] = element }
+            var item: [String: Any] = ["index": id]
+            if let role { item["role"] = role }
+            if let title { item["title"] = title }
+            if let value { item["value"] = value }
+            if let rect { item["bounds"] = rect }
+            var actions: CFArray?
+            if AXUIElementCopyActionNames(element, &actions) == .success, let names = actions as? [String], !names.isEmpty {
+                item["actions"] = names
+            }
+            var settable = DarwinBoolean(false)
+            if AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &settable) == .success {
+                item["settable"] = settable.boolValue
+            }
+            elements.append(item)
+            let label = title ?? value ?? ""
+            lines.append("\(String(repeating: "\t", count: depth))\(id) \(role ?? "element") \(label)")
+            for child in (Self.array(element, kAXChildrenAttribute) ?? []).prefix(160) {
+                walk(child, depth: depth + 1)
+                if next >= 500 { break }
+            }
+        }
+        walk(root, depth: 0)
+
+        let screenshot = await captureWindowScreenshot(for: app)
+        var structured: [String: Any] = [
+            "app": ["name": app.localizedName ?? "", "bundleId": app.bundleIdentifier ?? "", "pid": Int(app.processIdentifier)],
+            "snapshot": ["elements": elements, "text": lines.joined(separator: "\n")],
+        ]
+        if let screenshot {
+            structured["artifacts"] = ["screenshotMimeType": "image/png", "screenshotBase64": screenshot]
+        }
+        guard let safeStructured = Self.jsonSafe(structured) as? [String: Any] else {
+            throw DemoRecorderError.message("Could not encode computer state")
+        }
+        var content: [[String: Any]] = [["type": "text", "text": Self.json(safeStructured)]]
+        if let screenshot {
+            content.append(["type": "image", "data": screenshot, "mimeType": "image/png"])
+        }
+        let result: [String: Any] = ["content": content, "structuredContent": safeStructured, "isError": false]
+        let data = try JSONSerialization.data(withJSONObject: result)
+        return "mcpresult:" + data.base64EncodedString()
+    }
+
+    func selectText(appRef: String, elementIndex: String, text: String, prefix: String?, suffix: String?, selection: String) throws -> String {
+        guard ["text", "cursor_before", "cursor_after"].contains(selection) else {
+            throw DemoRecorderError.message("selection must be text, cursor_before, or cursor_after")
+        }
+        let element = cacheLock.withLock { computerElementsByIndex[elementIndex] }
+        guard let element else { throw DemoRecorderError.message("Unknown element_index \(elementIndex); call computer.get_app_state first") }
+        guard let current = Self.string(element, kAXValueAttribute) else {
+            throw DemoRecorderError.message("Element has no selectable text value")
+        }
+        let source = current as NSString
+        var search = NSRange(location: 0, length: source.length)
+        var found: NSRange?
+        while search.length > 0 {
+            let candidate = source.range(of: text, options: [], range: search)
+            if candidate.location == NSNotFound { break }
+            let before = source.substring(to: candidate.location)
+            let after = source.substring(from: candidate.location + candidate.length)
+            if (prefix == nil || before.hasSuffix(prefix!)) && (suffix == nil || after.hasPrefix(suffix!)) {
+                found = candidate; break
+            }
+            let next = candidate.location + 1
+            guard next < source.length else { break }
+            search = NSRange(location: next, length: source.length - next)
+        }
+        guard let found else { throw DemoRecorderError.message("Text not found in element") }
+        var range = CFRange(location: selection == "cursor_after" ? found.location + found.length : found.location,
+                            length: selection == "text" ? found.length : 0)
+        guard let axRange = AXValueCreate(.cfRange, &range) else { throw DemoRecorderError.message("Could not create AX text range") }
+        let error = AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, axRange)
+        guard error == .success else { throw accessibilityError(error) }
+        return Self.json(["action": "select_text", "element_index": elementIndex, "selection": selection])
+    }
+
+    func performSecondaryAction(elementIndex: String, action: String) throws -> String {
+        let element = cacheLock.withLock { computerElementsByIndex[elementIndex] }
+        guard let element else { throw DemoRecorderError.message("Unknown element_index \(elementIndex); call computer.get_app_state first") }
+        let name: String
+        switch action.lowercased() {
+        case "press": name = kAXPressAction
+        case "showmenu": name = kAXShowMenuAction
+        case "confirm": name = kAXConfirmAction
+        case "cancel": name = kAXCancelAction
+        case "raise": name = kAXRaiseAction
+        default: name = action
+        }
+        let error = AXUIElementPerformAction(element, name as CFString)
+        guard error == .success else { throw accessibilityError(error) }
+        return Self.json(["action": "secondary_action", "element_index": elementIndex, "name": name])
+    }
+
+    private func runningApplication(_ ref: String) -> NSRunningApplication? {
+        let lower = ref.lowercased()
+        return NSWorkspace.shared.runningApplications.first {
+            $0.bundleIdentifier?.lowercased() == lower || $0.localizedName?.lowercased() == lower
+        }
+    }
+
+    private func accessibilityRoot(for app: NSRunningApplication) -> AXUIElement {
+        let root = AXUIElementCreateApplication(app.processIdentifier)
+        if let focused = Self.element(root, kAXFocusedWindowAttribute) { return focused }
+        if let main = Self.element(root, kAXMainWindowAttribute) { return main }
+        if let first = Self.array(root, kAXWindowsAttribute)?.first { return first }
+        return root
+    }
+
+    private func captureWindowScreenshot(for app: NSRunningApplication) async -> String? {
+        guard CGPreflightScreenCaptureAccess() else { return nil }
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false) else { return nil }
+        let windows = content.windows.filter { $0.owningApplication?.processID == app.processIdentifier }
+        guard let window = windows.max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }),
+              let display = content.displays.first(where: { $0.frame.intersects(window.frame) }) ?? content.displays.first else { return nil }
+        let filter = SCContentFilter(display: display, including: [window])
+        let config = SCStreamConfiguration()
+        config.width = max(Int(window.frame.width.rounded(.up)), 1)
+        config.height = max(Int(window.frame.height.rounded(.up)), 1)
+        config.showsCursor = false
+        guard let image = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) else { return nil }
+        let rep = NSBitmapImageRep(cgImage: image)
+        return rep.representation(using: .png, properties: [:])?.base64EncodedString()
+    }
+
     private func requestTrust() {
         let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
@@ -272,6 +438,12 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
         return value as? String
     }
 
+    private static func element(_ element: AXUIElement, _ name: String) -> AXUIElement? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success, let value else { return nil }
+        return unsafeBitCast(value, to: AXUIElement.self)
+    }
+
     private static func array(_ element: AXUIElement, _ name: String) -> [AXUIElement]? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success, let array = value as? [AXUIElement] else { return nil }
@@ -308,6 +480,40 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
 enum AccessibilityTools {
     static func tools() -> [ToolDefinition] {
         [
+            ToolDefinition(name: "computer.list_apps", description: "List running macOS apps.", parameters: schema([:] )) { _ in
+                NeoYAccessibilityController.shared.listApps()
+            },
+            ToolDefinition(name: "computer.get_app_state", description: "Get app screenshot, accessibility state, element indexes, and element bounds.", parameters: schema([
+                "app": string("App name or bundle identifier"),
+            ], required: ["app"])) { args in
+                try await NeoYAccessibilityController.shared.getAppState(try requiredString(args, "app"))
+            },
+            ToolDefinition(name: "computer.select_text", description: "Select text or place cursor in a cached text element from computer.get_app_state.", parameters: schema([
+                "app": string("App name or bundle identifier"),
+                "element_index": string("Element index from get_app_state"),
+                "text": string("Exact text to select"),
+                "prefix": string("Optional prefix for disambiguation"),
+                "suffix": string("Optional suffix for disambiguation"),
+                "selection": string("text, cursor_before, or cursor_after"),
+            ], required: ["app", "element_index", "text"])) { args in
+                try NeoYAccessibilityController.shared.selectText(
+                    appRef: try requiredString(args, "app"),
+                    elementIndex: try requiredString(args, "element_index"),
+                    text: try requiredString(args, "text"),
+                    prefix: optionalString(args, "prefix"),
+                    suffix: optionalString(args, "suffix"),
+                    selection: optionalString(args, "selection") ?? "text"
+                )
+            },
+            ToolDefinition(name: "computer.perform_secondary_action", description: "Perform an AX secondary action on a cached element.", parameters: schema([
+                "element_index": string("Element index from get_app_state"),
+                "action": string("AX action name"),
+            ], required: ["element_index", "action"])) { args in
+                try NeoYAccessibilityController.shared.performSecondaryAction(
+                    elementIndex: try requiredString(args, "element_index"),
+                    action: try requiredString(args, "action")
+                )
+            },
             ToolDefinition(name: "accessibility.inspect", description: "Inspect the focused macOS accessibility tree and cache resolvable element paths.", parameters: schema([
                 "max_depth": integer("Maximum traversal depth", default: 8),
                 "max_nodes": integer("Maximum returned nodes", default: 400),
@@ -380,6 +586,11 @@ enum AccessibilityTools {
         guard case .object(let object) = args, case .string(let value)? = object[key] else {
             throw DemoRecorderError.message("\(key) is required")
         }
+        return value
+    }
+
+    private static func optionalString(_ args: JSONValue, _ key: String) -> String? {
+        guard case .object(let object) = args, case .string(let value)? = object[key] else { return nil }
         return value
     }
 

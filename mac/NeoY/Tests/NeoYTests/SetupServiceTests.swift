@@ -18,7 +18,7 @@ final class SetupServiceTests: XCTestCase {
 
     func testParserRejectsUnknownCommandAndTopic() {
         XCTAssertThrowsError(try NeoYSetupParser.parse("startup add")) { error in
-            XCTAssertEqual(error.localizedDescription, "missing argument: startup add <name> <absolute-executable> [args...]")
+            XCTAssertEqual(error.localizedDescription, "unknown command 'startup'; run 'help'")
         }
         XCTAssertThrowsError(try NeoYSetupParser.parse("help bogus")) { error in
             XCTAssertTrue(error.localizedDescription.contains("unknown topic 'bogus'"))
@@ -39,18 +39,10 @@ final class SetupServiceTests: XCTestCase {
         )
     }
 
-    func testParserAcceptsV2RuntimeCommands() throws {
+    func testParserAcceptsFederationAndEventCommands() throws {
         XCTAssertEqual(
-            try NeoYSetupParser.parse("startup add relay /usr/bin/env node server.js"),
-            .startupAdd(name: "relay", executable: "/usr/bin/env", arguments: ["node", "server.js"])
-        )
-        XCTAssertEqual(
-            try NeoYSetupParser.parse("startup set restart relay always"),
-            .startupSetRestart(name: "relay", policy: .always)
-        )
-        XCTAssertEqual(
-            try NeoYSetupParser.parse("mcp add tutor http://127.0.0.1:9333/mcp"),
-            .mcpAdd(name: "tutor", url: "http://127.0.0.1:9333/mcp")
+            try NeoYSetupParser.parse("mcp add events stdio:///opt/homebrew/bin/node?arg=%2Ftmp%2Fevents.mjs"),
+            .mcpAdd(name: "events", url: "stdio:///opt/homebrew/bin/node?arg=%2Ftmp%2Fevents.mjs")
         )
         XCTAssertEqual(
             try NeoYSetupParser.parse("events notify blocked \"Need approval\" human action required"),
@@ -126,29 +118,10 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertFalse(try store.loadOrCreate().document.configuration.capabilities.isEnabled(.demoRecording))
     }
 
-    func testCoreCommandTokenizerPreservesQuotedArgumentsAndRemainder() throws {
-        let parsed = try NeoYCommandLine.parse(#"run --cwd "/tmp/a b" -- echo hello world"#)
-        XCTAssertEqual(parsed.tokens, ["run", "--cwd", "/tmp/a b"])
-        XCTAssertEqual(parsed.remainder, "echo hello world")
-    }
-
-    func testCoreExecRunAndFileRoundTrip() async throws {
-        let exec = NeoYExecService()
-        let result = try await exec.execute("run -- printf neoy-v22")
-        XCTAssertTrue(result.contains("neoy-v22"))
-
-        let files = NeoYCoreFileService()
-        let path = Self.makeDirectory().appendingPathComponent("nested/test.txt").path
-        _ = try await files.execute("write '\(path)' -- hello")
-        let read = try await files.execute("read '\(path)'")
-        XCTAssertTrue(read.contains("hello"))
-        _ = try await files.execute("remove '\(path)'")
-    }
-
     func testCanonicalCoreToolSetIsSmallAndStable() {
         XCTAssertEqual(
             NeoYCoreRuntime.toolNames,
-            Set(["neoy.setup", "mac.exec", "mac.fs", "codex.threads", "node", "events.health", "events.status", "events.history", "events.wait", "events.publish", "feature.bootstrap"])
+            Set(["neoy.setup"])
         )
     }
 
@@ -255,13 +228,10 @@ final class SetupServiceTests: XCTestCase {
     }
 
     func testRemoteFeatureClassification() {
-        XCTAssertTrue(NeoYRemoteFeature.terminal.matches(toolName: "mac.exec"))
-        XCTAssertTrue(NeoYRemoteFeature.files.matches(toolName: "mac.fs"))
+        XCTAssertTrue(NeoYRemoteFeature.mcpServices.matches(toolName: "mcp.events.watch"))
+        XCTAssertTrue(NeoYRemoteFeature.mcpServices.matches(toolName: "mcp.mac.exec"))
         XCTAssertTrue(NeoYRemoteFeature.computer.matches(toolName: "computer.click"))
-        XCTAssertTrue(NeoYRemoteFeature.computer.matches(toolName: "accessibility.inspect"))
-        XCTAssertTrue(NeoYRemoteFeature.phone.matches(toolName: "phone.media.search"))
-        XCTAssertTrue(NeoYRemoteFeature.mcpServices.matches(toolName: "mcp.calendar.events"))
-        XCTAssertFalse(NeoYRemoteFeature.files.matches(toolName: "mac.exec"))
+        XCTAssertFalse(NeoYRemoteFeature.computer.matches(toolName: "mcp.mac.exec"))
     }
 
     private static func makeDirectory() -> URL {
