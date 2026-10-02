@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Bundled Node.js runtime for NeoY core MCP providers and the Web ChatGPT gateway.",
+  "description": "Installable Node.js runtime for NeoY core MCP providers and the Web ChatGPT gateway.",
   "engines": {
     "node": ">=18"
   },
