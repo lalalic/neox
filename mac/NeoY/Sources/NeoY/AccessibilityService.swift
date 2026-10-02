@@ -135,6 +135,15 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
 
     func resolve(_ target: DemoTarget) throws -> (frame: CGRect, element: AXUIElement?) {
         if let rect = target.rect { return (rect, nil) }
+        if let elementIndex = target.elementIndex {
+            guard let element = cachedComputerElement(index: elementIndex, stateID: target.stateID) else {
+                throw DemoRecorderError.message("Computer state is stale or element_index \(elementIndex) is unavailable; call computer.get_app_state again")
+            }
+            guard let frame = frame(for: element) else {
+                throw DemoRecorderError.message("Computer element \(elementIndex) has no usable frame")
+            }
+            return (frame, element)
+        }
         cacheLock.lock()
         let snapshot = lastSnapshot
         let cachedElements = elementsByPath
@@ -315,7 +324,8 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
         let stateID = UUID().uuidString
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
         let root = accessibilityRoot(for: app)
-        let focusedHash = Self.element(appElement, kAXFocusedUIElementAttribute).map(CFHash)
+        let focusedElement = Self.element(appElement, kAXFocusedUIElementAttribute)
+        let focusedHash = focusedElement.map(CFHash)
         var focusedElementIndex: String?
         var visited = Set<CFHashCode>()
         var elements: [ComputerElementSnapshot] = []
@@ -332,7 +342,8 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
             guard visited.insert(hash).inserted else { return }
             let role = Self.string(element, kAXRoleAttribute)
             let title = Self.string(element, kAXTitleAttribute)
-            let value = Self.string(element, kAXValueAttribute)
+            let subrole = Self.string(element, kAXSubroleAttribute)
+            let value = subrole == (kAXSecureTextFieldSubrole as String) ? nil : Self.string(element, kAXValueAttribute)
             let rect = frame(for: element)
             let id = String(next)
             next += 1
@@ -364,6 +375,25 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
             }
         }
         walk(root, depth: 0)
+        if focusedElementIndex == nil, let focusedElement, next < 500 {
+            let id = String(next)
+            next += 1
+            let role = Self.string(focusedElement, kAXRoleAttribute)
+            let title = Self.string(focusedElement, kAXTitleAttribute)
+            let subrole = Self.string(focusedElement, kAXSubroleAttribute)
+            let value = subrole == (kAXSecureTextFieldSubrole as String) ? nil : Self.string(focusedElement, kAXValueAttribute)
+            var actions: CFArray?
+            let actionNames = AXUIElementCopyActionNames(focusedElement, &actions) == .success ? (actions as? [String] ?? []) : []
+            var settable = DarwinBoolean(false)
+            let canSet = AXUIElementIsAttributeSettable(focusedElement, kAXValueAttribute as CFString, &settable) == .success && settable.boolValue
+            cacheLock.withLock { computerElementsByIndex[id] = focusedElement }
+            elements.append(ComputerElementSnapshot(
+                index: id, role: role, title: title, value: value,
+                bounds: frame(for: focusedElement).map(ComputerRect.init), actions: actionNames, settable: canSet
+            ))
+            focusedElementIndex = id
+            lines.append("\(id) \(role ?? "element") \(title ?? value ?? "") [focused]")
+        }
 
         let capture = await captureWindowScreenshot(for: app)
         let windowBounds = capture?.bounds ?? frame(for: root)
@@ -427,12 +457,15 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
         return "mcpresult:" + data.base64EncodedString()
     }
 
-    func elementSnapshot(index: String, stateID: String? = nil) -> ComputerElementSnapshot? {
-        let element: AXUIElement? = cacheLock.withLock {
+    private func cachedComputerElement(index: String, stateID: String? = nil) -> AXUIElement? {
+        cacheLock.withLock {
             if let stateID, stateID != currentComputerStateID { return nil }
             return computerElementsByIndex[index]
         }
-        guard let element else { return nil }
+    }
+
+    func elementSnapshot(index: String, stateID: String? = nil) -> ComputerElementSnapshot? {
+        guard let element = cachedComputerElement(index: index, stateID: stateID) else { return nil }
         var actions: CFArray?
         let names = AXUIElementCopyActionNames(element, &actions) == .success ? (actions as? [String] ?? []) : []
         var settable = DarwinBoolean(false)
@@ -441,19 +474,20 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
             index: index,
             role: Self.string(element, kAXRoleAttribute),
             title: Self.string(element, kAXTitleAttribute),
-            value: Self.string(element, kAXValueAttribute),
+            value: Self.string(element, kAXSubroleAttribute) == (kAXSecureTextFieldSubrole as String) ? nil : Self.string(element, kAXValueAttribute),
             bounds: frame(for: element).map(ComputerRect.init),
             actions: names,
             settable: canSet
         )
     }
 
-    func selectText(appRef: String, elementIndex: String, text: String, prefix: String?, suffix: String?, selection: String) throws -> String {
+    func selectText(appRef: String, stateID: String?, elementIndex: String, text: String, prefix: String?, suffix: String?, selection: String) throws -> String {
         guard ["text", "cursor_before", "cursor_after"].contains(selection) else {
             throw DemoRecorderError.message("selection must be text, cursor_before, or cursor_after")
         }
-        let element = cacheLock.withLock { computerElementsByIndex[elementIndex] }
-        guard let element else { throw DemoRecorderError.message("Unknown element_index \(elementIndex); call computer.get_app_state first") }
+        guard let element = cachedComputerElement(index: elementIndex, stateID: stateID) else {
+            throw DemoRecorderError.message("Computer state is stale or element_index \(elementIndex) is unavailable; call computer.get_app_state again")
+        }
         guard let current = Self.string(element, kAXValueAttribute) else {
             throw DemoRecorderError.message("Element has no selectable text value")
         }
@@ -481,9 +515,10 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
         return Self.json(["action": "select_text", "element_index": elementIndex, "selection": selection])
     }
 
-    func performSecondaryAction(elementIndex: String, action: String) throws -> String {
-        let element = cacheLock.withLock { computerElementsByIndex[elementIndex] }
-        guard let element else { throw DemoRecorderError.message("Unknown element_index \(elementIndex); call computer.get_app_state first") }
+    func performSecondaryAction(stateID: String?, elementIndex: String, action: String) throws -> String {
+        guard let element = cachedComputerElement(index: elementIndex, stateID: stateID) else {
+            throw DemoRecorderError.message("Computer state is stale or element_index \(elementIndex) is unavailable; call computer.get_app_state again")
+        }
         let name: String
         switch action.lowercased() {
         case "press": name = kAXPressAction
@@ -636,6 +671,7 @@ enum AccessibilityTools {
             },
             ToolDefinition(name: "computer.select_text", description: "Select text or place cursor in a cached text element from computer.get_app_state.", parameters: schema([
                 "app": string("App name or bundle identifier"),
+                "state_id": string("State ID from get_app_state; rejects stale element indexes"),
                 "element_index": string("Element index from get_app_state"),
                 "text": string("Exact text to select"),
                 "prefix": string("Optional prefix for disambiguation"),
@@ -644,6 +680,7 @@ enum AccessibilityTools {
             ], required: ["app", "element_index", "text"])) { args in
                 try NeoYAccessibilityController.shared.selectText(
                     appRef: try requiredString(args, "app"),
+                    stateID: optionalString(args, "state_id"),
                     elementIndex: try requiredString(args, "element_index"),
                     text: try requiredString(args, "text"),
                     prefix: optionalString(args, "prefix"),
@@ -652,10 +689,12 @@ enum AccessibilityTools {
                 )
             },
             ToolDefinition(name: "computer.perform_secondary_action", description: "Perform an AX secondary action on a cached element.", parameters: schema([
+                "state_id": string("State ID from get_app_state; rejects stale element indexes"),
                 "element_index": string("Element index from get_app_state"),
                 "action": string("AX action name"),
             ], required: ["element_index", "action"])) { args in
                 try NeoYAccessibilityController.shared.performSecondaryAction(
+                    stateID: optionalString(args, "state_id"),
                     elementIndex: try requiredString(args, "element_index"),
                     action: try requiredString(args, "action")
                 )
