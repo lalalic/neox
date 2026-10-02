@@ -65,21 +65,17 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertTrue(outcome.document.configuration.diagnostics.isEnabled)
         XCTAssertEqual(outcome.document.configuration.diagnostics.level, .warning)
         XCTAssertEqual(outcome.document.configuration.diagnostics.retentionDays, 21)
-        XCTAssertEqual(outcome.document.configuration.startupServices, [])
         XCTAssertEqual(outcome.document.configuration.mcpServers, [])
     }
 
-    func testV2ConfigurationPersistsStartupFederationAndEventPolicy() async throws {
+    func testConfigurationPersistsFederationAndEventPolicy() async throws {
         let store = NeoYFileControlPlaneStore(directory: Self.makeDirectory())
         let control = NeoYControlPlaneService(store: store)
 
-        _ = try await control.upsertStartup(.init(
-            name: "echo", executable: "/bin/echo", arguments: ["hello"], restartPolicy: .never))
         _ = try await control.upsertMCP(.init(name: "local", url: "http://127.0.0.1:9999/mcp"))
         _ = try await control.setEvent(.completed, enabled: false)
 
         let persisted = try store.loadOrCreate().document.configuration
-        XCTAssertEqual(persisted.startupServices.first?.name, "echo")
         XCTAssertEqual(persisted.mcpServers.first?.name, "local")
         XCTAssertFalse(persisted.events.completed)
     }
@@ -90,7 +86,7 @@ final class SetupServiceTests: XCTestCase {
         let directory = Self.makeDirectory()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let legacy = """
-        {"schemaVersion":2,"configuration":{"diagnostics":{"isEnabled":true,"level":"info","retentionDays":14},"startupServices":[],"mcpServers":[],"events":{"blocked":true,"failure":true,"completed":true}}}
+        {"schemaVersion":2,"configuration":{"diagnostics":{"isEnabled":true,"level":"info","retentionDays":14},"startupServices":[{"name":"old","executable":"/bin/echo","arguments":["legacy"],"environment":{},"isEnabled":true,"restartPolicy":"never"}],"mcpServers":[],"events":{"blocked":true,"failure":true,"completed":true}}}
         """
         try Data(legacy.utf8).write(to: directory.appendingPathComponent("control-plane.json"))
 
@@ -232,6 +228,21 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertTrue(NeoYRemoteFeature.mcpServices.matches(toolName: "mcp.mac.exec"))
         XCTAssertTrue(NeoYRemoteFeature.computer.matches(toolName: "computer.click"))
         XCTAssertFalse(NeoYRemoteFeature.computer.matches(toolName: "mcp.mac.exec"))
+    }
+
+    func testV3LegacyStartupServicesAreNormalizedAway() throws {
+        let directory = Self.makeDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let legacy = """
+        {"schemaVersion":3,"configuration":{"diagnostics":{"isEnabled":false,"level":"info","retentionDays":7},"startupServices":[{"name":"old","executable":"/bin/echo"}],"mcpServers":[],"events":{"blocked":true,"failure":true,"completed":true},"capabilities":{"disabled":[]}}}
+        """
+        let url = directory.appendingPathComponent("control-plane.json")
+        try Data(legacy.utf8).write(to: url)
+
+        _ = try NeoYFileControlPlaneStore(directory: directory).loadOrCreate()
+
+        let normalized = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertFalse(normalized.contains("startupServices"))
     }
 
     private static func makeDirectory() -> URL {

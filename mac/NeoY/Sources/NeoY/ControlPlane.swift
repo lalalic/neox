@@ -25,35 +25,6 @@ struct NeoYDiagnosticsConfiguration: Codable, Equatable, Sendable {
     }
 }
 
-enum NeoYRestartPolicy: String, Codable, CaseIterable, Sendable {
-    case never
-    case onFailure = "on-failure"
-    case always
-}
-
-struct NeoYStartupServiceConfiguration: Codable, Equatable, Sendable {
-    var name: String
-    var executable: String
-    var arguments: [String] = []
-    var workingDirectory: String?
-    var environment: [String: String] = [:]
-    var isEnabled = true
-    var restartPolicy: NeoYRestartPolicy = .onFailure
-
-    func validate() throws {
-        try NeoYControlPlaneValidation.name(name)
-        guard executable.hasPrefix("/") else {
-            throw NeoYControlPlaneError.invalidExecutable(executable)
-        }
-        if let workingDirectory, !workingDirectory.hasPrefix("/") {
-            throw NeoYControlPlaneError.invalidWorkingDirectory(workingDirectory)
-        }
-        for key in environment.keys where key.isEmpty || key.contains("=") {
-            throw NeoYControlPlaneError.invalidEnvironmentKey(key)
-        }
-    }
-}
-
 struct NeoYMCPServerConfiguration: Codable, Equatable, Sendable {
     var name: String
     var url: String
@@ -128,16 +99,13 @@ struct NeoYCapabilityConfiguration: Codable, Equatable, Sendable {
 
 struct NeoYControlPlaneConfiguration: Codable, Equatable, Sendable {
     var diagnostics = NeoYDiagnosticsConfiguration()
-    var startupServices: [NeoYStartupServiceConfiguration] = []
     var mcpServers: [NeoYMCPServerConfiguration] = []
     var events = NeoYEventConfiguration()
     var capabilities = NeoYCapabilityConfiguration()
 
     func validate() throws {
         try diagnostics.validate()
-        try NeoYControlPlaneValidation.unique(startupServices.map(\.name), kind: "startup service")
         try NeoYControlPlaneValidation.unique(mcpServers.map(\.name), kind: "MCP server")
-        try startupServices.forEach { try $0.validate() }
         try mcpServers.forEach { try $0.validate() }
     }
 }
@@ -192,9 +160,6 @@ enum NeoYControlPlaneError: LocalizedError {
     case invalidDiagnosticsProperty(String)
     case invalidName(String)
     case duplicateName(kind: String, name: String)
-    case invalidExecutable(String)
-    case invalidWorkingDirectory(String)
-    case invalidEnvironmentKey(String)
     case invalidMCPURL(String)
     case missingItem(kind: String, name: String)
     case saveFailed(String)
@@ -214,9 +179,6 @@ enum NeoYControlPlaneError: LocalizedError {
             "unknown diagnostics property '\(value)'; supported properties: level, retention-days"
         case .invalidName(let value): "invalid name '\(value)'; use letters, digits, '.', '_' or '-'"
         case .duplicateName(let kind, let name): "duplicate \(kind) name '\(name)'"
-        case .invalidExecutable(let value): "executable must be an absolute path; got '\(value)'"
-        case .invalidWorkingDirectory(let value): "working directory must be an absolute path; got '\(value)'"
-        case .invalidEnvironmentKey(let value): "invalid environment key '\(value)'"
         case .invalidMCPURL(let value): "MCP URL must be http(s) or stdio with an absolute executable path; got '\(value)'"
         case .missingItem(let kind, let name): "\(kind) '\(name)' does not exist"
         case .saveFailed(let reason): "configuration state could not be saved: \(reason)"
@@ -275,7 +237,6 @@ struct NeoYFileControlPlaneStore: NeoYControlPlaneStoring {
                 let migrated = NeoYControlPlaneDocument(
                     configuration: NeoYControlPlaneConfiguration(
                         diagnostics: legacy.configuration.diagnostics,
-                        startupServices: legacy.configuration.startupServices,
                         mcpServers: legacy.configuration.mcpServers,
                         events: legacy.configuration.events,
                         capabilities: NeoYCapabilityConfiguration()
@@ -286,6 +247,9 @@ struct NeoYFileControlPlaneStore: NeoYControlPlaneStoring {
             }
             let document = try decoder.decode(NeoYControlPlaneDocument.self, from: data)
             try document.validate()
+            if Self.containsLegacyStartupServices(data) {
+                try save(document)
+            }
             return NeoYControlPlaneLoadOutcome(document: document)
         } catch {
             var outcome = NeoYControlPlaneLoadOutcome()
@@ -321,6 +285,12 @@ struct NeoYFileControlPlaneStore: NeoYControlPlaneStoring {
         catch { throw NeoYControlPlaneError.saveFailed(error.localizedDescription) }
     }
 
+    private static func containsLegacyStartupServices(_ data: Data) -> Bool {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let configuration = root["configuration"] as? [String: Any] else { return false }
+        return configuration["startupServices"] != nil
+    }
+
     private func archive(data: Data, reason: String) throws {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
@@ -344,7 +314,6 @@ struct NeoYFileControlPlaneStore: NeoYControlPlaneStoring {
     }
     private struct V2Configuration: Codable {
         let diagnostics: NeoYDiagnosticsConfiguration
-        let startupServices: [NeoYStartupServiceConfiguration]
         let mcpServers: [NeoYMCPServerConfiguration]
         let events: NeoYEventConfiguration
     }
@@ -385,28 +354,6 @@ actor NeoYControlPlaneService {
         }
     }
 
-    func upsertStartup(_ service: NeoYStartupServiceConfiguration) throws -> NeoYControlPlaneConfiguration {
-        try service.validate()
-        return try mutate {
-            $0.startupServices.removeAll { $0.name == service.name }
-            $0.startupServices.append(service)
-            $0.startupServices.sort { $0.name < $1.name }
-        }
-    }
-
-    func removeStartup(_ name: String) throws -> NeoYControlPlaneConfiguration {
-        try mutateExisting(kind: "startup service", name: name, keyPath: \NeoYControlPlaneConfiguration.startupServices)
-    }
-
-    func updateStartup(_ name: String, transform: (inout NeoYStartupServiceConfiguration) throws -> Void) throws -> NeoYControlPlaneConfiguration {
-        try mutate {
-            guard let index = $0.startupServices.firstIndex(where: { $0.name == name }) else {
-                throw NeoYControlPlaneError.missingItem(kind: "startup service", name: name)
-            }
-            try transform(&$0.startupServices[index])
-        }
-    }
-
     func upsertMCP(_ server: NeoYMCPServerConfiguration) throws -> NeoYControlPlaneConfiguration {
         try server.validate()
         return try mutate {
@@ -417,7 +364,13 @@ actor NeoYControlPlaneService {
     }
 
     func removeMCP(_ name: String) throws -> NeoYControlPlaneConfiguration {
-        try mutateExisting(kind: "MCP server", name: name, keyPath: \NeoYControlPlaneConfiguration.mcpServers)
+        try mutate { configuration in
+            let before = configuration.mcpServers.count
+            configuration.mcpServers.removeAll { $0.name == name }
+            guard configuration.mcpServers.count != before else {
+                throw NeoYControlPlaneError.missingItem(kind: "MCP server", name: name)
+            }
+        }
     }
 
     func setMCPEnabled(_ name: String, enabled: Bool) throws -> NeoYControlPlaneConfiguration {
@@ -435,23 +388,6 @@ actor NeoYControlPlaneService {
 
     func setCapability(_ capability: NeoYOptionalCapability, enabled: Bool) throws -> NeoYControlPlaneConfiguration {
         try mutate { $0.capabilities.set(capability, enabled: enabled) }
-    }
-
-    private func mutateExisting<T>(
-        kind: String, name: String,
-        keyPath: WritableKeyPath<NeoYControlPlaneConfiguration, [T]>
-    ) throws -> NeoYControlPlaneConfiguration where T: Sendable {
-        try mutate { configuration in
-            let before = configuration[keyPath: keyPath].count
-            if T.self == NeoYStartupServiceConfiguration.self {
-                configuration.startupServices.removeAll { $0.name == name }
-            } else if T.self == NeoYMCPServerConfiguration.self {
-                configuration.mcpServers.removeAll { $0.name == name }
-            }
-            guard configuration[keyPath: keyPath].count != before else {
-                throw NeoYControlPlaneError.missingItem(kind: kind, name: name)
-            }
-        }
     }
 
     private func mutate(_ transform: (inout NeoYControlPlaneConfiguration) throws -> Void) throws -> NeoYControlPlaneConfiguration {
