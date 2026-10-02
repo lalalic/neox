@@ -33,12 +33,8 @@ xcodebuild -project "$PROJECT" -scheme NeoY -configuration Debug \
 mkdir -p "$APP/Contents/Resources"
 cp "$HERE/Resources/Scripts/runtime-control.sh" "$APP/Contents/Resources/runtime-control.sh"
 cp "$HERE/Resources/Scripts/bootstrap-runtime.sh" "$APP/Contents/Resources/bootstrap-runtime.sh"
-rm -rf "$APP/Contents/Resources/neoy-runtime"
-ditto "$HERE/Runtime" "$APP/Contents/Resources/neoy-runtime"
-rm -rf "$APP/Contents/Resources/neoy-runtime/node_modules"
-chmod 755 "$APP/Contents/Resources/runtime-control.sh" "$APP/Contents/Resources/bootstrap-runtime.sh" \
-  "$APP/Contents/Resources/neoy-runtime/src/mcp-gateway.mjs" \
-  "$APP/Contents/Resources/neoy-runtime/src/stdio-proxy.mjs"
+cp "$HERE/Resources/runtime.json" "$APP/Contents/Resources/runtime.json"
+chmod 755 "$APP/Contents/Resources/runtime-control.sh" "$APP/Contents/Resources/bootstrap-runtime.sh"
 
 codesign --force --deep --sign "$identity" \
   --entitlements "$ENTITLEMENTS" --timestamp=none "$APP"
@@ -51,7 +47,11 @@ ditto "$APP" "$DEST.new"
 rm -rf "$DEST"
 mv "$DEST.new" "$DEST"
 
-"$DEST/Contents/Resources/bootstrap-runtime.sh"
+RUNTIME_TARBALL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/neoy-runtime-pack.XXXXXX")"
+(cd "$HERE/Runtime" && npm pack --pack-destination "$RUNTIME_TARBALL_DIR" >/dev/null)
+RUNTIME_TARBALL="$(find "$RUNTIME_TARBALL_DIR" -maxdepth 1 -name '*.tgz' -print -quit)"
+NEO_RUNTIME_SPEC="$RUNTIME_TARBALL" "$DEST/Contents/Resources/bootstrap-runtime.sh"
+rm -rf "$RUNTIME_TARBALL_DIR"
 
 RUNTIME="$DEST/Contents/Resources/runtime-control.sh"
 mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.neoy"

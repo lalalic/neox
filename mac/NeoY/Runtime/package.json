@@ -1,7 +1,6 @@
 {
-  "name": "@neo/neoy-runtime",
+  "name": "@lalalic/neo",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "Installable Node.js runtime for NeoY core MCP providers and the Web ChatGPT gateway.",
   "engines": {
@@ -13,5 +12,17 @@
   "scripts": {
     "check": "node --check src/mcp-gateway.mjs && node --check src/stdio-proxy.mjs && node --check src/chatgpt-responses-adapter.mjs",
     "test": "npm run check"
-  }
+  },
+  "files": [
+    "src/"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lalalic/neox.git",
+    "directory": "mac/NeoY/Runtime"
+  },
+  "license": "MIT"
 }
