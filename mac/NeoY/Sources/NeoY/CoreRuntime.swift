@@ -7,7 +7,7 @@ enum NeoYCoreRuntime {
         "exec",
         "fs",
         "codex.threads",
-        "node"
+        "cluster"
     ]
 
     @MainActor

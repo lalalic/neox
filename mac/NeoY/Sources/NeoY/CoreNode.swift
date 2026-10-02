@@ -286,7 +286,7 @@ actor NeoYNodeService {
     }
 
     static let help = """
-    node — trusted remote NeoY Core forwarding
+    cluster — trusted remote NeoY Core forwarding
       local
       token
       discover [--seconds N]
@@ -294,7 +294,7 @@ actor NeoYNodeService {
       pair <name> <mcp-url> <core-token>
       remove <name>
       status <name>
-      invoke <name> <neoy.setup|mac.exec|mac.fs|codex.threads|node> -- <command>
+      invoke <name> <setup|exec|fs|codex.threads|cluster> -- <command>
     Pairing is explicit and stores the remote token in a mode-0600 local file. Remote responses always identify the executing node.
     """
 }
@@ -303,8 +303,8 @@ enum NeoYNodeTools {
     static func tools(service: NeoYNodeService) -> [ToolDefinition] {
         [
             ToolDefinition(
-                name: "node",
-                description: "Trusted remote NeoY discovery/pairing/status and canonical Core invocation. Call with command='help' for grammar.",
+                name: "cluster",
+                description: "Trusted NeoY cluster discovery/pairing/status and canonical Core invocation. Call with command='help' for grammar.",
                 parameters: NeoYCoreJSON.string("CLI-like remote-node command; use 'help' for grammar")
             ) { arguments in
                 try await service.execute(NeoYCoreJSON.command(from: arguments))

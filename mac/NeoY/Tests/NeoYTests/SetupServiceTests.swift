@@ -224,7 +224,7 @@ final class SetupServiceTests: XCTestCase {
     }
 
     func testRemoteFeatureClassification() {
-        XCTAssertTrue(NeoYRemoteFeature.mcpServices.matches(toolName: "mcp.events.watch"))
+        XCTAssertTrue(NeoYRemoteFeature.mcpServices.matches(toolName: "events.watch"))
         XCTAssertTrue(NeoYRemoteFeature.mcpServices.matches(toolName: "mcp.mac.exec"))
         XCTAssertTrue(NeoYRemoteFeature.computer.matches(toolName: "computer.click"))
         XCTAssertFalse(NeoYRemoteFeature.computer.matches(toolName: "mcp.mac.exec"))
@@ -265,7 +265,7 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "macbridge", tool: "pty_start"), "pty_start")
         XCTAssertNil(NeoYBundledRuntime.exposedToolName(provider: "macbridge", tool: "chrome_click"))
         XCTAssertNil(NeoYBundledRuntime.exposedToolName(provider: "macbridge", tool: "chatgpt_conversation_start"))
-        XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "events", tool: "health"), "mcp.events.health")
+        XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "events", tool: "health"), "events.health")
     }
 
     private static func makeDirectory() -> URL {
