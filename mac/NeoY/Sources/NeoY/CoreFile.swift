@@ -249,7 +249,7 @@ enum NeoYFileTools {
     static func tools(service: NeoYCoreFileService) -> [ToolDefinition] {
         [
             ToolDefinition(
-                name: "mac.fs",
+                name: "fs",
                 description: "Core filesystem read/write/stat/list/manage operations. Call with command='help' for authoritative grammar.",
                 parameters: NeoYCoreJSON.string("CLI-like filesystem command; use 'help' for grammar")
             ) { arguments in

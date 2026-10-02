@@ -5,7 +5,7 @@ import XCTest
 final class SetupServiceTests: XCTestCase {
     func testParserAcceptsAliasAndStatus() throws {
         XCTAssertEqual(try NeoYSetupParser.parse("neoy.setup status"), .status)
-        XCTAssertEqual(try NeoYSetupParser.parse("neoy.setup"), .help(topic: nil))
+        XCTAssertEqual(try NeoYSetupParser.parse("setup"), .help(topic: nil))
         XCTAssertEqual(try NeoYSetupParser.parse(" setup  "), .help(topic: nil))
         XCTAssertEqual(try NeoYSetupParser.parse("help"), .help(topic: nil))
     }
@@ -117,7 +117,7 @@ final class SetupServiceTests: XCTestCase {
     func testCanonicalCoreToolSetIsSmallAndStable() {
         XCTAssertEqual(
             NeoYCoreRuntime.toolNames,
-            Set(["neoy.setup", "mac.exec", "mac.fs", "codex.threads", "node"])
+            Set(["setup", "exec", "fs", "codex.threads", "node"])
         )
     }
 

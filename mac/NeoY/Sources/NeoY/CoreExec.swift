@@ -557,7 +557,7 @@ enum NeoYExecTools {
     static func tools(service: NeoYExecService) -> [ToolDefinition] {
         [
             ToolDefinition(
-                name: "mac.exec",
+                name: "exec",
                 description: "Core command execution, background jobs, and PTY sessions. Call with command='help' for authoritative grammar.",
                 parameters: NeoYCoreJSON.string("CLI-like command; use 'help' for grammar")
             ) { arguments in
