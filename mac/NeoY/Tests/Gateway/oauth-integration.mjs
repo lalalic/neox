@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const GATEWAY = path.join(ROOT, "Resources/Scripts/mcp-gateway.mjs");
+const GATEWAY = path.join(ROOT, "Runtime/src/mcp-gateway.mjs");
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "neoy-oauth-test-"));
 const token = "test-static-token-0123456789abcdef";
 const redirectUri = "https://chatgpt.com/connector/oauth/test_case";
@@ -76,26 +76,39 @@ function form(values) {
   return new URLSearchParams(values).toString();
 }
 
+
 let gateway;
-try {
-  const upstreamPort = await listen(upstream);
-  const holder = http.createServer();
-  const gatewayPort = await listen(holder);
-  await new Promise((r) => holder.close(r));
-  const base = `http://127.0.0.1:${gatewayPort}`;
-  gateway = spawn(process.execPath, [GATEWAY], {
+function startGateway(gatewayPort, upstreamPort) {
+  const child = spawn(process.execPath, [GATEWAY], {
     cwd: ROOT,
     stdio: ["ignore", "ignore", "pipe"],
     env: {
       ...process.env,
       NEOY_HTTP_PORT: String(gatewayPort),
       NEOY_HTTP_TOKEN: token,
-      NEOY_PUBLIC_URL: base,
+      NEOY_PUBLIC_URL: `http://127.0.0.1:${gatewayPort}`,
       NEOY_DATA_DIR: temp,
       NEOY_UPSTREAM: `http://127.0.0.1:${upstreamPort}/mcp`,
       NEOY_TOKEN_FILE: coreTokenFile,
     },
   });
+  return child;
+}
+
+async function stopGateway(child) {
+  if (!child || child.killed) return;
+  const exited = new Promise((resolve) => child.once("exit", resolve));
+  child.kill("SIGTERM");
+  await exited;
+}
+
+try {
+  const upstreamPort = await listen(upstream);
+  const holder = http.createServer();
+  const gatewayPort = await listen(holder);
+  await new Promise((r) => holder.close(r));
+  const base = `http://127.0.0.1:${gatewayPort}`;
+  gateway = startGateway(gatewayPort, upstreamPort);
   await waitForGateway(gateway, base);
 
   const prm = await fetch(base + "/.well-known/oauth-protected-resource/mcp");
@@ -205,6 +218,10 @@ try {
   assert.ok(tokens.access_token);
   assert.ok(tokens.refresh_token);
 
+  await stopGateway(gateway);
+  gateway = startGateway(gatewayPort, upstreamPort);
+  await waitForGateway(gateway, base);
+
   const list = await fetch(base + "/mcp", {
     method: "POST",
     headers: {
@@ -257,7 +274,7 @@ try {
 
   console.log("oauth-integration: ok");
 } finally {
-  if (gateway && !gateway.killed) gateway.kill("SIGTERM");
+  await stopGateway(gateway);
   await new Promise((r) => upstream.close(r));
   fs.rmSync(temp, { recursive: true, force: true });
 }
