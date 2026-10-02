@@ -4,7 +4,7 @@ import UserNotifications
 enum EventTools {
     static func tools() -> [ToolDefinition] {
         [ToolDefinition(
-            name: "event.notify",
+            name: "event.iphone.notify",
             description: "Deliver one important desktop-runtime event as a local NeoX notification. Intended for blocked, failure, or completed events after NeoY policy filtering.",
             parameters: .object([
                 "type": .string("object"),

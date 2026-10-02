@@ -38,11 +38,11 @@ final class NeoYRuntimeControl {
         federation.statuses(configurations: configuration.mcpServers)
     }
 
-    func notify(kind: NeoYImportantEventKind, title: String, body: String, configuration: NeoYControlPlaneConfiguration) async throws -> String {
+    func iphoneNotify(kind: NeoYImportantEventKind, title: String, body: String, configuration: NeoYControlPlaneConfiguration) async throws -> String {
         guard configuration.events.isEnabled(kind) else {
             return "{\"delivered\":false,\"reason\":\"disabled_by_policy\"}"
         }
-        return try await phone.callTool("event.notify", arguments: .object([
+        return try await phone.callTool("event.iphone.notify", arguments: .object([
             "kind": .string(kind.rawValue), "title": .string(title), "body": .string(body),
         ]))
     }

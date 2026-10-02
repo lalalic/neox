@@ -28,7 +28,12 @@ xcodebuild -project "$PROJECT" -scheme NeoY -configuration Debug \
 
 mkdir -p "$APP/Contents/Resources"
 cp "$HERE/Resources/Scripts/runtime-control.sh" "$APP/Contents/Resources/runtime-control.sh"
-chmod 755 "$APP/Contents/Resources/runtime-control.sh"
+cp "$HERE/Resources/Scripts/bootstrap-skills.sh" "$APP/Contents/Resources/bootstrap-skills.sh"
+chmod 755 "$APP/Contents/Resources/runtime-control.sh" "$APP/Contents/Resources/bootstrap-skills.sh"
+
+# NeoY depends on reusable event-bus and browser-workspace skills.
+# Install/update them before launching NeoY, then federate events-bus through MCP.
+"$HERE/Resources/Scripts/bootstrap-skills.sh"
 
 codesign --force --deep --sign "$identity" \
   --entitlements "$ENTITLEMENTS" --timestamp=none "$APP"
@@ -46,12 +51,8 @@ mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.neoy"
 
 # NeoY itself is always supervised by macOS launchd. PM2 is reserved for
 # NeoY-managed background/feature services and is invoked through npx.
-if command -v npx >/dev/null 2>&1; then
-  npx --yes pm2 delete neoy >/dev/null 2>&1 || true
-  npx --yes pm2 save --force >/dev/null 2>&1 || true
-else
-  print -u2 "warning: npx not found; NeoY will run, but PM2-managed feature services are unavailable"
-fi
+npx --yes pm2 delete neoy >/dev/null 2>&1 || true
+npx --yes pm2 save --force >/dev/null 2>&1 || true
 rm -f "$HOME/Library/Application Support/NeoY/neoy-pm2.config.cjs"
 
 cat > "$LAUNCH_PLIST" <<PLIST

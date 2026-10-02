@@ -370,7 +370,7 @@ actor NeoYSetupService {
             do {
                 guard let runtime else { throw NeoYRuntimeControlError.event("runtime event bridge is unavailable") }
                 let config = await controlPlane.currentConfiguration()
-                return try await runtime.notify(kind: kind, title: title, body: body, configuration: config)
+                return try await runtime.iphoneNotify(kind: kind, title: title, body: body, configuration: config)
             } catch {
                 return Self.json(JSONValue.object(["delivered": .bool(false), "error": .string(error.localizedDescription)]))
             }

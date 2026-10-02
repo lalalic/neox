@@ -12,7 +12,7 @@
 | Diagnostics/control state | **NeoY Core** | Schema v2 typed persistence, atomic replacement, malformed-state recovery, explicit v1 migration. |
 | NeoX pairing/handoff | **NeoY Core** | Preserve `_neoy._tcp`, port 8686, `POST /agent`, inbox and existing phone MCP selection. |
 | NeoX phone media | **First-party integration** | Phone remains authoritative for indexing/search/export; NeoY does not duplicate ownership. |
-| Important blocked/failure/completed events | **NeoY Core + NeoX** | NeoY policy filter -> paired NeoX `event.notify` -> local iOS notification. |
+| Important blocked/failure/completed events | **NeoY Core + NeoX** | NeoY policy filter -> paired NeoX `event.iphone.notify` -> local iOS notification. |
 | Browser profiles/tabs/cookies | **Outside Core** | Skill/plugin/federated MCP responsibility. |
 | ChatGPT/browser workflow glue | **Outside Core** | Do not recreate MacBridge product-specific automation inside NeoY. |
 | Standalone `neoy-bridge.py` | **Retired** | Native NeoY handoff already owns the wire contract. |

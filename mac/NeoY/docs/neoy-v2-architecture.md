@@ -21,7 +21,7 @@ neoy.setup(command)
    +--> PermissionService --------> macOS TCC / System Settings
    +--> StartupSupervisor --------> Process + cwd/env/logs/restart
    +--> MCPFederation ------------> user-configured HTTP MCP servers
-   +--> NeoX event bridge --------> paired NeoX event.notify
+   +--> NeoX event bridge --------> paired NeoX event.iphone.notify
    |
    +--> existing native tools
           capture/demo | accessibility/computer-use | phone media/handoff
@@ -104,7 +104,7 @@ A local MCP process can be started by the startup supervisor and then federated 
 
 ## NeoX important-event bridge
 
-NeoY forwards only policy-enabled `blocked`, `failure`, and `completed` events to the already-paired NeoX MCP endpoint through one NeoX native tool, `event.notify`. NeoX presents the event as a local notification after normal notification authorization. This reuses existing pairing/LAN trust rather than adding a cloud push service.
+NeoY forwards only policy-enabled `blocked`, `failure`, and `completed` events to the already-paired NeoX MCP endpoint through one NeoX native tool, `event.iphone.notify`. NeoX presents the event as a local notification after normal notification authorization. This reuses existing pairing/LAN trust rather than adding a cloud push service.
 
 ## Compatibility and retirement
 
