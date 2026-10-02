@@ -14,6 +14,31 @@ enum NeoYPermissionKind: String, Codable, CaseIterable, Sendable {
     case localNetwork = "local-network"
 }
 
+
+extension NeoYPermissionKind {
+    var title: String {
+        switch self {
+        case .accessibility: "Accessibility"
+        case .screenRecording: "Screen Recording"
+        case .camera: "Camera"
+        case .microphone: "Microphone"
+        case .notifications: "Notifications"
+        case .localNetwork: "Local Network"
+        }
+    }
+
+    var dependentFeatures: [String] {
+        switch self {
+        case .accessibility: ["Computer Use", "Demo semantic targeting"]
+        case .screenRecording: ["Computer Use screenshots", "Demo recording"]
+        case .camera: ["Capture Tour"]
+        case .microphone: ["Capture Tour audio"]
+        case .notifications: ["Notifications"]
+        case .localNetwork: ["Phone discovery", "local integrations"]
+        }
+    }
+}
+
 enum NeoYPermissionState: String, Codable, Sendable {
     case authorized
     case denied

@@ -25,8 +25,12 @@ final class NeoYSetupModel: ObservableObject {
     @Published private(set) var oauthToken = ""
     @Published var result = ""
     @Published var isBusy = false
+    @Published private(set) var permissions: [NeoYPermissionStatus] = []
 
-    init() { reload() }
+    init() {
+        reload()
+        Task { await refreshPermissions() }
+    }
 
     func reload() {
         let value = NeoYDeploymentSettingsStore.load()
@@ -161,6 +165,18 @@ final class NeoYSetupModel: ObservableObject {
             return
         }
         Task { await probe(remoteMCPURL, token: oauthToken) }
+    }
+
+    func refreshPermissions() async {
+        permissions = await NeoYPermissionService.snapshot()
+    }
+
+    func openPermission(_ kind: NeoYPermissionKind) {
+        if NeoYPermissionService.open(kind) {
+            result = "Opened System Settings for \(kind.title). Return to NeoY and click Refresh after changing access."
+        } else {
+            result = "Could not open System Settings for \(kind.title)."
+        }
     }
 
     private func persistRemoteSettings(restartServer: Bool = false) {
@@ -393,15 +409,54 @@ struct NeoYSetupView: View {
         VStack(alignment: .leading, spacing: 20) {
             heading("Advanced", "Runtime details and operational settings.")
 
+            GroupBox("Permissions") {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("NeoY native features share the permissions of this app. No helper authorization is required.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Refresh") { Task { await model.refreshPermissions() } }
+                    }
+                    Divider()
+                    ForEach([NeoYPermissionKind.accessibility, .screenRecording, .camera, .microphone], id: \.rawValue) { kind in
+                        permissionRow(kind)
+                    }
+                }
+                .padding(8)
+            }
+
             GroupBox("Runtime") {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("NeoY uses one MCP listener. Agent handoff, MCP and health routes share the configured port.")
                     Text("Remote transport is provided by Cloudflare when enabled.")
-                    Text("Permissions, diagnostics and MCP federation remain available through neoy.setup.")
+                    Text("Diagnostics and MCP federation remain available through neoy.setup.")
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(8)
+            }
+        }
+    }
+
+
+    private func permissionRow(_ kind: NeoYPermissionKind) -> some View {
+        let status = model.permissions.first { $0.kind == kind }
+        return HStack(alignment: .center, spacing: 12) {
+            Image(systemName: status?.state == .authorized ? "checkmark.circle.fill" : "exclamationmark.circle")
+                .foregroundStyle(status?.state == .authorized ? .green : .orange)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(kind.title)
+                Text("Used by: \(kind.dependentFeatures.joined(separator: ", "))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(status?.state.rawValue ?? "checking")
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+            if status?.state != .authorized {
+                Button("Open Settings") { model.openPermission(kind) }
             }
         }
     }
