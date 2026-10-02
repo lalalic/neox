@@ -33,7 +33,9 @@ deployment set hostname <host>
 
 Changing deployment settings persists them, restarts the MCP listener after the current response completes, and reconciles the Cloudflare tunnel. The menu-bar **Setup…** window exposes the same port/tunnel values plus local/public test buttons and MCP app credentials.
 
-Configured remote MCP tools appear as `mcp.<server>.<tool>`. Local MCP servers can be started by the startup supervisor and then federated by URL.
+Configured remote MCP tools appear as `mcp.<server>.<tool>`. Optional/product MCP servers are configured in the control plane and federated by URL. MacBridge is different: it is a NeoY core provider, pinned by `Runtime/package.json`, installed into `NeoY.app/Contents/Resources/neoy-runtime/node_modules`, and auto-registered by Swift at startup. It is not persisted in `mcpServers`.
+
+The Node.js runtime package owns the Web ChatGPT gateway/proxy scripts and direct Node dependencies. Swift remains the signed host, public auth boundary, native capability owner, and MCP federation host.
 
 Control state is schema-versioned and validated. v1 diagnostics-only state migrates explicitly to v2. Malformed state is preserved and surfaced as degraded health rather than silently discarded.
 

@@ -245,6 +245,22 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertFalse(normalized.contains("startupServices"))
     }
 
+    func testV3BundledMacBridgeIsNormalizedOutOfUserFederation() throws {
+        let directory = Self.makeDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let legacy = """
+        {"schemaVersion":3,"configuration":{"diagnostics":{"isEnabled":false,"level":"info","retentionDays":7},"mcpServers":[{"name":"macbridge","url":"stdio:///tmp/bridge.mjs","isEnabled":true},{"name":"events","url":"http://127.0.0.1:9999/mcp","isEnabled":true}],"events":{"blocked":true,"failure":true,"completed":true},"capabilities":{"disabled":[]}}}
+        """
+        let url = directory.appendingPathComponent("control-plane.json")
+        try Data(legacy.utf8).write(to: url)
+
+        let outcome = try NeoYFileControlPlaneStore(directory: directory).loadOrCreate()
+
+        XCTAssertEqual(outcome.document.configuration.mcpServers.map(\.name), ["events"])
+        let normalized = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertFalse(normalized.contains("\"name\" : \"macbridge\""))
+    }
+
     private static func makeDirectory() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("neoy-control-plane-tests", isDirectory: true)

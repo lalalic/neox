@@ -245,9 +245,17 @@ struct NeoYFileControlPlaneStore: NeoYControlPlaneStoring {
                 try save(migrated)
                 return NeoYControlPlaneLoadOutcome(document: migrated)
             }
-            let document = try decoder.decode(NeoYControlPlaneDocument.self, from: data)
+            var document = try decoder.decode(NeoYControlPlaneDocument.self, from: data)
             try document.validate()
-            if Self.containsLegacyStartupServices(data) {
+            let hadBundledMacBridge = document.configuration.mcpServers.contains {
+                $0.name == NeoYBundledRuntime.macBridgeProviderName
+            }
+            if hadBundledMacBridge {
+                document.configuration.mcpServers.removeAll {
+                    $0.name == NeoYBundledRuntime.macBridgeProviderName
+                }
+            }
+            if Self.containsLegacyStartupServices(data) || hadBundledMacBridge {
                 try save(document)
             }
             return NeoYControlPlaneLoadOutcome(document: document)

@@ -1,0 +1,17 @@
+{
+  "name": "@neo/neoy-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Bundled Node.js runtime for NeoY core MCP providers and the Web ChatGPT gateway.",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "mac-developer-bridge": "git+https://github.com/lalalic/mac-developer-bridge.git#945ac81396fac26b2f0a67f5182b831e24dfe468"
+  },
+  "scripts": {
+    "check": "node --check src/neoy-mcp-gateway.mjs && node --check src/neoy-stdio-proxy.mjs && node --check src/chatgpt-responses-adapter.mjs",
+    "test": "npm run check"
+  }
+}
