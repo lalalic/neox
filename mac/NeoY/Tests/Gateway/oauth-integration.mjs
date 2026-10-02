@@ -12,7 +12,6 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const GATEWAY = path.join(ROOT, "Resources/Scripts/neoy-mcp-gateway.mjs");
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "neoy-oauth-test-"));
 const token = "test-static-token-0123456789abcdef";
-const clientId = "neo-test-client";
 const redirectUri = "https://chatgpt.com/connector/oauth/test_case";
 const verifier = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~abc";
 const challenge = crypto.createHash("sha256").update(verifier, "ascii").digest("base64url");
@@ -91,7 +90,6 @@ try {
       ...process.env,
       NEOY_HTTP_PORT: String(gatewayPort),
       NEOY_HTTP_TOKEN: token,
-      NEOY_OAUTH_CLIENT_ID: clientId,
       NEOY_PUBLIC_URL: base,
       NEOY_DATA_DIR: temp,
       NEOY_UPSTREAM: `http://127.0.0.1:${upstreamPort}/mcp`,
@@ -109,6 +107,47 @@ try {
   assert.equal(asBody.issuer, base);
   assert.deepEqual(asBody.code_challenge_methods_supported, ["S256"]);
   assert.deepEqual(asBody.grant_types_supported, ["authorization_code", "refresh_token"]);
+  assert.equal(asBody.registration_endpoint, base + "/register");
+
+  const registration = await fetch(base + "/register", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      client_name: "ChatGPT",
+      redirect_uris: [redirectUri],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    }),
+  });
+  assert.equal(registration.status, 201);
+  const registered = await bodyJson(registration);
+  assert.match(registered.client_id, /^neo-dcr-[0-9a-f]{32}$/);
+  assert.deepEqual(registered.redirect_uris, [redirectUri]);
+  assert.equal(registered.token_endpoint_auth_method, "none");
+  const clientId = registered.client_id;
+
+  const repeatRegistration = await fetch(base + "/register", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      client_name: "ChatGPT",
+      redirect_uris: [redirectUri],
+      grant_types: ["authorization_code"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    }),
+  });
+  assert.equal(repeatRegistration.status, 201);
+  assert.equal((await bodyJson(repeatRegistration)).client_id, clientId);
+
+  const rejectedRegistration = await fetch(base + "/register", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ client_name: "attacker", redirect_uris: ["https://attacker.example/callback"] }),
+  });
+  assert.equal(rejectedRegistration.status, 400);
+  assert.equal((await bodyJson(rejectedRegistration)).error, "invalid_redirect_uri");
 
   const unauth = await fetch(base + "/mcp", {
     method: "POST",

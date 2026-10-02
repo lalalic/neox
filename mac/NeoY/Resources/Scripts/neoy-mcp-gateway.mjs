@@ -93,6 +93,7 @@ const AUTHREQ_TTL_MS = 300_000;
 const MAX_STORED_TOKENS = 256;
 const MAX_PENDING_AUTHREQS = 32;
 const MAX_PENDING_CODES = 32;
+const MAX_REGISTERED_CLIENTS = 64;
 // A flat per-request delay, not a lockout with a counter. POST /authorize is
 // reachable from the public tunnel by anyone, so any stateful "too many
 // failures" brake is a denial-of-service primitive against the only path that
@@ -445,7 +446,14 @@ function sha(s) {
 }
 
 function emptyStore() {
-  return { v: 1, bearerEpoch: BEARER_EPOCH, client: { id: "", createdAt: 0 }, access: new Map(), refresh: new Map() };
+  return {
+    v: 2,
+    bearerEpoch: BEARER_EPOCH,
+    client: { id: "", createdAt: 0 },
+    clients: new Map(),
+    access: new Map(),
+    refresh: new Map(),
+  };
 }
 
 // Only well-formed digests are rehydrated. A truncated or hand-edited `d` would
@@ -484,6 +492,21 @@ function loadStore() {
   if (parsed.client && typeof parsed.client.id === "string") {
     next.client.id = parsed.client.id;
     next.client.createdAt = typeof parsed.client.createdAt === "number" ? parsed.client.createdAt : 0;
+  }
+  if (Array.isArray(parsed.clients)) {
+    for (const rec of parsed.clients) {
+      if (!rec || typeof rec !== "object") continue;
+      if (typeof rec.id !== "string" || !/^neo-dcr-[0-9a-f]{32}$/.test(rec.id)) continue;
+      if (!Array.isArray(rec.redirectUris) || !rec.redirectUris.length) continue;
+      const redirectUris = rec.redirectUris.filter((uri) => allowedRedirect(uri));
+      if (redirectUris.length !== rec.redirectUris.length) continue;
+      next.clients.set(rec.id, {
+        id: rec.id,
+        redirectUris,
+        clientName: typeof rec.clientName === "string" ? rec.clientName.slice(0, 200) : "ChatGPT",
+        createdAt: typeof rec.createdAt === "number" ? rec.createdAt : 0,
+      });
+    }
   }
   if (parsed.bearerEpoch !== BEARER_EPOCH) {
     // The client_id survives deliberately: ChatGPT still holds it, and the
@@ -530,9 +553,10 @@ function saveStore() {
   // re-approval, losing the response costs the connector.
   try {
     const body = JSON.stringify({
-      v: 1,
+      v: 2,
       bearerEpoch: BEARER_EPOCH,
       client: store.client,
+      clients: [...store.clients.values()],
       access: serialise(store.access),
       refresh: serialise(store.refresh),
     });
@@ -700,6 +724,7 @@ function asDoc(origin) {
     issuer: origin,
     authorization_endpoint: `${origin}/authorize`,
     token_endpoint: `${origin}/token`,
+    registration_endpoint: `${origin}/register`,
     revocation_endpoint: `${origin}/revoke`,
     revocation_endpoint_auth_methods_supported: ["none"],
     response_types_supported: ["code"],
@@ -717,11 +742,10 @@ function asDoc(origin) {
     scopes_supported: [OAUTH_SCOPE],
     authorization_response_iss_parameter_supported: true,
   };
-  // Deliberately absent: registration_endpoint and
-  // client_id_metadata_document_supported (advertising either routes the client
-  // into a registration flow this file does not implement), and every OIDC
-  // signing/subject field, which is what makes the openid-configuration alias
-  // safe -- an OIDC-strict client aborts before it can demand an ID token.
+  // CIMD remains deliberately absent because this server implements RFC 7591
+  // dynamic client registration instead. OIDC signing/subject fields are also
+  // absent, which keeps the openid-configuration alias from pretending to be
+  // an identity provider.
 }
 
 // The seven paths clients actually probe. Each protected-resource document
@@ -758,6 +782,76 @@ function oauthError(res, status, code, desc) {
   // `desc` is always server-authored, never echoed client input, so no secret leaks.
   log(`oauth error ${status} ${code}: ${desc}`);
   return send(res, status, { error: code, error_description: desc }, { "cache-control": "no-store" });
+}
+
+function knownClient(id) {
+  if (typeof id !== "string" || !id) return null;
+  if (store.client.id && id === store.client.id) {
+    return { id, redirectUris: null, clientName: "Configured OAuth client", dynamic: false };
+  }
+  const rec = store.clients.get(id);
+  return rec ? { ...rec, dynamic: true } : null;
+}
+
+function redirectAllowedForClient(client, redirectUri) {
+  if (!client || !allowedRedirect(redirectUri)) return false;
+  return client.redirectUris === null || client.redirectUris.includes(redirectUri);
+}
+
+async function registerPost(req, res) {
+  let raw;
+  try {
+    raw = await readBody(req);
+  } catch (e) {
+    return oauthError(res, e?.httpStatus || 400, "invalid_client_metadata", String(e.message || e));
+  }
+  let body;
+  try {
+    body = JSON.parse(raw || "{}");
+  } catch {
+    return oauthError(res, 400, "invalid_client_metadata", "registration body must be JSON");
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return oauthError(res, 400, "invalid_client_metadata", "registration body must be an object");
+  }
+  const redirectUris = Array.isArray(body.redirect_uris) ? body.redirect_uris : [];
+  if (!redirectUris.length || redirectUris.some((uri) => !allowedRedirect(uri))) {
+    return oauthError(res, 400, "invalid_redirect_uri", "all redirect_uris must be approved ChatGPT callback URLs");
+  }
+  if (body.token_endpoint_auth_method && body.token_endpoint_auth_method !== "none") {
+    return oauthError(res, 400, "invalid_client_metadata", "only token_endpoint_auth_method=none is supported");
+  }
+  if (Array.isArray(body.grant_types) && body.grant_types.some((v) => !["authorization_code", "refresh_token"].includes(v))) {
+    return oauthError(res, 400, "invalid_client_metadata", "unsupported grant_types");
+  }
+  if (Array.isArray(body.response_types) && body.response_types.some((v) => v !== "code")) {
+    return oauthError(res, 400, "invalid_client_metadata", "unsupported response_types");
+  }
+
+  const canonicalRedirects = [...new Set(redirectUris)].sort();
+  const clientName = typeof body.client_name === "string" ? body.client_name.slice(0, 200) : "ChatGPT";
+  const fingerprint = JSON.stringify({ redirect_uris: canonicalRedirects, client_name: clientName });
+  const id = `neo-dcr-${crypto.createHash("sha256").update(fingerprint).digest("hex").slice(0, 32)}`;
+  let rec = store.clients.get(id);
+  if (!rec) {
+    if (store.clients.size >= MAX_REGISTERED_CLIENTS) {
+      return oauthError(res, 429, "temporarily_unavailable", "dynamic client registration capacity reached");
+    }
+    rec = { id, redirectUris: canonicalRedirects, clientName, createdAt: Date.now() };
+    store.clients.set(id, rec);
+    saveStore();
+    log(`dynamic OAuth client registered id=${id} redirect_count=${canonicalRedirects.length}`);
+  }
+
+  return send(res, 201, {
+    client_id: id,
+    client_id_issued_at: Math.floor(rec.createdAt / 1000),
+    client_name: rec.clientName,
+    redirect_uris: rec.redirectUris,
+    grant_types: ["authorization_code", "refresh_token"],
+    response_types: ["code"],
+    token_endpoint_auth_method: "none",
+  }, { "cache-control": "no-store" });
 }
 
 const PAGE_CSS =
@@ -869,8 +963,10 @@ function authorizeGet(req, res, url) {
   // redirect_uri and client_id are validated BEFORE anything is redirected
   // anywhere. Until both are known-good, an error redirect would itself be the
   // vulnerability.
-  const redirectUri = allowedRedirect(q.get("redirect_uri"));
-  if (!redirectUri) {
+  const clientId = q.get("client_id");
+  const client = knownClient(clientId);
+  const redirectUri = q.get("redirect_uri");
+  if (!client || !redirectAllowedForClient(client, redirectUri)) {
     // Log it: a rejected callback is the most likely reason a connector fails, and
     // without this the rejection is invisible (the error PAGE deliberately does not
     // reflect the value, to avoid turning it into a phishing surface).
@@ -880,10 +976,6 @@ function authorizeGet(req, res, url) {
     // a second log line, and truncated so a huge value cannot flood the file.
     log(`rejected redirect_uri: ${String(q.get("redirect_uri") ?? "<absent>").replace(/[\x00-\x1f\x7f]/g, "?").slice(0, 200)}`);
     return sendErrorPage(res, 400, "Unrecognised redirect_uri. Set NEOY_OAUTH_REDIRECT_URIS if your client uses a different callback.");
-  }
-  const clientId = q.get("client_id");
-  if (!store.client.id || clientId !== store.client.id) {
-    return sendErrorPage(res, 400, "Unrecognised client_id. Check the OAuth Client ID configured in your client.");
   }
 
   const state = q.get("state");
@@ -1081,7 +1173,7 @@ async function tokenPost(req, res) {
   const params = parseForm(req, raw);
 
   const cred = clientCredentials(req, params);
-  if (!store.client.id || cred.id !== store.client.id) {
+  if (!knownClient(cred.id)) {
     // No WWW-Authenticate Basic challenge: this is a public client endpoint and
     // a challenge would push a conforming client into an auth method it has no
     // credential for.
@@ -1764,6 +1856,11 @@ async function handle(req, res) {
   if (pathname === "/token") {
     if (req.method !== "POST") return send(res, 405, { error: "method not allowed" });
     return tokenPost(req, res);
+  }
+
+  if (pathname === "/register") {
+    if (req.method !== "POST") return send(res, 405, { error: "method not allowed" }, { allow: "POST" });
+    return registerPost(req, res);
   }
 
   if (pathname === "/revoke") {
