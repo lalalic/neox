@@ -107,6 +107,13 @@ the local endpoint, editable service port (default **6767**), and the client ID/
 needed to create an MCP app connection. The token can be revoked/rotated at any time;
 rotation invalidates the previous token while preserving the client ID.
 
+For Web ChatGPT, create the MCP App with the display name **`neo`** and point it at
+the public **`https://<host>/mcp`** endpoint. Use OAuth with the Client ID shown by
+NeoY. The public endpoint publishes MCP protected-resource and OAuth authorization
+server metadata, uses authorization-code + PKCE S256, and returns access/refresh
+tokens after the local approval step. Keep the existing legacy NeoY/Mac Bridge
+connection installed while migration/E2E verification is still in progress.
+
 Remote access can use a temporary Cloudflare address or a hostname managed by the
 user's Cloudflare account. Own-domain addresses remain stable across restarts;
 temporary addresses may change and can require the MCP app to be reconfigured.
