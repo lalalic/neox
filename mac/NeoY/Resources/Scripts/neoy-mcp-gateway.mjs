@@ -1799,7 +1799,11 @@ async function handle(req, res) {
   }
 
   if (!authorized(req)) {
-    log(`401 from ${req.socket.remoteAddress} (bad or missing bearer token)`);
+    const rawAuth = typeof req.headers.authorization === "string" ? req.headers.authorization : "";
+    const match = /^([^ \t]+)[ \t]+(\S+)/.exec(rawAuth);
+    const scheme = match ? match[1] : (rawAuth ? "malformed" : "none");
+    const tokenLength = match ? match[2].length : 0;
+    log("401 from " + req.socket.remoteAddress + " auth_scheme=" + scheme + " token_length=" + tokenLength + " method=" + req.method + " protocol=" + (req.headers["mcp-protocol-version"] || "<none>"));
     // A bare "Bearer" told a client nothing about where to get a token, which is
     // why ChatGPT discovered no auth support at all.
     return send(res, 401, { error: "unauthorized" }, { "www-authenticate": challengeFor(req) });
