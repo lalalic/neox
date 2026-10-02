@@ -38,8 +38,10 @@ The rules are:
    lifecycle, or direct device control belong in NeoY. Generic services do not.
 3. **Federate; do not duplicate.** If a capability already has a good MCP server
    or product-owned runtime, NeoY should federate it and preserve that service as
-   the source of truth. A provider failure must be isolated and must not prevent
-   NeoY itself from starting.
+   the source of truth. Core providers may be bundled as version-pinned Node.js
+   package dependencies (for example MacBridge) and auto-registered at startup;
+   optional/product providers remain control-plane configuration. Provider failure
+   must be isolated and must not prevent NeoY itself from starting.
 4. **Browser automation belongs to Browser Workspace.** NeoY and product services
    must not grow ChatGPT/Discord/site-specific DOM, tab, grouping, or session
    automation. Browser Workspace owns browser sessions and platform actions.

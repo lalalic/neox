@@ -6,3 +6,5 @@ Neox.xcodeproj
 scripts/remote-deploy.sh
 mac/NeoY/NeoY.xcodeproj/
 mac/NeoY/build-signed/
+
+mac/NeoY/Runtime/node_modules/

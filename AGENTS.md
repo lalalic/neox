@@ -21,8 +21,11 @@ work should be reviewed against them before adding code to `mac/NeoY`.
 - **Default to federation.** Before implementing a new tool in NeoY, ask whether
   an existing service/runtime already owns that capability. If it does, register
   or discover that MCP provider and federate it. Do not copy its implementation
-  into NeoY. Provider registration/discovery errors must be caught and isolated;
-  an optional provider must never make the NeoY app fail to launch.
+  into NeoY. A core provider may be a version-pinned dependency of
+  `mac/NeoY/Runtime/package.json` and bundled inside `NeoY.app`; do not put such a
+  core provider in mutable user control-plane state. Provider registration/discovery
+  errors must be caught and isolated; an optional provider must never make the NeoY
+  app fail to launch.
 - **Native NeoY code is reserved for capabilities that need the NeoY process or
   macOS privileges.** Typical examples are Accessibility/Screen Recording/TCC
   computer use, capture/demo/tour UI, direct local device control, and app

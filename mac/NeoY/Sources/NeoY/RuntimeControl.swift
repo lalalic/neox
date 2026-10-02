@@ -22,7 +22,7 @@ final class NeoYRuntimeControl {
     }
 
     func reconcile(_ configuration: NeoYControlPlaneConfiguration) async {
-        await federation.reconcile(configuration.mcpServers)
+        await federation.reconcile(NeoYBundledRuntime.resolvedMCPServers(userServers: configuration.mcpServers))
     }
 
     func permissions() async -> [NeoYPermissionStatus] {
@@ -35,7 +35,7 @@ final class NeoYRuntimeControl {
 
 
     func federationStatus(_ configuration: NeoYControlPlaneConfiguration) -> [NeoYFederatedServerStatus] {
-        federation.statuses(configurations: configuration.mcpServers)
+        federation.statuses(configurations: NeoYBundledRuntime.resolvedMCPServers(userServers: configuration.mcpServers))
     }
 
     func iphoneNotify(kind: NeoYImportantEventKind, title: String, body: String, configuration: NeoYControlPlaneConfiguration) async throws -> String {
