@@ -230,6 +230,25 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertFalse(names.contains("node"))
     }
 
+    func testSSHAddressDefaultsPortTo22() throws {
+        XCTAssertEqual(
+            try NeoYSSHAddress.parse("chengli@home98"),
+            NeoYSSHAddress(user: "chengli", host: "home98", port: 22)
+        )
+        XCTAssertEqual(
+            try NeoYSSHAddress.parse("chengli@127.0.0.1#port=22022"),
+            NeoYSSHAddress(user: "chengli", host: "127.0.0.1", port: 22022)
+        )
+    }
+
+    func testReverseSSHProcessParsing() {
+        let line = "/usr/bin/ssh -N -o BatchMode=yes -p 2222 -i /Users/lir/.ssh/id_ed25519 -R 127.0.0.1:22022:127.0.0.1:22 chengli@neo.example"
+        XCTAssertEqual(
+            NeoYSSHBootstrap.parseReverseSSH(from: line),
+            .init(target: "chengli@neo.example", port: 2222, identityFile: "/Users/lir/.ssh/id_ed25519")
+        )
+    }
+
     func testRemoteFeatureClassification() {
         XCTAssertTrue(NeoYRemoteFeature.mcpServices.matches(toolName: "events.watch"))
         XCTAssertTrue(NeoYRemoteFeature.mcpServices.matches(toolName: "mcp.mac.exec"))
