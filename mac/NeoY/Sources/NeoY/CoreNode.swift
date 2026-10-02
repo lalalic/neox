@@ -1,10 +1,16 @@
 import Foundation
 import Network
 
+enum NeoYNodeKind: String, Codable, Sendable {
+    case neoyPeer = "neoy-peer"
+    case neoNode = "neo-node"
+}
+
 struct NeoYNodeConfiguration: Codable, Equatable, Sendable {
     let name: String
     let url: String
-    let token: String
+    let kind: NeoYNodeKind
+    let token: String?
     var isEnabled: Bool = true
 }
 
@@ -92,11 +98,13 @@ actor NeoYNodeService {
     private struct PublicNode: Codable {
         let name: String
         let url: String
+        let kind: String
         let enabled: Bool
 
         init(_ node: NeoYNodeConfiguration) {
             name = node.name
             url = node.url
+            kind = node.kind.rawValue
             enabled = node.isEnabled
         }
     }
@@ -152,14 +160,26 @@ actor NeoYNodeService {
     }
 
     private func pair(_ tokens: [String]) async throws -> String {
-        guard tokens.count == 4 else {
-            throw NeoYCoreError.invalidCommand("usage: pair <name> <mcp-url> <core-token>")
+        guard tokens.count == 3 || tokens.count == 4 else {
+            throw NeoYCoreError.invalidCommand("usage: pair <name> <mcp-url> [core-token]")
         }
-        let node = NeoYNodeConfiguration(name: tokens[1], url: tokens[2], token: tokens[3])
-        guard let url = URL(string: securedURL(node)) else {
+        let token = tokens.count == 4 ? tokens[3] : nil
+        let provisional = NeoYNodeConfiguration(name: tokens[1], url: tokens[2], kind: .neoNode, token: token)
+        guard let url = URL(string: securedURL(provisional)) else {
             throw NeoYCoreError.invalidCommand("invalid node MCP URL")
         }
-        _ = try await rpc(url: url, method: "tools/list", params: [:])
+        let result = try await rpc(url: url, method: "tools/list", params: [:])
+        let tools = (result as? [String: Any])?["tools"] as? [[String: Any]] ?? []
+        let names = Set(tools.compactMap { $0["name"] as? String })
+        let kind: NeoYNodeKind
+        if names.contains("shell_exec") && (names.contains("fs_read") || names.contains("fs_write")) {
+            kind = .neoNode
+        } else if !names.isDisjoint(with: Self.allowedRemoteCoreTools) {
+            kind = .neoyPeer
+        } else {
+            throw NeoYCoreError.operationFailed("endpoint is not a supported NeoY peer or neo-node")
+        }
+        let node = NeoYNodeConfiguration(name: tokens[1], url: tokens[2], kind: kind, token: token)
         try await store.upsert(node)
         return NeoYCoreJSON.encode(PublicNode(node))
     }
@@ -173,13 +193,22 @@ actor NeoYNodeService {
         struct Status: Codable {
             let name: String
             let url: String
+            let kind: String
             let reachable: Bool
             let coreTools: [String]
         }
-        let names = tools.compactMap { $0["name"] as? String }
-            .filter { Self.allowedRemoteCoreTools.contains($0) }
-            .sorted()
-        return NeoYCoreJSON.encode(Status(name: node.name, url: node.url, reachable: true, coreTools: names))
+        let remoteNames = Set(tools.compactMap { $0["name"] as? String })
+        let names: [String]
+        switch node.kind {
+        case .neoyPeer:
+            names = remoteNames.filter { Self.allowedRemoteCoreTools.contains($0) }.sorted()
+        case .neoNode:
+            var mapped: [String] = []
+            if remoteNames.contains("shell_exec") { mapped.append("exec") }
+            if remoteNames.contains("fs_read") || remoteNames.contains("fs_write") || remoteNames.contains("fs_list") { mapped.append("fs") }
+            names = mapped
+        }
+        return NeoYCoreJSON.encode(Status(name: node.name, url: node.url, kind: node.kind.rawValue, reachable: true, coreTools: names))
     }
 
     private func invoke(_ parsed: NeoYCommandLine.Parsed) async throws -> String {
@@ -196,10 +225,16 @@ actor NeoYNodeService {
             throw NeoYCoreError.notFound("trusted node '\(name)' not found or disabled")
         }
         let command = parsed.remainder ?? "help"
-        let result = try await rpc(url: url, method: "tools/call", params: [
-            "name": tool,
-            "arguments": ["command": command]
-        ])
+        let result: Any
+        switch node.kind {
+        case .neoyPeer:
+            result = try await rpc(url: url, method: "tools/call", params: [
+                "name": tool,
+                "arguments": ["command": command]
+            ])
+        case .neoNode:
+            result = try await invokeNeoNode(url: url, tool: tool, command: command)
+        }
         struct RemoteResult: Codable {
             let node: String
             let tool: String
@@ -216,6 +251,55 @@ actor NeoYNodeService {
             text = String(decoding: data, as: UTF8.self)
         }
         return NeoYCoreJSON.encode(RemoteResult(node: name, tool: tool, result: text))
+    }
+
+
+    private func invokeNeoNode(url: URL, tool: String, command: String) async throws -> Any {
+        switch tool {
+        case "exec":
+            let parsed = try NeoYCommandLine.parse(command)
+            guard parsed.tokens.first == "run" else {
+                throw NeoYCoreError.invalidCommand("Neo nodes currently support: exec run [--cwd <path>] [--timeout-ms <ms>] -- <command>")
+            }
+            var cwd: String?
+            var timeout: Int?
+            var i = 1
+            while i < parsed.tokens.count {
+                if parsed.tokens[i] == "--cwd", i + 1 < parsed.tokens.count { cwd = parsed.tokens[i + 1]; i += 2; continue }
+                if parsed.tokens[i] == "--timeout-ms", i + 1 < parsed.tokens.count { timeout = Int(parsed.tokens[i + 1]); i += 2; continue }
+                i += 1
+            }
+            guard let shellCommand = parsed.remainder, !shellCommand.isEmpty else {
+                throw NeoYCoreError.invalidCommand("exec run requires a command after --")
+            }
+            var arguments: [String: Any] = ["command": shellCommand]
+            if let cwd { arguments["cwd"] = cwd }
+            if let timeout { arguments["timeout_ms"] = timeout }
+            return try await rpc(url: url, method: "tools/call", params: ["name": "shell_exec", "arguments": arguments])
+
+        case "fs":
+            let parsed = try NeoYCommandLine.parse(command)
+            guard let verb = parsed.tokens.first else { throw NeoYCoreError.invalidCommand("fs command is required") }
+            switch verb {
+            case "read":
+                guard parsed.tokens.count >= 2 else { throw NeoYCoreError.invalidCommand("usage: fs read <path> [--max-bytes N]") }
+                var arguments: [String: Any] = ["path": parsed.tokens[1]]
+                if let index = parsed.tokens.firstIndex(of: "--max-bytes"), index + 1 < parsed.tokens.count, let value = Int(parsed.tokens[index + 1]) { arguments["max_bytes"] = value }
+                return try await rpc(url: url, method: "tools/call", params: ["name": "fs_read", "arguments": arguments])
+            case "write", "append":
+                guard parsed.tokens.count >= 2, let content = parsed.remainder else { throw NeoYCoreError.invalidCommand("usage: fs \(verb) <path> -- <content>") }
+                return try await rpc(url: url, method: "tools/call", params: ["name": "fs_write", "arguments": ["path": parsed.tokens[1], "content": content, "append": verb == "append"]])
+            case "list":
+                let path = parsed.tokens.count >= 2 ? parsed.tokens[1] : "."
+                var arguments: [String: Any] = ["path": path]
+                if let index = parsed.tokens.firstIndex(of: "--limit"), index + 1 < parsed.tokens.count, let value = Int(parsed.tokens[index + 1]) { arguments["limit"] = value }
+                return try await rpc(url: url, method: "tools/call", params: ["name": "fs_list", "arguments": arguments])
+            default:
+                throw NeoYCoreError.invalidCommand("Neo nodes currently support: fs read|write|append|list")
+            }
+        default:
+            throw NeoYCoreError.unauthorized("Neo nodes currently expose canonical exec and fs only")
+        }
     }
 
     private func localIdentity() -> String {
@@ -249,10 +333,10 @@ actor NeoYNodeService {
     }
 
     private func securedURL(_ node: NeoYNodeConfiguration) -> String {
-        guard var components = URLComponents(string: node.url) else { return node.url }
+        guard let token = node.token, !token.isEmpty, var components = URLComponents(string: node.url) else { return node.url }
         var items = components.queryItems ?? []
         items.removeAll { $0.name == "token" }
-        items.append(URLQueryItem(name: "token", value: node.token))
+        items.append(URLQueryItem(name: "token", value: token))
         components.queryItems = items
         return components.string ?? node.url
     }
@@ -286,16 +370,16 @@ actor NeoYNodeService {
     }
 
     static let help = """
-    cluster — trusted remote NeoY Core forwarding
+    cluster — trusted Neo cluster nodes
       local
       token
       discover [--seconds N]
       list
-      pair <name> <mcp-url> <core-token>
+      pair <name> <mcp-url> [core-token]
       remove <name>
       status <name>
       invoke <name> <setup|exec|fs|codex.threads|cluster> -- <command>
-    Pairing is explicit and stores the remote token in a mode-0600 local file. Remote responses always identify the executing node.
+    Pairing auto-detects NeoY peers and neo-node endpoints. Tokens are optional and stored mode-0600 when supplied. Remote responses always identify the executing node.
     """
 }
 
@@ -304,7 +388,7 @@ enum NeoYNodeTools {
         [
             ToolDefinition(
                 name: "cluster",
-                description: "Trusted NeoY cluster discovery/pairing/status and canonical Core invocation. Call with command='help' for grammar.",
+                description: "Trusted cluster discovery/pairing/status and canonical invocation across NeoY peers or neo-nodes. Call with command='help' for grammar.",
                 parameters: NeoYCoreJSON.string("CLI-like remote-node command; use 'help' for grammar")
             ) { arguments in
                 try await service.execute(NeoYCoreJSON.command(from: arguments))
