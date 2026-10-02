@@ -196,7 +196,7 @@ actor NeoYNodeService {
 
         let probe = try NeoYSSHBootstrap.ssh(
             ssh,
-            command: "printf 'NEOY_HOME=%s\\nNEOY_CONN=%s\\n' \"$HOME\" \"$SSH_CONNECTION\""
+            command: "node_bin=\"$(command -v node 2>/dev/null || true)\"; for candidate in /opt/homebrew/bin/node /usr/local/bin/node \"$HOME/.local/bin/node\"; do if test -z \"$node_bin\" && test -x \"$candidate\"; then node_bin=\"$candidate\"; fi; done; printf 'NEOY_HOME=%s\\nNEOY_CONN=%s\\nNEOY_NODE=%s\\n' \"$HOME\" \"$SSH_CONNECTION\" \"$node_bin\""
         )
         guard probe.exitCode == 0 else {
             throw NeoYCoreError.operationFailed("SSH bootstrap failed: \(probe.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
@@ -207,6 +207,9 @@ actor NeoYNodeService {
         })
         guard let remoteHome = probeValues["NEOY_HOME"], !remoteHome.isEmpty else {
             throw NeoYCoreError.operationFailed("SSH bootstrap could not determine remote home directory")
+        }
+        guard let nodeBinary = probeValues["NEOY_NODE"], !nodeBinary.isEmpty else {
+            throw NeoYCoreError.operationFailed("neo-node requires Node.js on the remote Mac")
         }
 
         let hub: NeoYSSHBootstrap.ReverseSSH
@@ -239,23 +242,18 @@ actor NeoYNodeService {
             throw NeoYCoreError.operationFailed("failed to prepare neo-node directories: \(mkdir.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
         }
 
-        let oldBootstrap = remoteRoot + "/bootstrap-mac-node.sh"
+        let legacyBootstrap = remoteRoot + "/bootstrap-mac-node.sh"
+        let currentRuntime = remoteRoot + "/neo-node.mjs"
         let oldConfig = remoteConfig + "/node.env"
         _ = try NeoYSSHBootstrap.ssh(
             ssh,
-            command: "if test -f \(shellQuote(oldBootstrap)) && test -f \(shellQuote(oldConfig)); then /bin/zsh \(shellQuote(oldBootstrap)) stop >/dev/null 2>&1 || true; /bin/zsh \(shellQuote(oldBootstrap)) uninstall-persistence >/dev/null 2>&1 || true; fi"
+            command: "if test -f \(shellQuote(oldConfig)); then if test -f \(shellQuote(currentRuntime)); then \(shellQuote(nodeBinary)) \(shellQuote(currentRuntime)) stop >/dev/null 2>&1 || true; \(shellQuote(nodeBinary)) \(shellQuote(currentRuntime)) uninstall-persistence >/dev/null 2>&1 || true; fi; if test -f \(shellQuote(legacyBootstrap)); then /bin/zsh \(shellQuote(legacyBootstrap)) stop >/dev/null 2>&1 || true; /bin/zsh \(shellQuote(legacyBootstrap)) uninstall-persistence >/dev/null 2>&1 || true; fi; /bin/sleep 1; fi"
         )
 
-        let server = try nodeRuntimeResource("mac-node-server.py")
-        let bootstrap = try nodeRuntimeResource("bootstrap-mac-node.sh")
-        for (source, destination) in [
-            (server, "\(remoteRoot)/mac-node-server.py"),
-            (bootstrap, "\(remoteRoot)/bootstrap-mac-node.sh")
-        ] {
-            let copied = try NeoYSSHBootstrap.scp(source, to: ssh, remotePath: destination)
-            guard copied.exitCode == 0 else {
-                throw NeoYCoreError.operationFailed("failed to copy neo-node runtime: \(copied.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
-            }
+        let runtime = try nodeRuntimeResource("neo-node.mjs")
+        let copied = try NeoYSSHBootstrap.scp(runtime, to: ssh, remotePath: currentRuntime)
+        guard copied.exitCode == 0 else {
+            throw NeoYCoreError.operationFailed("failed to copy neo-node runtime: \(copied.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
         }
 
         var identityFile = hub.identityFile
@@ -281,12 +279,13 @@ actor NeoYNodeService {
             "HUB_MCP_PORT=\(hubMCPPort)",
             "LOCAL_MCP_PORT=\(localMCPPort)",
             "NODE_ROOT=\(remoteRoot)",
+            "NODE_BIN=\(nodeBinary)",
             "NODE_SSH_KEY=\(identityFile ?? "")"
         ].joined(separator: "\n") + "\n"
         let encoded = Data(env.utf8).base64EncodedString()
         let install = try NeoYSSHBootstrap.ssh(
             ssh,
-            command: "printf %s \(shellQuote(encoded)) | base64 -D > \(shellQuote(remoteConfig + "/node.env")); chmod 755 \(shellQuote(remoteRoot + "/bootstrap-mac-node.sh")) \(shellQuote(remoteRoot + "/mac-node-server.py")); /bin/zsh \(shellQuote(remoteRoot + "/bootstrap-mac-node.sh")) install; /bin/zsh \(shellQuote(remoteRoot + "/bootstrap-mac-node.sh")) start"
+            command: "printf %s \(shellQuote(encoded)) | base64 -D > \(shellQuote(remoteConfig + "/node.env")); chmod 755 \(shellQuote(currentRuntime)); \(shellQuote(nodeBinary)) \(shellQuote(currentRuntime)) install; \(shellQuote(nodeBinary)) \(shellQuote(currentRuntime)) start; rm -f \(shellQuote(remoteRoot + "/bootstrap-mac-node.sh")) \(shellQuote(remoteRoot + "/mac-node-server.py"))"
         )
         guard install.exitCode == 0 else {
             throw NeoYCoreError.operationFailed("failed to install/start neo-node: \(install.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")

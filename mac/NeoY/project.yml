@@ -12,9 +12,7 @@ targets:
     platform: macOS
     sources:
       - Sources/NeoY
-      - path: Resources/Scripts/neo-node/bootstrap-mac-node.sh
-        buildPhase: resources
-      - path: Resources/Scripts/neo-node/mac-node-server.py
+      - path: Resources/Scripts/neo-node/neo-node.mjs
         buildPhase: resources
     resources:
       - Resources/Scripts

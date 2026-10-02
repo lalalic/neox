@@ -100,9 +100,9 @@ unless they carry the NeoY Core token. `neoy.setup("auth show")` returns the
 trusted Core URL for an already-trusted local agent; treat that URL/token as a
 secret.
 
-Remote Macs are `neo-node`s and do not need NeoY installed. The normal bootstrap
+Remote Macs are `neo-node`s and do not need NeoY installed, but they do need a Node.js executable. The normal bootstrap
 contract is `cluster add <name> --ssh <user>@<host>[#port=<port>]`; port 22 is the
-default. NeoY connects over that SSH endpoint, copies its bundled mini node runtime,
+default. NeoY connects over that SSH endpoint, copies its bundled single-file Node.js `neo-node.mjs` runtime,
 starts the node MCP runtime, establishes the node-to-NeoY MCP tunnel, verifies it, and
 registers the node. For an outbound-only Mac, the user first creates an SSH reverse
 tunnel that exposes the Mac's SSH port on the NeoY machine, then calls the same command
