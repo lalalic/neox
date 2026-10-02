@@ -6,6 +6,66 @@ search, analyze, and pull photos/videos off the phone over WiFi.
 
 **No chat UI. No channels. One status screen.**
 
+## NeoY v2 design principles
+
+NeoY v2 is the Mac-side **authenticated MCP gateway and native capability host**.
+It is not a place to reimplement every service that an agent may need. The
+architecture should keep capability ownership explicit:
+
+```text
+ChatGPT / remote MCP client
+        │
+        │ one authenticated public MCP boundary
+        ▼
+      NeoY
+      ├─ native Mac capabilities that must live in-process
+      │  (TCC-sensitive computer use, capture/demo/tour, local device control)
+      └─ federated MCP providers
+         ├─ Browser Workspace
+         ├─ Family Tutor
+         ├─ events / other local services
+         └─ future product-specific MCPs
+```
+
+The rules are:
+
+1. **One external trust boundary.** Remote clients authenticate to NeoY. A
+   trusted local provider behind NeoY should normally bind to loopback and trust
+   the gateway instead of inventing a second public auth system. Do not expose an
+   unauthenticated loopback provider directly to the Internet.
+2. **Native only when the capability must be native.** Capabilities that depend
+   on the NeoY process, macOS TCC, Accessibility, Screen Recording, local app
+   lifecycle, or direct device control belong in NeoY. Generic services do not.
+3. **Federate; do not duplicate.** If a capability already has a good MCP server
+   or product-owned runtime, NeoY should federate it and preserve that service as
+   the source of truth. A provider failure must be isolated and must not prevent
+   NeoY itself from starting.
+4. **Browser automation belongs to Browser Workspace.** NeoY and product services
+   must not grow ChatGPT/Discord/site-specific DOM, tab, grouping, or session
+   automation. Browser Workspace owns browser sessions and platform actions.
+5. **Products own business lifecycle; platforms own UI mechanics.** A product may
+   keep durable business identifiers such as `project_id` and `thread_id`, and it
+   may own the lifetime of long-lived browser sessions. It should not persist
+   page URLs, DOM selectors, browser target IDs, or other implementation details
+   that belong to the browser platform. Persistence is a caller/service lifecycle
+   decision, not a special semantic mode of a platform action.
+6. **Submission is not completion.** For long-running UI/LLM work, the synchronous
+   request should stop once the downstream system has accepted the submission.
+   Final results should return asynchronously through an MCP tool call, event,
+   callback, or other explicit delivery contract. Do not keep gateway requests
+   open while polling a web UI for completion.
+7. **Stable contracts over transport details.** Callers should depend on stable
+   IDs, logical tool names, typed inputs, and explicit lifecycle/result states.
+   URL construction, DOM behavior, transport retries, and provider-specific
+   mechanics stay behind the component that owns them.
+8. **Federated tools stay attributable.** Generic provider tools exposed through
+   NeoY remain provider-namespaced (for example `mcp.<provider>.*`) so ownership
+   is obvious and collisions do not turn NeoY into a second copy of each service.
+
+The practical test for a new feature is: **does this capability require NeoY's
+process/native privileges?** If yes, implement it natively. If not, prefer a
+separate product/runtime with an MCP contract and federate it through NeoY.
+
 ```
 ┌ iPhone ─────────────────────────────┐      ┌ Desktop agent ────────────┐
 │ Neox.app                            │      │ Copilot / Claude / any    │
