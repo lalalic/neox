@@ -11,6 +11,7 @@ const SERVER_INFO = {
   version: "2.3.0",
   description: "Privileged NeoY runtime for the host Mac."
 };
+const SECURITY_SCHEMES = [{ type: "oauth2", scopes: ["mcp"] }];
 
 let token = "";
 try {
@@ -52,6 +53,71 @@ function completeModern(result) {
       "io.modelcontextprotocol/serverInfo": SERVER_INFO
     }
   };
+}
+
+function titleFromName(name) {
+  return String(name || "Neo tool")
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function normalizeSchema(value) {
+  if (Array.isArray(value)) return value.map(normalizeSchema);
+  if (!value || typeof value !== "object") return value;
+
+  const out = {};
+  for (const [key, raw] of Object.entries(value)) {
+    let v = normalizeSchema(raw);
+
+    if (
+      ["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+       "minLength", "maxLength", "minItems", "maxItems", "minProperties", "maxProperties"].includes(key)
+      && typeof v === "boolean"
+    ) {
+      v = v ? 1 : 0;
+    }
+
+    if (key === "const" && typeof v === "boolean" && ["integer", "number"].includes(value.type)) {
+      v = v ? 1 : 0;
+    }
+
+    out[key] = v;
+  }
+  return out;
+}
+
+function normalizeTool(tool) {
+  const annotations = {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: false,
+    ...(tool.annotations || {})
+  };
+
+  const meta = {
+    ...(tool._meta || {}),
+    securitySchemes: SECURITY_SCHEMES
+  };
+
+  return {
+    ...tool,
+    title: tool.title || titleFromName(tool.name),
+    inputSchema: normalizeSchema(tool.inputSchema || { type: "object", properties: {} }),
+    annotations,
+    securitySchemes: SECURITY_SCHEMES,
+    _meta: meta
+  };
+}
+
+function normalizeResultForWeb(msg, parsed) {
+  if (!parsed || parsed.error || !parsed.result) return parsed;
+  if (msg.method === "tools/list" && Array.isArray(parsed.result.tools)) {
+    parsed.result.tools = parsed.result.tools.map(normalizeTool);
+  }
+  return parsed;
 }
 
 function write(message) {
@@ -102,7 +168,8 @@ async function forward(msg) {
       });
       return;
     }
-    const parsed = parseResponse(text, response.headers.get("content-type") || "");
+    let parsed = parseResponse(text, response.headers.get("content-type") || "");
+    parsed = normalizeResultForWeb(msg, parsed);
     if (modernRequest(msg) && parsed && !parsed.error && parsed.result && msg.method !== "initialize") {
       parsed.result = completeModern(parsed.result);
     }
