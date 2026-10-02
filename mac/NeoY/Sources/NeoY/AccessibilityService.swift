@@ -14,14 +14,44 @@ struct AccessibilityNodeSnapshot: Codable, Equatable, Sendable {
 }
 
 
+struct ComputerRect: Codable, Equatable, Sendable {
+    var x: Double
+    var y: Double
+    var width: Double
+    var height: Double
+
+    init(_ rect: CGRect) {
+        x = rect.origin.x
+        y = rect.origin.y
+        width = rect.size.width
+        height = rect.size.height
+    }
+
+    var cgRect: CGRect { CGRect(x: x, y: y, width: width, height: height) }
+}
+
 struct ComputerElementSnapshot: Codable, Equatable, Sendable {
     var index: String
     var role: String?
     var title: String?
     var value: String?
-    var bounds: CGRect?
+    var bounds: ComputerRect?
     var actions: [String]
     var settable: Bool
+}
+
+struct ComputerWindowSnapshot: Codable, Equatable, Sendable {
+    var title: String?
+    var bounds: ComputerRect?
+    var screenshotWidth: Int?
+    var screenshotHeight: Int?
+}
+
+struct ComputerCoordinateSpace: Codable, Equatable, Sendable {
+    var elementBounds: String = "screen-points"
+    var screenshot: String = "window-pixels"
+    var scaleX: Double?
+    var scaleY: Double?
 }
 
 struct ComputerAppSnapshot: Codable, Equatable, Sendable {
@@ -29,10 +59,21 @@ struct ComputerAppSnapshot: Codable, Equatable, Sendable {
     var appName: String
     var bundleID: String
     var pid: Int32
+    var window: ComputerWindowSnapshot
     var elements: [ComputerElementSnapshot]
+    var focusedElementIndex: String?
+    var coordinateSpace: ComputerCoordinateSpace
     var treeText: String
     var screenshotPNGBase64: String?
     var createdAt: Date
+}
+
+private struct ComputerWindowCapture {
+    var base64: String
+    var title: String?
+    var bounds: CGRect
+    var pixelWidth: Int
+    var pixelHeight: Int
 }
 
 final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Sendable {
@@ -270,7 +311,10 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
         guard let app = runningApplication(appRef) else {
             throw DemoRecorderError.message("App not found: \(appRef)")
         }
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
         let root = accessibilityRoot(for: app)
+        let focusedHash = Self.element(appElement, kAXFocusedUIElementAttribute).map(CFHash)
+        var focusedElementIndex: String?
         var visited = Set<CFHashCode>()
         var elements: [ComputerElementSnapshot] = []
         var lines: [String] = []
@@ -287,6 +331,7 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
             let rect = frame(for: element)
             let id = String(next)
             next += 1
+            if let focusedHash, focusedHash == hash { focusedElementIndex = id }
             cacheLock.withLock { computerElementsByIndex[id] = element }
             var actions: CFArray?
             let actionNames: [String]
@@ -302,7 +347,7 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
                 role: role,
                 title: title,
                 value: value,
-                bounds: rect,
+                bounds: rect.map(ComputerRect.init),
                 actions: actionNames,
                 settable: canSetValue
             ))
@@ -315,14 +360,32 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
         }
         walk(root, depth: 0)
 
+        let capture = await captureWindowScreenshot(for: app)
+        let windowBounds = capture?.bounds ?? frame(for: root)
+        let scaleX: Double? = {
+            guard let capture, capture.bounds.width > 0 else { return nil }
+            return Double(capture.pixelWidth) / capture.bounds.width
+        }()
+        let scaleY: Double? = {
+            guard let capture, capture.bounds.height > 0 else { return nil }
+            return Double(capture.pixelHeight) / capture.bounds.height
+        }()
         return ComputerAppSnapshot(
             stateID: UUID().uuidString,
             appName: app.localizedName ?? "",
             bundleID: app.bundleIdentifier ?? "",
             pid: app.processIdentifier,
+            window: ComputerWindowSnapshot(
+                title: capture?.title ?? Self.string(root, kAXTitleAttribute),
+                bounds: windowBounds.map(ComputerRect.init),
+                screenshotWidth: capture?.pixelWidth,
+                screenshotHeight: capture?.pixelHeight
+            ),
             elements: elements,
+            focusedElementIndex: focusedElementIndex,
+            coordinateSpace: ComputerCoordinateSpace(scaleX: scaleX, scaleY: scaleY),
             treeText: lines.joined(separator: "\n"),
-            screenshotPNGBase64: await captureWindowScreenshot(for: app),
+            screenshotPNGBase64: capture?.base64,
             createdAt: Date()
         )
     }
@@ -335,6 +398,9 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
         var structured: [String: Any] = [
             "state_id": snapshot.stateID,
             "app": ["name": snapshot.appName, "bundleId": snapshot.bundleID, "pid": Int(snapshot.pid)],
+            "window": snapshotObject["window"] ?? [:],
+            "focused_element": snapshot.focusedElementIndex ?? NSNull(),
+            "coordinate_space": snapshotObject["coordinateSpace"] ?? [:],
             "snapshot": [
                 "elements": snapshotObject["elements"] ?? [],
                 "text": snapshot.treeText,
@@ -368,7 +434,7 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
             role: Self.string(element, kAXRoleAttribute),
             title: Self.string(element, kAXTitleAttribute),
             value: Self.string(element, kAXValueAttribute),
-            bounds: frame(for: element),
+            bounds: frame(for: element).map(ComputerRect.init),
             actions: names,
             settable: canSet
         )
@@ -439,7 +505,7 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
         return root
     }
 
-    private func captureWindowScreenshot(for app: NSRunningApplication) async -> String? {
+    private func captureWindowScreenshot(for app: NSRunningApplication) async -> ComputerWindowCapture? {
         guard CGPreflightScreenCaptureAccess() else { return nil }
         guard let content = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false) else { return nil }
         let windows = content.windows.filter { $0.owningApplication?.processID == app.processIdentifier }
@@ -452,7 +518,14 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
         config.showsCursor = false
         guard let image = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) else { return nil }
         let rep = NSBitmapImageRep(cgImage: image)
-        return rep.representation(using: .png, properties: [:])?.base64EncodedString()
+        guard let data = rep.representation(using: .png, properties: [:]) else { return nil }
+        return ComputerWindowCapture(
+            base64: data.base64EncodedString(),
+            title: window.title,
+            bounds: window.frame,
+            pixelWidth: image.width,
+            pixelHeight: image.height
+        )
     }
 
     private func requestTrust() {
