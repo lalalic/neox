@@ -117,7 +117,7 @@ final class SetupServiceTests: XCTestCase {
     func testCanonicalCoreToolSetIsSmallAndStable() {
         XCTAssertEqual(
             NeoYCoreRuntime.toolNames,
-            Set(["neoy.setup"])
+            Set(["neoy.setup", "mac.exec", "mac.fs", "codex.threads", "node"])
         )
     }
 

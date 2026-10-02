@@ -25,6 +25,10 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
     private var setupWindow: NSWindow?
     private var runtimeControl: NeoYRuntimeControl?
+    private let coreExec = NeoYExecService()
+    private let coreFiles = NeoYCoreFileService()
+    private let coreCodex = NeoYCodexThreadService()
+    private let coreNodes = NeoYNodeService()
     private var observers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -144,7 +148,14 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
             await runtimeControl.reconcile(await setup.currentConfiguration())
         }
 
-        NeoYCoreRuntime.register(on: value, setup: setup)
+        NeoYCoreRuntime.register(
+            on: value,
+            setup: setup,
+            exec: coreExec,
+            files: coreFiles,
+            codex: coreCodex,
+            node: coreNodes
+        )
 
         if configuration.capabilities.isEnabled(.captureTour) {
             value.register(tools: CaptureTourTools.tools())

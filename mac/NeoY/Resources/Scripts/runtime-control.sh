@@ -2,12 +2,18 @@
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 NPX="${NPX_BIN:-$(command -v npx 2>/dev/null || true)}"
+NODE="${NODE_BIN:-$(command -v node 2>/dev/null || true)}"
 CLOUDFLARED="${CLOUDFLARED_BIN:-$(command -v cloudflared 2>/dev/null || true)}"
+SCRIPT_DIR="${0:A:h}"
 DATA="$HOME/Library/Application Support/NeoY"
 SETTINGS="$DATA/deployment.json"
 LOGDIR="$HOME/Library/Logs/NeoY"
 PUBLIC="$DATA/public-url"
 TUNNEL_LOG="$LOGDIR/tunnel.log"
+GATEWAY_LOG="$LOGDIR/mcp-gateway.log"
+GATEWAY_PORT="${NEOY_GATEWAY_PORT:-6768}"
+TOKEN_FILE="$DATA/core-token"
+CLIENT_ID_FILE="$DATA/oauth-client-id"
 ACTION="${1:-status}"
 
 mkdir -p "$DATA" "$LOGDIR"
@@ -37,9 +43,50 @@ pm2() {
   "$NPX" --yes pm2 "$@"
 }
 need_cloudflared() { [[ -n "$CLOUDFLARED" ]] || { print -u2 "cloudflared not found"; exit 69; }; }
+need_node() { [[ -n "$NODE" ]] || { print -u2 "node not found"; exit 69; }; }
+
+ensure_client_id() {
+  if [[ ! -s "$CLIENT_ID_FILE" ]]; then
+    /usr/bin/python3 - "$CLIENT_ID_FILE" <<'PY2'
+import secrets,sys,os
+p=sys.argv[1]
+with open(p,'w') as f: f.write("neo-" + secrets.token_hex(16) + "\n")
+os.chmod(p,0o600)
+PY2
+  fi
+}
+
+gateway_stop() {
+  [[ -n "$NPX" ]] && pm2 delete neoy-mcp-gateway >/dev/null 2>&1 || true
+}
+
+gateway_start() {
+  need_npx
+  need_node
+  [[ -s "$TOKEN_FILE" ]] || { print -u2 "NeoY core token is missing"; return 69; }
+  [[ -f "$SCRIPT_DIR/neoy-mcp-gateway.mjs" ]] || { print -u2 "NeoY MCP gateway script is missing"; return 69; }
+  [[ -f "$SCRIPT_DIR/neoy-stdio-proxy.mjs" ]] || { print -u2 "NeoY MCP proxy script is missing"; return 69; }
+  ensure_client_id
+  gateway_stop
+  : > "$GATEWAY_LOG"
+  export NEOY_HTTP_PORT="$GATEWAY_PORT"
+  export NEOY_HTTP_TOKEN_FILE="$TOKEN_FILE"
+  export NEOY_TOKEN_FILE="$TOKEN_FILE"
+  export NEOY_DATA_DIR="$DATA"
+  export NEOY_ENTRY="$SCRIPT_DIR/neoy-stdio-proxy.mjs"
+  export NEOY_UPSTREAM="http://127.0.0.1:$PORT/mcp"
+  export NEOY_OAUTH_CLIENT_ID="$(cat "$CLIENT_ID_FILE")"
+  if [[ -n "$HOSTNAME" ]]; then
+    export NEOY_PUBLIC_URL="https://$HOSTNAME"
+  else
+    unset NEOY_PUBLIC_URL 2>/dev/null || true
+  fi
+  pm2 start "$SCRIPT_DIR/neoy-mcp-gateway.mjs" --name neoy-mcp-gateway --interpreter "$NODE" --log "$GATEWAY_LOG" --update-env >/dev/null
+}
 
 tunnel_stop() {
   [[ -n "$NPX" ]] && pm2 delete neoy-tunnel >/dev/null 2>&1 || true
+  gateway_stop
   rm -f "$PUBLIC"
 }
 
@@ -49,9 +96,10 @@ tunnel_start() {
   tunnel_stop
   [[ "$MODE" != "off" ]] || { print "Tunnel is off"; return 0; }
   : > "$TUNNEL_LOG"
+  gateway_start
 
   if [[ "$MODE" == "quick" ]]; then
-    pm2 start "$CLOUDFLARED" --name neoy-tunnel --interpreter none --log "$TUNNEL_LOG" --       tunnel --no-autoupdate --url "http://127.0.0.1:$PORT" >/dev/null
+    pm2 start "$CLOUDFLARED" --name neoy-tunnel --interpreter none --log "$TUNNEL_LOG" --       tunnel --no-autoupdate --url "http://127.0.0.1:$GATEWAY_PORT" >/dev/null
   else
     [[ -n "$HOSTNAME" ]] || {
       print -u2 "named tunnel requires a public hostname"; return 64
@@ -75,7 +123,7 @@ tunnel: $tid
 credentials-file: $creds
 ingress:
   - hostname: $HOSTNAME
-    service: http://127.0.0.1:$PORT
+    service: http://127.0.0.1:$GATEWAY_PORT
   - service: http_status:404
 EOF
     pm2 start "$CLOUDFLARED" --name neoy-tunnel --interpreter none --log "$TUNNEL_LOG" --       tunnel --config "$DATA/cloudflared.yml" run "$tid" >/dev/null
@@ -126,10 +174,11 @@ case "$ACTION" in
   named-create) named_create ;;
   named-apply) named_create; tunnel_start ;;
   status)
-    print "port=$PORT mode=$MODE"
+    print "port=$PORT gateway_port=$GATEWAY_PORT mode=$MODE"
     [[ -f "$PUBLIC" ]] && print "public=$(cat "$PUBLIC")/mcp"
+    [[ -f "$CLIENT_ID_FILE" ]] && print "oauth_client_id=$(cat "$CLIENT_ID_FILE")"
     if [[ -n "$NPX" ]]; then
-      pm2 jlist | jq -r '.[] | select(.name=="neoy-tunnel") | "\(.name)=\(.pm2_env.status)"'
+      pm2 jlist | jq -r '.[] | select(.name=="neoy-tunnel" or .name=="neoy-mcp-gateway") | "\(.name)=\(.pm2_env.status)"'
     fi
     ;;
   *) print -u2 "usage: runtime-control.sh tunnel-start|tunnel-stop|tunnel-restart|named-create|named-apply|status"; exit 64 ;;
