@@ -128,7 +128,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
         value.configureOAuth(
             clientID: oauthCredentials.clientID,
             consentToken: coreToken,
-            stateURL: NeoYPaths.supportDirectory.appendingPathComponent("oauth-state.json")
+            stateURL: NeoYPaths.supportDirectory.appendingPathComponent("native-oauth-state.json")
         )
         value.setRemoteAllowedFeatures(deployment.enabledRemoteFeatures)
 
