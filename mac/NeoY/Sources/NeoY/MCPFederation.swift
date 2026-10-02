@@ -318,7 +318,9 @@ final class NeoYMCPFederation {
 
                 var names: [String] = []
                 for tool in tools {
-                    let localName = "mcp.\(configuration.name).\(tool.name)"
+                    guard let localName = NeoYBundledRuntime.exposedToolName(
+                        provider: configuration.name, tool: tool.name
+                    ) else { continue }
                     let descriptor = rewriteToolResourceMetadata(tool.descriptor, provider: configuration.name)
                     server.registerFederatedTool(descriptor: descriptor, name: localName, protected: true) { arguments in
                         try await invoke(tool.name, arguments)

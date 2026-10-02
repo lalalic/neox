@@ -60,9 +60,10 @@ The rules are:
    IDs, logical tool names, typed inputs, and explicit lifecycle/result states.
    URL construction, DOM behavior, transport retries, and provider-specific
    mechanics stay behind the component that owns them.
-8. **Federated tools stay attributable.** Generic provider tools exposed through
-   NeoY remain provider-namespaced (for example `mcp.<provider>.*`) so ownership
-   is obvious and collisions do not turn NeoY into a second copy of each service.
+8. **External federated tools stay attributable.** Optional/product providers
+   exposed through NeoY remain provider-namespaced (for example
+   `mcp.<provider>.*`). Bundled core runtime dependencies are part of NeoY's core
+   surface and keep their original tool names without an `mcp.macbridge` wrapper.
 
 The practical test for a new feature is: **does this capability require NeoY's
 process/native privileges?** If yes, implement it natively. If not, prefer a
