@@ -82,6 +82,7 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
     private let cacheLock = NSLock()
     private var elementsByPath: [String: AXUIElement] = [:]
     private var computerElementsByIndex: [String: AXUIElement] = [:]
+    private var currentComputerStateID: String?
     private var lastSnapshot: AccessibilityNodeSnapshot?
 
     func inspect(maxDepth: Int = 8, maxNodes: Int = 400) async throws -> String {
@@ -311,6 +312,7 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
         guard let app = runningApplication(appRef) else {
             throw DemoRecorderError.message("App not found: \(appRef)")
         }
+        let stateID = UUID().uuidString
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
         let root = accessibilityRoot(for: app)
         let focusedHash = Self.element(appElement, kAXFocusedUIElementAttribute).map(CFHash)
@@ -319,7 +321,10 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
         var elements: [ComputerElementSnapshot] = []
         var lines: [String] = []
         var next = 0
-        cacheLock.withLock { computerElementsByIndex.removeAll() }
+        cacheLock.withLock {
+            computerElementsByIndex.removeAll()
+            currentComputerStateID = stateID
+        }
 
         func walk(_ element: AXUIElement, depth: Int) {
             guard next < 500, depth <= 14 else { return }
@@ -371,7 +376,7 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
             return Double(capture.pixelHeight) / capture.bounds.height
         }()
         return ComputerAppSnapshot(
-            stateID: UUID().uuidString,
+            stateID: stateID,
             appName: app.localizedName ?? "",
             bundleID: app.bundleIdentifier ?? "",
             pid: app.processIdentifier,
@@ -422,8 +427,11 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
         return "mcpresult:" + data.base64EncodedString()
     }
 
-    func elementSnapshot(index: String) -> ComputerElementSnapshot? {
-        let element = cacheLock.withLock { computerElementsByIndex[index] }
+    func elementSnapshot(index: String, stateID: String? = nil) -> ComputerElementSnapshot? {
+        let element: AXUIElement? = cacheLock.withLock {
+            if let stateID, stateID != currentComputerStateID { return nil }
+            return computerElementsByIndex[index]
+        }
         guard let element else { return nil }
         var actions: CFArray?
         let names = AXUIElementCopyActionNames(element, &actions) == .success ? (actions as? [String] ?? []) : []

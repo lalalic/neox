@@ -234,6 +234,22 @@ final class DemoRecorder: NSObject {
 
     private func resolved(for target: DemoTarget) throws -> DemoTarget {
         if target.rect != nil { return target }
+        if let elementIndex = target.elementIndex {
+            guard let element = NeoYAccessibilityController.shared.elementSnapshot(index: elementIndex, stateID: target.stateID) else {
+                throw DemoRecorderError.message("Demo target is stale or element_index \(elementIndex) is unavailable; call computer.get_app_state again")
+            }
+            guard let bounds = element.bounds else {
+                throw DemoRecorderError.message("Demo target element \(elementIndex) has no usable bounds")
+            }
+            return DemoTarget(
+                rect: bounds.cgRect,
+                stateID: target.stateID,
+                elementIndex: elementIndex,
+                path: target.path,
+                label: target.label ?? element.title ?? element.value,
+                role: target.role ?? element.role
+            )
+        }
         let frame = try NeoYAccessibilityController.shared.resolve(target).frame
         return DemoTarget(rect: frame, path: target.path, label: target.label, role: target.role)
     }
@@ -691,6 +707,8 @@ enum DemoRecorderTools {
                 "type": .string("object"),
                 "properties": .object([
                     "rect": .object(["type": .string("object")]),
+                    "state_id": .object(["type": .string("string")]),
+                    "element_index": .object(["type": .string("string")]),
                     "path": .object(["type": .string("string")]),
                     "label": .object(["type": .string("string")]),
                     "role": .object(["type": .string("string")]),

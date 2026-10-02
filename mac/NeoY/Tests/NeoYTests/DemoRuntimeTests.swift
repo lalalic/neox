@@ -33,4 +33,13 @@ final class DemoRuntimeTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(DemoTarget.self, from: data), original)
         XCTAssertEqual(original.summary, "rect(10,20,30,40)")
     }
+    func testElementIndexTargetRoundTrips() throws {
+        let target = DemoTarget(stateID: "state-1", elementIndex: "42", label: "Save", role: "AXButton")
+        let data = try JSONEncoder().encode(target)
+        let decoded = try JSONDecoder().decode(DemoTarget.self, from: data)
+        XCTAssertEqual(decoded.stateID, "state-1")
+        XCTAssertEqual(decoded.elementIndex, "42")
+        XCTAssertEqual(decoded.summary, "state:state-1/element:42")
+    }
+
 }

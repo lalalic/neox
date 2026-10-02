@@ -19,19 +19,25 @@ enum DemoPrimitive: String, CaseIterable, Codable, Sendable {
 
 struct DemoTarget: Codable, Equatable, Sendable {
     var rect: CGRect?
+    var stateID: String?
+    var elementIndex: String?
     var path: String?
     var label: String?
     var role: String?
 
     enum CodingKeys: String, CodingKey {
         case rect
+        case stateID = "state_id"
+        case elementIndex = "element_index"
         case path
         case label
         case role
     }
 
-    init(rect: CGRect? = nil, path: String? = nil, label: String? = nil, role: String? = nil) {
+    init(rect: CGRect? = nil, stateID: String? = nil, elementIndex: String? = nil, path: String? = nil, label: String? = nil, role: String? = nil) {
         self.rect = rect
+        self.stateID = stateID
+        self.elementIndex = elementIndex
         self.path = path
         self.label = label
         self.role = role
@@ -40,6 +46,8 @@ struct DemoTarget: Codable, Equatable, Sendable {
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         rect = try? values.decode(CGRect.self, forKey: .rect)
+        stateID = try? values.decode(String.self, forKey: .stateID)
+        elementIndex = try? values.decode(String.self, forKey: .elementIndex)
         path = try? values.decode(String.self, forKey: .path)
         label = try? values.decode(String.self, forKey: .label)
         role = try? values.decode(String.self, forKey: .role)
@@ -49,6 +57,7 @@ struct DemoTarget: Codable, Equatable, Sendable {
         if let rect {
             return "rect(\(Int(rect.minX)),\(Int(rect.minY)),\(Int(rect.width)),\(Int(rect.height)))"
         }
+        if let elementIndex { return "state:\(stateID ?? "latest")/element:\(elementIndex)" }
         if let path { return "element:\(path)" }
         if let label { return "label:\(label)" }
         return "unresolved"
