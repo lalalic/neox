@@ -31,8 +31,8 @@ cp "$HERE/Resources/Scripts/runtime-control.sh" "$APP/Contents/Resources/runtime
 cp "$HERE/Resources/Scripts/bootstrap-skills.sh" "$APP/Contents/Resources/bootstrap-skills.sh"
 chmod 755 "$APP/Contents/Resources/runtime-control.sh" "$APP/Contents/Resources/bootstrap-skills.sh"
 
-# NeoY depends on reusable event-bus and browser-workspace skills.
-# Install/update them before launching NeoY, then federate events-bus through MCP.
+# NeoY depends on the reusable events-bus skill.
+# Install/update it before launching NeoY, then federate it through MCP.
 "$HERE/Resources/Scripts/bootstrap-skills.sh"
 
 codesign --force --deep --sign "$identity" \

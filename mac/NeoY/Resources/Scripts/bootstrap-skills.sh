@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if ! command -v npx >/dev/null 2>&1; then
-  print -u2 "NeoY requires npx to install required skills: events-bus and browser-workspace."
+  print -u2 "NeoY requires npx to install required skill: events-bus."
   exit 1
 fi
 if ! command -v node >/dev/null 2>&1; then
@@ -12,32 +12,19 @@ fi
 
 SKILLS_ROOT="$HOME/.agents/skills"
 EVENTS_DIR="$SKILLS_ROOT/events-bus"
-BROWSER_DIR="$SKILLS_ROOT/browser-workspace"
 
 echo "Installing NeoY required skill: events-bus"
 npx --yes skills add https://github.com/lalalic/neo \
   --skill events-bus --global --agent codex --yes --copy
 
-echo "Installing NeoY required skill: browser-workspace"
-npx --yes skills add https://github.com/lalalic/browser-workspace \
-  --skill browser-workspace --global --agent codex --yes --copy
-
 if [[ ! -f "$EVENTS_DIR/mcp/server.mjs" ]]; then
   print -u2 "events-bus skill installed without mcp/server.mjs: $EVENTS_DIR"
   exit 1
 fi
-if [[ ! -x "$BROWSER_DIR/bin/browser-workspace" ]]; then
-  chmod +x "$BROWSER_DIR/bin/browser-workspace" 2>/dev/null || true
-fi
-
 if [[ -f "$EVENTS_DIR/package-lock.json" ]]; then
   (cd "$EVENTS_DIR" && npm ci --omit=dev)
 elif [[ -f "$EVENTS_DIR/package.json" ]]; then
   (cd "$EVENTS_DIR" && npm install --omit=dev)
-fi
-
-if [[ -x "$BROWSER_DIR/scripts/install.sh" ]]; then
-  "$BROWSER_DIR/scripts/install.sh"
 fi
 
 NODE_BIN="$(command -v node)"
@@ -82,4 +69,3 @@ PYCONFIG
 
 echo "NeoY required skills ready:"
 echo "  events-bus: $EVENTS_DIR"
-echo "  browser-workspace: $BROWSER_DIR"
