@@ -135,3 +135,11 @@ user's Cloudflare account. Own-domain addresses remain stable across restarts;
 temporary addresses may change and can require the MCP app to be reconfigured.
 Local access always receives every enabled NeoY feature. Remote access is authenticated
 and `tools/list`/`tools/call` are filtered by the Features selected in the Remote tab.
+
+## Optional feature contract
+
+NeoY optional products are installed features rather than code compiled into NeoY. A feature is published as a versioned package with `neo-feature.json`, runtime lifecycle scripts, an MCP provider declaration, and setup bootstrap/manual assets. NeoY installs packages under `~/Library/Application Support/NeoY/products/<feature>/`, initializes an instance, and exposes the feature MCP locally. Features that require configuration enter `setup-required` and open a Browser Workspace-backed ChatGPT Temporary Chat using the packaged setup guide. The setup conversation uses the standard `setup feature ...` lifecycle commands instead of feature-specific NeoY code.
+
+Local MCP exposes every enabled feature. Remote access is independent: built-in capabilities and installed MCP providers are explicitly selected on the Remote tab, and newly installed providers default to remote-disabled. `mcp-services` remains only a legacy compatibility identifier and is migrated away from broad remote exposure.
+
+Family Tutor is the first feature using this contract. Family Tutor itself owns Browser Workspace, learner Project/thread bindings, Discord/Cloudflare integration, and tutoring runtime; NeoY owns only installation, lifecycle, setup orchestration, MCP federation, and remote exposure policy.

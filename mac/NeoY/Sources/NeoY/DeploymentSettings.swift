@@ -12,10 +12,13 @@ struct NeoYDeploymentSettings: Codable, Equatable {
     var tunnelName: String = ""
     var publicHostname: String = ""
     var remoteFeatures: Set<String>? = nil
+    var remoteProviders: Set<String>? = nil
 
     var enabledRemoteFeatures: Set<NeoYRemoteFeature> {
         Set((remoteFeatures ?? []).compactMap(NeoYRemoteFeature.init(rawValue:)))
     }
+
+    var enabledRemoteProviders: Set<String> { remoteProviders ?? [] }
 
     var localMCPURL: String { "http://127.0.0.1:\(mcpPort)/mcp" }
 
@@ -58,11 +61,22 @@ enum NeoYDeploymentSettingsStore {
             value.mcpPort = NeoYDeploymentSettings.defaultPort
             migrated = true
         }
-        // Existing remote installs had no per-feature policy and historically exposed
-        // the whole authenticated surface. Preserve that behavior once, while new
-        // remote configurations start with an explicit empty selection.
+        // Remote access is explicit. Migrate old broad MCP-service exposure to
+        // per-provider opt-in rather than silently exposing newly installed services.
         if value.tunnelMode != .off && value.remoteFeatures == nil {
-            value.remoteFeatures = Set(NeoYRemoteFeature.allCases.map(\.rawValue))
+            value.remoteFeatures = Set(NeoYRemoteFeature.allCases.filter { $0 != .mcpServices }.map(\.rawValue))
+            migrated = true
+        }
+        if value.remoteFeatures?.remove(NeoYRemoteFeature.mcpServices.rawValue) != nil {
+            migrated = true
+        }
+        let canonicalRemoteFeatures = Set(value.enabledRemoteFeatures.filter { $0 != .mcpServices }.map(\.rawValue))
+        if value.remoteFeatures != canonicalRemoteFeatures {
+            value.remoteFeatures = canonicalRemoteFeatures
+            migrated = true
+        }
+        if value.remoteProviders == nil {
+            value.remoteProviders = []
             migrated = true
         }
         if migrated { try? save(value) }
