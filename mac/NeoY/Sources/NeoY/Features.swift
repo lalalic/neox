@@ -148,7 +148,9 @@ actor NeoYFeatureManager {
             throw NSError(domain: "NeoYFeature", code: 23, userInfo: [NSLocalizedDescriptionKey: "feature MCP endpoint is unavailable"])
         }
         var lastError = "MCP did not become healthy"
-        for _ in 0..<20 {
+        // First-time feature startup may initialize browser-backed sessions and projects.
+        // Family Tutor with two learners takes ~30–40s on a clean instance, so allow 90s.
+        for _ in 0..<180 {
             do {
                 var request = URLRequest(url: url, timeoutInterval: 3)
                 request.httpMethod = "POST"
@@ -158,12 +160,13 @@ actor NeoYFeatureManager {
                 if let http = response as? HTTPURLResponse, http.statusCode == 200,
                    let rpc = try? JSONSerialization.jsonObject(with: data) as? [String: Any], rpc["result"] != nil {
                     try markReady(id: id)
+                    stopSetupSession(id: id)
                     NotificationCenter.default.post(name: .neoYFeaturesChanged, object: nil)
                     return NeoYFeatureActionResult(id: id, action: "complete", ok: true, output: "feature setup complete; MCP healthy at \(urlString)", state: .ready)
                 }
                 lastError = "MCP returned an unhealthy response"
             } catch { lastError = error.localizedDescription }
-            try? await Task.sleep(for: .milliseconds(300))
+            try? await Task.sleep(for: .milliseconds(500))
         }
         return NeoYFeatureActionResult(id: id, action: "complete", ok: false, output: lastError, state: record.state)
     }
@@ -174,6 +177,7 @@ actor NeoYFeatureManager {
         guard let index = records.firstIndex(where: { $0.id == item.id }) else {
             return NeoYFeatureRecord(id: item.id, package: item.package, version: nil, enabled: false, state: .available, provider: nil, mcpURL: nil, error: nil)
         }
+        stopSetupSession(id: item.id)
         if let manifest = try? loadManifest(id: item.id) {
             _ = try? runNodeScript(packageRoot(id: item.id).appendingPathComponent(manifest.runtime.serviceScript), args: ["stop", instanceRoot(id: item.id).path])
         }
@@ -226,9 +230,23 @@ actor NeoYFeatureManager {
         guard FileManager.default.isExecutableFile(atPath: cli.path) else {
             throw NSError(domain: "NeoYFeature", code: 10, userInfo: [NSLocalizedDescriptionKey: "browser-workspace is required for feature setup"])
         }
-        let result = try Self.run(cli.path, ["platform", "run", "chatgpt", "temporary-submit", "--config", configURL.path])
+        // The setup conversation belongs to NeoY, not to the one-shot platform action.
+        // Keep a caller-owned Browser Workspace session alive until setup completes.
+        stopSetupSession(id: id)
+        let started = try Self.run(cli.path, ["session", "start", "--url", "https://chatgpt.com/"])
+        guard started.status == 0,
+              let startedData = started.output.data(using: .utf8),
+              let startedJSON = try? JSONSerialization.jsonObject(with: startedData) as? [String: Any],
+              let sessionID = startedJSON["session_id"] as? String, !sessionID.isEmpty else {
+            throw NSError(domain: "NeoYFeature", code: 11, userInfo: [NSLocalizedDescriptionKey: "failed to start Browser Workspace setup session: \(started.output)"])
+        }
+        let sessionData = try JSONSerialization.data(withJSONObject: ["session_id": sessionID], options: [.prettyPrinted, .sortedKeys])
+        try sessionData.write(to: setupSessionURL(id: id), options: .atomic)
+
+        let result = try Self.run(cli.path, ["platform", "run", "chatgpt", "temporary-submit", "--config", configURL.path, "--session-id", sessionID])
         guard result.status == 0 else {
-            throw NSError(domain: "NeoYFeature", code: 11, userInfo: [NSLocalizedDescriptionKey: result.output])
+            stopSetupSession(id: id)
+            throw NSError(domain: "NeoYFeature", code: 12, userInfo: [NSLocalizedDescriptionKey: result.output])
         }
         var records = loadRecords()
         if let index = records.firstIndex(where: { $0.id == id }) {
@@ -311,6 +329,20 @@ actor NeoYFeatureManager {
             return "http://\(host):\(port)/mcp"
         }
         return "http://\(manifest.mcp.defaultHost):\(manifest.mcp.defaultPort)/mcp"
+    }
+
+    private func setupSessionURL(id: String) -> URL { productRoot(id: id).appendingPathComponent("setup-session.json") }
+
+    private func stopSetupSession(id: String) {
+        let url = setupSessionURL(id: id)
+        defer { try? FileManager.default.removeItem(at: url) }
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let sessionID = json["session_id"] as? String, !sessionID.isEmpty else { return }
+        let cli = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".agents/skills/browser-workspace/bin/browser-workspace")
+        guard FileManager.default.isExecutableFile(atPath: cli.path) else { return }
+        _ = try? Self.run(cli.path, ["session", "stop", sessionID])
     }
 
     private func productRoot(id: String) -> URL { root.appendingPathComponent(id, isDirectory: true) }
