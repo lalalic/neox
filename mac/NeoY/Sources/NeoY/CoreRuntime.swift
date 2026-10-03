@@ -6,6 +6,7 @@ enum NeoYCoreRuntime {
         "setup",
         "exec",
         "fs",
+        "apply_patch",
         "codex.threads",
         "cluster"
     ]
@@ -22,6 +23,7 @@ enum NeoYCoreRuntime {
         server.register(tools: NeoYSetupTools.tools(service: setup), protected: true)
         server.register(tools: NeoYExecTools.tools(service: exec), protected: true)
         server.register(tools: NeoYFileTools.tools(service: files), protected: true)
+        server.register(tools: NeoYPatchTools.tools(), protected: true)
         server.register(tools: NeoYCodexThreadTools.tools(service: codex), protected: true)
         server.register(tools: NeoYNodeTools.tools(service: node), protected: true)
     }
