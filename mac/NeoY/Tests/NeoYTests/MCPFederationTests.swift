@@ -19,12 +19,14 @@ final class MCPFederationTests: XCTestCase {
 
         let file = fixture.root.appendingPathComponent("sample.txt")
         try Data("before\n".utf8).write(to: file)
-        XCTAssertTrue(try await Self.text(client.call(name: "fs_read", arguments: .object([
+        let readResult = try await client.call(name: "fs_read", arguments: .object([
             "path": .string(file.path)
-        ]))).contains("before"))
-        XCTAssertTrue(try await Self.text(client.call(name: "shell_exec", arguments: .object([
+        ]))
+        XCTAssertTrue(try Self.text(readResult).contains("before"))
+        let shellResult = try await client.call(name: "shell_exec", arguments: .object([
             "command": .string("printf lifecycle-ok")
-        ]))).contains("lifecycle-ok"))
+        ]))
+        XCTAssertTrue(try Self.text(shellResult).contains("lifecycle-ok"))
 
         let patch = """
         diff --git a/sample.txt b/sample.txt
@@ -61,11 +63,13 @@ final class MCPFederationTests: XCTestCase {
         defer { Task { @MainActor in federation.stop() } }
 
         for _ in 0..<3 {
-            let originalPID = try XCTUnwrap(await federation.stdioProcessIdentifier(configuration.name))
+            let pid = await federation.stdioProcessIdentifier(configuration.name)
+            let originalPID = try XCTUnwrap(pid)
             XCTAssertEqual(kill(originalPID, SIGKILL), 0)
             let replacementPID = try await Self.waitForPID(federation, name: configuration.name, unlike: originalPID)
             XCTAssertNotEqual(replacementPID, originalPID)
-            let status = try XCTUnwrap(await federation.statuses(configurations: [configuration]).first)
+            let statuses = await federation.statuses(configurations: [configuration])
+            let status = try XCTUnwrap(statuses.first)
             XCTAssertTrue(status.healthy)
             XCTAssertEqual(status.lifecycleState, "ready")
             XCTAssertTrue(status.processAlive)
@@ -95,9 +99,10 @@ final class MCPFederationTests: XCTestCase {
         await XCTAssertThrowsErrorAsync { _ = try await client.connect() }
         try FileManager.default.removeItem(at: failure)
         _ = try await Self.waitForPID(client)
-        XCTAssertTrue(try await Self.text(client.call(name: "shell_exec", arguments: .object([
+        let recoveryResult = try await client.call(name: "shell_exec", arguments: .object([
             "command": .string("printf recovered")
-        ]))).contains("recovered"))
+        ]))
+        XCTAssertTrue(try Self.text(recoveryResult).contains("recovered"))
     }
 
     private struct Fixture {
