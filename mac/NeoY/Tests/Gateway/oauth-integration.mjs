@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const GATEWAY = path.join(ROOT, "Runtime/src/mcp-gateway.mjs");
+const GATEWAY = path.join(ROOT, "Runtime/src/core/mcp-gateway.mjs");
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "neoy-oauth-test-"));
 const token = "test-static-token-0123456789abcdef";
 const redirectUri = "https://chatgpt.com/connector/oauth/test_case";

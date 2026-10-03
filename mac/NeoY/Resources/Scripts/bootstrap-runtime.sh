@@ -113,7 +113,7 @@ install_neoy_runtime() {
   installed_version="$(node -p 'try { require(process.argv[1]).version } catch { "" }' "$runtime_package_dir/package.json" 2>/dev/null || true)"
 
   if [[ "$installed_name" == "$runtime_package" && "$installed_version" == "$runtime_version" && \
-        -f "$runtime_package_dir/src/local-bridge/bridge.mjs" ]]; then
+        -f "$runtime_package_dir/src/core/bridge/bridge.mjs" ]]; then
     log "Neo runtime ready: $runtime_package@$runtime_version"
     return
   fi
@@ -130,8 +130,8 @@ install_neoy_runtime() {
   staged_version="$(node -p 'require(process.argv[1]).version' "$staged_package_dir/package.json")"
   [[ "$staged_name" == "$runtime_package" ]] || fail "Installed runtime package mismatch: expected $runtime_package, got $staged_name"
   [[ "$staged_version" == "$runtime_version" ]] || fail "Installed runtime version mismatch: expected $runtime_version, got $staged_version"
-  [[ -f "$staged_package_dir/src/local-bridge/bridge.mjs" ]] || fail "NeoY bundled stdio provider is missing"
-  [[ -f "$staged_package_dir/src/mcp-gateway.mjs" ]] || fail "Neo runtime gateway is missing"
+  [[ -f "$staged_package_dir/src/core/bridge/bridge.mjs" ]] || fail "NeoY bundled stdio provider is missing"
+  [[ -f "$staged_package_dir/src/core/mcp-gateway.mjs" ]] || fail "Neo runtime gateway is missing"
 
   rm -rf "$RUNTIME_ROOT.old"
   [[ ! -d "$RUNTIME_ROOT" ]] || mv "$RUNTIME_ROOT" "$RUNTIME_ROOT.old"

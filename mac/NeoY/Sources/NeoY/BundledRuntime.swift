@@ -16,7 +16,8 @@ enum NeoYBundledRuntime {
             .appendingPathComponent("@lalalic", isDirectory: true)
             .appendingPathComponent("neo", isDirectory: true)
             .appendingPathComponent("src", isDirectory: true)
-            .appendingPathComponent("local-bridge", isDirectory: true)
+            .appendingPathComponent("core", isDirectory: true)
+            .appendingPathComponent("bridge", isDirectory: true)
             .appendingPathComponent("bridge.mjs")
         guard fileManager.isReadableFile(atPath: bridge.path) else { return [] }
         let nodeCandidates = [

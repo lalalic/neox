@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const WORKER = path.join(HERE, "xchat-lifecycle-worker.mjs");
+const WORKER = path.join(HERE, "lifecycle-worker.mjs");
 const PROJECT_ID = /^g-p-[A-Za-z0-9_-]{8,128}$/;
 const THREAD_ID = /^[A-Za-z0-9_-]{8,160}$/;
 
