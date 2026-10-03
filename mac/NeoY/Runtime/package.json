@@ -10,8 +10,8 @@
     "mac-developer-bridge": "git+https://github.com/alexanderradahl/mac-developer-bridge.git#fea70d1a3c5524164f2159f6063ba685fef91324"
   },
   "scripts": {
-    "check": "node --check src/mcp-gateway.mjs && node --check src/stdio-proxy.mjs && node --check src/chatgpt-responses-adapter.mjs",
-    "test": "npm run check"
+    "check": "node --check src/mcp-gateway.mjs && node --check src/stdio-proxy.mjs && node --check src/chatgpt-responses-adapter.mjs && node --check src/xchat-lifecycle.mjs && node --check src/xchat-lifecycle-worker.mjs",
+    "test": "npm run check && node --test test/*.test.mjs"
   },
   "files": [
     "src/"
