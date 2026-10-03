@@ -9,9 +9,6 @@ import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 
-import { createFederation, consumePersonalApproval } from "./lib/federation.mjs";
-import { backgroundChromeCall, backgroundChromeStatus } from "./lib/chrome-extension-client.mjs";
-
 const BRIDGE_VERSION = "0.2.0";
 const SERVER_NAME = "mac-developer-bridge";
 const SERVER_TITLE = "Mac Developer Bridge";
@@ -1501,45 +1498,6 @@ function sweepPtyTtyOnClose(session) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Child MCP server federation
-// ---------------------------------------------------------------------------
-
-// The supervisor lives entirely in lib/federation.mjs and imports nothing from
-// this file, so it can be tested against a stub child without starting a bridge.
-// Everything it needs from here arrives as a callback — including
-// writeJobMetadata, so a federated child lands in the same $DATA_DIR/jobs
-// directory scripts/disable.sh already scans, with no change to its discovery
-// loop.
-const PERSONAL_BROWSER_APPROVAL_FILE = process.env.MAC_DEV_BRIDGE_PERSONAL_APPROVAL_FILE
-  || path.join(APP_SUPPORT_DIR, "PERSONAL_BROWSER_APPROVED");
-
-const federation = createFederation({
-  audit,
-  stderr,
-  dataDir: APP_SUPPORT_DIR,
-  jobDir: JOB_DIR,
-  nowIso,
-  writeJobMetadata,
-  version: BRIDGE_VERSION,
-  approvalFile: PERSONAL_BROWSER_APPROVAL_FILE,
-  // Collisions with a built-in tool are rejected at startup rather than
-  // shadowing one silently at call time.
-  reservedToolNames: TOOLS.map((tool) => tool.name),
-});
-
-// Reported, never acted on: personal mode is gated by consuming the grant inside
-// lib/federation.mjs. This exists so an operator can see from bridge_status that
-// an unconsumed grant is sitting on disk.
-async function personalBrowserApprovalPresent() {
-  try {
-    await fsp.stat(PERSONAL_BROWSER_APPROVAL_FILE);
-    return { present: true, path: PERSONAL_BROWSER_APPROVAL_FILE };
-  } catch (error) {
-    return { present: false, path: PERSONAL_BROWSER_APPROVAL_FILE, reason: error?.code || String(error) };
-  }
-}
-
 const BACKGROUND_CHROME_PROVIDER_KEY = "chrome-background";
 const BACKGROUND_CHROME_GRANT_DIR = process.env.MAC_DEV_BRIDGE_BACKGROUND_CHROME_GRANT_DIR
   || path.join(APP_SUPPORT_DIR, "chrome-background-grants");
@@ -2210,21 +2168,14 @@ let ptyProbe = probePtySupport().then((ok) => {
 // drops id-less messages so notifications/tools/list_changed never reaches the
 // client — a provider that finishes starting after the first tools/list would be
 // invisible for five minutes with no way to correct it.
-const federationReady = federation.start().then(() => {
-  // Arms the idle unlock recheck for federated children, which unlike pty
-  // sessions exist from boot and never call syncPtyTimers themselves.
-  syncPtyTimers();
-});
-
 // Tools are filtered rather than removed from the static array so tools/list and
 // the tools/call membership gate cannot disagree. The gate rejects anything absent
 // from the advertised set with -32601, so a dispatchTool case reached through only
 // one of the two would be unreachable in one direction and unguarded in the other.
 function advertisedTools() {
   let base = ptyAvailable ? TOOLS : TOOLS.filter((tool) => !tool.name.startsWith("pty_"));
-  if (process.platform !== "darwin") base = base.filter((tool) => !tool.name.startsWith("chrome_") && !tool.name.startsWith("chatgpt_"));
-  const federated = federation.listTools();
-  return federated.length === 0 ? base : base.concat(federated);
+  base = base.filter((tool) => !tool.name.startsWith("chrome_") && !tool.name.startsWith("chatgpt_"));
+  return base;
 }
 
 function livePtySessions() {
@@ -2860,14 +2811,6 @@ function teardownAll(reason) {
     stderr(`pty teardown failed: ${error?.message || error}`);
   }
   try {
-    // Federated children are spawned detached so their groups are reclaimable,
-    // which also means they survive every one of these exit paths unless they are
-    // killed here.
-    federation.killAll();
-  } catch (error) {
-    stderr(`federation teardown failed: ${error?.message || error}`);
-  }
-  try {
     killInFlightCommands();
   } catch (error) {
     stderr(`in-flight teardown failed: ${error?.message || error}`);
@@ -2955,9 +2898,8 @@ async function recheckUnlock() {
     // beat appendFile — and a revocation that leaves no trace is the one event that
     // must not.
     const reclaimed = killPtySessions("revoked");
-    const federatedReclaimed = federation.killAll();
     killInFlightCommands();
-    await audit("pty_unlock_recheck", {}, { revoked: true, sessions, reclaimed, federatedReclaimed }, new Error("Full-access unlock has been revoked; the bridge is shutting down."));
+    await audit("pty_unlock_recheck", {}, { revoked: true, sessions, reclaimed }, new Error("Full-access unlock has been revoked; the bridge is shutting down."));
     exitAfterFlush(78);
   } finally {
     unlockRecheckInFlight = false;
@@ -2990,7 +2932,6 @@ async function assertStillUnlocked(tool, args) {
     // holding an unrestricted shell.
     killInFlightCommands();
     killPtySessions("revoked");
-    federation.killAll();
     // Exit so a supervisor restarts into the locked state where startup fails 78,
     // but only after the response has been flushed.
     exitAfterFlush(78);
@@ -3002,7 +2943,6 @@ async function dispatchTool(name, args) {
   await assertStillUnlocked(name, args);
   switch (name) {
     case "bridge_status": {
-      const federationStatus = federation.status();
       const status = {
         bridgeVersion: BRIDGE_VERSION,
         pid: process.pid,
@@ -3047,19 +2987,6 @@ async function dispatchTool(name, args) {
         // once froze at its startup value and reported `true` while the file was gone;
         // a cached session inventory would repeat that mistake with processes.
         ptySessions: [...ptySessions.values()].map(ptySessionSummary),
-        // Recomputed per call from the same live read, never cached. Surfacing
-        // the child environment allowlist is what makes it observable and
-        // therefore testable, the same reason
-        // tunnelRuntimeKeyScrubbedFromChildEnvironment is reported above.
-        federation: federationStatus,
-        childServerEnvAllowlist: federationStatus.childServerEnvAllowlist,
-        personalBrowserApproved: await personalBrowserApprovalPresent(),
-        backgroundChrome: {
-          ...(await backgroundChromeStatus({ dataDir: APP_SUPPORT_DIR, timeoutMs: 750 })),
-          grant: await backgroundChromeGrantStatus(),
-          providerKey: BACKGROUND_CHROME_PROVIDER_KEY,
-          focusPolicy: "background-only via Chrome extension; no activate/select/new foreground window",
-        },
         accessModel: "No bridge sandbox or path allowlist. Effective access equals the macOS account running tunnel-client/this server, subject to macOS TCC, Full Disk Access, ACLs, and sudo authentication.",
       };
       await audit(name, args, { ok: true });
@@ -3236,13 +3163,6 @@ async function dispatchTool(name, args) {
     case "shell_exec": {
       const command = requireString(args, "command");
       const cwd = optionalString(args, "cwd", HOME);
-      const chromeRoutingRisk = chromeBackgroundRoutingRisk(command);
-      if (chromeRoutingRisk) {
-        const error = new Error(`Direct Chrome GUI automation is blocked (${chromeRoutingRisk.reason}). Chrome web work must use the built-in chrome_* tools and the MDB tab group so it stays in the signed-in profile without stealing focus. This routing rule applies in both Relaxed and Strict approval modes.`);
-        error.code = "CHROME_BACKGROUND_REQUIRED";
-        await audit(name, args, { blocked: true, chromeBackgroundRequired: true, chromeRoutingRisk }, error);
-        throw error;
-      }
       const focusRisk = guiFocusRisk(command);
       const operatorSettings = await readOperatorSettings();
       let foregroundGrant = null;
@@ -3271,13 +3191,6 @@ async function dispatchTool(name, args) {
 
     case "shell_start": {
       const command = requireString(args, "command");
-      const chromeRoutingRisk = chromeBackgroundRoutingRisk(command);
-      if (chromeRoutingRisk) {
-        const error = new Error(`Direct Chrome GUI automation is blocked (${chromeRoutingRisk.reason}). Chrome web work must use the built-in chrome_* tools and the MDB tab group so it stays in the signed-in profile without stealing focus. This routing rule applies in both Relaxed and Strict approval modes.`);
-        error.code = "CHROME_BACKGROUND_REQUIRED";
-        await audit(name, args, { blocked: true, chromeBackgroundRequired: true, chromeRoutingRisk }, error);
-        throw error;
-      }
       const operatorSettings = await readOperatorSettings();
       const focusRisk = guiFocusRisk(command);
       if (focusRisk && operatorSettings.strictApprovals) {
@@ -3963,10 +3876,6 @@ async function dispatchTool(name, args) {
     }
 
     default:
-      // Federated tools are routed here, AFTER assertStillUnlocked at the top of
-      // this function, so they inherit the revocation entry check unchanged
-      // rather than needing their own copy of it.
-      if (federation.hasTool(name)) return await federation.callTool(name, args);
       throw new Error(`Unknown tool: ${name}`);
   }
 }
@@ -4033,11 +3942,6 @@ async function handleMessage(message) {
     // after the first answer would be wrong for five minutes with no way to correct
     // it. Free after the first call: the probe is a settled promise.
     await ptyProbe;
-    // Deliberately NOT awaited for native tools; see the dispatch default: branch.
-    // tools/list genuinely must wait: the answer is cached by the client for 300s and
-    // listChanged is false, so omitting a provider's tools here would be wrong for
-    // five minutes with no way to correct it. tools/call does not wait — see below.
-    await federationReady;
     sendResult(id, completeResult(
       { tools: advertisedTools() },
       modern,
@@ -4054,15 +3958,6 @@ async function handleMessage(message) {
       return;
     }
     await ptyProbe;
-    // Do NOT await federationReady for a native tool.
-    //
-    // Awaiting it unconditionally meant one slow provider blocked bridge_status — a
-    // native, read-only tool — for the whole provider start budget. Capping that
-    // budget changed the number (20s to 15s) but not the coupling, and the documented
-    // remedy of raising the deadline restored the original 20s exactly. A federated
-    // call still waits, because it cannot be routed until the tool set is known.
-    const federatedCall = typeof name === "string" && name.includes("__");
-    if (federatedCall) await federationReady;
     // The same set tools/list advertised. A pty tool that is not advertised must be
     // -32601 here too: "advertised but fails at call time" and "callable but
     // unadvertised" are both ways of reporting a capability the host does not have.
