@@ -15,11 +15,11 @@ That document owns the principles, Architecture Lens, and planning/review
 requirements; this README intentionally does not duplicate them.
 
 NeoY bundles and federates the upstream MacBridge MCP runtime for generic Mac
-developer primitives: shell execution, background jobs, filesystem, PTY, and
-read-only Codex thread access. Those capabilities are not reimplemented in
-Swift. NeoY remains the signed authenticated host, remote authorization and
-federation boundary, native/TCC capability owner, cluster router, and public
-facade; `apply_patch` remains NeoY-native.
+developer primitives: shell execution, background jobs, filesystem, PTY,
+read-only Codex thread access, and `apply_patch`. Those capabilities are not
+reimplemented in Swift. NeoY remains the signed authenticated host, remote
+authorization and federation boundary, native/TCC capability owner, cluster
+router, and public facade.
 
 ```
 ┌ iPhone ─────────────────────────────┐      ┌ Desktop agent ────────────┐

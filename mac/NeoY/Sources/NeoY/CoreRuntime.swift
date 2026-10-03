@@ -4,7 +4,6 @@ enum NeoYCoreRuntime {
     static let version = "2.3.0"
     static let toolNames: Set<String> = [
         "setup",
-        "apply_patch",
         "cluster",
         "bridge_status",
         "shell_exec", "shell_start", "shell_job_status", "shell_job_list", "shell_job_kill",
@@ -21,7 +20,6 @@ enum NeoYCoreRuntime {
         node: NeoYNodeService
     ) {
         server.register(tools: NeoYSetupTools.tools(service: setup), protected: true)
-        server.register(tools: NeoYPatchTools.tools(), protected: true)
         server.register(tools: NeoYNodeTools.tools(service: node), protected: true)
     }
 }

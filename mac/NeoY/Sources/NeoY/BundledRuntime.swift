@@ -31,7 +31,7 @@ enum NeoYBundledRuntime {
 
     static func exposedToolName(provider: String, tool: String) -> String? {
         if provider == macBridgeProviderName {
-            if tool == "apply_patch" || tool.hasPrefix("chrome_") || tool.hasPrefix("chatgpt_") { return nil }
+            if tool.hasPrefix("chrome_") || tool.hasPrefix("chatgpt_") { return nil }
             return tool
         }
         if provider == "events" { return "events.\(tool)" }

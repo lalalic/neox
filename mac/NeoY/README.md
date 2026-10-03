@@ -92,13 +92,13 @@ shell_exec / shell_*   shell and background jobs (bundled MacBridge)
 fs_*                   filesystem read/write/manage (bundled MacBridge)
 pty_*                  interactive PTY sessions (bundled MacBridge)
 codex_thread_*         read-only Codex history (bundled MacBridge)
-apply_patch            NeoY-native direct patch contract
+apply_patch            patch application (bundled MacBridge)
 cluster(command)          trusted neo-node invocation
 ```
 
 MacBridge tools expose their upstream typed schemas directly; NeoY does not
-maintain a duplicate Swift shell/filesystem/PTY/Codex stack. `apply_patch` and
-`cluster` remain NeoY-owned facades. These Core surfaces are always available on
+maintain a duplicate Swift shell/filesystem/PTY/Codex/patch stack. `cluster`
+remains NeoY-owned. These Core surfaces are always available on
 trusted/local connections. First-party
 specialized capabilities remain enabled by default but can be hidden at runtime
 with `neoy.setup("capability disable <name>")`.

@@ -131,8 +131,7 @@ NeoY v2.2 separates control, execution, and optional product capabilities:
 trusted agent
     |
     +-- neoy.setup -------- control plane
-    +-- MacBridge ---------- shell / jobs / filesystem / PTY / Codex threads
-    +-- apply_patch -------- NeoY-native direct patch contract
+    +-- MacBridge ---------- shell / jobs / filesystem / PTY / Codex threads / apply_patch
     +-- node -------------- same Core contract on trusted NeoY peers
 
 optional registry (default enabled)
