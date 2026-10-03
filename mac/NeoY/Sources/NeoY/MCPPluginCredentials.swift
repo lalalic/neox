@@ -1,9 +1,7 @@
 import Foundation
-import Security
 
 enum NeoYMCPPluginCredentials {
-    private static let service = "com.neox.neoy.mcp-plugin"
-    private static let account = "credentials"
+    private static let clientIDFile = NeoYPaths.supportDirectory.appendingPathComponent("mcp-client-id")
 
     struct Credentials: Equatable {
         let clientID: String
@@ -16,46 +14,31 @@ enum NeoYMCPPluginCredentials {
     }
 
     private static func loadClientID() -> String? {
-        guard let data = keychainData(),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: String],
-              let clientID = object["client_id"], !clientID.isEmpty else {
-            return nil
-        }
-        return clientID
+        guard let value = try? String(contentsOf: clientIDFile, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else { return nil }
+        return value
     }
 
     private static func createClientID() -> String {
         let clientID = randomID()
-        guard let data = try? JSONSerialization.data(withJSONObject: ["client_id": clientID]) else {
+        do {
+            try FileManager.default.createDirectory(
+                at: NeoYPaths.supportDirectory,
+                withIntermediateDirectories: true
+            )
+            try (clientID + "\n").write(to: clientIDFile, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: clientIDFile.path
+            )
+        } catch {
             return clientID
         }
-        var query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecValueData as String: data
-        ]
-        SecItemDelete(query as CFDictionary)
-        SecItemAdd(query as CFDictionary, nil)
         return clientID
-    }
-
-    private static func keychainData() -> Data? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
-        return result as? Data
     }
 
     private static func randomID() -> String {
         "neoy_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     }
-
-
 }
