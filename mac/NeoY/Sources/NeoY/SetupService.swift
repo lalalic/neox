@@ -27,6 +27,7 @@ enum NeoYSetupCommand: Equatable, Sendable {
     case featureInstall(String)
     case featureEnable(String, enabled: Bool)
     case featureUninstall(String)
+    case featureConfigure(id: String, patchJSON: String)
     case featureAction(id: String, action: String)
     case featureSetup(String)
     case featureComplete(String)
@@ -206,6 +207,9 @@ enum NeoYSetupParser {
         case "uninstall":
             guard tokens.count == 3 else { throw NeoYSetupError.missingArgument("feature uninstall <id>") }
             return .featureUninstall(tokens[2])
+        case "configure":
+            guard tokens.count == 4 else { throw NeoYSetupError.missingArgument("feature configure <id> '<json-object-patch>'") }
+            return .featureConfigure(id: tokens[2], patchJSON: tokens[3])
         case "start", "stop", "restart", "doctor":
             guard tokens.count == 3 else { throw NeoYSetupError.missingArgument("feature \(tokens[1]) <id>") }
             return .featureAction(id: tokens[2], action: tokens[1])
@@ -271,17 +275,19 @@ enum NeoYSetupParser {
     private static func tokenize(_ raw: String) throws -> [String] {
         var tokens: [String] = []
         var token = ""
-        var quoted = false
+        var quote: Character?
         for character in raw {
-            switch character {
-            case "\"": quoted.toggle()
-            case " ", "\t", "\n", "\r":
-                if quoted { token.append(character) }
-                else if !token.isEmpty { tokens.append(token); token = "" }
-            default: token.append(character)
+            if character == "\"" || character == "'" {
+                if quote == nil { quote = character; continue }
+                if quote == character { quote = nil; continue }
+            }
+            if character.isWhitespace && quote == nil {
+                if !token.isEmpty { tokens.append(token); token = "" }
+            } else {
+                token.append(character)
             }
         }
-        if quoted { throw NeoYSetupError.unmatchedQuote }
+        if quote != nil { throw NeoYSetupError.unmatchedQuote }
         if !token.isEmpty { tokens.append(token) }
         return tokens
     }
@@ -425,6 +431,9 @@ actor NeoYSetupService {
         case .featureUninstall(let id):
             guard let item = NeoYFeatureCatalog.all.first(where: { $0.id == id }) else { return "Error: unknown feature '\(id)'" }
             do { try await NeoYFeatureManager.shared.uninstall(item); return "{\"ok\":true,\"id\":\"\(id)\"}" }
+            catch { return "Error: \(error.localizedDescription)" }
+        case .featureConfigure(let id, let patchJSON):
+            do { return Self.json(try await NeoYFeatureManager.shared.configure(id: id, patchJSON: patchJSON)) }
             catch { return "Error: \(error.localizedDescription)" }
         case .featureAction(let id, let action):
             do { return Self.json(try await NeoYFeatureManager.shared.action(id: id, action: action)) }
@@ -596,6 +605,7 @@ actor NeoYSetupService {
             feature list
             feature status <id>
             feature install|enable|disable|uninstall <id>
+            feature configure <id> '<json-object-patch>'
             feature start|stop|restart|doctor <id>
             feature setup <id> — open the feature's temporary ChatGPT setup conversation.
             feature complete <id> — run doctor, start the service, verify MCP health, and mark setup ready.
@@ -632,7 +642,7 @@ actor NeoYSetupService {
               diagnostics ...
               permissions status|open ...
               mcp list|add|remove|enable|disable ...
-              feature list|status|install|enable|disable|uninstall|start|stop|restart|doctor|setup|complete ...
+              feature list|status|install|enable|disable|uninstall|configure|start|stop|restart|doctor|setup|complete ...
               events status|enable|disable|notify ...
               capability list|enable|disable ...
               auth show|rotate|revoke
