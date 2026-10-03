@@ -113,8 +113,8 @@ NeoY preserves the current `_mcp._tcp`, `_neoy._tcp`, port 9224 MCP endpoint, po
 Browser profiles, cookies, ChatGPT-specific UI automation, and one-off browser workflow glue are deliberately outside Core. Those belong in skills/plugins/federated MCPs.
 
 The standalone Python handoff bridge and old Neox Tour app remain retired.
-MacBridge-specific browser/UI glue is not migrated into NeoY; the bundled
-provider remains the owner of generic developer primitives.
+MacBridge-specific browser/UI glue is not migrated into NeoY. Generic developer
+primitives are now owned directly by `@lalalic/neo` Core tools.
 
 ## Validation boundary
 
@@ -131,7 +131,7 @@ NeoY v2.2 separates control, execution, and optional product capabilities:
 trusted agent
     |
     +-- neoy.setup -------- control plane
-    +-- MacBridge ---------- shell / jobs / filesystem / PTY / Codex threads / apply_patch
+    +-- Core tools --------- shell / jobs / filesystem / PTY / Codex threads / apply_patch
     +-- node -------------- same Core contract on trusted NeoY peers
 
 optional registry (default enabled)
@@ -142,11 +142,11 @@ optional registry (default enabled)
     +-- public tunnel
 ```
 
-The bundled MacBridge provider is discovered and federated by NeoY. Its upstream
-typed tool names are the public generic primitive contracts; NeoY's allowlists
-and remote feature policy track those names. Cluster routing remains NeoY-owned.
+The `@lalalic/neo` Core runtime exposes the generic primitive contracts directly.
+The migrated typed tool names remain stable; NeoY's allowlists and remote feature
+policy track those names. Cluster routing remains NeoY-owned.
 
-Generic execution is implemented by the bundled MacBridge runtime and does not
+Generic execution is implemented by `@lalalic/neo` Core tools and does not
 depend on PM2. PM2 remains the product deployment/keepalive supervisor for NeoY
 and the Cloudflare tunnel. `runtime-control.sh` remains deployment/tunnel glue
 only.

@@ -2,11 +2,11 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const WORKER = path.join(HERE, "lifecycle-worker.mjs");
+const WORKER = fileURLToPath(import.meta.url);
 const PROJECT_ID = /^g-p-[A-Za-z0-9_-]{8,128}$/;
 const THREAD_ID = /^[A-Za-z0-9_-]{8,160}$/;
 
@@ -131,4 +131,43 @@ export function scheduleXChatLifecycle(name, args, options = {}) {
     ...(parsed.sourceThreadId ? { source_thread_id: parsed.sourceThreadId } : {}),
     instruction: "End the current orchestrator turn now. Do not make additional business tool calls.",
   });
+}
+
+
+function writeWorkerStatus(statusPath, payload) {
+  const tmp = statusPath + ".tmp-" + process.pid;
+  fs.writeFileSync(tmp, JSON.stringify(payload), { mode: 0o600 });
+  fs.renameSync(tmp, statusPath);
+}
+
+function runWorker(action, configPath, statusPath) {
+  if (!["new-turn", "new-thread"].includes(action) || !configPath || !statusPath) return 64;
+  const cli = process.env.BROWSER_WORKSPACE_CLI
+    || path.join(os.homedir(), ".agents/skills/browser-workspace/bin/browser-workspace");
+  const started = new Date().toISOString();
+  try {
+    writeWorkerStatus(statusPath, { transfer_id: path.basename(statusPath, ".status.json"), status: "running", mode: action, started_at: started });
+    const result = spawnSync(cli, ["platform", "run", "chatgpt", action, "--config", configPath], {
+      encoding: "utf8",
+      timeout: Number(process.env.XCHAT_LIFECYCLE_TIMEOUT_MS || 600_000),
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    const stdout = String(result.stdout || "").trim();
+    const stderr = String(result.stderr || "").trim();
+    if (result.error || result.status !== 0) {
+      writeWorkerStatus(statusPath, { status: "failed", mode: action, started_at: started, finished_at: new Date().toISOString(), exit_code: result.status, error: result.error?.message || stderr || stdout || "Browser Workspace lifecycle action failed" });
+      return result.status || 1;
+    }
+    let output = stdout;
+    try { output = JSON.parse(stdout || "{}"); } catch {}
+    writeWorkerStatus(statusPath, { status: "completed", mode: action, started_at: started, finished_at: new Date().toISOString(), output });
+    return 0;
+  } finally {
+    try { fs.unlinkSync(configPath); } catch {}
+  }
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+  const [action, configPath, statusPath] = process.argv.slice(2);
+  process.exitCode = runWorker(action, configPath, statusPath);
 }

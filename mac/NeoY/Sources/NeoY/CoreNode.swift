@@ -578,7 +578,7 @@ actor NeoYNodeService {
       status <name>
       invoke <name> <core-tool> -- <arguments>
     NeoY peers use the direct Core tool name. setup/cluster accept command text;
-    bundled MacBridge tools and apply_patch accept a JSON argument object.
+    Core tools and apply_patch accept a JSON argument object.
     Mini neo-node compatibility aliases remain exec and fs.
     SSH port defaults to 22. 'add' bootstraps the bundled mini neo-node runtime over SSH, starts its MCP tunnel, then pairs it. A loopback SSH target on a non-default port is treated as reverse-SSH bootstrap and uses session mode without LaunchAgent. Pairing remains available for already-running endpoints.
     """

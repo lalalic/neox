@@ -8,6 +8,7 @@ enum NeoYCoreRuntime {
         "bridge_status",
         "shell_exec", "shell_start", "shell_job_status", "shell_job_list", "shell_job_kill",
         "fs_read", "fs_write", "fs_list", "fs_stat", "fs_manage",
+        "apply_patch",
         "codex_thread_read", "codex_thread_list", "codex_thread_turns_list",
         "audit_tail",
         "pty_start", "pty_read", "pty_write", "pty_resize", "pty_signal", "pty_close"

@@ -17,13 +17,14 @@ specific principle, reason, and evidence that the exception is necessary.
 
 ### Core ownership contract
 
-NeoY bundles the upstream MacBridge runtime and federates it internally. The
-bundled provider owns generic shell execution, background jobs, filesystem
-operations, PTY sessions, read-only Codex thread access, and `apply_patch`. NeoY
-does not keep Swift implementations or compatibility stacks for those primitives.
-NeoY owns the signed host process, authentication and authorization, remote
-exposure, federation, native TCC/device capabilities, cluster routing, lifecycle,
-and the public MCP facade.
+`@lalalic/neo` owns the Core runtime implementation for generic shell execution,
+background jobs, filesystem operations, PTY sessions, read-only Codex thread
+access, and `apply_patch`. The implementation was migrated from the predecessor
+MacBridge source, but MacBridge is no longer a runtime dependency or separate
+service. NeoY does not keep duplicate Swift implementations or compatibility
+stacks for those primitives. NeoY owns the signed host process, authentication
+and authorization, remote exposure, federation, native TCC/device capabilities,
+cluster routing, lifecycle, and the public MCP facade.
 
 ## Principles
 

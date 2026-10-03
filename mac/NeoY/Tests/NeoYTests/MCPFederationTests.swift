@@ -9,7 +9,7 @@ final class MCPFederationTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let client = NeoYMCPStdioClient(
             executable: fixture.node, arguments: [fixture.server.path],
-            environment: NeoYBundledRuntime.macBridgeEnvironment,
+            environment: NeoYBundledRuntime.coreEnvironment,
             retryDelays: [.milliseconds(10)]
         )
         defer { Task { await client.stop() } }
@@ -55,7 +55,7 @@ final class MCPFederationTests: XCTestCase {
         let server = await MainActor.run { MCPServer(name: "test", port: 0) }
         let federation = await MainActor.run { NeoYMCPFederation(server: server) }
         let configuration = NeoYMCPServerConfiguration(
-            name: NeoYBundledRuntime.macBridgeProviderName,
+            name: NeoYBundledRuntime.coreProviderName,
             url: Self.stdioURL(node: fixture.node, script: fixture.server.path),
             isEnabled: true
         )
@@ -89,7 +89,7 @@ final class MCPFederationTests: XCTestCase {
         try Data().write(to: failure)
         let client = NeoYMCPStdioClient(
             executable: fixture.node, arguments: [fixture.server.path],
-            environment: NeoYBundledRuntime.macBridgeEnvironment.merging([
+            environment: NeoYBundledRuntime.coreEnvironment.merging([
                 "FAKE_MCP_FAIL_FILE": failure.path
             ]) { _, supplied in supplied },
             retryDelays: [.milliseconds(20), .milliseconds(50)]
@@ -121,7 +121,7 @@ final class MCPFederationTests: XCTestCase {
         import fs from "node:fs";
         import readline from "node:readline";
         import { spawnSync } from "node:child_process";
-        if (process.env.MAC_DEV_BRIDGE_FULL_ACCESS_ACK !== "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS") process.exit(78);
+        if (process.env.NEO_CORE_FULL_ACCESS_ACK !== "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS") process.exit(78);
         if (process.env.FAKE_MCP_FAIL_FILE && fs.existsSync(process.env.FAKE_MCP_FAIL_FILE)) process.exit(70);
         const tools = ["fs_read", "shell_exec", "apply_patch"].map(name => ({
           name, description: name, inputSchema: { type: "object", properties: {} }
