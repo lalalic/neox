@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { XCHAT_LIFECYCLE_TOOLS, isXChatLifecycleTool, scheduleXChatLifecycle } from "../src/xchat/lifecycle.mjs";
+import { XCHAT_LIFECYCLE_TOOLS, isXChatLifecycleTool, scheduleXChatLifecycle } from "../src/core/tools/xchat.mjs";
 
 test("declares terminal turn and thread lifecycle tools", () => {
   assert.deepEqual(XCHAT_LIFECYCLE_TOOLS.map((tool) => tool.name), ["xchat.turn.new", "xchat.thread.new"]);

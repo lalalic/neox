@@ -24,8 +24,8 @@ import {
   chatgptResponsesErrorBody,
   parseChatgptResponsesEnvelope,
   prepareChatgptResponsesRequest,
-} from "../xchat/chatgpt-responses-adapter.mjs";
-import { XCHAT_LIFECYCLE_TOOLS, isXChatLifecycleTool, scheduleXChatLifecycle } from "../xchat/lifecycle.mjs";
+} from "./responses-adapter.mjs";
+import { XCHAT_LIFECYCLE_TOOLS, isXChatLifecycleTool, scheduleXChatLifecycle } from "./tools/xchat.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BRIDGE = process.env.NEOY_ENTRY || path.join(HERE, "stdio-proxy.mjs");

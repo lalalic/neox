@@ -7,7 +7,7 @@
 | Capture/demo | **NeoY Core** | Native ScreenCaptureKit runtime remains unchanged. |
 | Accessibility/computer-use | **NeoY Core** | Native trusted boundary remains narrow; no browser-specific ownership added. |
 | Permission status/recovery | **NeoY Core** | Native Accessibility/Screen Recording/camera/mic/notification status plus guided System Settings; Local Network is runtime-probed. |
-| Generic shell/filesystem/PTY/job/Codex primitives | **Bundled MacBridge** | Upstream `shell_*`, `fs_*`, `pty_*`, and `codex_thread_*` tools are federated by NeoY; no duplicate Swift stack. |
+| Generic shell/filesystem/PTY/job/Codex primitives | **@lalalic/neo Core tools** | Migrated `shell_*`, `fs_*`, `pty_*`, and `codex_thread_*` implementations live in the Neo runtime package; no MacBridge dependency and no duplicate Swift stack. |
 | User-added MCP federation | **NeoY Core** | Durable configured HTTP MCPs; dynamic namespaced tools `mcp.<server>.<tool>`; text results only. |
 | Diagnostics/control state | **NeoY Core** | Schema v2 typed persistence, atomic replacement, malformed-state recovery, explicit v1 migration. |
 | NeoX pairing/handoff | **NeoY Core** | Preserve `_neoy._tcp`, port 8686, `POST /agent`, inbox and existing phone MCP selection. |

@@ -412,8 +412,8 @@ final class NeoYMCPFederation {
                 case "stdio":
                     let token = UUID()
                     stdioTokens[configuration.name] = token
-                    let environment = configuration.name == NeoYBundledRuntime.macBridgeProviderName
-                        ? NeoYBundledRuntime.macBridgeEnvironment : [:]
+                    let environment = configuration.name == NeoYBundledRuntime.coreProviderName
+                        ? NeoYBundledRuntime.coreEnvironment : [:]
                     let client = try NeoYMCPStdioClient.from(url: url, environment: environment) { [weak self] event in
                         await self?.handleStdioEvent(event, configuration: configuration, token: token)
                     }

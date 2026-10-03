@@ -290,7 +290,7 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertFalse(normalized.contains("startupServices"))
     }
 
-    func testV3BundledMacBridgeIsNormalizedOutOfUserFederation() throws {
+    func testV3LegacyMacBridgeIsNormalizedOutOfUserFederation() throws {
         let directory = Self.makeDirectory()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let legacy = """
@@ -306,9 +306,9 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertFalse(normalized.contains("\"name\" : \"macbridge\""))
     }
 
-    func testBundledMacBridgeToolsAreFlatAndLegacyBrowserToolsAreHidden() {
-        XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "macbridge", tool: "pty_start"), "pty_start")
-        XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "macbridge", tool: "apply_patch"), "apply_patch")
+    func testBundledCoreToolsAreFlat() {
+        XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "core", tool: "pty_start"), "pty_start")
+        XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "core", tool: "apply_patch"), "apply_patch")
         XCTAssertNil(NeoYBundledRuntime.exposedToolName(provider: "macbridge", tool: "chrome_click"))
         XCTAssertNil(NeoYBundledRuntime.exposedToolName(provider: "macbridge", tool: "chatgpt_conversation_start"))
         XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "events", tool: "health"), "events.health")

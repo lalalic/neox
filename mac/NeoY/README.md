@@ -38,11 +38,11 @@ deployment set hostname <host>
 
 Changing deployment settings persists them, restarts the MCP listener after the current response completes, and reconciles the Cloudflare tunnel. The menu-bar **Setup…** window exposes the same port/tunnel values plus local/public test buttons and MCP app credentials.
 
-Optional/product MCP tools appear as `mcp.<server>.<tool>` and are configured in the control plane. Runtime code is grouped by owner: `Runtime/src/core` contains the Core gateway, proxy, and local stdio bridge; `Runtime/src/xchat` contains the XChat adapter and lifecycle worker. The bridge's minimal upstream-derived implementation and MIT attribution are documented in `core/bridge/UPSTREAM.md`. It is not an npm dependency or a separate installed service. `runtime.json` selects the required `@lalalic/neo` version; `bootstrap-runtime.sh` installs it with npm under `~/Library/Application Support/NeoY/runtime/node_modules/@lalalic/neo` and atomically replaces the runtime when that version changes. Swift starts and supervises the local bridge from that runtime.
+Optional/product MCP tools appear as `mcp.<server>.<tool>` and are configured in the control plane. Runtime code is grouped by owner under `Runtime/src/core`: `gateway.mjs` and `stdio-proxy.mjs` own transport; `tools/` owns Core capabilities; `tools/xchat.mjs` is the thin Browser Workspace lifecycle adapter; and `lib/` contains Core helpers. The migrated implementation and MIT attribution are documented in `core/UPSTREAM.md`. MacBridge is not an npm dependency or separate installed service. `runtime.json` selects the required `@lalalic/neo` version; `bootstrap-runtime.sh` installs it with npm under `~/Library/Application Support/NeoY/runtime/node_modules/@lalalic/neo` and atomically replaces the runtime when that version changes. Swift starts and supervises the Core stdio entrypoint from that runtime.
 
-NeoY explicitly authorizes only that trusted bundled child at spawn time; unrelated stdio providers receive no such authorization. Federation initializes the child, requires a successful `tools/list` before publishing it as ready, removes stale registrations on an unexpected exit, and respawns with bounded backoff without restarting NeoY Core.
+NeoY explicitly authorizes only that trusted Core child at spawn time; unrelated stdio providers receive no such authorization. Federation initializes the child, requires a successful `tools/list` before publishing it as ready, removes stale registrations on an unexpected exit, and respawns with bounded backoff without restarting NeoY Core.
 
-For local runtime development, `~/Library/Application Support/NeoY/runtime-source` may contain an absolute path to a runtime source checkout (normally `.../mac/NeoY/Runtime`). `runtime-control.sh` uses that source for the gateway/proxy scripts while keeping npm-installed dependencies and the production version pin intact. Remove the file to return immediately to the installed npm runtime. Its tools keep their original names (`shell_exec`, `pty_start`, `fs_read`, etc.) instead of an `mcp.macbridge.*` wrapper, and MacBridge is not persisted in `mcpServers`.
+For local runtime development, `~/Library/Application Support/NeoY/runtime-source` may contain an absolute path to a runtime source checkout (normally `.../mac/NeoY/Runtime`). `runtime-control.sh` uses that source for the gateway/proxy scripts while keeping npm-installed dependencies and the production version pin intact. Remove the file to return immediately to the installed npm runtime. Core tools keep their stable names (`shell_exec`, `pty_start`, `fs_read`, etc.) without an extra provider prefix; legacy MacBridge configuration is normalized out of `mcpServers`.
 
 The Node.js runtime package owns the Web ChatGPT gateway/proxy scripts and direct Node dependencies. Swift remains the signed host, public auth boundary, native capability owner, and MCP federation host.
 
@@ -90,15 +90,15 @@ NeoY 2.2 keeps the privileged agent surface intentionally small:
 
 ```text
 neoy.setup(command)    configuration/control
-shell_exec / shell_*   shell and background jobs (bundled MacBridge)
-fs_*                   filesystem read/write/manage (bundled MacBridge)
-pty_*                  interactive PTY sessions (bundled MacBridge)
-codex_thread_*         read-only Codex history (bundled MacBridge)
-apply_patch            patch application (bundled MacBridge)
+shell_exec / shell_*   shell and background jobs (@lalalic/neo Core)
+fs_*                   filesystem read/write/manage (@lalalic/neo Core)
+pty_*                  interactive PTY sessions (@lalalic/neo Core)
+codex_thread_*         read-only Codex history (@lalalic/neo Core)
+apply_patch            patch application (@lalalic/neo Core)
 cluster(command)          trusted neo-node invocation
 ```
 
-MacBridge tools expose their upstream typed schemas directly; NeoY does not
+The migrated Core tools preserve their typed schemas directly; NeoY does not
 maintain a duplicate Swift shell/filesystem/PTY/Codex/patch stack. `cluster`
 remains NeoY-owned. These Core surfaces are always available on
 trusted/local connections. First-party
