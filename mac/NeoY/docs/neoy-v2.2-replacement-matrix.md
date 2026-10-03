@@ -10,7 +10,7 @@ upstream MacBridge. It does not copy MacBridge capabilities into Swift.
 | Filesystem | bundled MacBridge: `fs_read`, `fs_write`, `fs_list`, `fs_stat`, `fs_manage` |
 | PTY | bundled MacBridge: `pty_start`, `pty_read`, `pty_write`, `pty_resize`, `pty_signal`, `pty_close` |
 | Codex history | bundled MacBridge: `codex_thread_read`, `codex_thread_list`, `codex_thread_turns_list` |
-| Patch application | NeoY-native `apply_patch` direct contract |
+| Patch application | bundled MacBridge: `apply_patch` |
 | Cluster routing/control | NeoY-owned `cluster` facade and node transport adapters |
 | Auth, remote exposure, federation, lifecycle, native/TCC features | NeoY-owned |
 

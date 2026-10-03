@@ -19,13 +19,11 @@ specific principle, reason, and evidence that the exception is necessary.
 
 NeoY bundles the upstream MacBridge runtime and federates it internally. The
 bundled provider owns generic shell execution, background jobs, filesystem
-operations, PTY sessions, and read-only Codex thread access. NeoY does not keep
-Swift implementations or compatibility stacks for those primitives. NeoY owns
-the signed host process, authentication and authorization, remote exposure,
-federation, native TCC/device capabilities, cluster routing, lifecycle, and the
-public MCP facade. `apply_patch` remains the one deliberate NeoY-native core
-adapter because its current direct contract is working and independently
-authorized.
+operations, PTY sessions, read-only Codex thread access, and `apply_patch`. NeoY
+does not keep Swift implementations or compatibility stacks for those primitives.
+NeoY owns the signed host process, authentication and authorization, remote
+exposure, federation, native TCC/device capabilities, cluster routing, lifecycle,
+and the public MCP facade.
 
 ## Principles
 

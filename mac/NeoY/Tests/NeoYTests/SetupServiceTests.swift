@@ -128,7 +128,7 @@ final class SetupServiceTests: XCTestCase {
 
     func testCanonicalCoreToolSetIsSmallAndStable() {
         XCTAssertTrue(NeoYCoreRuntime.toolNames.isSuperset(of: [
-            "setup", "apply_patch", "cluster", "shell_exec", "fs_read",
+            "setup", "cluster", "shell_exec", "fs_read", "apply_patch",
             "pty_start", "codex_thread_list"
         ]))
         XCTAssertFalse(NeoYCoreRuntime.toolNames.contains("exec"))
@@ -308,7 +308,7 @@ final class SetupServiceTests: XCTestCase {
 
     func testBundledMacBridgeToolsAreFlatAndLegacyBrowserToolsAreHidden() {
         XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "macbridge", tool: "pty_start"), "pty_start")
-        XCTAssertNil(NeoYBundledRuntime.exposedToolName(provider: "macbridge", tool: "apply_patch"))
+        XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "macbridge", tool: "apply_patch"), "apply_patch")
         XCTAssertNil(NeoYBundledRuntime.exposedToolName(provider: "macbridge", tool: "chrome_click"))
         XCTAssertNil(NeoYBundledRuntime.exposedToolName(provider: "macbridge", tool: "chatgpt_conversation_start"))
         XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "events", tool: "health"), "events.health")
