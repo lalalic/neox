@@ -314,6 +314,25 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "events", tool: "health"), "events.health")
     }
 
+    func testChildProcessEnvironmentAddsGlobalCLIPathsWithoutDuplicates() {
+        let home = URL(fileURLWithPath: "/Users/tester", isDirectory: true)
+        let environment = NeoYProcessEnvironment.childEnvironment(
+            base: ["PATH": "/usr/bin:/opt/homebrew/bin"],
+            homeDirectory: home
+        )
+        let path = environment["PATH"]?.split(separator: ":").map(String.init) ?? []
+
+        XCTAssertEqual(path.first, "/usr/bin")
+        XCTAssertEqual(path.filter { $0 == "/opt/homebrew/bin" }.count, 1)
+        XCTAssertTrue(path.contains("/usr/local/bin"))
+        XCTAssertTrue(path.contains("/Users/tester/.local/bin"))
+    }
+
+    func testChildProcessEnvironmentProvidesSystemFallbackPath() {
+        let environment = NeoYProcessEnvironment.childEnvironment(base: [:], homeDirectory: URL(fileURLWithPath: "/Users/tester"))
+        XCTAssertTrue(environment["PATH"]?.contains("/usr/bin") == true)
+    }
+
     private static func makeDirectory() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("neoy-control-plane-tests", isDirectory: true)

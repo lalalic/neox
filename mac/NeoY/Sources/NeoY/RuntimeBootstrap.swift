@@ -10,7 +10,7 @@ enum NeoYRuntimeBootstrap {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/zsh")
             process.arguments = [script.path]
-            process.environment = ProcessInfo.processInfo.environment
+            process.environment = NeoYProcessEnvironment.childEnvironment()
             let logURL = NeoYPaths.supportDirectory.appendingPathComponent("bootstrap.log")
             try? FileManager.default.createDirectory(at: NeoYPaths.supportDirectory, withIntermediateDirectories: true)
             FileManager.default.createFile(atPath: logURL.path, contents: nil)

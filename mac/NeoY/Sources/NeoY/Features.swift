@@ -378,11 +378,7 @@ actor NeoYFeatureManager {
     private static func run(_ executable: String, _ args: [String]) throws -> (status: Int32, output: String) {
         let p = Process(); let pipe = Pipe()
         p.executableURL = URL(fileURLWithPath: executable); p.arguments = args
-        var env = ProcessInfo.processInfo.environment
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let prefix = "/opt/homebrew/bin:/usr/local/bin:\(home)/.local/bin"
-        env["PATH"] = prefix + ":" + (env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin")
-        p.environment = env
+        p.environment = NeoYProcessEnvironment.childEnvironment()
         p.standardOutput = pipe; p.standardError = pipe
         try p.run()
         let data = pipe.fileHandleForReading.readDataToEndOfFile(); p.waitUntilExit()

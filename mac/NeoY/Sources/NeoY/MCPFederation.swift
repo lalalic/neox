@@ -138,6 +138,7 @@ actor NeoYMCPStdioClient {
         let stdoutPipe = Pipe()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
+        process.environment = NeoYProcessEnvironment.childEnvironment()
         process.standardInput = stdinPipe
         process.standardOutput = stdoutPipe
         process.standardError = FileHandle.nullDevice
