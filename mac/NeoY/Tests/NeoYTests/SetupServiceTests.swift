@@ -51,6 +51,17 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertEqual(try NeoYSetupParser.parse("permissions status"), .permissionsStatus)
     }
 
+    func testParserAcceptsFeatureLifecycleCommands() throws {
+        XCTAssertEqual(try NeoYSetupParser.parse("feature list"), .featureList)
+        XCTAssertEqual(try NeoYSetupParser.parse("features status family-tutor"), .featureStatus("family-tutor"))
+        XCTAssertEqual(try NeoYSetupParser.parse("feature install family-tutor"), .featureInstall("family-tutor"))
+        XCTAssertEqual(try NeoYSetupParser.parse("feature disable family-tutor"), .featureEnable("family-tutor", enabled: false))
+        XCTAssertEqual(try NeoYSetupParser.parse("feature doctor family-tutor"), .featureAction(id: "family-tutor", action: "doctor"))
+        XCTAssertEqual(try NeoYSetupParser.parse("feature setup family-tutor"), .featureSetup("family-tutor"))
+        XCTAssertEqual(try NeoYSetupParser.parse("feature complete family-tutor"), .featureComplete("family-tutor"))
+        XCTAssertEqual(try NeoYSetupParser.parse("help features"), .help(topic: .features))
+    }
+
     func testV1ControlPlaneMigratesToV3WithoutLosingDiagnostics() throws {
         let directory = Self.makeDirectory()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

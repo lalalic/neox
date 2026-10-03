@@ -21,6 +21,9 @@ final class NeoYSetupModel: ObservableObject {
     @Published var remoteMode: RemoteMode = .temporary
     @Published var publicHostname = ""
     @Published var remoteFeatures: Set<NeoYRemoteFeature> = []
+    @Published var remoteProviders: Set<String> = []
+    @Published private(set) var featureRecords: [NeoYFeatureRecord] = []
+    @Published private(set) var remoteProviderOptions: [String] = []
     @Published private(set) var oauthClientID = ""
     @Published private(set) var oauthToken = ""
     @Published var result = ""
@@ -29,7 +32,10 @@ final class NeoYSetupModel: ObservableObject {
 
     init() {
         reload()
-        Task { await refreshPermissions() }
+        Task {
+            await refreshPermissions()
+            await refreshFeatures()
+        }
     }
 
     func reload() {
@@ -39,6 +45,7 @@ final class NeoYSetupModel: ObservableObject {
         remoteMode = value.tunnelMode == .named ? .ownDomain : .temporary
         publicHostname = value.publicHostname
         remoteFeatures = value.enabledRemoteFeatures
+        remoteProviders = value.enabledRemoteProviders
         let credentials = NeoYMCPPluginCredentials.current()
         oauthClientID = credentials.clientID
         oauthToken = credentials.token
@@ -145,8 +152,74 @@ final class NeoYSetupModel: ObservableObject {
     }
 
     func setAllRemoteFeatures(_ enabled: Bool) {
-        remoteFeatures = enabled ? Set(NeoYRemoteFeature.allCases) : []
+        remoteFeatures = enabled ? Set(NeoYRemoteFeature.allCases.filter { $0 != .mcpServices }) : []
+        remoteProviders = enabled ? Set(remoteProviderOptions) : []
         persistRemoteSettings(restartServer: true)
+    }
+
+    func setRemoteProvider(_ provider: String, enabled: Bool) {
+        if enabled { remoteProviders.insert(provider) }
+        else { remoteProviders.remove(provider) }
+        persistRemoteSettings(restartServer: true)
+    }
+
+    func refreshFeatures() async {
+        featureRecords = await NeoYFeatureManager.shared.records()
+        var providers = Set(featureRecords.filter { $0.enabled }.compactMap(\.provider))
+        let controlPlaneURL = NeoYPaths.supportDirectory.appendingPathComponent("control-plane.json")
+        if let data = try? Data(contentsOf: controlPlaneURL),
+           let document = try? JSONDecoder().decode(NeoYControlPlaneDocument.self, from: data) {
+            providers.formUnion(document.configuration.mcpServers.filter(\.isEnabled).map(\.name))
+        }
+        remoteProviderOptions = providers.sorted()
+    }
+
+    func featureRecord(_ id: String) -> NeoYFeatureRecord? {
+        featureRecords.first { $0.id == id }
+    }
+
+    func setFeature(_ item: NeoYFeatureCatalogItem, enabled: Bool) {
+        Task {
+            isBusy = true
+            defer { isBusy = false }
+            do {
+                _ = try await NeoYFeatureManager.shared.setEnabled(item, enabled: enabled)
+                await refreshFeatures()
+                result = enabled ? "\(item.name) installed and setup started." : "\(item.name) disabled."
+            } catch {
+                await refreshFeatures()
+                result = error.localizedDescription
+            }
+        }
+    }
+
+    func startFeatureSetup(_ item: NeoYFeatureCatalogItem) {
+        Task {
+            isBusy = true
+            defer { isBusy = false }
+            do {
+                try await NeoYFeatureManager.shared.startSetup(id: item.id)
+                await refreshFeatures()
+                result = "Started \(item.name) setup in a temporary ChatGPT conversation."
+            } catch {
+                result = error.localizedDescription
+            }
+        }
+    }
+
+    func uninstallFeature(_ item: NeoYFeatureCatalogItem) {
+        Task {
+            isBusy = true
+            defer { isBusy = false }
+            do {
+                let provider = featureRecord(item.id)?.provider
+                try await NeoYFeatureManager.shared.uninstall(item)
+                if let provider { remoteProviders.remove(provider) }
+                persistRemoteSettings(restartServer: true)
+                await refreshFeatures()
+                result = "Uninstalled \(item.name)."
+            } catch { result = error.localizedDescription }
+        }
     }
 
     func revokeToken() {
@@ -185,6 +258,7 @@ final class NeoYSetupModel: ObservableObject {
             value.tunnelMode = remoteEnabled ? (remoteMode == .ownDomain ? .named : .quick) : .off
             value.publicHostname = publicHostname.trimmingCharacters(in: .whitespacesAndNewlines)
             value.remoteFeatures = Set(remoteFeatures.map(\.rawValue))
+            value.remoteProviders = remoteProviders
             try NeoYDeploymentSettingsStore.save(value)
             if restartServer {
                 NotificationCenter.default.post(name: .neoYDeploymentSettingsChanged, object: nil)
@@ -393,11 +467,23 @@ struct NeoYSetupView: View {
                         Button("None") { model.setAllRemoteFeatures(false) }
                     }
                     Divider()
-                    ForEach(NeoYRemoteFeature.allCases) { feature in
+                    ForEach(NeoYRemoteFeature.allCases.filter { $0 != .mcpServices }) { feature in
                         Toggle(feature.title, isOn: Binding(
                             get: { model.remoteFeatures.contains(feature) },
                             set: { model.setRemoteFeature(feature, enabled: $0) }
                         ))
+                    }
+                    if !model.remoteProviderOptions.isEmpty {
+                        Divider()
+                        Text("Connected MCP services")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        ForEach(model.remoteProviderOptions, id: \.self) { provider in
+                            Toggle(provider, isOn: Binding(
+                                get: { model.remoteProviders.contains(provider) },
+                                set: { model.setRemoteProvider(provider, enabled: $0) }
+                            ))
+                        }
                     }
                 }
                 .padding(8)
@@ -408,6 +494,51 @@ struct NeoYSetupView: View {
     private var advancedTab: some View {
         VStack(alignment: .leading, spacing: 20) {
             heading("Advanced", "Runtime details and operational settings.")
+
+            GroupBox("Features") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Optional features install from their published package. Installing a feature also registers its local MCP. Remote access remains off until explicitly enabled on the Remote tab.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Divider()
+                    ForEach(NeoYFeatureCatalog.all) { item in
+                        let record = model.featureRecord(item.id)
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Toggle(item.name, isOn: Binding(
+                                    get: { record?.enabled == true },
+                                    set: { model.setFeature(item, enabled: $0) }
+                                ))
+                                Spacer()
+                                Text(record?.state.rawValue ?? "not installed")
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(item.summary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if let record, record.enabled {
+                                HStack {
+                                    if record.state == .setupRequired || record.state == .configuring {
+                                        Button("Setup…") { model.startFeatureSetup(item) }
+                                    }
+                                    if let provider = record.provider {
+                                        Text("MCP: \(provider)")
+                                            .font(.caption.monospaced())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Button("Uninstall", role: .destructive) { model.uninstallFeature(item) }
+                                }
+                            }
+                            if let error = record?.error, !error.isEmpty {
+                                Text(error).font(.caption).foregroundStyle(.red)
+                            }
+                        }
+                    }
+                }
+                .padding(8)
+            }
 
             GroupBox("Permissions") {
                 VStack(alignment: .leading, spacing: 12) {

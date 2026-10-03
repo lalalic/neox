@@ -70,6 +70,11 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             Task { @MainActor in self?.restartPrimaryMCPServer() }
         })
+        observers.append(NotificationCenter.default.addObserver(
+            forName: .neoYFeaturesChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.restartPrimaryMCPServer() }
+        })
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -131,6 +136,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
             stateURL: NeoYPaths.supportDirectory.appendingPathComponent("native-oauth-state.json")
         )
         value.setRemoteAllowedFeatures(deployment.enabledRemoteFeatures)
+        value.setRemoteAllowedProviders(deployment.enabledRemoteProviders)
 
         let configuration = (try? NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)
             .loadOrCreate().document.configuration) ?? NeoYControlPlaneConfiguration()

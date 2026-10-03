@@ -1,7 +1,7 @@
 import Foundation
 
 enum NeoYSetupTopic: String, CaseIterable, Sendable {
-    case overview, status, configuration, deployment, diagnostics, permissions, federation, events, capabilities, auth, roadmap
+    case overview, status, configuration, deployment, diagnostics, permissions, federation, features, events, capabilities, auth, roadmap
 }
 
 enum NeoYSetupCommand: Equatable, Sendable {
@@ -22,6 +22,14 @@ enum NeoYSetupCommand: Equatable, Sendable {
     case mcpAdd(name: String, url: String)
     case mcpRemove(String)
     case mcpEnable(name: String, enabled: Bool)
+    case featureList
+    case featureStatus(String)
+    case featureInstall(String)
+    case featureEnable(String, enabled: Bool)
+    case featureUninstall(String)
+    case featureAction(id: String, action: String)
+    case featureSetup(String)
+    case featureComplete(String)
     case eventsStatus
     case eventsSet(kind: NeoYImportantEventKind, enabled: Bool)
     case eventNotify(kind: NeoYImportantEventKind, title: String, body: String)
@@ -70,6 +78,7 @@ enum NeoYSetupParser {
         case "diagnostics": return try diagnostics(tokens)
         case "permissions": return try permissions(tokens)
         case "mcp": return try mcp(tokens)
+        case "feature", "features": return try feature(tokens)
         case "events": return try events(tokens)
         case "capability", "capabilities": return try capability(tokens)
         case "auth": return try auth(tokens)
@@ -176,6 +185,38 @@ enum NeoYSetupParser {
             guard tokens.count == 3 else { throw NeoYSetupError.missingArgument("mcp \(tokens[1]) <name>") }
             return .mcpEnable(name: tokens[2], enabled: tokens[1] == "enable")
         default: throw NeoYSetupError.unknownCommand(tokens.prefix(2).joined(separator: " "))
+        }
+    }
+
+    private static func feature(_ tokens: [String]) throws -> NeoYSetupCommand {
+        guard tokens.count >= 2 else { return .featureList }
+        switch tokens[1] {
+        case "list":
+            try exact(tokens, count: 2)
+            return .featureList
+        case "status":
+            guard tokens.count == 3 else { throw NeoYSetupError.missingArgument("feature status <id>") }
+            return .featureStatus(tokens[2])
+        case "install":
+            guard tokens.count == 3 else { throw NeoYSetupError.missingArgument("feature install <id>") }
+            return .featureInstall(tokens[2])
+        case "enable", "disable":
+            guard tokens.count == 3 else { throw NeoYSetupError.missingArgument("feature \(tokens[1]) <id>") }
+            return .featureEnable(tokens[2], enabled: tokens[1] == "enable")
+        case "uninstall":
+            guard tokens.count == 3 else { throw NeoYSetupError.missingArgument("feature uninstall <id>") }
+            return .featureUninstall(tokens[2])
+        case "start", "stop", "restart", "doctor":
+            guard tokens.count == 3 else { throw NeoYSetupError.missingArgument("feature \(tokens[1]) <id>") }
+            return .featureAction(id: tokens[2], action: tokens[1])
+        case "setup":
+            guard tokens.count == 3 else { throw NeoYSetupError.missingArgument("feature setup <id>") }
+            return .featureSetup(tokens[2])
+        case "complete":
+            guard tokens.count == 3 else { throw NeoYSetupError.missingArgument("feature complete <id>") }
+            return .featureComplete(tokens[2])
+        default:
+            throw NeoYSetupError.unknownCommand(tokens.prefix(2).joined(separator: " "))
         }
     }
 
@@ -360,6 +401,40 @@ actor NeoYSetupService {
             return await mutateAndReconcile("mcp.\(enabled ? "enable" : "disable")") {
                 try await self.controlPlane.setMCPEnabled(name, enabled: enabled)
             }
+        case .featureList:
+            let installed = await NeoYFeatureManager.shared.records()
+            let byID = Dictionary(uniqueKeysWithValues: installed.map { ($0.id, $0) })
+            let rows = NeoYFeatureCatalog.all.map { item in
+                byID[item.id] ?? NeoYFeatureRecord(id: item.id, package: item.package, version: nil, enabled: false, state: .available, provider: nil, mcpURL: nil, error: nil)
+            }
+            return Self.json(rows)
+        case .featureStatus(let id):
+            if let record = await NeoYFeatureManager.shared.record(id: id) { return Self.json(record) }
+            if let item = NeoYFeatureCatalog.all.first(where: { $0.id == id }) {
+                return Self.json(NeoYFeatureRecord(id: item.id, package: item.package, version: nil, enabled: false, state: .available, provider: nil, mcpURL: nil, error: nil))
+            }
+            return "Error: unknown feature '\(id)'"
+        case .featureInstall(let id):
+            guard let item = NeoYFeatureCatalog.all.first(where: { $0.id == id }) else { return "Error: unknown feature '\(id)'" }
+            do { return Self.json(try await NeoYFeatureManager.shared.setEnabled(item, enabled: true)) }
+            catch { return "Error: \(error.localizedDescription)" }
+        case .featureEnable(let id, let enabled):
+            guard let item = NeoYFeatureCatalog.all.first(where: { $0.id == id }) else { return "Error: unknown feature '\(id)'" }
+            do { return Self.json(try await NeoYFeatureManager.shared.setEnabled(item, enabled: enabled)) }
+            catch { return "Error: \(error.localizedDescription)" }
+        case .featureUninstall(let id):
+            guard let item = NeoYFeatureCatalog.all.first(where: { $0.id == id }) else { return "Error: unknown feature '\(id)'" }
+            do { try await NeoYFeatureManager.shared.uninstall(item); return "{\"ok\":true,\"id\":\"\(id)\"}" }
+            catch { return "Error: \(error.localizedDescription)" }
+        case .featureAction(let id, let action):
+            do { return Self.json(try await NeoYFeatureManager.shared.action(id: id, action: action)) }
+            catch { return "Error: \(error.localizedDescription)" }
+        case .featureSetup(let id):
+            do { try await NeoYFeatureManager.shared.startSetup(id: id); return "{\"ok\":true,\"id\":\"\(id)\",\"state\":\"configuring\"}" }
+            catch { return "Error: \(error.localizedDescription)" }
+        case .featureComplete(let id):
+            do { return Self.json(try await NeoYFeatureManager.shared.completeSetup(id: id)) }
+            catch { return "Error: \(error.localizedDescription)" }
         case .eventsStatus:
             return Self.json((await controlPlane.currentConfiguration()).events)
         case .eventsSet(let kind, let enabled):
@@ -516,6 +591,16 @@ actor NeoYSetupService {
             mcp remove|enable|disable <name>
             Enabled tools appear as mcp.<server>.<tool>. HTTP MCPs connect by URL; stdio MCPs are launched and supervised by federation itself.
             """
+        case .features:
+            """
+            feature list
+            feature status <id>
+            feature install|enable|disable|uninstall <id>
+            feature start|stop|restart|doctor <id>
+            feature setup <id> — open the feature's temporary ChatGPT setup conversation.
+            feature complete <id> — run doctor, start the service, verify MCP health, and mark setup ready.
+            Optional features install from their published package; local MCP is automatic and remote exposure is separately opt-in.
+            """
         case .events:
             """
             events status
@@ -547,6 +632,7 @@ actor NeoYSetupService {
               diagnostics ...
               permissions status|open ...
               mcp list|add|remove|enable|disable ...
+              feature list|status|install|enable|disable|uninstall|start|stop|restart|doctor|setup|complete ...
               events status|enable|disable|notify ...
               capability list|enable|disable ...
               auth show|rotate|revoke
