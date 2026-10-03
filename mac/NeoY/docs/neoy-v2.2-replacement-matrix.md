@@ -1,49 +1,20 @@
-# NeoY v2.2 DevMacBridge replacement matrix
+# NeoY Core ownership matrix
 
-NeoY 2.2 copies DevMacBridge **capabilities**, not its one-tool-per-operation MCP
-surface.
+NeoY preserves the needed developer capabilities by bundling and federating
+upstream MacBridge. It does not copy MacBridge capabilities into Swift.
 
-| DevMacBridge dependency | NeoY 2.2 equivalent | Evidence |
-|---|---|---|
-| synchronous shell exec | `mac.exec run` | installed-app E2E: exit 0, stdout `v22-ok` |
-| long-running shell jobs | `mac.exec start/jobs/status/logs/stop` | installed-app E2E: background job started, logs read, stopped |
-| PTY interactive terminal | `mac.exec pty start/read/write/resize/signal/close` | installed-app E2E using `/bin/cat`, write/read/resize/close |
-| generic filesystem | `mac.fs` | installed-app E2E write/read plus focused tests |
-| Codex thread list/read/turns | `codex.threads` | installed-app real `codex app-server` thread list |
-| setup/configuration | `neoy.setup` | existing v2.1 surface extended with capabilities/auth |
-| work/home node wrapper tools | `cluster` canonical Core forwarding | implementation + local canonical-contract tests; real second-node E2E still required before retiring DevMacBridge |
-| browser/Chrome/ChatGPT UI glue | outside Core | skill/plugin/federated MCP |
-| SaaS-specific APIs | outside Core | connectors/federated MCP |
+| Capability | Owner and public contract |
+|---|---|
+| Shell execution | bundled MacBridge: `shell_exec` |
+| Background jobs | bundled MacBridge: `shell_start`, `shell_job_status`, `shell_job_list`, `shell_job_kill` |
+| Filesystem | bundled MacBridge: `fs_read`, `fs_write`, `fs_list`, `fs_stat`, `fs_manage` |
+| PTY | bundled MacBridge: `pty_start`, `pty_read`, `pty_write`, `pty_resize`, `pty_signal`, `pty_close` |
+| Codex history | bundled MacBridge: `codex_thread_read`, `codex_thread_list`, `codex_thread_turns_list` |
+| Patch application | NeoY-native `apply_patch` direct contract |
+| Cluster routing/control | NeoY-owned `cluster` facade and node transport adapters |
+| Auth, remote exposure, federation, lifecycle, native/TCC features | NeoY-owned |
 
-## Trust boundary
-
-- Direct loopback MCP is privileged.
-- Core and user-federated MCP tools are marked protected.
-- Public/tunneled `tools/list` hides protected Core tools without a valid NeoY Core token.
-- A protected `tools/call` without trust is rejected.
-- Remote node pairing is explicit and stores peer credentials mode `0600`.
-- Optional first-party capabilities are enabled by default and can be disabled;
-  the corresponding tools disappear from `tools/list`.
-
-## Validation
-
-- NeoY XCTest: **21/21 passed**.
-- Signed installed app: `/Applications/NeoY.app`, stable `com.neox.neoy` identity.
-- Runtime version: **2.2.2**.
-- Local Core E2E: shell, background jobs, PTY, filesystem, Codex history.
-- Optional capability E2E: `demo-recording` changed from 18 visible demo tools
-  to 0 when disabled, then restored to 18 after re-enable.
-- Public named tunnel `https://neoy.qili2.com/mcp`: unauthenticated
-  `tools/list` remained compatible with the existing optional/plugin surface
-  while exposing **zero** of the five privileged Core tools.
-- PM2 `neoy` and named tunnel remained online during v2.2 validation.
-
-## Retirement gate
-
-The current environment's legacy remote-node connector returned `Unknown tool`
-for both configured remote-node execution surfaces, so a real second-Mac NeoY
-pairing/invocation could not be performed in this run.
-
-Therefore NeoY 2.2 implements the replacement surface, but **DevMacBridge should
-not yet be retired**. Final retirement requires one real remote NeoY E2E plus a
-NeoY-only rerun of the workflows that currently depend on DevMacBridge.
+MacBridge discovery failure is isolated: NeoY still starts with its native
+surface and reports the provider as unavailable. Protected remote exposure is
+filtered by NeoY feature authorization; the provider does not create a second
+Internet-facing trust boundary.

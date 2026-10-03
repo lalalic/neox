@@ -15,6 +15,18 @@ When an implementation choice conflicts with a principle below, the principle is
 the default. A deliberate exception must be documented in the task/PR with the
 specific principle, reason, and evidence that the exception is necessary.
 
+### Core ownership contract
+
+NeoY bundles the upstream MacBridge runtime and federates it internally. The
+bundled provider owns generic shell execution, background jobs, filesystem
+operations, PTY sessions, and read-only Codex thread access. NeoY does not keep
+Swift implementations or compatibility stacks for those primitives. NeoY owns
+the signed host process, authentication and authorization, remote exposure,
+federation, native TCC/device capabilities, cluster routing, lifecycle, and the
+public MCP facade. `apply_patch` remains the one deliberate NeoY-native core
+adapter because its current direct contract is working and independently
+authorized.
+
 ## Principles
 
 ### 1. Migrate capabilities, not tool surfaces
@@ -72,6 +84,13 @@ Provider registration/discovery failure must be isolated. Optional providers mus
 not make NeoY itself fail to launch. Bundled Core runtime dependencies may be
 version-pinned deployment dependencies without becoming duplicated Swift
 implementations.
+
+For this migration, the Architecture Lens answers are explicit: generic
+execution/filesystem/PTY/job/Codex access does not require NeoY's process or
+TCC, and already has an upstream owner, so NeoY federates it; the exposed names
+are the provider's MCP contracts rather than a second Swift command grammar; no
+new public trust boundary is created; cluster remains NeoY-owned routing; and
+provider submission/completion semantics are not simulated by NeoY.
 
 ### 7. Products own business lifecycle; platforms own UI mechanics
 

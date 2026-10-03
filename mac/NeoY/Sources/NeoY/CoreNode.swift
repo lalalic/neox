@@ -59,6 +59,7 @@ actor NeoYNodeStore {
 actor NeoYNodeService {
     private let store: NeoYNodeStore
     private static var allowedRemoteCoreTools: Set<String> { NeoYCoreRuntime.toolNames }
+    private static let clusterAliases: Set<String> = ["exec", "fs"]
 
     init(store: NeoYNodeStore = NeoYNodeStore()) {
         self.store = store
@@ -378,7 +379,7 @@ actor NeoYNodeService {
         }
         let name = parsed.tokens[1]
         let tool = parsed.tokens[2]
-        guard Self.allowedRemoteCoreTools.contains(tool) else {
+        guard Self.allowedRemoteCoreTools.contains(tool) || Self.clusterAliases.contains(tool) else {
             throw NeoYCoreError.unauthorized("'\(tool)' is not part of the canonical remote Core contract")
         }
         guard let node = await store.get(name), node.isEnabled,
@@ -389,9 +390,10 @@ actor NeoYNodeService {
         let result: Any
         switch node.kind {
         case .neoyPeer:
+            let (providerTool, arguments) = try peerInvocation(tool, command: command)
             result = try await rpc(url: url, method: "tools/call", params: [
-                "name": tool,
-                "arguments": ["command": command]
+                "name": providerTool,
+                "arguments": arguments
             ])
         case .neoNode:
             result = try await invokeNeoNode(url: url, tool: tool, command: command)
@@ -412,6 +414,40 @@ actor NeoYNodeService {
             text = String(decoding: data, as: UTF8.self)
         }
         return NeoYCoreJSON.encode(RemoteResult(node: name, tool: tool, result: text))
+    }
+
+    private func peerInvocation(_ tool: String, command: String) throws -> (String, [String: Any]) {
+        if tool == "setup" || tool == "cluster" {
+            return (tool, ["command": command])
+        }
+        if Self.allowedRemoteCoreTools.contains(tool) {
+            guard let data = command.data(using: .utf8),
+                  let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw NeoYCoreError.invalidCommand("cluster invoke for '\(tool)' requires a JSON object after --")
+            }
+            return (tool, object)
+        }
+        let parsed = try NeoYCommandLine.parse(command)
+        switch tool {
+        case "exec":
+            guard let value = parsed.remainder, !value.isEmpty else { throw NeoYCoreError.invalidCommand("exec requires a command after --") }
+            return ("shell_exec", ["command": value])
+        case "fs":
+            guard let verb = parsed.tokens.first else { throw NeoYCoreError.invalidCommand("fs requires read, write, or list") }
+            switch verb {
+            case "read":
+                guard parsed.tokens.count >= 2 else { throw NeoYCoreError.invalidCommand("usage: fs read <path>") }
+                return ("fs_read", ["path": parsed.tokens[1]])
+            case "write", "append":
+                guard parsed.tokens.count >= 2, let value = parsed.remainder else { throw NeoYCoreError.invalidCommand("usage: fs \(verb) <path> -- <content>") }
+                return ("fs_write", ["path": parsed.tokens[1], "content": value, "append": verb == "append"])
+            case "list":
+                return ("fs_list", ["path": parsed.tokens.count > 1 ? parsed.tokens[1] : "."])
+            default: throw NeoYCoreError.invalidCommand("fs supports read, write, append, and list")
+            }
+        default:
+            throw NeoYCoreError.invalidCommand("unsupported cluster compatibility alias '\(tool)'")
+        }
     }
 
 
@@ -474,7 +510,7 @@ actor NeoYNodeService {
         return NeoYCoreJSON.encode(Identity(
             host: Host.current().localizedName ?? ProcessInfo.processInfo.hostName,
             bundle: Bundle.main.bundleIdentifier ?? "com.neox.neoy",
-            version: "2.2.2",
+            version: NeoYCoreRuntime.version,
             coreURL: NeoYCoreAuth.url(base)
         ))
     }
@@ -540,7 +576,10 @@ actor NeoYNodeService {
       pair <name> <mcp-url> [core-token]
       remove <name>
       status <name>
-      invoke <name> <setup|exec|fs|codex.threads|cluster> -- <command>
+      invoke <name> <core-tool> -- <arguments>
+    NeoY peers use the direct Core tool name. setup/cluster accept command text;
+    bundled MacBridge tools and apply_patch accept a JSON argument object.
+    Mini neo-node compatibility aliases remain exec and fs.
     SSH port defaults to 22. 'add' bootstraps the bundled mini neo-node runtime over SSH, starts its MCP tunnel, then pairs it. A loopback SSH target on a non-default port is treated as reverse-SSH bootstrap and uses session mode without LaunchAgent. Pairing remains available for already-running endpoints.
     """
 }

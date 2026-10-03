@@ -112,7 +112,9 @@ NeoY preserves the current `_mcp._tcp`, `_neoy._tcp`, port 9224 MCP endpoint, po
 
 Browser profiles, cookies, ChatGPT-specific UI automation, and one-off browser workflow glue are deliberately outside Core. Those belong in skills/plugins/federated MCPs.
 
-The standalone Python handoff bridge and old Neox Tour app remain retired. Generic MacBridge responsibilities covered by native permissions, supervised processes, MCP federation, and NeoX event forwarding can be retired only after the signed installed-app E2E is verified; MacBridge-specific browser/UI glue is not migrated into NeoY.
+The standalone Python handoff bridge and old Neox Tour app remain retired.
+MacBridge-specific browser/UI glue is not migrated into NeoY; the bundled
+provider remains the owner of generic developer primitives.
 
 ## Validation boundary
 
@@ -129,9 +131,8 @@ NeoY v2.2 separates control, execution, and optional product capabilities:
 trusted agent
     |
     +-- neoy.setup -------- control plane
-    +-- mac.exec ---------- shell / jobs / PTY
-    +-- mac.fs ------------ filesystem
-    +-- codex.threads ----- read-only local Codex history
+    +-- MacBridge ---------- shell / jobs / filesystem / PTY / Codex threads
+    +-- apply_patch -------- NeoY-native direct patch contract
     +-- node -------------- same Core contract on trusted NeoY peers
 
 optional registry (default enabled)
@@ -142,13 +143,14 @@ optional registry (default enabled)
     +-- public tunnel
 ```
 
-The canonical Core tool-name set lives in one runtime definition and is reused
-by remote-node invocation. Adding a future Core surface must not require adding
-per-machine wrappers.
+The bundled MacBridge provider is discovered and federated by NeoY. Its upstream
+typed tool names are the public generic primitive contracts; NeoY's allowlists
+and remote feature policy track those names. Cluster routing remains NeoY-owned.
 
-Core execution is implemented in Swift/Foundation/Darwin and does not depend on
-PM2. PM2 remains the product deployment/keepalive supervisor for NeoY and the
-Cloudflare tunnel. `runtime-control.sh` remains deployment/tunnel glue only.
+Generic execution is implemented by the bundled MacBridge runtime and does not
+depend on PM2. PM2 remains the product deployment/keepalive supervisor for NeoY
+and the Cloudflare tunnel. `runtime-control.sh` remains deployment/tunnel glue
+only.
 
 ### Public transport
 

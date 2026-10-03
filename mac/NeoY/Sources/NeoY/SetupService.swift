@@ -622,7 +622,7 @@ actor NeoYSetupService {
             """
             capability list
             capability enable|disable <accessibility-computer|demo-recording|capture-tour|phone-integration|public-tunnel>
-            Optional first-party capabilities are enabled by default. Core setup/exec/fs/codex/node capabilities cannot be disabled.
+            Optional first-party capabilities are enabled by default. Core setup, bundled MacBridge, apply_patch, and cluster capabilities cannot be disabled.
             """
         case .auth:
             """
