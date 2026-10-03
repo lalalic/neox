@@ -4,7 +4,7 @@ import { handleFilesystem, FILESYSTEM_TOOLS } from "./filesystem.mjs";
 import { handlePatch, PATCH_TOOLS } from "./patch.mjs";
 import { handleCodex, CODEX_TOOLS } from "./codex.mjs";
 import { handleAudit, AUDIT_TOOLS } from "./audit.mjs";
-import { handlePty, PTY_TOOLS } from "./pty.mjs";
+import { configurePty, handlePty, ptyReady, ptyStatus, teardownPty, PTY_TOOLS } from "./pty.mjs";
 
 import { execFileSync, spawn } from "node:child_process";
 import crypto from "node:crypto";
@@ -39,6 +39,7 @@ const DEFAULT_SHELL = process.platform === "darwin" && fs.existsSync("/bin/zsh")
 const SHELL = envValue("NEO_CORE_SHELL", "MAC_DEV_BRIDGE_SHELL") || DEFAULT_SHELL;
 const CODEX_BIN = process.env.CODEX_BIN || "codex";
 const CORE_TOOLS_DIR = path.dirname(fileURLToPath(import.meta.url));
+const UNLOCK_RECHECK_MS = clampInt(envValue("NEO_CORE_UNLOCK_RECHECK_MS", "MAC_DEV_BRIDGE_UNLOCK_RECHECK_MS"), 3_000, 250, 60_000);
 
 
 const TUNNEL_RUNTIME_KEY_WAS_PRESENT = Boolean(process.env.CONTROL_PLANE_API_KEY);
@@ -659,6 +660,10 @@ const TOOLS = [
   ...PTY_TOOLS,
 ];
 
+function advertisedTools() {
+  return ptyStatus().available ? TOOLS : TOOLS.filter((tool) => !tool.name.startsWith("pty_"));
+}
+
 // Re-read the unlock state before every tool call, so removing the unlock file
 // is genuinely fail-closed.
 //
@@ -707,26 +712,6 @@ function killProcessGroup(pgid, signal) {
 // Verified by the same predicate the kill used: -pgid. Verifying containment by
 // the helper's exit code instead is how this project shipped three "Disabled"
 // verdicts it had not achieved.
-function processGroupGone(pgid) {
-  if (!Number.isInteger(pgid) || pgid <= 1) return true;
-  try {
-    process.kill(-pgid, 0);
-    return false;
-  } catch (error) {
-    return error?.code === "ESRCH";
-  }
-}
-
-function processGone(pid) {
-  if (!Number.isInteger(pid) || pid <= 1) return true;
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch (error) {
-    return error?.code === "ESRCH";
-  }
-}
-
 const TRANSIENT_LATCH_ERRNOS = new Set(["EMFILE", "ENFILE", "EIO", "EAGAIN", "EINTR", "EBUSY", "ETIMEDOUT"]);
 
 // One reader for the latch, shared by the per-call check and the idle recheck.
@@ -773,7 +758,7 @@ async function recheckUnlock() {
     if (state === "unreadable") return;
     fullAccessUnlocked = state === "unlocked";
     if (state === "unlocked") return;
-    const sessions = livePtySessions().map((session) => ({ id: session.id, leaderPid: session.leaderPid }));
+    const sessions = ptyStatus().sessions.filter((session) => !session.exited).map(({ id, leaderPid }) => ({ id, leaderPid }));
     stderr(`Full-access unlock revoked (${FULL_ACCESS_UNLOCK_FILE}); reclaiming ${sessions.length} pty session(s) and exiting.`);
     // Containment first here, unlike the per-call path: no response is pending on
     // this path, so there is nothing to flush and nothing to lose by killing before
@@ -781,7 +766,7 @@ async function recheckUnlock() {
     // exitAfterFlush fires on an empty stdout via setImmediate and would otherwise
     // beat appendFile — and a revocation that leaves no trace is the one event that
     // must not.
-    const reclaimed = killPtySessions("revoked");
+    const reclaimed = teardownPty("revoked");
     killInFlightCommands();
     await audit("pty_unlock_recheck", {}, { revoked: true, sessions, reclaimed }, new Error("Full-access unlock has been revoked; the bridge is shutting down."));
     exitAfterFlush(78);
@@ -815,7 +800,7 @@ async function assertStillUnlocked(tool, args) {
     // inserted here is a window in which the bridge dies with a live pty still
     // holding an unrestricted shell.
     killInFlightCommands();
-    killPtySessions("revoked");
+    teardownPty("revoked");
     // Exit so a supervisor restarts into the locked state where startup fails 78,
     // but only after the response has been flushed.
     exitAfterFlush(78);
@@ -823,7 +808,14 @@ async function assertStillUnlocked(tool, args) {
   }
 }
 
-const context = { HOME, SHELL, JOB_DIR, DEFAULT_OUTPUT_BYTES, MAX_OUTPUT_BYTES, SHELL_EXEC_DEFAULT_TIMEOUT_MS, GUI_FOCUS_POLICY, readOperatorSettings, guiFocusRisk, consumeForegroundGuiApproval, normalizeEnv, optionalString, optionalInteger, optionalBoolean, optionalStringArray, requireString, requireInteger, resolvePath, crypto, fs, fsp, path, process, spawn, mergedEnv, nowIso, writeJobMetadata, readJobMetadata, processRunning, tailFile, killProcessGroup, audit, runCommand, CODEX_BIN, callCodexAppServer, PTY_TERMS, PTY_IDLE_TIMEOUT_MS, PTY_WRITE_MAX, PTY_MAX_CANON, PTY_SIGNALS, PTY_CLOSE_GRACE_MS, PTY_ACK_TIMEOUT_MS, startPtySession, ptyError, requirePtySessionId, getPtySession, refreshPtyTtyTargets, waitForPtyOutput, ptySliceForCursor, renderPtyText, canonicalRuns, sendPtyControl, beginPtyTtyScanBudget, snapshotPtyTtyProcesses, killPtySession, verifyPtyContainment, syncPtyTimers, AUDIT_LOG };
+const context = { HOME, SHELL, JOB_DIR, DEFAULT_OUTPUT_BYTES, MAX_OUTPUT_BYTES, SHELL_EXEC_DEFAULT_TIMEOUT_MS, GUI_FOCUS_POLICY, readOperatorSettings, guiFocusRisk, consumeForegroundGuiApproval, normalizeEnv, optionalString, optionalInteger, optionalBoolean, optionalStringArray, requireString, requireInteger, resolvePath, crypto, fs, fsp, path, process, spawn, mergedEnv, nowIso, writeJobMetadata, readJobMetadata, processRunning, tailFile, killProcessGroup, audit, runCommand, CODEX_BIN, callCodexAppServer, AUDIT_LOG };
+configurePty(context);
+
+let unlockRecheckInFlight = false;
+const unlockRecheckTimer = setInterval(() => {
+  recheckUnlock().catch((error) => stderr(`unlock recheck failed: ${error?.message || error}`));
+}, UNLOCK_RECHECK_MS);
+unlockRecheckTimer.unref();
 
 async function dispatchTool(name, args) {
   await assertStillUnlocked(name, args);
@@ -855,24 +847,18 @@ async function dispatchTool(name, args) {
         foregroundGuiApproved: await foregroundGuiApprovalPresent(),
         fullAccessUnlocked,
         fullAccessUnlockFile: FULL_ACCESS_UNLOCK_FILE,
-        // Set once by the startup probe and deliberately not recomputed: the helper
-        // either works on this host or it does not, and re-probing per status call
-        // would spawn a pty every time.
-        ptyAvailable,
-        ptyHelper: ptyAvailable ? { interpreter: PTY_HELPER_PERL, script: PTY_HELPER_PL } : null,
-        ptyLimits: {
-          maxSessions: PTY_MAX_SESSIONS,
-          ringBytesPerSession: PTY_RING_BYTES,
-          ringBytesGlobal: PTY_RING_GLOBAL_BYTES,
-          idleTimeoutMs: PTY_IDLE_TIMEOUT_MS,
-          maxLifetimeMs: PTY_MAX_LIFETIME_MS,
-          writeMaxBytes: PTY_WRITE_MAX,
-          unlockRecheckMs: UNLOCK_RECHECK_MS,
-        },
+        ...(() => {
+          const pty = ptyStatus();
+          return {
+            ptyAvailable: pty.available,
+            ptyHelper: pty.helper,
+            ptyLimits: { ...pty.limits, unlockRecheckMs: UNLOCK_RECHECK_MS },
+            ptySessions: pty.sessions,
+          };
+        })(),
         // Built at read time from the live registry, never cached. fullAccessUnlocked
         // once froze at its startup value and reported `true` while the file was gone;
         // a cached session inventory would repeat that mistake with processes.
-        ptySessions: [...ptySessions.values()].map(ptySessionSummary),
         accessModel: "No bridge sandbox or path allowlist. Effective access equals the macOS account running tunnel-client/this server, subject to macOS TCC, Full Disk Access, ACLs, and sudo authentication.",
       };
       await audit(name, args, { ok: true });
@@ -987,7 +973,7 @@ async function handleMessage(message) {
     // 300s and capabilities.tools.listChanged is false, so a tool set that changed
     // after the first answer would be wrong for five minutes with no way to correct
     // it. Free after the first call: the probe is a settled promise.
-    await ptyProbe;
+    await ptyReady;
     sendResult(id, completeResult(
       { tools: advertisedTools() },
       modern,
@@ -1003,7 +989,7 @@ async function handleMessage(message) {
       sendError(id, -32602, "Invalid params: tool name is required");
       return;
     }
-    await ptyProbe;
+    await ptyReady;
     // The same set tools/list advertised. A pty tool that is not advertised must be
     // -32601 here too: "advertised but fails at call time" and "callable but
     // unadvertised" are both ways of reporting a capability the host does not have.
@@ -1066,6 +1052,19 @@ rl.on("line", (line) => {
     if (message?.id !== undefined) sendError(message.id, -32603, "Internal error", { detail: String(error?.message || error) });
   });
 });
+
+function teardownAll(reason) {
+  try {
+    teardownPty(reason);
+  } catch (error) {
+    stderr(`pty teardown failed: ${error?.message || error}`);
+  }
+  try {
+    killInFlightCommands();
+  } catch (error) {
+    stderr(`in-flight teardown failed: ${error?.message || error}`);
+  }
+}
 
 // All three exited with no cleanup, and detached pty groups survive every one.
 // SIGTERM is exactly what scripts/disable.sh sends, and mcp-http.mjs sends it to
