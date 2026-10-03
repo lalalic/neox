@@ -2,6 +2,11 @@
 
 NeoY is NeoX's signed menu-bar/headless-first Mac runtime for native capture/demo, Accessibility/computer-use, phone media/handoff, trusted Mac setup, supervised local processes, and MCP federation.
 
+Architecture work under `mac/NeoY` is governed by
+[`docs/design-principles.md`](docs/design-principles.md). That document is the
+canonical source for NeoY V2 principles, the Architecture Lens used in planning,
+and principle-level review requirements.
+
 ## Runtime endpoints
 
 - MCP: configurable local port (default `http://127.0.0.1:9224/mcp`), Bonjour `_mcp._tcp` / `NeoY`
