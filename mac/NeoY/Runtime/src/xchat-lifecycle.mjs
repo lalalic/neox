@@ -28,17 +28,18 @@ export const XCHAT_LIFECYCLE_TOOLS = [
   },
   {
     name: "xchat.thread.new",
-    description: "Terminal control transfer: schedule creation of a fresh Web ChatGPT thread in the same Project and submit the continuation there. Uses Browser Workspace. On success, stop the current turn and perform no further business actions.",
+    description: "Terminal control transfer: schedule creation of a fresh Web ChatGPT thread, optionally inside a Project or as Temporary Chat, and submit the continuation there. Uses Browser Workspace. On success, stop the current turn and perform no further business actions.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
-        project_id: { type: "string", description: "Stable ChatGPT Project ID." },
+        project_id: { type: "string", description: "Optional stable ChatGPT Project ID. Omit for a normal standalone chat." },
         source_thread_id: { type: "string", description: "Optional stable source thread ID for provenance." },
+        temporary: { type: "boolean", description: "Create a ChatGPT Temporary Chat. Defaults to false. Cannot be combined with project_id." },
         message: { type: "string", description: "Continuation/handoff message for the new thread." },
         reason: { type: "string", description: "Optional diagnostic reason for the control transfer." },
       },
-      required: ["project_id", "message"],
+      required: ["message"],
     },
   },
 ];
@@ -55,8 +56,12 @@ function requireText(args, key) {
 
 function validate(args, name) {
   if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("arguments must be an object");
-  const projectId = requireText(args, "project_id");
-  if (!PROJECT_ID.test(projectId)) throw new Error("project_id is invalid");
+  const projectId = typeof args.project_id === "string" && args.project_id.trim() ? args.project_id.trim() : null;
+  if (projectId && !PROJECT_ID.test(projectId)) throw new Error("project_id is invalid");
+  const temporary = args.temporary === undefined ? false : args.temporary;
+  if (typeof temporary !== "boolean") throw new Error("temporary must be a boolean");
+  if (name === "xchat.turn.new" && !projectId) throw new Error("project_id is required");
+  if (name === "xchat.thread.new" && temporary && projectId) throw new Error("temporary=true cannot be combined with project_id");
   const message = requireText(args, "message");
   if (message.length > 64_000) throw new Error("message is too large");
   const sourceThreadId = typeof args.source_thread_id === "string" && args.source_thread_id.trim() ? args.source_thread_id.trim() : null;
@@ -67,7 +72,7 @@ function validate(args, name) {
     if (!THREAD_ID.test(threadId)) throw new Error("thread_id is invalid");
   }
   const reason = typeof args.reason === "string" && args.reason.trim() ? args.reason.trim().slice(0, 2000) : null;
-  return { projectId, threadId, sourceThreadId, message, reason };
+  return { projectId, threadId, sourceThreadId, temporary, message, reason };
 }
 
 function resultText(payload) {
@@ -85,7 +90,8 @@ export function scheduleXChatLifecycle(name, args, options = {}) {
 
   const action = name === "xchat.turn.new" ? "new-turn" : "new-thread";
   const config = {
-    project_id: parsed.projectId,
+    ...(parsed.projectId ? { project_id: parsed.projectId } : {}),
+    temporary: parsed.temporary,
     message: parsed.message,
     reason: parsed.reason,
     ...(parsed.threadId ? { thread_id: parsed.threadId } : {}),
@@ -98,7 +104,8 @@ export function scheduleXChatLifecycle(name, args, options = {}) {
     transfer_id: transferId,
     status: "scheduled",
     mode: action,
-    project_id: parsed.projectId,
+    ...(parsed.projectId ? { project_id: parsed.projectId } : {}),
+    temporary: parsed.temporary,
     ...(parsed.threadId ? { thread_id: parsed.threadId } : {}),
     ...(parsed.sourceThreadId ? { source_thread_id: parsed.sourceThreadId } : {}),
     reason: parsed.reason,
@@ -119,7 +126,8 @@ export function scheduleXChatLifecycle(name, args, options = {}) {
     terminal: true,
     transfer_id: transferId,
     mode: action,
-    project_id: parsed.projectId,
+    ...(parsed.projectId ? { project_id: parsed.projectId } : {}),
+    temporary: parsed.temporary,
     ...(parsed.threadId ? { thread_id: parsed.threadId } : {}),
     ...(parsed.sourceThreadId ? { source_thread_id: parsed.sourceThreadId } : {}),
     instruction: "End the current orchestrator turn now. Do not make additional business tool calls.",
