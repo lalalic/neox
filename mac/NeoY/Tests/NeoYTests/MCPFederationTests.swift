@@ -33,6 +33,7 @@ final class MCPFederationTests: XCTestCase {
         @@ -1 +1 @@
         -before
         +after
+
         """
         _ = try await client.call(name: "apply_patch", arguments: .object([
             "patch": .string(patch), "cwd": .string(fixture.root.path)

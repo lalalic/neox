@@ -1,16 +1,13 @@
 {
   "name": "@lalalic/neo",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "Installable Node.js runtime for NeoY core MCP providers and the Web ChatGPT gateway.",
   "engines": {
     "node": ">=18"
   },
-  "dependencies": {
-    "mac-developer-bridge": "git+https://github.com/alexanderradahl/mac-developer-bridge.git#fea70d1a3c5524164f2159f6063ba685fef91324"
-  },
   "scripts": {
-    "check": "node --check src/mcp-gateway.mjs && node --check src/stdio-proxy.mjs && node --check src/chatgpt-responses-adapter.mjs && node --check src/xchat-lifecycle.mjs && node --check src/xchat-lifecycle-worker.mjs",
+    "check": "node --check src/mcp-gateway.mjs && node --check src/stdio-proxy.mjs && node --check src/chatgpt-responses-adapter.mjs && node --check src/xchat-lifecycle.mjs && node --check src/xchat-lifecycle-worker.mjs && node --check src/mac-developer-bridge/bridge.mjs && node --check src/mac-developer-bridge/lib/federation.mjs && node --check src/mac-developer-bridge/lib/chrome-extension-client.mjs",
     "test": "npm run check && node --test test/*.test.mjs"
   },
   "files": [

@@ -13,6 +13,9 @@ enum NeoYBundledRuntime {
     ) -> [NeoYMCPServerConfiguration] {
         let bridge = runtimeURL
             .appendingPathComponent("node_modules", isDirectory: true)
+            .appendingPathComponent("@lalalic", isDirectory: true)
+            .appendingPathComponent("neo", isDirectory: true)
+            .appendingPathComponent("src", isDirectory: true)
             .appendingPathComponent("mac-developer-bridge", isDirectory: true)
             .appendingPathComponent("bridge.mjs")
         guard fileManager.isReadableFile(atPath: bridge.path) else { return [] }
