@@ -18,12 +18,12 @@ export const XCHAT_LIFECYCLE_TOOLS = [
       type: "object",
       additionalProperties: false,
       properties: {
-        project_id: { type: "string", description: "Stable ChatGPT Project ID." },
+        project_id: { type: "string", description: "Optional stable ChatGPT Project ID. Omit for a standalone thread." },
         thread_id: { type: "string", description: "Stable current ChatGPT thread ID." },
         message: { type: "string", description: "Continuation/handoff message for the next turn." },
         reason: { type: "string", description: "Optional diagnostic reason for the control transfer." },
       },
-      required: ["project_id", "thread_id", "message"],
+      required: ["thread_id", "message"],
     },
   },
   {
@@ -60,7 +60,6 @@ function validate(args, name) {
   if (projectId && !PROJECT_ID.test(projectId)) throw new Error("project_id is invalid");
   const temporary = args.temporary === undefined ? false : args.temporary;
   if (typeof temporary !== "boolean") throw new Error("temporary must be a boolean");
-  if (name === "xchat.turn.new" && !projectId) throw new Error("project_id is required");
   if (name === "xchat.thread.new" && temporary && projectId) throw new Error("temporary=true cannot be combined with project_id");
   const message = requireText(args, "message");
   if (message.length > 64_000) throw new Error("message is too large");

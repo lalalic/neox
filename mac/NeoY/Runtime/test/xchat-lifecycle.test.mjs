@@ -7,6 +7,8 @@ import { XCHAT_LIFECYCLE_TOOLS, isXChatLifecycleTool, scheduleXChatLifecycle } f
 
 test("declares terminal turn and thread lifecycle tools", () => {
   assert.deepEqual(XCHAT_LIFECYCLE_TOOLS.map((tool) => tool.name), ["xchat.turn.new", "xchat.thread.new"]);
+  const turnSchema=XCHAT_LIFECYCLE_TOOLS.find((tool)=>tool.name==="xchat.turn.new").inputSchema;
+  assert.deepEqual(turnSchema.required, ["thread_id", "message"]);
   for (const tool of XCHAT_LIFECYCLE_TOOLS) {
     assert.match(tool.description, /Terminal control transfer/);
     assert.equal(tool.inputSchema.additionalProperties, false);
@@ -32,6 +34,19 @@ test("schedules same-thread Browser Workspace transfer", () => {
   assert.equal(payload.mode,"new-turn");
   assert.equal(observed.args[1],"new-turn");
   assert.ok(fs.existsSync(path.join(dir,"xchat-lifecycle","turn-1.json")));
+});
+
+test("schedules standalone same-thread transfer without project_id", () => {
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"neoy-xchat-turn-standalone-"));
+  const result=scheduleXChatLifecycle("xchat.turn.new",{
+    thread_id:"thread_12345678",
+    message:"Continue in the standalone thread.",
+  },{dataDir:dir,transferId:"turn-standalone",spawnImpl:()=>({unref(){}}),workerPath:"/tmp/worker.mjs"});
+  const payload=JSON.parse(result.content[0].text);
+  assert.equal(payload.thread_id,"thread_12345678");
+  assert.equal("project_id" in payload,false);
+  const config=JSON.parse(fs.readFileSync(path.join(dir,"xchat-lifecycle","turn-standalone.json"),"utf8"));
+  assert.equal("project_id" in config,false);
 });
 
 test("schedules new-thread Browser Workspace transfer", () => {
