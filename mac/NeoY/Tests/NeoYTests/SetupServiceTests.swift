@@ -56,6 +56,7 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertEqual(try NeoYSetupParser.parse("features status family-tutor"), .featureStatus("family-tutor"))
         XCTAssertEqual(try NeoYSetupParser.parse("feature install family-tutor"), .featureInstall("family-tutor"))
         XCTAssertEqual(try NeoYSetupParser.parse("feature disable family-tutor"), .featureEnable("family-tutor", enabled: false))
+        XCTAssertEqual(try NeoYSetupParser.parse("feature configure family-tutor '{\"children\":[{\"id\":\"sammy\",\"name\":\"Sammy\"}]}'"), .featureConfigure(id: "family-tutor", patchJSON: "{\"children\":[{\"id\":\"sammy\",\"name\":\"Sammy\"}]}"))
         XCTAssertEqual(try NeoYSetupParser.parse("feature doctor family-tutor"), .featureAction(id: "family-tutor", action: "doctor"))
         XCTAssertEqual(try NeoYSetupParser.parse("feature setup family-tutor"), .featureSetup("family-tutor"))
         XCTAssertEqual(try NeoYSetupParser.parse("feature complete family-tutor"), .featureComplete("family-tutor"))

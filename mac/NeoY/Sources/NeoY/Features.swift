@@ -36,6 +36,7 @@ struct NeoYFeatureManifest: Codable, Sendable {
         let serviceScript: String
         let initScript: String
         let doctorScript: String
+        let configureScript: String?
         let defaultInstance: String
     }
     struct MCP: Codable, Sendable {
@@ -113,6 +114,28 @@ actor NeoYFeatureManager {
         return NeoYFeatureActionResult(id: id, action: action, ok: result.status == 0, output: result.output, state: record.state)
     }
 
+    func configure(id: String, patchJSON: String) async throws -> NeoYFeatureActionResult {
+        guard record(id: id) != nil else {
+            throw NSError(domain: "NeoYFeature", code: 24, userInfo: [NSLocalizedDescriptionKey: "feature '\(id)' is not installed"])
+        }
+        guard let data = patchJSON.data(using: .utf8),
+              (try? JSONSerialization.jsonObject(with: data)) is [String: Any] else {
+            throw NSError(domain: "NeoYFeature", code: 25, userInfo: [NSLocalizedDescriptionKey: "feature configure requires a JSON object patch"])
+        }
+        let manifest = try loadManifest(id: id)
+        guard let relative = manifest.runtime.configureScript, !relative.isEmpty else {
+            throw NSError(domain: "NeoYFeature", code: 26, userInfo: [NSLocalizedDescriptionKey: "feature '\(id)' does not support configuration patches"])
+        }
+        let result = try runNodeScript(packageRoot(id: id).appendingPathComponent(relative), args: [instanceRoot(id: id).path, patchJSON])
+        var records = loadRecords()
+        if let index = records.firstIndex(where: { $0.id == id }) {
+            records[index].mcpURL = try discoverMCPURL(manifest: manifest, id: id)
+            records[index].error = result.status == 0 ? nil : result.output
+            try save(records)
+        }
+        return NeoYFeatureActionResult(id: id, action: "configure", ok: result.status == 0, output: result.output, state: records.first(where: { $0.id == id })?.state)
+    }
+
     func completeSetup(id: String) async throws -> NeoYFeatureActionResult {
         guard record(id: id) != nil else {
             throw NSError(domain: "NeoYFeature", code: 22, userInfo: [NSLocalizedDescriptionKey: "feature '\(id)' is not installed"])
@@ -186,6 +209,7 @@ actor NeoYFeatureManager {
 
         Use NeoY's setup tool for feature lifecycle checks and actions:
           feature status \(manifest.id)
+          feature configure \(manifest.id) '<json-object-patch>'
           feature doctor \(manifest.id)
           feature start \(manifest.id)
           feature complete \(manifest.id)
