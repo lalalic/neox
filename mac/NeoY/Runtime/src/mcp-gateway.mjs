@@ -25,6 +25,7 @@ import {
   parseChatgptResponsesEnvelope,
   prepareChatgptResponsesRequest,
 } from "./chatgpt-responses-adapter.mjs";
+import { XCHAT_LIFECYCLE_TOOLS, isXChatLifecycleTool, scheduleXChatLifecycle } from "./xchat-lifecycle.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BRIDGE = process.env.NEOY_ENTRY || path.join(HERE, "stdio-proxy.mjs");
@@ -1980,8 +1981,24 @@ async function handle(req, res) {
 
   const clientId = msg.id ?? null;
   try {
-    const reply = await callBridge(msg);
+    if (msg.method === "tools/call" && isXChatLifecycleTool(msg.params?.name)) {
+      const result = scheduleXChatLifecycle(msg.params.name, msg.params?.arguments || {});
+      const reply = { jsonrpc: "2.0", id: clientId, result };
+      return wantsEventStream(req) ? sendEventStream(res, reply) : send(res, 200, reply);
+    }
+
+    let reply = await callBridge(msg);
     if (reply === null) return sendEmpty(res, 202); // notification accepted
+    if (msg.method === "tools/list" && Array.isArray(reply?.result?.tools)) {
+      const names = new Set(reply.result.tools.map((tool) => tool?.name).filter(Boolean));
+      reply = {
+        ...reply,
+        result: {
+          ...reply.result,
+          tools: [...reply.result.tools, ...XCHAT_LIFECYCLE_TOOLS.filter((tool) => !names.has(tool.name))],
+        },
+      };
+    }
     return wantsEventStream(req) ? sendEventStream(res, reply) : send(res, 200, reply);
   } catch (e) {
     const message = String(e?.message || e);
