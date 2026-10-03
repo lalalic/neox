@@ -303,6 +303,7 @@ final class SetupServiceTests: XCTestCase {
 
     func testBundledMacBridgeToolsAreFlatAndLegacyBrowserToolsAreHidden() {
         XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "macbridge", tool: "pty_start"), "pty_start")
+        XCTAssertNil(NeoYBundledRuntime.exposedToolName(provider: "macbridge", tool: "apply_patch"))
         XCTAssertNil(NeoYBundledRuntime.exposedToolName(provider: "macbridge", tool: "chrome_click"))
         XCTAssertNil(NeoYBundledRuntime.exposedToolName(provider: "macbridge", tool: "chatgpt_conversation_start"))
         XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "events", tool: "health"), "events.health")
