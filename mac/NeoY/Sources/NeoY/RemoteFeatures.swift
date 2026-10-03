@@ -33,7 +33,7 @@ enum NeoYRemoteFeature: String, CaseIterable, Identifiable, Codable, Sendable {
         switch self {
         case .setup: toolName == "setup"
         case .terminal: toolName == "exec"
-        case .files: toolName == "fs"
+        case .files: toolName == "fs" || toolName == "apply_patch"
         case .codex: toolName == "codex.threads"
         case .nodes: toolName == "cluster"
         case .computer: toolName.hasPrefix("computer.") || toolName.hasPrefix("accessibility.")
