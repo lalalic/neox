@@ -52,6 +52,41 @@ test("schedules new-thread Browser Workspace transfer", () => {
   assert.equal(observed.args[1],"new-thread");
 });
 
+test("supports projectless and temporary new threads", () => {
+  const schema=XCHAT_LIFECYCLE_TOOLS.find((tool)=>tool.name==="xchat.thread.new").inputSchema;
+  assert.deepEqual(schema.required, ["message"]);
+  assert.equal(schema.properties.temporary.type, "boolean");
+
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"neoy-xchat-temporary-"));
+  const spawnImpl=()=>({ unref(){} });
+  const result=scheduleXChatLifecycle("xchat.thread.new",{
+    message:"Check the refreshed tool surface.",
+    temporary:true,
+  },{dataDir:dir,transferId:"temporary-1",spawnImpl,workerPath:"/tmp/worker.mjs"});
+  const payload=JSON.parse(result.content[0].text);
+  assert.equal(payload.temporary,true);
+  assert.equal("project_id" in payload,false);
+  const config=JSON.parse(fs.readFileSync(path.join(dir,"xchat-lifecycle","temporary-1.json"),"utf8"));
+  assert.equal(config.temporary,true);
+  assert.equal("project_id" in config,false);
+
+  assert.throws(()=>scheduleXChatLifecycle("xchat.thread.new",{
+    project_id:"g-p-12345678",
+    temporary:true,
+    message:"x",
+  },{dataDir:dir,transferId:"temporary-invalid",spawnImpl,workerPath:"/tmp/worker.mjs"}),/cannot be combined/);
+});
+
+test("supports projectless persistent new threads", () => {
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"neoy-xchat-projectless-"));
+  const result=scheduleXChatLifecycle("xchat.thread.new",{
+    message:"Continue in a standalone chat.",
+  },{dataDir:dir,transferId:"projectless-1",spawnImpl:()=>({unref(){}}),workerPath:"/tmp/worker.mjs"});
+  const payload=JSON.parse(result.content[0].text);
+  assert.equal(payload.temporary,false);
+  assert.equal("project_id" in payload,false);
+});
+
 test("rejects invalid stable ids and unknown tools", () => {
   assert.equal(isXChatLifecycleTool("xchat.turn.new"),true);
   assert.equal(isXChatLifecycleTool("xchat.nope"),false);
