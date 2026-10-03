@@ -10,65 +10,27 @@ desktop agents over MCP. One app target, zero external SPM dependencies,
 
 ## NeoY v2 architecture rules
 
-These are architectural constraints, not implementation suggestions. New Mac-side
-work should be reviewed against them before adding code to `mac/NeoY`.
+For any work under `mac/NeoY`, the canonical architecture contract is
+`mac/NeoY/docs/design-principles.md`. Read it before planning, implementation,
+or review. Do not maintain another copy of the principles in this file.
 
-- **NeoY is the authenticated external MCP gateway plus native/TCC capability
-  host.** Keep one public auth boundary at NeoY. Do not make every federated
-  service independently public or independently authenticated just because it is
-  reachable through NeoY. Trusted provider MCPs should bind to loopback unless
-  there is a separate product requirement for public access.
-- **Default to federation.** Before implementing a new tool in NeoY, ask whether
-  an existing service/runtime already owns that capability. If it does, register
-  or discover that MCP provider and federate it. Do not copy its implementation
-  into NeoY. A core provider may be a version-pinned dependency of the published `@lalalic/neo`
-  package. `Resources/runtime.json` pins the runtime version and bootstrap installs it
-  under Application Support instead of embedding packages in `NeoY.app`; do not put
-  such a core provider in mutable user control-plane state. Provider registration/discovery
-  errors must be caught and isolated; an optional provider must never make the NeoY
-  app fail to launch.
-- **Native NeoY code is reserved for capabilities that need the NeoY process or
-  macOS privileges.** Typical examples are Accessibility/Screen Recording/TCC
-  computer use, capture/demo/tour UI, direct local device control, and app
-  lifecycle integration. Generic workflow engines, browser platforms, tutoring,
-  posting, event services, and similar product logic belong outside NeoY.
-- **Browser Workspace owns the browser.** Never add ChatGPT-specific URLs, DOM
-  selectors, tab grouping, target reuse, Chrome state, or site-specific submit
-  logic to NeoY. Use Browser Workspace platform contracts instead. If a caller
-  needs a long-lived tab/session, the caller owns that session lifecycle and
-  passes the session handle to the platform action. The action itself must remain
-  submission-oriented and must not grow a `persistent` business semantic.
-- **Persist stable business identity, not UI identity.** Product runtimes may store
-  IDs such as `project_id`, `thread_id`, child/user IDs, correlation IDs, and
-  explicit workflow state. Do not persist canonicalized page URLs, DOM selectors,
-  Chrome target IDs, or other platform internals as product state when stable IDs
-  exist. The platform reconstructs URLs and UI state from stable IDs.
-- **Separate submit acknowledgement from final completion.** A synchronous MCP
-  ingress that kicks off ChatGPT/browser work should return after the platform has
-  verified that the turn was accepted. It must not hold the request open waiting
-  for the assistant/web page to finish. The eventual answer must come back through
-  an explicit tool/event/callback contract keyed by an opaque correlation ID.
-- **Do not scrape a result when the result can be delivered.** Prefer the remote
-  agent/model actively calling a narrow result-delivery tool (or emitting a typed
-  event) over polling assistant DOM text. DOM completion scraping is a platform
-  fallback/debug technique, not the product protocol.
-- **Keep external ownership visible in names.** Optional/product federated tools
-  remain namespaced as `mcp.<provider>.*`. Bundled core Node runtime dependencies
-  are part of NeoY's core surface and preserve their original tool names; do not
-  wrap MacBridge core tools in `mcp.macbridge.*`.
-- **Thin gateway, explicit contracts.** Authentication, authorization, provider
-  federation, native privileged capabilities, and routing belong at the gateway.
-  Product rules, workflow state, platform automation, and delivery semantics stay
-  with their owning service. Prefer small typed contracts between those layers to
-  shared code or hidden cross-repo dependencies.
+Before implementation, the plan MUST answer the task-relevant Architecture Lens
+questions from that document. At minimum, explicitly state:
 
-Decision rule for any proposed NeoY v2 feature:
+- whether the capability truly requires NeoY's process, TCC/native privileges,
+  or device-local lifecycle;
+- whether an existing service/runtime already owns the capability;
+- whether the proposed public contract exposes user intent or leaks an internal
+  primitive;
+- whether the change expands the external MCP surface, and why that expansion is
+  necessary;
+- whether browser/platform mechanics or UI identity are leaking into product or
+  gateway state;
+- whether submission acknowledgement is being confused with final completion.
 
-```text
-Does it require NeoY's process, TCC/native privilege, or device-local lifecycle?
-  yes -> native NeoY capability
-  no  -> product/runtime-owned MCP -> federate through NeoY
-```
+During review, verify those answers against the actual diff. A review is not
+complete if it only checks code correctness while ignoring a violated applicable
+NeoY design principle.
 
 ## Repo layout
 
