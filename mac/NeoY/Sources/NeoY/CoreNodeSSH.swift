@@ -54,6 +54,7 @@ enum NeoYSSHBootstrap {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
+        process.environment = NeoYProcessEnvironment.childEnvironment()
         let stdout = Pipe()
         let stderr = Pipe()
         process.standardOutput = stdout

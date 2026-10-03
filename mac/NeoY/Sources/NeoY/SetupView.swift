@@ -308,6 +308,7 @@ final class NeoYSetupModel: ObservableObject {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = [script.path, action]
+        process.environment = NeoYProcessEnvironment.childEnvironment()
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
