@@ -14,6 +14,13 @@ The canonical architecture contract for all work under `mac/NeoY` is
 That document owns the principles, Architecture Lens, and planning/review
 requirements; this README intentionally does not duplicate them.
 
+NeoY bundles and federates the upstream MacBridge MCP runtime for generic Mac
+developer primitives: shell execution, background jobs, filesystem, PTY, and
+read-only Codex thread access. Those capabilities are not reimplemented in
+Swift. NeoY remains the signed authenticated host, remote authorization and
+federation boundary, native/TCC capability owner, cluster router, and public
+facade; `apply_patch` remains NeoY-native.
+
 ```
 ┌ iPhone ─────────────────────────────┐      ┌ Desktop agent ────────────┐
 │ Neox.app                            │      │ Copilot / Claude / any    │

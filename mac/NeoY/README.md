@@ -38,7 +38,7 @@ deployment set hostname <host>
 
 Changing deployment settings persists them, restarts the MCP listener after the current response completes, and reconciles the Cloudflare tunnel. The menu-bar **Setup…** window exposes the same port/tunnel values plus local/public test buttons and MCP app credentials.
 
-Optional/product MCP tools appear as `mcp.<server>.<tool>` and are configured in the control plane. MacBridge is different: it is a dependency of the published `@lalalic/neo` package and is pinned there from upstream `alexanderradahl/mac-developer-bridge`. `runtime.json` selects the required `@lalalic/neo` version; `bootstrap-runtime.sh` installs it with npm under `~/Library/Application Support/NeoY/runtime/node_modules/@lalalic/neo` and atomically replaces the runtime when that version changes. Swift auto-registers the installed MacBridge provider at startup.
+Optional/product MCP tools appear as `mcp.<server>.<tool>` and are configured in the control plane. MacBridge is different: it is a bundled dependency of the published `@lalalic/neo` package and is pinned there from upstream `alexanderradahl/mac-developer-bridge`. `runtime.json` selects the required `@lalalic/neo` version; `bootstrap-runtime.sh` installs it with npm under `~/Library/Application Support/NeoY/runtime/node_modules/@lalalic/neo` and atomically replaces the runtime when that version changes. Swift discovers and federates the installed MacBridge provider at startup.
 
 For local runtime development, `~/Library/Application Support/NeoY/runtime-source` may contain an absolute path to a runtime source checkout (normally `.../mac/NeoY/Runtime`). `runtime-control.sh` uses that source for the gateway/proxy scripts while keeping npm-installed dependencies and the production version pin intact. Remove the file to return immediately to the installed npm runtime. Its tools keep their original names (`shell_exec`, `pty_start`, `fs_read`, etc.) instead of an `mcp.macbridge.*` wrapper, and MacBridge is not persisted in `mcpServers`.
 
@@ -88,14 +88,18 @@ NeoY 2.2 keeps the privileged agent surface intentionally small:
 
 ```text
 neoy.setup(command)    configuration/control
-mac.exec(command)      shell, background jobs, PTY
-mac.fs(command)        filesystem read/write/manage
-codex.threads(command) read-only Codex history
+shell_exec / shell_*   shell and background jobs (bundled MacBridge)
+fs_*                   filesystem read/write/manage (bundled MacBridge)
+pty_*                  interactive PTY sessions (bundled MacBridge)
+codex_thread_*         read-only Codex history (bundled MacBridge)
+apply_patch            NeoY-native direct patch contract
 cluster(command)          trusted neo-node invocation
 ```
 
-Each tool documents its current grammar through `command=help`. The five Core
-surfaces are always available on trusted/local connections. First-party
+MacBridge tools expose their upstream typed schemas directly; NeoY does not
+maintain a duplicate Swift shell/filesystem/PTY/Codex stack. `apply_patch` and
+`cluster` remain NeoY-owned facades. These Core surfaces are always available on
+trusted/local connections. First-party
 specialized capabilities remain enabled by default but can be hidden at runtime
 with `neoy.setup("capability disable <name>")`.
 

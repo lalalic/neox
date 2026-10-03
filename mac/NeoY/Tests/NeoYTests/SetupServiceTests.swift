@@ -127,10 +127,13 @@ final class SetupServiceTests: XCTestCase {
     }
 
     func testCanonicalCoreToolSetIsSmallAndStable() {
-        XCTAssertEqual(
-            NeoYCoreRuntime.toolNames,
-            Set(["setup", "exec", "fs", "apply_patch", "codex.threads", "cluster"])
-        )
+        XCTAssertTrue(NeoYCoreRuntime.toolNames.isSuperset(of: [
+            "setup", "apply_patch", "cluster", "shell_exec", "fs_read",
+            "pty_start", "codex_thread_list"
+        ]))
+        XCTAssertFalse(NeoYCoreRuntime.toolNames.contains("exec"))
+        XCTAssertFalse(NeoYCoreRuntime.toolNames.contains("fs"))
+        XCTAssertFalse(NeoYCoreRuntime.toolNames.contains("codex.threads"))
     }
 
     func testParserValidatesDiagnosticsSettings() {
@@ -263,7 +266,9 @@ final class SetupServiceTests: XCTestCase {
 
     func testRemoteFeatureClassification() {
         XCTAssertTrue(NeoYRemoteFeature.mcpServices.matches(toolName: "events.watch"))
-        XCTAssertTrue(NeoYRemoteFeature.mcpServices.matches(toolName: "mcp.mac.exec"))
+        XCTAssertTrue(NeoYRemoteFeature.terminal.matches(toolName: "shell_exec"))
+        XCTAssertTrue(NeoYRemoteFeature.files.matches(toolName: "fs_read"))
+        XCTAssertTrue(NeoYRemoteFeature.codex.matches(toolName: "codex_thread_list"))
         XCTAssertTrue(NeoYRemoteFeature.computer.matches(toolName: "computer.click"))
         XCTAssertTrue(NeoYRemoteFeature.nodes.matches(toolName: "cluster"))
         XCTAssertFalse(NeoYRemoteFeature.nodes.matches(toolName: "node"))

@@ -28,7 +28,7 @@ const upstream = http.createServer(async (req, res) => {
   } else if (msg.method === "tools/list") {
     result = {
       tools: [
-        { name: "mac.exec", description: "Run a command", inputSchema: { type: "object", properties: { command: { type: "string" } } } },
+        { name: "shell_exec", description: "Run a command", inputSchema: { type: "object", properties: { command: { type: "string" } } } },
         { name: "phone.media.search", description: "Search media", inputSchema: { type: "object", properties: {} } },
       ],
     };
@@ -233,7 +233,7 @@ try {
   assert.equal(list.status, 200);
   const listBody = await bodyJson(list);
   const names = listBody.result.tools.map((tool) => tool.name);
-  assert.ok(names.includes("mac.exec"));
+  assert.ok(names.includes("shell_exec"));
   for (const tool of listBody.result.tools) {
     assert.deepEqual(tool.securitySchemes, [{ type: "oauth2", scopes: ["mcp"] }]);
     assert.deepEqual(tool._meta.securitySchemes, [{ type: "oauth2", scopes: ["mcp"] }]);
@@ -245,10 +245,10 @@ try {
       "content-type": "application/json",
       "authorization": "Bearer " + tokens.access_token,
     },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "mac.exec", arguments: { command: "echo test" } } }),
+    body: JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "shell_exec", arguments: { command: "echo test" } } }),
   });
   assert.equal(call.status, 200);
-  assert.equal((await bodyJson(call)).result.content[0].text, "ok:mac.exec");
+  assert.equal((await bodyJson(call)).result.content[0].text, "ok:shell_exec");
 
   const refreshBadAudience = await fetch(base + "/token", {
     method: "POST",
