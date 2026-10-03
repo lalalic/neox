@@ -226,6 +226,7 @@ Deployment gotchas (all hit in practice):
 ## Project learnings
 
 - 2026-09-27: For user-owned iCloud Drive workflows, prefer a native Files folder picker plus a persisted security-scoped bookmark over adding an app-owned iCloud container when the app only needs user-selected folder access. Write cross-device ready markers only after all referenced media bytes are complete.
+- 2026-10-03: A trusted bundled stdio provider must receive its authorization only at NeoY's spawn boundary, and its supervisor must unpublish stale tools, reinitialize, probe `tools/list`, and republish after child replacement; process launch alone is not provider readiness.
 
 ## Health check after deploy
 

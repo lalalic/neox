@@ -2,6 +2,9 @@ import Foundation
 
 enum NeoYBundledRuntime {
     static let macBridgeProviderName = "macbridge"
+    static let macBridgeEnvironment = [
+        "MAC_DEV_BRIDGE_FULL_ACCESS_ACK": "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS"
+    ]
 
     static func coreMCPServers(
         runtimeURL: URL = NeoYPaths.supportDirectory
