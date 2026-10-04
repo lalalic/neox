@@ -42,7 +42,7 @@ Optional/product MCP providers appear as one CLI-style facade per provider (`eve
 
 NeoY explicitly authorizes only that trusted Core child at spawn time; unrelated stdio providers receive no such authorization. Federation initializes the child, requires a successful `tools/list` before publishing it as ready, removes stale registrations on an unexpected exit, and respawns with bounded backoff without restarting NeoY Core.
 
-For local runtime development, `~/Library/Application Support/NeoY/runtime-source` may contain an absolute path to a runtime source checkout (normally `.../mac/NeoY/Runtime`). `runtime-control.sh` uses that source for the gateway/proxy scripts while keeping npm-installed dependencies and the production version pin intact. Remove the file to return immediately to the installed npm runtime. Core capabilities use compact CLI-style facades (`shell`, `terminal`, `fs`, `codex`) with exact subcommand schemas available through `command=help`; legacy MacBridge configuration is normalized out of `mcpServers`.
+Core capabilities use compact CLI-style facades (`shell`, `terminal`, `fs`, `codex`) with exact subcommand schemas available through `command=help`; legacy MacBridge configuration is normalized out of `mcpServers`.
 
 The Node.js runtime package owns the Web ChatGPT gateway/proxy scripts and direct Node dependencies. Swift remains the signed host, public auth boundary, native capability owner, and MCP federation host.
 
