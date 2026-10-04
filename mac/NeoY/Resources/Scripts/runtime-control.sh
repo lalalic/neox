@@ -11,7 +11,7 @@ SETTINGS="$DATA/deployment.json"
 LOGDIR="$HOME/Library/Logs/NeoY"
 PUBLIC="$DATA/public-url"
 TUNNEL_LOG="$LOGDIR/tunnel.log"
-GATEWAY_LOG="$LOGDIR/mcp-gateway.log"
+GATEWAY_LOG="$LOGDIR/runtime-gateway.log"
 GATEWAY_PORT="${NEOY_GATEWAY_PORT:-6768}"
 TOKEN_FILE="$DATA/core-token"
 CLIENT_ID_FILE="$DATA/oauth-client-id"
@@ -58,7 +58,10 @@ PY2
 }
 
 gateway_stop() {
-  [[ -n "$NPX" ]] && pm2 delete neoy-mcp-gateway >/dev/null 2>&1 || true
+  if [[ -n "$NPX" ]]; then
+    pm2 delete neoy-runtime-gateway >/dev/null 2>&1 || true
+    pm2 delete neoy-mcp-gateway >/dev/null 2>&1 || true
+  fi
 }
 
 gateway_start() {
@@ -82,7 +85,7 @@ gateway_start() {
   else
     unset NEOY_PUBLIC_URL 2>/dev/null || true
   fi
-  pm2 start "$NODE" --name neoy-mcp-gateway --interpreter none --log "$GATEWAY_LOG" --update-env -- \
+  pm2 start "$NODE" --name neoy-runtime-gateway --interpreter none --log "$GATEWAY_LOG" --update-env -- \
     "$NODE_RUNTIME_DIR/src/core/gateway.mjs" >/dev/null
 }
 
@@ -180,7 +183,7 @@ case "$ACTION" in
     [[ -f "$PUBLIC" ]] && print "public=$(cat "$PUBLIC")/mcp"
     [[ -f "$CLIENT_ID_FILE" ]] && print "oauth_client_id=$(cat "$CLIENT_ID_FILE")"
     if [[ -n "$NPX" ]]; then
-      pm2 jlist | jq -r '.[] | select(.name=="neoy-tunnel" or .name=="neoy-mcp-gateway") | "\(.name)=\(.pm2_env.status)"'
+      pm2 jlist | jq -r '.[] | select(.name=="neoy-tunnel" or .name=="neoy-runtime-gateway") | "\(.name)=\(.pm2_env.status)"'
     fi
     ;;
   *) print -u2 "usage: runtime-control.sh tunnel-start|tunnel-stop|tunnel-restart|named-create|named-apply|status"; exit 64 ;;
