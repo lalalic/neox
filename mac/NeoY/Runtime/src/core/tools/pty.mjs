@@ -8,10 +8,6 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-function envValue(primary, legacy) {
-  return process.env[primary] ?? process.env[legacy];
-}
-
 function clampInt(value, fallback, min, max) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(parsed)) return fallback;
@@ -28,15 +24,15 @@ function stderr(message) {
 
 const HOME = os.homedir();
 const CORE_TOOLS_DIR = path.dirname(fileURLToPath(import.meta.url));
-const PTY_HELPER_PERL = envValue("NEO_CORE_PTY_PERL", "MAC_DEV_BRIDGE_PTY_PERL") || "/usr/bin/perl";
-const PTY_HELPER_PL = envValue("NEO_CORE_PTY_HELPER", "MAC_DEV_BRIDGE_PTY_HELPER") || path.join(CORE_TOOLS_DIR, "..", "lib", "ptyhelper.pl");
-const PTY_MAX_SESSIONS = clampInt(envValue("NEO_CORE_PTY_MAX_SESSIONS", "MAC_DEV_BRIDGE_PTY_MAX_SESSIONS"), 8, 1, 64);
-const PTY_RING_BYTES = clampInt(envValue("NEO_CORE_PTY_RING_BYTES", "MAC_DEV_BRIDGE_PTY_RING_BYTES"), 262_144, 4_096, 4_000_000);
+const PTY_HELPER_PERL = process.env.NEO_CORE_PTY_PERL || "/usr/bin/perl";
+const PTY_HELPER_PL = process.env.NEO_CORE_PTY_HELPER || path.join(CORE_TOOLS_DIR, "..", "lib", "ptyhelper.pl");
+const PTY_MAX_SESSIONS = clampInt(process.env.NEO_CORE_PTY_MAX_SESSIONS, 8, 1, 64);
+const PTY_RING_BYTES = clampInt(process.env.NEO_CORE_PTY_RING_BYTES, 262_144, 4_096, 4_000_000);
 const PTY_RING_GLOBAL_BYTES = PTY_MAX_SESSIONS * PTY_RING_BYTES;
-const PTY_IDLE_TIMEOUT_MS = clampInt(envValue("NEO_CORE_PTY_IDLE_TIMEOUT_MS", "MAC_DEV_BRIDGE_PTY_IDLE_TIMEOUT_MS"), 900_000, 1_000, 3_600_000);
-const PTY_MAX_LIFETIME_MS = clampInt(envValue("NEO_CORE_PTY_MAX_LIFETIME_MS", "MAC_DEV_BRIDGE_PTY_MAX_LIFETIME_MS"), 28_800_000, 5_000, 86_400_000);
+const PTY_IDLE_TIMEOUT_MS = clampInt(process.env.NEO_CORE_PTY_IDLE_TIMEOUT_MS, 900_000, 1_000, 3_600_000);
+const PTY_MAX_LIFETIME_MS = clampInt(process.env.NEO_CORE_PTY_MAX_LIFETIME_MS, 28_800_000, 5_000, 86_400_000);
 const PTY_WRITE_MAX = 65_536;
-const PTY_START_TIMEOUT_MS = clampInt(envValue("NEO_CORE_PTY_START_TIMEOUT_MS", "MAC_DEV_BRIDGE_PTY_START_TIMEOUT_MS"), 5_000, 500, 60_000);
+const PTY_START_TIMEOUT_MS = clampInt(process.env.NEO_CORE_PTY_START_TIMEOUT_MS, 5_000, 500, 60_000);
 const PTY_ACK_TIMEOUT_MS = 2_000;
 const PTY_CLOSE_GRACE_MS = 2_000;
 const PTY_HELPER_CLOSE_GRACE_MS = 250;

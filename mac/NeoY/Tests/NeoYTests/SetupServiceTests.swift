@@ -349,6 +349,28 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertTrue(environment["PATH"]?.contains("/usr/bin") == true)
     }
 
+    func testChildProcessEnvironmentDropsLegacyMacBridgeVariables() {
+        let environment = NeoYProcessEnvironment.childEnvironment(
+            base: [
+                "PATH": "/usr/bin",
+                "MAC_DEV_BRIDGE_DATA_DIR": "/tmp/legacy",
+                "MAC_DEV_BRIDGE_UNLOCK_FILE": "/tmp/legacy/unlock",
+                "NEO_CORE_DATA_DIR": "/tmp/neoy",
+            ],
+            homeDirectory: URL(fileURLWithPath: "/Users/tester")
+        )
+
+        XCTAssertNil(environment["MAC_DEV_BRIDGE_DATA_DIR"])
+        XCTAssertNil(environment["MAC_DEV_BRIDGE_UNLOCK_FILE"])
+        XCTAssertEqual(environment["NEO_CORE_DATA_DIR"], "/tmp/neoy")
+    }
+
+    func testBundledCoreEnvironmentUsesNeoYOwnedPaths() {
+        XCTAssertTrue(NeoYBundledRuntime.coreEnvironment["NEO_CORE_DATA_DIR"]?.contains("Application Support/NeoY/core") == true)
+        XCTAssertTrue(NeoYBundledRuntime.coreEnvironment["NEO_CORE_LOG_DIR"]?.contains("Library/Logs/NeoY/Core") == true)
+        XCTAssertFalse(NeoYBundledRuntime.coreEnvironment.keys.contains { $0.hasPrefix("MAC_DEV_BRIDGE_") })
+    }
+
     private static func makeDirectory() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("neoy-control-plane-tests", isDirectory: true)

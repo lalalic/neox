@@ -571,7 +571,7 @@ struct NeoYSetupView: View {
                         Button("Refresh") { Task { await model.refreshPermissions() } }
                     }
                     Divider()
-                    ForEach([NeoYPermissionKind.accessibility, .screenRecording, .camera, .microphone], id: \.rawValue) { kind in
+                    ForEach([NeoYPermissionKind.fullDiskAccess, .accessibility, .screenRecording, .camera, .microphone], id: \.rawValue) { kind in
                         permissionRow(kind)
                     }
                 }
