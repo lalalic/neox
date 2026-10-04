@@ -180,6 +180,28 @@ const OAUTH_STATE_FILE = path.join(DATA_DIR, "oauth-state.json");
 const CHATGPT_RUNTIME_CONFIG_FILE = process.env.NEOY_CHATGPT_RUNTIME_CONFIG_FILE
   || path.join(DATA_DIR, "chatgpt-runtime.json");
 const CHATGPT_PROJECT_ID_PATTERN = /^g-p-[A-Za-z0-9_-]{8,128}$/;
+const TELEMETRY_LOG = process.env.NEO_CORE_AUDIT_LOG
+  || path.join(process.env.HOME || "", "Library", "Logs", "NeoY", "Core", "audit.jsonl");
+function platformTelemetry(category, stage, summary = {}, error = null) {
+  try {
+    fs.mkdirSync(path.dirname(TELEMETRY_LOG), { recursive: true, mode: 0o700 });
+    const entry = {
+      timestamp: new Date().toISOString(),
+      pid: process.pid,
+      event: "platform_rejection",
+      category,
+      stage,
+      tool: summary.tool || null,
+      command: summary.command || null,
+      platform: "chatgpt",
+      summary,
+      error: error ? String(error?.message || error) : null,
+    };
+    fs.appendFileSync(TELEMETRY_LOG, `${JSON.stringify(entry)}\n`, { encoding: "utf8", mode: 0o600 });
+  } catch (e) {
+    log(`telemetry failure: ${e?.message || e}`);
+  }
+}
 try {
   fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
   // A recursive mkdir applies `mode` only to directories it creates, so an
@@ -975,7 +997,9 @@ function authorizeGet(req, res, url) {
     // A callback URL is not a secret, but it IS client input, so it is sanitised
     // before touching the log: control characters stripped so a newline cannot forge
     // a second log line, and truncated so a huge value cannot flood the file.
-    log(`rejected redirect_uri: ${String(q.get("redirect_uri") ?? "<absent>").replace(/[\x00-\x1f\x7f]/g, "?").slice(0, 200)}`);
+    const rejectedRedirect = String(q.get("redirect_uri") ?? "<absent>").replace(/[\x00-\x1f\x7f]/g, "?").slice(0, 200);
+    log(`rejected redirect_uri: ${rejectedRedirect}`);
+    platformTelemetry("auth_error", "oauth_authorize", { reason: "unrecognized_redirect_uri", redirectUri: rejectedRedirect });
     return sendErrorPage(res, 400, "Unrecognised redirect_uri. Set NEOY_OAUTH_REDIRECT_URIS if your client uses a different callback.");
   }
 
@@ -1955,7 +1979,8 @@ async function handle(req, res) {
   let msg;
   try {
     msg = JSON.parse(raw);
-  } catch {
+  } catch (error) {
+    platformTelemetry("malformed_json", "http_mcp", { method: req.method, path: MCP_PATH }, error);
     return send(res, 400, {
       jsonrpc: "2.0",
       id: null,
@@ -1967,6 +1992,7 @@ async function handle(req, res) {
   // crashes the process: callBridge() throws on property access, and the catch
   // handler below would throw again reading msg.id.
   if (msg === null || typeof msg !== "object" || Array.isArray(msg)) {
+    platformTelemetry("schema_validation_error", "http_mcp", { reason: "invalid_jsonrpc_shape" });
     return send(res, 400, {
       jsonrpc: "2.0",
       id: null,
@@ -2006,6 +2032,12 @@ async function handle(req, res) {
     // Child-unavailable conditions are transient; tell the client so rather
     // than reporting a generic internal error.
     const status = /exited|not running/.test(message) ? 503 : 500;
+    platformTelemetry(status === 503 ? "transport_error" : "platform_rejection", "gateway_dispatch", {
+      status,
+      tool: msg?.method === "tools/call" ? msg?.params?.name : null,
+      command: msg?.method === "tools/call" ? msg?.params?.arguments?.command : null,
+      method: msg?.method || null,
+    }, e);
     return send(res, status, { jsonrpc: "2.0", id: clientId, error: { code: -32603, message } });
   }
 }
