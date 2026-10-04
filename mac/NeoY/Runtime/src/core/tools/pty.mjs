@@ -6,6 +6,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 function envValue(primary, legacy) {
   return process.env[primary] ?? process.env[legacy];
@@ -26,7 +27,7 @@ function stderr(message) {
 }
 
 const HOME = os.homedir();
-const CORE_TOOLS_DIR = path.dirname(new URL(import.meta.url).pathname);
+const CORE_TOOLS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PTY_HELPER_PERL = envValue("NEO_CORE_PTY_PERL", "MAC_DEV_BRIDGE_PTY_PERL") || "/usr/bin/perl";
 const PTY_HELPER_PL = envValue("NEO_CORE_PTY_HELPER", "MAC_DEV_BRIDGE_PTY_HELPER") || path.join(CORE_TOOLS_DIR, "..", "lib", "ptyhelper.pl");
 const PTY_MAX_SESSIONS = clampInt(envValue("NEO_CORE_PTY_MAX_SESSIONS", "MAC_DEV_BRIDGE_PTY_MAX_SESSIONS"), 8, 1, 64);
