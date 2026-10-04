@@ -33,11 +33,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         startNativePhoneServices()
-        Task { [weak self] in
-            let ready = await NeoYRuntimeBootstrap.prepare()
-            if !ready { fputs("NeoY runtime bootstrap did not complete; starting with available capabilities\n", stderr) }
-            await MainActor.run { self?.startServer() }
-        }
+        startServer()
         observers.append(NotificationCenter.default.addObserver(
             forName: .captureTourStarted, object: nil, queue: .main
         ) { [weak self] _ in

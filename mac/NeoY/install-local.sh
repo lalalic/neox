@@ -22,12 +22,6 @@ if [[ -z "$identity" ]]; then
 fi
 
 if command -v node >/dev/null 2>&1; then
-  runtime_package_version="$(node -p "require('$HERE/Runtime/package.json').version")"
-  runtime_manifest_version="$(node -p "require('$HERE/Resources/runtime.json').version")"
-  if [[ "$runtime_package_version" != "$runtime_manifest_version" ]]; then
-    print -u2 "NeoY runtime version mismatch: package=$runtime_package_version manifest=$runtime_manifest_version"
-    exit 1
-  fi
   npm test --prefix "$HERE/Runtime"
 fi
 
@@ -38,9 +32,7 @@ xcodebuild -project "$PROJECT" -scheme NeoY -configuration Debug \
 
 mkdir -p "$APP/Contents/Resources"
 cp "$HERE/Resources/Scripts/runtime-control.sh" "$APP/Contents/Resources/runtime-control.sh"
-cp "$HERE/Resources/Scripts/bootstrap-runtime.sh" "$APP/Contents/Resources/bootstrap-runtime.sh"
-cp "$HERE/Resources/runtime.json" "$APP/Contents/Resources/runtime.json"
-chmod 755 "$APP/Contents/Resources/runtime-control.sh" "$APP/Contents/Resources/bootstrap-runtime.sh"
+chmod 755 "$APP/Contents/Resources/runtime-control.sh"
 
 codesign --force --deep --sign "$identity" \
   --entitlements "$ENTITLEMENTS" --timestamp=none "$APP"
@@ -53,16 +45,9 @@ ditto "$APP" "$DEST.new"
 rm -rf "$DEST"
 mv "$DEST.new" "$DEST"
 
-RUNTIME_TARBALL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/neoy-runtime-pack.XXXXXX")"
-(cd "$HERE/Runtime" && npm pack --pack-destination "$RUNTIME_TARBALL_DIR" >/dev/null)
-RUNTIME_TARBALL="$(find "$RUNTIME_TARBALL_DIR" -maxdepth 1 -name '*.tgz' -print -quit)"
-NEO_RUNTIME_SPEC="$RUNTIME_TARBALL" "$DEST/Contents/Resources/bootstrap-runtime.sh"
-rm -rf "$RUNTIME_TARBALL_DIR"
-
 RUNTIME="$DEST/Contents/Resources/runtime-control.sh"
-# Legacy developer override could pin the public gateway to an obsolete source
-# checkout even after the app/runtime was upgraded. Production NeoY always uses
-# the installed @lalalic/neo runtime.
+# Runtime code is loaded directly from the NeoY repo; remove all legacy runtime copies/overrides.
+rm -rf "$HOME/Library/Application Support/NeoY/runtime"
 rm -f "$HOME/Library/Application Support/NeoY/runtime-source"
 mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.neoy"
 
