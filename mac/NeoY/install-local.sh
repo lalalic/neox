@@ -22,6 +22,12 @@ if [[ -z "$identity" ]]; then
 fi
 
 if command -v node >/dev/null 2>&1; then
+  runtime_package_version="$(node -p "require('$HERE/Runtime/package.json').version")"
+  runtime_manifest_version="$(node -p "require('$HERE/Resources/runtime.json').version")"
+  if [[ "$runtime_package_version" != "$runtime_manifest_version" ]]; then
+    print -u2 "NeoY runtime version mismatch: package=$runtime_package_version manifest=$runtime_manifest_version"
+    exit 1
+  fi
   npm test --prefix "$HERE/Runtime"
 fi
 
