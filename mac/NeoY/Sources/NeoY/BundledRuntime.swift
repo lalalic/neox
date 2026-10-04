@@ -14,15 +14,20 @@ enum NeoYBundledRuntime {
         name == coreProviderName || name == legacyMacBridgeProviderName
     }
 
+    static var repoRuntimeURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Workspace", isDirectory: true)
+            .appendingPathComponent("neox", isDirectory: true)
+            .appendingPathComponent("mac", isDirectory: true)
+            .appendingPathComponent("NeoY", isDirectory: true)
+            .appendingPathComponent("Runtime", isDirectory: true)
+    }
+
     static func coreMCPServers(
-        runtimeURL: URL = NeoYPaths.supportDirectory
-            .appendingPathComponent("runtime", isDirectory: true),
+        runtimeURL: URL = repoRuntimeURL,
         fileManager: FileManager = .default
     ) -> [NeoYMCPServerConfiguration] {
         let tools = runtimeURL
-            .appendingPathComponent("node_modules", isDirectory: true)
-            .appendingPathComponent("@lalalic", isDirectory: true)
-            .appendingPathComponent("neo", isDirectory: true)
             .appendingPathComponent("src", isDirectory: true)
             .appendingPathComponent("core", isDirectory: true)
             .appendingPathComponent("tools", isDirectory: true)
@@ -58,8 +63,7 @@ enum NeoYBundledRuntime {
 
     static func resolvedMCPServers(
         userServers: [NeoYMCPServerConfiguration],
-        runtimeURL: URL = NeoYPaths.supportDirectory
-            .appendingPathComponent("runtime", isDirectory: true),
+        runtimeURL: URL = repoRuntimeURL,
         fileManager: FileManager = .default
     ) -> [NeoYMCPServerConfiguration] {
         let external = userServers.filter { !isBundledProviderName($0.name) }

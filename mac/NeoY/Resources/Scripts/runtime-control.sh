@@ -6,10 +6,7 @@ NODE="${NODE_BIN:-$(command -v node 2>/dev/null || true)}"
 CLOUDFLARED="${CLOUDFLARED_BIN:-$(command -v cloudflared 2>/dev/null || true)}"
 SCRIPT_DIR="${0:A:h}"
 DATA="$HOME/Library/Application Support/NeoY"
-RUNTIME_MANIFEST="$SCRIPT_DIR/runtime.json"
-RUNTIME_PACKAGE="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["package"])' "$RUNTIME_MANIFEST")"
-INSTALLED_RUNTIME_DIR="$DATA/runtime/node_modules/$RUNTIME_PACKAGE"
-NODE_RUNTIME_DIR="$INSTALLED_RUNTIME_DIR"
+NODE_RUNTIME_DIR="$HOME/Workspace/neox/mac/NeoY/Runtime"
 SETTINGS="$DATA/deployment.json"
 LOGDIR="$HOME/Library/Logs/NeoY"
 PUBLIC="$DATA/public-url"
@@ -68,8 +65,8 @@ gateway_start() {
   need_npx
   need_node
   [[ -s "$TOKEN_FILE" ]] || { print -u2 "NeoY core token is missing"; return 69; }
-  [[ -f "$NODE_RUNTIME_DIR/src/core/gateway.mjs" ]] || { print -u2 "NeoY MCP gateway script is missing"; return 69; }
-  [[ -f "$NODE_RUNTIME_DIR/src/core/stdio-proxy.mjs" ]] || { print -u2 "NeoY MCP proxy script is missing"; return 69; }
+  [[ -f "$NODE_RUNTIME_DIR/src/core/gateway.mjs" ]] || { print -u2 "NeoY repo runtime gateway is missing: $NODE_RUNTIME_DIR"; return 69; }
+  [[ -f "$NODE_RUNTIME_DIR/src/core/stdio-proxy.mjs" ]] || { print -u2 "NeoY repo runtime proxy is missing: $NODE_RUNTIME_DIR"; return 69; }
   ensure_client_id
   gateway_stop
   : > "$GATEWAY_LOG"
