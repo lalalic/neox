@@ -209,7 +209,7 @@ final class CaptureTourStore: ObservableObject {
 
 enum CaptureTourTools {
     static func tools() -> [ToolDefinition] {
-        [
+        let commands: [ToolDefinition] = [
             ToolDefinition(
                 name: "tour.start",
                 description: "Validate and start a generic ordered Capture Tour manifest on this Mac.",
@@ -248,6 +248,12 @@ enum CaptureTourTools {
                 return "{\"state\":\"idle\"}"
             },
         ]
+        return [CommandTool.facade(
+            name: "tour",
+            description: "Start, inspect, and cancel Capture Tours.",
+            commands: commands,
+            commandName: CommandTool.stripPrefix("tour.")
+        )]
     }
 
     private static func stringProp(_ description: String) -> JSONValue {

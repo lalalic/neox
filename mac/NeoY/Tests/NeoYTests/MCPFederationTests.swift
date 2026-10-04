@@ -15,16 +15,18 @@ final class MCPFederationTests: XCTestCase {
         defer { Task { await client.stop() } }
 
         let snapshot = try await client.connect()
-        XCTAssertTrue(Set(snapshot.tools.map(\.name)).isSuperset(of: ["fs_read", "shell_exec", "apply_patch"]))
+        XCTAssertTrue(Set(snapshot.tools.map(\.name)).isSuperset(of: ["fs", "shell", "apply_patch"]))
 
         let file = fixture.root.appendingPathComponent("sample.txt")
         try Data("before\n".utf8).write(to: file)
-        let readResult = try await client.call(name: "fs_read", arguments: .object([
-            "path": .string(file.path)
+        let readResult = try await client.call(name: "fs", arguments: .object([
+            "command": .string("read"),
+            "args": .object(["path": .string(file.path)])
         ]))
         XCTAssertTrue(try Self.text(readResult).contains("before"))
-        let shellResult = try await client.call(name: "shell_exec", arguments: .object([
-            "command": .string("printf lifecycle-ok")
+        let shellResult = try await client.call(name: "shell", arguments: .object([
+            "command": .string("exec"),
+            "args": .object(["command": .string("printf lifecycle-ok")])
         ]))
         XCTAssertTrue(try Self.text(shellResult).contains("lifecycle-ok"))
 
@@ -78,8 +80,27 @@ final class MCPFederationTests: XCTestCase {
             XCTAssertTrue(status.toolsListSuccessful)
             let names = await MainActor.run { server.toolNames }
             XCTAssertEqual(names.count, Set(names).count)
-            XCTAssertTrue(Set(names).isSuperset(of: ["fs_read", "shell_exec", "apply_patch"]))
+            XCTAssertTrue(Set(names).isSuperset(of: ["fs", "shell", "apply_patch"]))
         }
+    }
+
+    func testExternalProviderPublishesOneCommandFacade() async throws {
+        let fixture = try Self.makeFixture(requireCoreAuthorization: false)
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let server = await MainActor.run { MCPServer(name: "test", port: 0) }
+        let federation = await MainActor.run { NeoYMCPFederation(server: server) }
+        let configuration = NeoYMCPServerConfiguration(
+            name: "events",
+            url: Self.stdioURL(node: fixture.node, script: fixture.server.path),
+            isEnabled: true
+        )
+        await federation.reconcile([configuration])
+        defer { Task { @MainActor in federation.stop() } }
+
+        let names = await MainActor.run { server.toolNames }
+        XCTAssertEqual(names, ["events"])
+        let statuses = await federation.statuses(configurations: [configuration])
+        XCTAssertEqual(statuses.first?.exposedTools, ["events"])
     }
 
     func testStartupFailureBacksOffAndRecoversWhenCauseClears() async throws {
@@ -99,8 +120,9 @@ final class MCPFederationTests: XCTestCase {
         await XCTAssertThrowsErrorAsync { _ = try await client.connect() }
         try FileManager.default.removeItem(at: failure)
         _ = try await Self.waitForPID(client)
-        let recoveryResult = try await client.call(name: "shell_exec", arguments: .object([
-            "command": .string("printf recovered")
+        let recoveryResult = try await client.call(name: "shell", arguments: .object([
+            "command": .string("exec"),
+            "args": .object(["command": .string("printf recovered")])
         ]))
         XCTAssertTrue(try Self.text(recoveryResult).contains("recovered"))
     }
@@ -111,7 +133,7 @@ final class MCPFederationTests: XCTestCase {
         let server: URL
     }
 
-    private static func makeFixture() throws -> Fixture {
+    private static func makeFixture(requireCoreAuthorization: Bool = true) throws -> Fixture {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("neoy-stdio-tests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -121,9 +143,10 @@ final class MCPFederationTests: XCTestCase {
         import fs from "node:fs";
         import readline from "node:readline";
         import { spawnSync } from "node:child_process";
-        if (process.env.NEO_CORE_FULL_ACCESS_ACK !== "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS") process.exit(78);
+        const requireCoreAuthorization = __REQUIRE_CORE_AUTH__;
+        if (requireCoreAuthorization && process.env.NEO_CORE_FULL_ACCESS_ACK !== "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS") process.exit(78);
         if (process.env.FAKE_MCP_FAIL_FILE && fs.existsSync(process.env.FAKE_MCP_FAIL_FILE)) process.exit(70);
-        const tools = ["fs_read", "shell_exec", "apply_patch"].map(name => ({
+        const tools = ["fs", "shell", "apply_patch"].map(name => ({
           name, description: name, inputSchema: { type: "object", properties: {} }
         }));
         const result = text => ({ content: [{ type: "text", text }] });
@@ -137,9 +160,9 @@ final class MCPFederationTests: XCTestCase {
           if (message.method === "resources/list") value = { resources: [] };
           if (message.method === "tools/call") {
             const { name, arguments: args = {} } = message.params;
-            if (name === "fs_read") value = result(fs.readFileSync(args.path, "utf8"));
-            if (name === "shell_exec") {
-              const run = spawnSync("/bin/zsh", ["-lc", args.command], { encoding: "utf8" });
+            if (name === "fs" && args.command === "read") value = result(fs.readFileSync(args.args.path, "utf8"));
+            if (name === "shell" && args.command === "exec") {
+              const run = spawnSync("/bin/zsh", ["-lc", args.args.command], { encoding: "utf8" });
               value = result(JSON.stringify({ stdout: run.stdout, stderr: run.stderr, exit_code: run.status }));
             }
             if (name === "apply_patch") {
@@ -153,7 +176,8 @@ final class MCPFederationTests: XCTestCase {
           process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: value }) + "\n");
         });
         """#
-        try Data(source.utf8).write(to: server)
+        let rendered = source.replacingOccurrences(of: "__REQUIRE_CORE_AUTH__", with: requireCoreAuthorization ? "true" : "false")
+        try Data(rendered.utf8).write(to: server)
         return Fixture(root: root, node: try nodePath(), server: server)
     }
 

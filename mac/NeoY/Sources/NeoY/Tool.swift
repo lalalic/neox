@@ -71,3 +71,91 @@ public struct ToolDefinition: Sendable {
         self.handler = handler
     }
 }
+
+
+/// Builds one compact CLI-style MCP facade over a richer internal command set.
+/// The public schema stays small (`command` + `args`); exact subcommand schemas
+/// remain discoverable through `help`, while existing handlers remain the
+/// source of truth for execution semantics and argument validation.
+public enum CommandTool {
+    public static func facade(
+        name: String,
+        description: String,
+        commands: [ToolDefinition],
+        commandName: @escaping @Sendable (String) -> String
+    ) -> ToolDefinition {
+        let commandMap = Dictionary(uniqueKeysWithValues: commands.map { (commandName($0.name), $0) })
+        return ToolDefinition(
+            name: name,
+            description: description + " Use command='help' to list subcommands or inspect one subcommand's exact args schema.",
+            parameters: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "command": .object([
+                        "type": .string("string"),
+                        "description": .string("Subcommand name, or 'help'."),
+                    ]),
+                    "args": .object([
+                        "type": .string("object"),
+                        "description": .string("Arguments for the selected subcommand. Use help for the exact schema."),
+                    ]),
+                ]),
+                "required": .array([.string("command")]),
+                "additionalProperties": .bool(false),
+            ])
+        ) { input in
+            guard case .object(let object) = input,
+                  case .string(let requested)? = object["command"] else {
+                throw CommandToolError.message("command is required")
+            }
+            let args = object["args"] ?? .object([:])
+            if requested == "help" {
+                let named: String?
+                if case .object(let helpArgs) = args, case .string(let value)? = helpArgs["command"] {
+                    named = value
+                } else {
+                    named = nil
+                }
+                if let named {
+                    guard let command = commandMap[named] else {
+                        throw CommandToolError.message("Unknown \(name) command '\(named)'")
+                    }
+                    return json([
+                        "command": .string(named),
+                        "description": .string(command.description ?? ""),
+                        "schema": command.parameters ?? .object(["type": .string("object")]),
+                    ])
+                }
+                let rows: [JSONValue] = commandMap.keys.sorted().compactMap { key in
+                    guard let command = commandMap[key] else { return nil }
+                    return .object([
+                        "command": .string(key),
+                        "description": .string(command.description ?? ""),
+                    ])
+                }
+                return json(["commands": .array(rows)])
+            }
+            guard let command = commandMap[requested] else {
+                throw CommandToolError.message("Unknown \(name) command '\(requested)'")
+            }
+            return try await command.handler(args)
+        }
+    }
+
+    public static func stripPrefix(_ prefix: String) -> @Sendable (String) -> String {
+        { value in value.hasPrefix(prefix) ? String(value.dropFirst(prefix.count)) : value }
+    }
+
+    private static func json(_ object: [String: JSONValue]) -> String {
+        guard let data = try? JSONEncoder().encode(JSONValue.object(object)) else { return "{}" }
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+}
+
+private enum CommandToolError: LocalizedError {
+    case message(String)
+    var errorDescription: String? {
+        if case .message(let value) = self { return value }
+        return nil
+    }
+}

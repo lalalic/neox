@@ -5,6 +5,7 @@ import { handlePatch, PATCH_TOOLS } from "./patch.mjs";
 import { handleCodex, CODEX_TOOLS } from "./codex.mjs";
 import { handleAudit, AUDIT_TOOLS } from "./audit.mjs";
 import { configurePty, handlePty, ptyReady, ptyStatus, teardownPty, PTY_TOOLS } from "./pty.mjs";
+import { commandFacade } from "./command-facade.mjs";
 
 import { execFileSync, spawn } from "node:child_process";
 import crypto from "node:crypto";
@@ -644,24 +645,54 @@ async function callCodexAppServer(method, params, timeoutMs = 30_000) {
   });
 }
 
-const TOOLS = [
-{
+const shellFacade = commandFacade({
+  name: "shell",
+  description: "Execute commands and manage background shell jobs.",
+  commands: SHELL_TOOLS,
+  commandName: (name) => ({
+    shell_exec: "exec", shell_start: "start", shell_job_status: "job.status",
+    shell_job_list: "job.list", shell_job_kill: "job.kill",
+  })[name] || name,
+});
+const filesystemFacade = commandFacade({
+  name: "fs",
+  description: "Read, write, inspect, and manage filesystem paths.",
+  commands: FILESYSTEM_TOOLS,
+  commandName: (name) => name.startsWith("fs_") ? name.slice(3) : name,
+});
+const codexFacade = commandFacade({
+  name: "codex",
+  description: "Read local Codex thread history.",
+  commands: CODEX_TOOLS,
+  commandName: (name) => ({
+    codex_thread_list: "thread.list", codex_thread_read: "thread.read",
+    codex_thread_turns_list: "thread.turns.list",
+  })[name] || name,
+});
+const terminalFacade = commandFacade({
+  name: "terminal",
+  description: "Create and interact with persistent pseudo-terminal sessions.",
+  commands: PTY_TOOLS,
+  commandName: (name) => name.startsWith("pty_") ? name.slice(4) : name,
+});
+
+const BASE_TOOLS = [
+  {
     name: "bridge_status",
     title: "Bridge status",
     description: "Inspect the host identity, runtime paths, permissions context, configured shell, audit log, and Codex executable. This is read-only.",
     inputSchema: { type: "object", additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
-  ...SHELL_TOOLS,
-  ...FILESYSTEM_TOOLS,
+  shellFacade.tool,
+  filesystemFacade.tool,
   ...PATCH_TOOLS,
-  ...CODEX_TOOLS,
+  codexFacade.tool,
   ...AUDIT_TOOLS,
-  ...PTY_TOOLS,
 ];
 
 function advertisedTools() {
-  return ptyStatus().available ? TOOLS : TOOLS.filter((tool) => !tool.name.startsWith("pty_"));
+  return ptyStatus().available ? [...BASE_TOOLS, terminalFacade.tool] : BASE_TOOLS;
 }
 
 // Re-read the unlock state before every tool call, so removing the unlock file
@@ -865,27 +896,12 @@ async function dispatchTool(name, args) {
       return status;
     }
 
-    case "shell_exec":
-    case "shell_start":
-    case "shell_job_status":
-    case "shell_job_list":
-    case "shell_job_kill": return handleShell(name, args, context);
-    case "fs_read":
-    case "fs_write":
-    case "fs_list":
-    case "fs_stat":
-    case "fs_manage": return handleFilesystem(name, args, context);
+    case "shell": return shellFacade.execute(args, (tool, commandArgs) => handleShell(tool, commandArgs, context));
+    case "fs": return filesystemFacade.execute(args, (tool, commandArgs) => handleFilesystem(tool, commandArgs, context));
     case "apply_patch": return handlePatch(name, args, context);
-    case "codex_thread_read":
-    case "codex_thread_list":
-    case "codex_thread_turns_list": return handleCodex(name, args, context);
+    case "codex": return codexFacade.execute(args, (tool, commandArgs) => handleCodex(tool, commandArgs, context));
     case "audit_tail": return handleAudit(name, args, context);
-    case "pty_start":
-    case "pty_read":
-    case "pty_write":
-    case "pty_resize":
-    case "pty_signal":
-    case "pty_close": return handlePty(name, args, context);
+    case "terminal": return terminalFacade.execute(args, (tool, commandArgs) => handlePty(tool, commandArgs, context));
 
 
 
