@@ -145,7 +145,7 @@ final class SetupServiceTests: XCTestCase {
     func testCanonicalCoreToolSetIsSmallAndStable() {
         XCTAssertEqual(NeoYCoreRuntime.toolNames, [
             "setup", "cluster", "status", "shell", "fs", "apply_patch",
-            "codex", "audit_tail", "terminal"
+            "codex", "audit_tail", "terminal", "chatgpt"
         ])
         XCTAssertFalse(NeoYCoreRuntime.toolNames.contains("bridge_status"))
         XCTAssertFalse(NeoYCoreRuntime.toolNames.contains("shell_exec"))
