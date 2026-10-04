@@ -20,7 +20,8 @@ final class NeoYSetupModel: ObservableObject {
     @Published var remoteEnabled = false
     @Published var remoteMode: RemoteMode = .temporary
     @Published var publicHostname = ""
-    @Published var remoteFeatures: Set<NeoYRemoteFeature> = []
+    @Published var remoteTools: Set<String> = []
+    @Published private(set) var remoteToolOptions: [String] = []
     @Published var remoteProviders: Set<String> = []
     @Published private(set) var featureRecords: [NeoYFeatureRecord] = []
     @Published private(set) var remoteProviderOptions: [String] = []
@@ -44,7 +45,8 @@ final class NeoYSetupModel: ObservableObject {
         remoteEnabled = value.tunnelMode != .off
         remoteMode = value.tunnelMode == .named ? .ownDomain : .temporary
         publicHostname = value.publicHostname
-        remoteFeatures = value.enabledRemoteFeatures
+        remoteTools = value.enabledRemoteTools
+        refreshRemoteToolOptions()
         remoteProviders = value.enabledRemoteProviders
         let credentials = NeoYMCPPluginCredentials.current()
         oauthClientID = credentials.clientID
@@ -145,16 +147,25 @@ final class NeoYSetupModel: ObservableObject {
         Task { await runRuntimeControl("named-apply") }
     }
 
-    func setRemoteFeature(_ feature: NeoYRemoteFeature, enabled: Bool) {
-        if enabled { remoteFeatures.insert(feature) }
-        else { remoteFeatures.remove(feature) }
+    func setRemoteTool(_ tool: String, enabled: Bool) {
+        if enabled { remoteTools.insert(tool) }
+        else { remoteTools.remove(tool) }
         persistRemoteSettings(restartServer: true)
     }
 
-    func setAllRemoteFeatures(_ enabled: Bool) {
-        remoteFeatures = enabled ? Set(NeoYRemoteFeature.allCases.filter { $0 != .mcpServices }) : []
+    func setAllRemoteTools(_ enabled: Bool) {
+        remoteTools = enabled ? Set(remoteToolOptions) : []
         remoteProviders = enabled ? Set(remoteProviderOptions) : []
         persistRemoteSettings(restartServer: true)
+    }
+
+    private func refreshRemoteToolOptions() {
+        let controlPlaneURL = NeoYPaths.supportDirectory.appendingPathComponent("control-plane.json")
+        let configuration = (try? Data(contentsOf: controlPlaneURL))
+            .flatMap { try? JSONDecoder().decode(NeoYControlPlaneDocument.self, from: $0).configuration }
+            ?? NeoYControlPlaneConfiguration()
+        remoteToolOptions = NeoYRemoteToolCatalog.availableToolNames(configuration: configuration)
+        remoteTools = remoteTools.intersection(Set(remoteToolOptions))
     }
 
     func setRemoteProvider(_ provider: String, enabled: Bool) {
@@ -257,7 +268,8 @@ final class NeoYSetupModel: ObservableObject {
             var value = NeoYDeploymentSettingsStore.load()
             value.tunnelMode = remoteEnabled ? (remoteMode == .ownDomain ? .named : .quick) : .off
             value.publicHostname = publicHostname.trimmingCharacters(in: .whitespacesAndNewlines)
-            value.remoteFeatures = Set(remoteFeatures.map(\.rawValue))
+            value.remoteTools = remoteTools
+            value.remoteFeatures = nil
             value.remoteProviders = remoteProviders
             try NeoYDeploymentSettingsStore.save(value)
             if restartServer {
@@ -457,22 +469,23 @@ struct NeoYSetupView: View {
                 .padding(8)
             }
 
-            GroupBox("Remote features") {
+            GroupBox("Remote tools") {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
-                        Text("Local access is unchanged. These switches only control remote access.")
+                        Text("Local access is unchanged. Each switch is an exact public tool name exposed remotely.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Button("All") { model.setAllRemoteFeatures(true) }
-                        Button("None") { model.setAllRemoteFeatures(false) }
+                        Button("All") { model.setAllRemoteTools(true) }
+                        Button("None") { model.setAllRemoteTools(false) }
                     }
                     Divider()
-                    ForEach(NeoYRemoteFeature.allCases.filter { $0 != .mcpServices }) { feature in
-                        Toggle(feature.title, isOn: Binding(
-                            get: { model.remoteFeatures.contains(feature) },
-                            set: { model.setRemoteFeature(feature, enabled: $0) }
+                    ForEach(model.remoteToolOptions, id: \.self) { tool in
+                        Toggle(tool, isOn: Binding(
+                            get: { model.remoteTools.contains(tool) },
+                            set: { model.setRemoteTool(tool, enabled: $0) }
                         ))
+                        .font(.system(.body, design: .monospaced))
                     }
                     if !model.remoteProviderOptions.isEmpty {
                         Divider()
@@ -495,6 +508,13 @@ struct NeoYSetupView: View {
     private var advancedTab: some View {
         VStack(alignment: .leading, spacing: 20) {
             heading("Advanced", "Runtime details and operational settings.")
+
+            GroupBox("Runtime") {
+                VStack(alignment: .leading, spacing: 12) {
+                    valueRow("NeoY version", value: NeoYCoreRuntime.version)
+                }
+                .padding(8)
+            }
 
             GroupBox("Features") {
                 VStack(alignment: .leading, spacing: 12) {

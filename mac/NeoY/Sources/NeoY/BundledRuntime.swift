@@ -3,9 +3,12 @@ import Foundation
 enum NeoYBundledRuntime {
     static let coreProviderName = "core"
     static let legacyMacBridgeProviderName = "macbridge"
-    static let coreEnvironment = [
-        "NEO_CORE_FULL_ACCESS_ACK": "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS"
-    ]
+    static var coreEnvironment: [String: String] {
+        [
+            "NEO_CORE_FULL_ACCESS_ACK": "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS",
+            "NEOY_VERSION": NeoYCoreRuntime.version,
+        ]
+    }
 
     static func isBundledProviderName(_ name: String) -> Bool {
         name == coreProviderName || name == legacyMacBridgeProviderName

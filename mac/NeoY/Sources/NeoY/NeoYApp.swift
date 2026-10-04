@@ -11,6 +11,8 @@ struct NeoYApp: App {
             Button("Open Current Tour") { appDelegate.showTourWindow() }
             Button("Setup…") { appDelegate.showSetupWindow() }
             Divider()
+            Text("NeoY \(NeoYCoreRuntime.version)")
+                .foregroundStyle(.secondary)
             Button("Quit NeoY") { NSApp.terminate(nil) }
         }
     }
@@ -132,7 +134,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
             consentToken: coreToken,
             stateURL: NeoYPaths.supportDirectory.appendingPathComponent("native-oauth-state.json")
         )
-        value.setRemoteAllowedFeatures(deployment.enabledRemoteFeatures)
+        value.setRemoteAllowedTools(deployment.enabledRemoteTools)
         value.setRemoteAllowedProviders(deployment.enabledRemoteProviders)
 
         let configuration = (try? NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)

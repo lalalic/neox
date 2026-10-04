@@ -59,7 +59,7 @@ public final class MCPServer {
     private var resourceHandlers: [String: MCPResourceHandler] = [:]
     private var privilegedAccessToken: String?
     private var oauthService: NeoYOAuthService?
-    private var remoteAllowedFeatures: Set<NeoYRemoteFeature> = []
+    private var remoteAllowedTools: Set<String> = []
     private var remoteAllowedProviders: Set<String> = []
     private var httpRoutes: [String: HTTPRouteHandler] = [:]
     // Dedicated queue for all network I/O — avoids blocking on MainActor
@@ -76,7 +76,7 @@ public final class MCPServer {
     nonisolated(unsafe) private var _snapshotResourceHandlers: [String: MCPResourceHandler] = [:]
     nonisolated(unsafe) private var _snapshotPrivilegedAccessToken: String?
     nonisolated(unsafe) private var _snapshotOAuthService: NeoYOAuthService?
-    nonisolated(unsafe) private var _snapshotRemoteAllowedFeatures: Set<NeoYRemoteFeature> = []
+    nonisolated(unsafe) private var _snapshotRemoteAllowedTools: Set<String> = []
     nonisolated(unsafe) private var _snapshotRemoteAllowedProviders: Set<String> = []
     nonisolated(unsafe) private var _snapshotHTTPRoutes: [String: HTTPRouteHandler] = [:]
 
@@ -190,8 +190,8 @@ public final class MCPServer {
         refreshSnapshots()
     }
 
-    func setRemoteAllowedFeatures(_ features: Set<NeoYRemoteFeature>) {
-        remoteAllowedFeatures = features
+    func setRemoteAllowedTools(_ tools: Set<String>) {
+        remoteAllowedTools = tools
         refreshSnapshots()
     }
 
@@ -211,7 +211,7 @@ public final class MCPServer {
         _snapshotResourceHandlers = resourceHandlers
         _snapshotPrivilegedAccessToken = privilegedAccessToken
         _snapshotOAuthService = oauthService
-        _snapshotRemoteAllowedFeatures = remoteAllowedFeatures
+        _snapshotRemoteAllowedTools = remoteAllowedTools
         _snapshotRemoteAllowedProviders = remoteAllowedProviders
         _snapshotHTTPRoutes = httpRoutes
     }
@@ -248,7 +248,7 @@ public final class MCPServer {
         _snapshotResourceHandlers = resourceHandlers
         _snapshotPrivilegedAccessToken = privilegedAccessToken
         _snapshotOAuthService = oauthService
-        _snapshotRemoteAllowedFeatures = remoteAllowedFeatures
+        _snapshotRemoteAllowedTools = remoteAllowedTools
         _snapshotRemoteAllowedProviders = remoteAllowedProviders
         _snapshotHTTPRoutes = httpRoutes
 
@@ -570,8 +570,7 @@ public final class MCPServer {
             } else if authorized {
                 visibleResources = _snapshotResources.filter { resource in
                     guard let uri = resource["uri"] as? String else { return false }
-                    return Self.remoteProvider(forResourceURI: uri).map { _snapshotRemoteAllowedProviders.contains($0) }
-                        ?? _snapshotRemoteAllowedFeatures.contains(.mcpServices)
+                    return Self.remoteProvider(forResourceURI: uri).map { _snapshotRemoteAllowedProviders.contains($0) } ?? false
                 }
             } else {
                 visibleResources = []
@@ -589,7 +588,7 @@ public final class MCPServer {
                     return
                 }
                 let providerAllowed = Self.remoteProvider(forResourceURI: uri).map { _snapshotRemoteAllowedProviders.contains($0) } ?? false
-                guard providerAllowed || _snapshotRemoteAllowedFeatures.contains(.mcpServices) else {
+                guard providerAllowed else {
                     sendJSONRPCError(connection: connection, id: id, code: -32003, message: "MCP resource is not enabled for remote access")
                     return
                 }
@@ -619,7 +618,7 @@ public final class MCPServer {
             } else if authorized {
                 visibleTools = _snapshotTools.filter {
                     guard let name = $0["name"] as? String else { return false }
-                    return _snapshotRemoteAllowedFeatures.contains { $0.matches(toolName: name) }
+                    return _snapshotRemoteAllowedTools.contains(name)
                         || Self.remoteProvider(forToolName: name).map { _snapshotRemoteAllowedProviders.contains($0) } == true
                 }
             } else {
@@ -638,9 +637,9 @@ public final class MCPServer {
                         message: "Remote MCP requires a valid NeoY token")
                     return
                 }
-                let featureAllowed = _snapshotRemoteAllowedFeatures.contains(where: { $0.matches(toolName: toolName) })
+                let toolAllowed = _snapshotRemoteAllowedTools.contains(toolName)
                 let providerAllowed = Self.remoteProvider(forToolName: toolName).map { _snapshotRemoteAllowedProviders.contains($0) } ?? false
-                guard featureAllowed || providerAllowed else {
+                guard toolAllowed || providerAllowed else {
                     sendJSONRPCError(connection: connection, id: id, code: -32003,
                         message: "Tool '\(toolName)' is not enabled for remote access")
                     return

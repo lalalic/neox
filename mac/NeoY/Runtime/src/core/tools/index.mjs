@@ -41,6 +41,12 @@ const DEFAULT_SHELL = process.platform === "darwin" && fs.existsSync("/bin/zsh")
 const SHELL = envValue("NEO_CORE_SHELL", "MAC_DEV_BRIDGE_SHELL") || DEFAULT_SHELL;
 const CODEX_BIN = process.env.CODEX_BIN || "codex";
 const CORE_TOOLS_DIR = path.dirname(fileURLToPath(import.meta.url));
+const RUNTIME_PACKAGE_JSON = path.resolve(CORE_TOOLS_DIR, "../../..", "package.json");
+const RUNTIME_VERSION = (() => {
+  try { return JSON.parse(fs.readFileSync(RUNTIME_PACKAGE_JSON, "utf8")).version || null; }
+  catch { return null; }
+})();
+const NEOY_VERSION = process.env.NEOY_VERSION || null;
 const UNLOCK_RECHECK_MS = clampInt(envValue("NEO_CORE_UNLOCK_RECHECK_MS", "MAC_DEV_BRIDGE_UNLOCK_RECHECK_MS"), 3_000, 250, 60_000);
 
 
@@ -855,7 +861,9 @@ async function dispatchTool(name, args) {
   switch (name) {
     case "status": {
       const status = {
-        bridgeVersion: CORE_VERSION,
+        version: NEOY_VERSION,
+        runtimeVersion: RUNTIME_VERSION,
+        coreVersion: CORE_VERSION,
         pid: process.pid,
         hostname: os.hostname(),
         username: os.userInfo().username,

@@ -11,13 +11,11 @@ struct NeoYDeploymentSettings: Codable, Equatable {
     var tunnelMode: NeoYTunnelMode = .off
     var tunnelName: String = ""
     var publicHostname: String = ""
-    var remoteFeatures: Set<String>? = nil
+    var remoteTools: Set<String>? = nil
+    var remoteFeatures: Set<String>? = nil // legacy; migrated to remoteTools on load
     var remoteProviders: Set<String>? = nil
 
-    var enabledRemoteFeatures: Set<NeoYRemoteFeature> {
-        Set((remoteFeatures ?? []).compactMap(NeoYRemoteFeature.init(rawValue:)))
-    }
-
+    var enabledRemoteTools: Set<String> { remoteTools ?? [] }
     var enabledRemoteProviders: Set<String> { remoteProviders ?? [] }
 
     var localMCPURL: String { "http://127.0.0.1:\(mcpPort)/mcp" }
@@ -61,18 +59,22 @@ enum NeoYDeploymentSettingsStore {
             value.mcpPort = NeoYDeploymentSettings.defaultPort
             migrated = true
         }
-        // Remote access is explicit. Migrate old broad MCP-service exposure to
-        // per-provider opt-in rather than silently exposing newly installed services.
-        if value.tunnelMode != .off && value.remoteFeatures == nil {
-            value.remoteFeatures = Set(NeoYRemoteFeature.allCases.filter { $0 != .mcpServices }.map(\.rawValue))
+        // Remote access is explicit. Migrate the old feature buckets to exact
+        // public tool names so the UI and enforcement use the same contract.
+        if value.remoteTools == nil {
+            if let legacy = value.remoteFeatures {
+                value.remoteTools = NeoYRemoteToolCatalog.migrateLegacyFeatures(legacy)
+            } else if value.tunnelMode != .off {
+                let config = (try? NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)
+                    .loadOrCreate().document.configuration) ?? NeoYControlPlaneConfiguration()
+                value.remoteTools = Set(NeoYRemoteToolCatalog.availableToolNames(configuration: config))
+            } else {
+                value.remoteTools = []
+            }
             migrated = true
         }
-        if value.remoteFeatures?.remove(NeoYRemoteFeature.mcpServices.rawValue) != nil {
-            migrated = true
-        }
-        let canonicalRemoteFeatures = Set(value.enabledRemoteFeatures.filter { $0 != .mcpServices }.map(\.rawValue))
-        if value.remoteFeatures != canonicalRemoteFeatures {
-            value.remoteFeatures = canonicalRemoteFeatures
+        if value.remoteFeatures != nil {
+            value.remoteFeatures = nil
             migrated = true
         }
         if value.remoteProviders == nil {

@@ -281,15 +281,13 @@ final class SetupServiceTests: XCTestCase {
     }
 
     func testRemoteFeatureClassification() {
-        XCTAssertTrue(NeoYRemoteFeature.mcpServices.matches(toolName: "events"))
-        XCTAssertTrue(NeoYRemoteFeature.terminal.matches(toolName: "status"))
-        XCTAssertTrue(NeoYRemoteFeature.terminal.matches(toolName: "shell"))
-        XCTAssertTrue(NeoYRemoteFeature.files.matches(toolName: "fs"))
-        XCTAssertTrue(NeoYRemoteFeature.codex.matches(toolName: "codex"))
-        XCTAssertTrue(NeoYRemoteFeature.computer.matches(toolName: "computer"))
-        XCTAssertTrue(NeoYRemoteFeature.nodes.matches(toolName: "cluster"))
-        XCTAssertFalse(NeoYRemoteFeature.nodes.matches(toolName: "node"))
-        XCTAssertFalse(NeoYRemoteFeature.computer.matches(toolName: "mcp.mac.exec"))
+        XCTAssertEqual(
+            NeoYRemoteToolCatalog.migrateLegacyFeatures(["terminal", "files", "nodes"]),
+            Set(["status", "audit_tail", "shell", "terminal", "fs", "apply_patch", "cluster"])
+        )
+        let names = Set(NeoYRemoteToolCatalog.availableToolNames(configuration: NeoYControlPlaneConfiguration()))
+        XCTAssertTrue(names.isSuperset(of: ["setup", "cluster", "status", "shell", "fs", "apply_patch", "codex", "audit_tail", "terminal", "chatgpt"]))
+        XCTAssertTrue(names.contains("computer"))
     }
 
     func testV3LegacyStartupServicesAreNormalizedAway() throws {
