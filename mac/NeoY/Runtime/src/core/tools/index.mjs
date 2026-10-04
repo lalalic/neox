@@ -409,7 +409,7 @@ function classifyToolFailure(error) {
   const message = String(error?.message || error || "").toLowerCase();
   if (/required|missing/.test(message)) return "missing_parameter";
   if (/must be (a |an )?(string|boolean|integer|number|array|object)|wrong type|expected .*?(string|boolean|integer|number|array|object)/.test(message)) return "wrong_type";
-  if (/one of|invalid enum|unsupported .*value|unknown command/.test(message)) return "invalid_enum";
+  if (/one of|invalid enum|unsupported .*value|unknown(?: [a-z0-9_.-]+)? command/.test(message)) return "invalid_enum";
   if (/invalid params|malformed|parse error|invalid json|expected a json/.test(message)) return "schema_validation_error";
   if (/invalid|must |cannot|not allowed|out of range|non-empty/.test(message)) return "semantic_validation_error";
   if (/timeout|timed out/.test(message)) return "timeout";
