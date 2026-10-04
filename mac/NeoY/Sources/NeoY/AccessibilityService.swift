@@ -152,7 +152,7 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
             guard let frame = frame(for: element) else { throw DemoRecorderError.message("Accessibility element has no usable frame") }
             return (frame, element)
         }
-        guard let snapshot else { throw DemoRecorderError.message("Run accessibility.inspect before resolving a labeled element") }
+        guard let snapshot else { throw DemoRecorderError.message("Call computer get_app_state before resolving a labeled element") }
         let flattened = flatten(snapshot.children)
         let matches = flattened.filter { node in
             let roleMatches = target.role == nil || node.role?.caseInsensitiveCompare(target.role!) == .orderedSame
@@ -660,7 +660,7 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
 
 enum AccessibilityTools {
     static func tools() -> [ToolDefinition] {
-        [
+        let commands: [ToolDefinition] = [
             ToolDefinition(name: "computer.list_apps", description: "List running macOS apps.", parameters: schema([:] )) { _ in
                 NeoYAccessibilityController.shared.listApps()
             },
@@ -698,19 +698,6 @@ enum AccessibilityTools {
                     elementIndex: try requiredString(args, "element_index"),
                     action: try requiredString(args, "action")
                 )
-            },
-            ToolDefinition(name: "accessibility.inspect", description: "Inspect the focused macOS accessibility tree and cache resolvable element paths.", parameters: schema([
-                "max_depth": integer("Maximum traversal depth", default: 8),
-                "max_nodes": integer("Maximum returned nodes", default: 400),
-            ])) { args in
-                let maxDepth = int(args, "max_depth", 8)
-                let maxNodes = int(args, "max_nodes", 400)
-                return try await NeoYAccessibilityController.shared.inspect(maxDepth: maxDepth, maxNodes: maxNodes)
-            },
-            ToolDefinition(name: "accessibility.resolve", description: "Resolve an explicit rectangle or cached accessibility element to a screen frame.", parameters: targetSchema()) { args in
-                let target = try target(from: args)
-                let resolved = try NeoYAccessibilityController.shared.resolve(target)
-                return NeoYAccessibilityController.json(["frame": resolved.frame])
             },
             ToolDefinition(name: "computer.click", description: "Press or click a resolved macOS UI target.", parameters: targetSchema()) { args in
                 try await NeoYAccessibilityController.shared.click(try target(from: args))
@@ -753,6 +740,12 @@ enum AccessibilityTools {
                 try await NeoYAccessibilityController.shared.drag(from: try target(from: args), to: try target(from: args, key: "to"))
             },
         ]
+        return [CommandTool.facade(
+            name: "computer",
+            description: "Inspect and control native macOS applications through NeoY Computer Use.",
+            commands: commands,
+            commandName: CommandTool.stripPrefix("computer.")
+        )]
     }
 
     private static func target(from args: JSONValue, key: String = "target") throws -> DemoTarget {

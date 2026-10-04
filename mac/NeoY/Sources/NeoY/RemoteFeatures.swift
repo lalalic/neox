@@ -32,17 +32,15 @@ enum NeoYRemoteFeature: String, CaseIterable, Identifiable, Codable, Sendable {
     func matches(toolName: String) -> Bool {
         switch self {
         case .setup: toolName == "setup"
-        case .terminal:
-            toolName == "bridge_status" || toolName == "audit_tail" ||
-            toolName.hasPrefix("shell_") || toolName.hasPrefix("pty_")
-        case .files: toolName.hasPrefix("fs_") || toolName == "apply_patch"
-        case .codex: toolName.hasPrefix("codex_thread_")
+        case .terminal: toolName == "bridge_status" || toolName == "audit_tail" || toolName == "shell" || toolName == "terminal"
+        case .files: toolName == "fs" || toolName == "apply_patch"
+        case .codex: toolName == "codex"
         case .nodes: toolName == "cluster"
-        case .computer: toolName.hasPrefix("computer.") || toolName.hasPrefix("accessibility.")
-        case .demo: toolName.hasPrefix("demo.")
-        case .tour: toolName.hasPrefix("tour.")
-        case .phone: toolName.hasPrefix("phone.")
-        case .mcpServices: toolName.hasPrefix("mcp.") || toolName.hasPrefix("events.")
+        case .computer: toolName == "computer"
+        case .demo: toolName == "demo"
+        case .tour: toolName == "tour"
+        case .phone: toolName == "phone"
+        case .mcpServices: toolName == "events" || toolName.hasPrefix("mcp.")
         }
     }
 }

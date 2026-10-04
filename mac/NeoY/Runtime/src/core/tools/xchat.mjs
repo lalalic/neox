@@ -10,7 +10,7 @@ const WORKER = fileURLToPath(import.meta.url);
 const PROJECT_ID = /^g-p-[A-Za-z0-9_-]{8,128}$/;
 const THREAD_ID = /^[A-Za-z0-9_-]{8,160}$/;
 
-export const XCHAT_LIFECYCLE_TOOLS = [
+const XCHAT_COMMAND_TOOLS = [
   {
     name: "xchat.turn.new",
     description: "Terminal control transfer: schedule the next user turn in the same Web ChatGPT thread after the current assistant turn finishes. Uses Browser Workspace. On success, stop the current turn and perform no further business actions.",
@@ -44,8 +44,27 @@ export const XCHAT_LIFECYCLE_TOOLS = [
   },
 ];
 
+const XCHAT_COMMAND_MAP = new Map([
+  ["turn.new", XCHAT_COMMAND_TOOLS.find((tool) => tool.name === "xchat.turn.new")],
+  ["thread.new", XCHAT_COMMAND_TOOLS.find((tool) => tool.name === "xchat.thread.new")],
+]);
+
+export const XCHAT_LIFECYCLE_TOOLS = [{
+  name: "xchat",
+  description: "Transfer control to a new turn or thread. Use command='help' to discover exact subcommand schemas.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      command: { type: "string", description: "turn.new, thread.new, or help" },
+      args: { type: "object", description: "Subcommand arguments. Use help for the exact schema." },
+    },
+    required: ["command"],
+    additionalProperties: false,
+  },
+}];
+
 export function isXChatLifecycleTool(name) {
-  return name === "xchat.turn.new" || name === "xchat.thread.new";
+  return name === "xchat";
 }
 
 function requireText(args, key) {
@@ -78,16 +97,32 @@ function resultText(payload) {
   return { content: [{ type: "text", text: JSON.stringify(payload) }], isError: false };
 }
 
-export function scheduleXChatLifecycle(name, args, options = {}) {
+export function scheduleXChatLifecycle(name, input, options = {}) {
   if (!isXChatLifecycleTool(name)) throw new Error(`unknown XChat lifecycle tool: ${name}`);
-  const parsed = validate(args, name);
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("arguments must be an object");
+  const command = typeof input.command === "string" ? input.command.trim() : "";
+  const args = input.args === undefined ? {} : input.args;
+  if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("args must be an object");
+  if (command === "help") {
+    const named = typeof args.command === "string" ? args.command.trim() : "";
+    if (named) {
+      const tool = XCHAT_COMMAND_MAP.get(named);
+      if (!tool) throw new Error(`Unknown xchat command '${named}'`);
+      return resultText({ command: named, description: tool.description || "", schema: tool.inputSchema });
+    }
+    return resultText({ commands: [...XCHAT_COMMAND_MAP].map(([subcommand, tool]) => ({ command: subcommand, description: tool.description || "" })) });
+  }
+  const tool = XCHAT_COMMAND_MAP.get(command);
+  if (!tool) throw new Error(`Unknown xchat command '${command}'`);
+  const internalName = tool.name;
+  const parsed = validate(args, internalName);
   const transferId = options.transferId || crypto.randomUUID();
   const dataRoot = options.dataDir || process.env.NEOY_DATA_DIR || path.join(os.homedir(), "Library/Application Support/NeoY");
   const dir = path.join(dataRoot, "xchat-lifecycle");
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   try { fs.chmodSync(dir, 0o700); } catch {}
 
-  const action = name === "xchat.turn.new" ? "new-turn" : "new-thread";
+  const action = internalName === "xchat.turn.new" ? "new-turn" : "new-thread";
   const config = {
     ...(parsed.projectId ? { project_id: parsed.projectId } : {}),
     temporary: parsed.temporary,

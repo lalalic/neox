@@ -526,15 +526,27 @@ final class NeoYMCPFederation {
         }
 
         var names: [String] = []
-        for tool in tools {
-            guard let localName = NeoYBundledRuntime.exposedToolName(
-                provider: configuration.name, tool: tool.name
-            ) else { continue }
-            let descriptor = rewriteToolResourceMetadata(tool.descriptor, provider: configuration.name)
-            server.registerFederatedTool(descriptor: descriptor, name: localName, protected: true) { arguments in
-                try await invoke(tool.name, arguments)
+        if configuration.name == NeoYBundledRuntime.coreProviderName {
+            for tool in tools {
+                guard let localName = NeoYBundledRuntime.exposedToolName(
+                    provider: configuration.name, tool: tool.name
+                ) else { continue }
+                let descriptor = rewriteToolResourceMetadata(tool.descriptor, provider: configuration.name)
+                server.registerFederatedTool(descriptor: descriptor, name: localName, protected: true) { arguments in
+                    try await invoke(tool.name, arguments)
+                }
+                names.append(localName)
             }
-            names.append(localName)
+        } else if configuration.name != NeoYBundledRuntime.legacyMacBridgeProviderName, !tools.isEmpty {
+            let facadeName = configuration.name == "events" ? "events" : "mcp.\(configuration.name)"
+            let rewritten = tools.map { tool in
+                NeoYRemoteTool(name: tool.name, descriptor: rewriteToolResourceMetadata(tool.descriptor, provider: configuration.name))
+            }
+            let descriptor = federatedCommandFacadeDescriptor(provider: configuration.name)
+            server.registerFederatedTool(descriptor: descriptor, name: facadeName, protected: true) { arguments in
+                try await dispatchFederatedCommandFacade(provider: configuration.name, tools: rewritten, arguments: arguments, invoke: invoke)
+            }
+            names.append(facadeName)
         }
         exposedByServer[configuration.name] = names
         resourcesByServer[configuration.name] = resourceURIs
@@ -544,6 +556,83 @@ final class NeoYMCPFederation {
             lifecycleState: "ready", processAlive: processAlive, transportConnected: true,
             initialized: true, toolsListSuccessful: true)
     }
+}
+
+
+private func federatedCommandFacadeDescriptor(provider: String) -> JSONValue {
+    .object([
+        "description": .string("Commands exposed by federated MCP provider \(provider). Use command='help' to list subcommands or inspect one subcommand's exact args schema."),
+        "inputSchema": .object([
+            "type": .string("object"),
+            "properties": .object([
+                "command": .object([
+                    "type": .string("string"),
+                    "description": .string("Remote subcommand name, or 'help'."),
+                ]),
+                "args": .object([
+                    "type": .string("object"),
+                    "description": .string("Arguments for the selected subcommand. Use help for the exact schema."),
+                ]),
+            ]),
+            "required": .array([.string("command")]),
+            "additionalProperties": .bool(false),
+        ]),
+    ])
+}
+
+private func dispatchFederatedCommandFacade(
+    provider: String,
+    tools: [NeoYRemoteTool],
+    arguments: JSONValue,
+    invoke: @escaping @Sendable (String, JSONValue) async throws -> String
+) async throws -> String {
+    guard case .object(let object) = arguments,
+          case .string(let requested)? = object["command"] else {
+        throw NeoYRuntimeControlError.federation("command is required")
+    }
+    let args = object["args"] ?? .object([:])
+    guard case .object = args else {
+        throw NeoYRuntimeControlError.federation("args must be an object")
+    }
+    let byName = Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0) })
+    if requested == "help" {
+        let named: String?
+        if case .object(let helpArgs) = args, case .string(let value)? = helpArgs["command"] { named = value }
+        else { named = nil }
+        if let named {
+            guard let tool = byName[named] else {
+                throw NeoYRuntimeControlError.federation("Unknown \(provider) command '\(named)'")
+            }
+            let description = descriptorField(tool.descriptor, "description") ?? .string("")
+            let schema = descriptorField(tool.descriptor, "inputSchema") ?? .object(["type": .string("object")])
+            return encodeJSONValue(.object([
+                "command": .string(named),
+                "description": description,
+                "schema": schema,
+            ]))
+        }
+        let rows: [JSONValue] = tools.sorted { $0.name < $1.name }.map { tool in
+            .object([
+                "command": .string(tool.name),
+                "description": descriptorField(tool.descriptor, "description") ?? .string(""),
+            ])
+        }
+        return encodeJSONValue(.object(["commands": .array(rows)]))
+    }
+    guard let tool = byName[requested] else {
+        throw NeoYRuntimeControlError.federation("Unknown \(provider) command '\(requested)'")
+    }
+    return try await invoke(tool.name, args)
+}
+
+private func descriptorField(_ descriptor: JSONValue, _ key: String) -> JSONValue? {
+    guard case .object(let object) = descriptor else { return nil }
+    return object[key]
+}
+
+private func encodeJSONValue(_ value: JSONValue) -> String {
+    guard let data = try? JSONEncoder().encode(value) else { return "{}" }
+    return String(data: data, encoding: .utf8) ?? "{}"
 }
 
 private func decodeTools(_ result: [String: Any]) throws -> [NeoYRemoteTool] {

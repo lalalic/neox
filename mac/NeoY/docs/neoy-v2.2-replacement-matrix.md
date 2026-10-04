@@ -6,11 +6,11 @@ runtime dependency, and NeoY does not duplicate these capabilities in Swift.
 
 | Capability | Owner and public contract |
 |---|---|
-| Shell execution | Core tools: `shell_exec` |
+| Shell execution | Core facade: `shell` (`exec` subcommand) |
 | Background jobs | Core tools: `shell_start`, `shell_job_status`, `shell_job_list`, `shell_job_kill` |
-| Filesystem | Core tools: `fs_read`, `fs_write`, `fs_list`, `fs_stat`, `fs_manage` |
-| PTY | Core tools: `pty_start`, `pty_read`, `pty_write`, `pty_resize`, `pty_signal`, `pty_close` |
-| Codex history | Core tools: `codex_thread_read`, `codex_thread_list`, `codex_thread_turns_list` |
+| Filesystem | Core facade: `fs` (`read` / `write` / `list` / `stat` / `manage`) |
+| PTY | Core facade: `terminal` (`start` / `read` / `write` / `resize` / `signal` / `close`) |
+| Codex history | Core facade: `codex` (`thread.read` / `thread.list` / `thread.turns.list`) |
 | Patch application | Core tools: `apply_patch` |
 | Cluster routing/control | NeoY-owned `cluster` facade and node transport adapters |
 | Auth, remote exposure, federation, lifecycle, native/TCC features | NeoY-owned |

@@ -7,7 +7,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "check": "node --check src/core/gateway.mjs && node --check src/core/stdio-proxy.mjs && node --check src/core/tools/index.mjs && node --check src/core/tools/shell.mjs && node --check src/core/tools/filesystem.mjs && node --check src/core/tools/pty.mjs && node --check src/core/tools/codex.mjs && node --check src/core/tools/patch.mjs && node --check src/core/tools/audit.mjs && node --check src/core/responses-adapter.mjs && node --check src/core/tools/xchat.mjs",
+    "check": "node --check src/core/gateway.mjs && node --check src/core/stdio-proxy.mjs && node --check src/core/tools/index.mjs && node --check src/core/tools/command-facade.mjs && node --check src/core/tools/shell.mjs && node --check src/core/tools/filesystem.mjs && node --check src/core/tools/pty.mjs && node --check src/core/tools/codex.mjs && node --check src/core/tools/patch.mjs && node --check src/core/tools/audit.mjs && node --check src/core/responses-adapter.mjs && node --check src/core/tools/xchat.mjs",
     "test": "npm run check && node --test test/*.test.mjs"
   },
   "files": [

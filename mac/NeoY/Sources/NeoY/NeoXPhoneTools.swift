@@ -2,7 +2,7 @@ import Foundation
 
 enum NeoXPhoneTools {
     static func tools(client: NeoXPhoneClient, handoff: NativeNeoYPhoneHandoffReceiver) -> [ToolDefinition] {
-        [
+        let commands: [ToolDefinition] = [
             ToolDefinition(
                 name: "phone.status",
                 description: "Check the selected NeoX phone MCP endpoint and the native _neoy._tcp handoff receiver.",
@@ -65,6 +65,16 @@ enum NeoXPhoneTools {
                 try await client.exportAndDownload(arguments: arguments)
             },
         ]
+        return [CommandTool.facade(
+            name: "phone",
+            description: "Inspect the paired NeoX phone and work with its media library.",
+            commands: commands,
+            commandName: { value in
+                if value == "phone.status" { return "status" }
+                if value.hasPrefix("phone.media.") { return "media." + String(value.dropFirst("phone.media.".count)) }
+                return value
+            }
+        )]
     }
 
     private static func stringProp(_ description: String) -> JSONValue {

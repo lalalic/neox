@@ -420,6 +420,24 @@ actor NeoYNodeService {
         if tool == "setup" || tool == "cluster" {
             return (tool, ["command": command])
         }
+        let parsed = try NeoYCommandLine.parse(command)
+        if tool == "exec" {
+            guard let value = parsed.remainder, !value.isEmpty else { throw NeoYCoreError.invalidCommand("exec requires a command after --") }
+            return ("shell", ["command": "exec", "args": ["command": value]])
+        }
+        if tool == "fs", let verb = parsed.tokens.first, ["read", "write", "append", "list"].contains(verb) {
+            switch verb {
+            case "read":
+                guard parsed.tokens.count >= 2 else { throw NeoYCoreError.invalidCommand("usage: fs read <path>") }
+                return ("fs", ["command": "read", "args": ["path": parsed.tokens[1]]])
+            case "write", "append":
+                guard parsed.tokens.count >= 2, let value = parsed.remainder else { throw NeoYCoreError.invalidCommand("usage: fs \(verb) <path> -- <content>") }
+                return ("fs", ["command": "write", "args": ["path": parsed.tokens[1], "content": value, "append": verb == "append"]])
+            case "list":
+                return ("fs", ["command": "list", "args": ["path": parsed.tokens.count > 1 ? parsed.tokens[1] : "."]])
+            default: break
+            }
+        }
         if Self.allowedRemoteCoreTools.contains(tool) {
             guard let data = command.data(using: .utf8),
                   let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -427,27 +445,7 @@ actor NeoYNodeService {
             }
             return (tool, object)
         }
-        let parsed = try NeoYCommandLine.parse(command)
-        switch tool {
-        case "exec":
-            guard let value = parsed.remainder, !value.isEmpty else { throw NeoYCoreError.invalidCommand("exec requires a command after --") }
-            return ("shell_exec", ["command": value])
-        case "fs":
-            guard let verb = parsed.tokens.first else { throw NeoYCoreError.invalidCommand("fs requires read, write, or list") }
-            switch verb {
-            case "read":
-                guard parsed.tokens.count >= 2 else { throw NeoYCoreError.invalidCommand("usage: fs read <path>") }
-                return ("fs_read", ["path": parsed.tokens[1]])
-            case "write", "append":
-                guard parsed.tokens.count >= 2, let value = parsed.remainder else { throw NeoYCoreError.invalidCommand("usage: fs \(verb) <path> -- <content>") }
-                return ("fs_write", ["path": parsed.tokens[1], "content": value, "append": verb == "append"])
-            case "list":
-                return ("fs_list", ["path": parsed.tokens.count > 1 ? parsed.tokens[1] : "."])
-            default: throw NeoYCoreError.invalidCommand("fs supports read, write, append, and list")
-            }
-        default:
-            throw NeoYCoreError.invalidCommand("unsupported cluster compatibility alias '\(tool)'")
-        }
+        throw NeoYCoreError.invalidCommand("unsupported cluster compatibility alias '\(tool)'")
     }
 
 

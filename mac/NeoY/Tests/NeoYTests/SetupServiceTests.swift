@@ -126,14 +126,29 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertFalse(try store.loadOrCreate().document.configuration.capabilities.isEnabled(.demoRecording))
     }
 
-    func testCanonicalCoreToolSetIsSmallAndStable() {
-        XCTAssertTrue(NeoYCoreRuntime.toolNames.isSuperset(of: [
-            "setup", "cluster", "shell_exec", "fs_read", "apply_patch",
-            "pty_start", "codex_thread_list"
+    func testNativeCapabilitiesExposeOneFacadeAndDiscoverExactSchemas() async throws {
+        XCTAssertEqual(AccessibilityTools.tools().map(\.name), ["computer"])
+        XCTAssertEqual(DemoRecorderTools.tools().map(\.name), ["demo"])
+        XCTAssertEqual(CaptureTourTools.tools().map(\.name), ["tour"])
+
+        let computer = try XCTUnwrap(AccessibilityTools.tools().first)
+        let help = try await computer.handler(.object([
+            "command": .string("help"),
+            "args": .object(["command": .string("get_app_state")]),
         ]))
-        XCTAssertFalse(NeoYCoreRuntime.toolNames.contains("exec"))
-        XCTAssertFalse(NeoYCoreRuntime.toolNames.contains("fs"))
-        XCTAssertFalse(NeoYCoreRuntime.toolNames.contains("codex.threads"))
+        let data = try XCTUnwrap(help.data(using: .utf8))
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let schema = try XCTUnwrap(object["schema"] as? [String: Any])
+        XCTAssertEqual(schema["required"] as? [String], ["app"])
+    }
+
+    func testCanonicalCoreToolSetIsSmallAndStable() {
+        XCTAssertEqual(NeoYCoreRuntime.toolNames, [
+            "setup", "cluster", "bridge_status", "shell", "fs", "apply_patch",
+            "codex", "audit_tail", "terminal"
+        ])
+        XCTAssertFalse(NeoYCoreRuntime.toolNames.contains("shell_exec"))
+        XCTAssertFalse(NeoYCoreRuntime.toolNames.contains("pty_start"))
     }
 
     func testParserValidatesDiagnosticsSettings() {
@@ -265,11 +280,11 @@ final class SetupServiceTests: XCTestCase {
     }
 
     func testRemoteFeatureClassification() {
-        XCTAssertTrue(NeoYRemoteFeature.mcpServices.matches(toolName: "events.watch"))
-        XCTAssertTrue(NeoYRemoteFeature.terminal.matches(toolName: "shell_exec"))
-        XCTAssertTrue(NeoYRemoteFeature.files.matches(toolName: "fs_read"))
-        XCTAssertTrue(NeoYRemoteFeature.codex.matches(toolName: "codex_thread_list"))
-        XCTAssertTrue(NeoYRemoteFeature.computer.matches(toolName: "computer.click"))
+        XCTAssertTrue(NeoYRemoteFeature.mcpServices.matches(toolName: "events"))
+        XCTAssertTrue(NeoYRemoteFeature.terminal.matches(toolName: "shell"))
+        XCTAssertTrue(NeoYRemoteFeature.files.matches(toolName: "fs"))
+        XCTAssertTrue(NeoYRemoteFeature.codex.matches(toolName: "codex"))
+        XCTAssertTrue(NeoYRemoteFeature.computer.matches(toolName: "computer"))
         XCTAssertTrue(NeoYRemoteFeature.nodes.matches(toolName: "cluster"))
         XCTAssertFalse(NeoYRemoteFeature.nodes.matches(toolName: "node"))
         XCTAssertFalse(NeoYRemoteFeature.computer.matches(toolName: "mcp.mac.exec"))
@@ -307,11 +322,12 @@ final class SetupServiceTests: XCTestCase {
     }
 
     func testBundledCoreToolsAreFlat() {
-        XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "core", tool: "pty_start"), "pty_start")
+        XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "core", tool: "terminal"), "terminal")
         XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "core", tool: "apply_patch"), "apply_patch")
         XCTAssertNil(NeoYBundledRuntime.exposedToolName(provider: "macbridge", tool: "chrome_click"))
         XCTAssertNil(NeoYBundledRuntime.exposedToolName(provider: "macbridge", tool: "chatgpt_conversation_start"))
-        XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "events", tool: "health"), "events.health")
+        XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "events", tool: "health"), "events")
+        XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "family-tutor", tool: "reply"), "mcp.family-tutor")
     }
 
     func testChildProcessEnvironmentAddsGlobalCLIPathsWithoutDuplicates() {

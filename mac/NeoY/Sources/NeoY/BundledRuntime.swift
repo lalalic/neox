@@ -49,8 +49,8 @@ enum NeoYBundledRuntime {
         if provider == legacyMacBridgeProviderName {
             return nil
         }
-        if provider == "events" { return "events.\(tool)" }
-        return "mcp.\(provider).\(tool)"
+        if provider == "events" { return "events" }
+        return "mcp.\(provider)"
     }
 
     static func resolvedMCPServers(

@@ -598,7 +598,7 @@ enum DemoRecorderError: LocalizedError {
 
 enum DemoRecorderTools {
     static func tools() -> [ToolDefinition] {
-        [
+        let commands: [ToolDefinition] = [
             ToolDefinition(name: "demo.start_recording", description: "Reset the semantic timeline and start main-display H.264 recording.", parameters: schema([:])) { _ in
                 await DemoRecorder.shared.startSemanticRecording()
             },
@@ -666,6 +666,12 @@ enum DemoRecorderTools {
                 await DemoRecorder.shared.cancel()
             },
         ]
+        return [CommandTool.facade(
+            name: "demo",
+            description: "Record and annotate native product demos.",
+            commands: commands,
+            commandName: CommandTool.stripPrefix("demo.")
+        )]
     }
 
     private static func parseOverlay(_ args: JSONValue) throws -> (kind: String, rect: CGRect?, text: String?, durationMS: Int?) {
