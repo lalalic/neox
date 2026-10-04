@@ -405,7 +405,19 @@ function auditSafeArguments(tool, args) {
   return args;
 }
 
-async function audit(tool, argsInput, summary = {}, error = null) {
+function classifyToolFailure(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  if (/required|missing/.test(message)) return "missing_parameter";
+  if (/must be (a |an )?(string|boolean|integer|number|array|object)|wrong type|expected .*?(string|boolean|integer|number|array|object)/.test(message)) return "wrong_type";
+  if (/one of|invalid enum|unsupported .*value|unknown command/.test(message)) return "invalid_enum";
+  if (/invalid params|malformed|parse error|invalid json|expected a json/.test(message)) return "schema_validation_error";
+  if (/invalid|must |cannot|not allowed|out of range|non-empty/.test(message)) return "semantic_validation_error";
+  if (/timeout|timed out/.test(message)) return "timeout";
+  if (/permission|denied|not authorized|unauthorized|forbidden/.test(message)) return "permission_denied";
+  return "tool_internal_error";
+}
+
+async function audit(tool, argsInput, summary = {}, error = null, meta = {}) {
   if (AUDIT_MODE === "off") return;
   try {
     const args = auditSafeArguments(tool, argsInput);
@@ -413,7 +425,11 @@ async function audit(tool, argsInput, summary = {}, error = null) {
     const entry = {
       timestamp: nowIso(),
       pid: process.pid,
+      event: meta.event || (error ? "tool_failure" : "tool_call"),
+      category: meta.category || (error ? classifyToolFailure(error) : "success"),
+      stage: meta.stage || "handler",
       tool,
+      command: typeof args?.command === "string" ? args.command : null,
       argumentsHash: crypto.createHash("sha256").update(raw).digest("hex"),
       summary,
       error: error ? String(error?.message || error) : null,
@@ -1020,7 +1036,9 @@ async function handleMessage(message) {
     const name = message?.params?.name;
     const args = message?.params?.arguments ?? {};
     if (typeof name !== "string") {
-      sendError(id, -32602, "Invalid params: tool name is required");
+      const error = new Error("Invalid params: tool name is required");
+      await audit("<unknown>", args, {}, error, { event: "tool_input_error", category: "missing_parameter", stage: "mcp_boundary" });
+      sendError(id, -32602, error.message);
       return;
     }
     await ptyReady;
@@ -1028,7 +1046,9 @@ async function handleMessage(message) {
     // -32601 here too: "advertised but fails at call time" and "callable but
     // unadvertised" are both ways of reporting a capability the host does not have.
     if (!advertisedTools().some((tool) => tool.name === name)) {
-      sendError(id, -32601, `Unknown tool: ${name}`);
+      const error = new Error(`Unknown tool: ${name}`);
+      await audit(name, args, {}, error, { event: "tool_input_error", category: "schema_validation_error", stage: "mcp_boundary" });
+      sendError(id, -32601, error.message);
       return;
     }
     try {
@@ -1052,7 +1072,7 @@ async function handleMessage(message) {
         : toolTextResult(value, { modern }));
     } catch (error) {
       stderr(`tool ${name} failed: ${error?.stack || error}`);
-      await audit(name, args, {}, error);
+      await audit(name, args, {}, error, { event: "tool_input_error", category: classifyToolFailure(error), stage: "handler" });
       // Include `code`. The pty taxonomy (PTY_WRITE_CANON_LIMIT and 14 others) was
       // built, documented in README, and then discarded here — no client could ever see
       // one, and the tests had to regex English prose instead. `name` is dropped: it was
@@ -1078,6 +1098,7 @@ rl.on("line", (line) => {
   try {
     message = JSON.parse(trimmed);
   } catch (error) {
+    audit("<jsonrpc>", { rawPreview: trimmed.slice(0, 512) }, {}, error, { event: "tool_input_error", category: "malformed_json", stage: "mcp_boundary" }).catch(() => {});
     sendError(null, -32700, "Parse error", { detail: String(error?.message || error) });
     return;
   }
