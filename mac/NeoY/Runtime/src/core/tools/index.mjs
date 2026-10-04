@@ -23,22 +23,22 @@ const SERVER_TITLE = "Neo Core Tools";
 const MODERN_PROTOCOL = "2026-07-28";
 const LEGACY_PROTOCOLS = new Set(["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]);
 const HOME = os.homedir();
-const APP_SUPPORT_DIR = envValue("NEO_CORE_DATA_DIR", "MAC_DEV_BRIDGE_DATA_DIR") || path.join(HOME, "Library", "Application Support", "NeoY", "core");
+const APP_SUPPORT_DIR = process.env.NEO_CORE_DATA_DIR || path.join(HOME, "Library", "Application Support", "NeoY", "core");
 const JOB_DIR = path.join(APP_SUPPORT_DIR, "jobs");
 const LOG_DIR = process.env.NEO_CORE_LOG_DIR || path.join(HOME, "Library", "Logs", "NeoY", "Core");
 const AUDIT_LOG = process.env.NEO_CORE_AUDIT_LOG || path.join(LOG_DIR, "audit.jsonl");
-const DEFAULT_OUTPUT_BYTES = clampInt(envValue("NEO_CORE_DEFAULT_OUTPUT_BYTES", "MAC_DEV_BRIDGE_DEFAULT_OUTPUT_BYTES"), 1_000_000, 1_024, 8_000_000);
-const MAX_OUTPUT_BYTES = clampInt(envValue("NEO_CORE_MAX_OUTPUT_BYTES", "MAC_DEV_BRIDGE_MAX_OUTPUT_BYTES"), 8_000_000, 1_024, 64_000_000);
+const DEFAULT_OUTPUT_BYTES = clampInt(process.env.NEO_CORE_DEFAULT_OUTPUT_BYTES, 1_000_000, 1_024, 8_000_000);
+const MAX_OUTPUT_BYTES = clampInt(process.env.NEO_CORE_MAX_OUTPUT_BYTES, 8_000_000, 1_024, 64_000_000);
 const SHELL_EXEC_DEFAULT_TIMEOUT_MS = 600_000;
-const AUDIT_MODE = ["off", "metadata", "full"].includes(envValue("NEO_CORE_AUDIT_MODE", "MAC_DEV_BRIDGE_AUDIT_MODE") || "metadata")
-  ? (envValue("NEO_CORE_AUDIT_MODE", "MAC_DEV_BRIDGE_AUDIT_MODE") || "metadata")
+const AUDIT_MODE = ["off", "metadata", "full"].includes(process.env.NEO_CORE_AUDIT_MODE || "metadata")
+  ? (process.env.NEO_CORE_AUDIT_MODE || "metadata")
   : "metadata";
 const DEFAULT_SHELL = process.platform === "darwin" && fs.existsSync("/bin/zsh")
   ? "/bin/zsh"
   : fs.existsSync("/bin/bash")
     ? "/bin/bash"
     : "/bin/sh";
-const SHELL = envValue("NEO_CORE_SHELL", "MAC_DEV_BRIDGE_SHELL") || DEFAULT_SHELL;
+const SHELL = process.env.NEO_CORE_SHELL || DEFAULT_SHELL;
 const CODEX_BIN = process.env.CODEX_BIN || "codex";
 const CORE_TOOLS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const RUNTIME_PACKAGE_JSON = path.resolve(CORE_TOOLS_DIR, "../../..", "package.json");
@@ -47,7 +47,7 @@ const RUNTIME_VERSION = (() => {
   catch { return null; }
 })();
 const NEOY_VERSION = process.env.NEOY_VERSION || null;
-const UNLOCK_RECHECK_MS = clampInt(envValue("NEO_CORE_UNLOCK_RECHECK_MS", "MAC_DEV_BRIDGE_UNLOCK_RECHECK_MS"), 3_000, 250, 60_000);
+const UNLOCK_RECHECK_MS = clampInt(process.env.NEO_CORE_UNLOCK_RECHECK_MS, 3_000, 250, 60_000);
 
 
 const TUNNEL_RUNTIME_KEY_WAS_PRESENT = Boolean(process.env.CONTROL_PLANE_API_KEY);
@@ -65,10 +65,9 @@ const FULL_ACCESS_ACK = "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS";
 //
 // Behaviour for THIS process is unchanged: the captured value still unlocks, exactly
 // as documented in SECURITY.md.
-const FULL_ACCESS_ACK_FROM_ENV = envValue("NEO_CORE_FULL_ACCESS_ACK", "MAC_DEV_BRIDGE_FULL_ACCESS_ACK");
+const FULL_ACCESS_ACK_FROM_ENV = process.env.NEO_CORE_FULL_ACCESS_ACK;
 delete process.env.NEO_CORE_FULL_ACCESS_ACK;
-delete process.env.MAC_DEV_BRIDGE_FULL_ACCESS_ACK;
-const FULL_ACCESS_UNLOCK_FILE = envValue("NEO_CORE_UNLOCK_FILE", "MAC_DEV_BRIDGE_UNLOCK_FILE") || path.join(APP_SUPPORT_DIR, "FULL_ACCESS_ENABLED");
+const FULL_ACCESS_UNLOCK_FILE = process.env.NEO_CORE_UNLOCK_FILE || path.join(APP_SUPPORT_DIR, "FULL_ACCESS_ENABLED");
 
 await Promise.all([
   fsp.mkdir(APP_SUPPORT_DIR, { recursive: true, mode: 0o700 }),
@@ -98,10 +97,6 @@ if (!fullAccessUnlocked) {
 }
 
 let legacyInitialized = false;
-
-function envValue(primary, legacy) {
-  return process.env[primary] ?? process.env[legacy];
-}
 
 function clampInt(value, fallback, min, max) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
@@ -218,10 +213,10 @@ function requireInteger(args, key, min, max) {
   return value;
 }
 
-const GUI_FOCUS_POLICY = envValue("NEO_CORE_GUI_FOCUS_POLICY", "MAC_DEV_BRIDGE_GUI_FOCUS_POLICY") || "background-first";
-const SETTINGS_FILE = envValue("NEO_CORE_SETTINGS_FILE", "MAC_DEV_BRIDGE_SETTINGS_FILE") || path.join(APP_SUPPORT_DIR, "settings.json");
+const GUI_FOCUS_POLICY = process.env.NEO_CORE_GUI_FOCUS_POLICY || "background-first";
+const SETTINGS_FILE = process.env.NEO_CORE_SETTINGS_FILE || path.join(APP_SUPPORT_DIR, "settings.json");
 const DEFAULT_OPERATOR_SETTINGS = Object.freeze({ strictApprovals: false });
-const FOREGROUND_GUI_APPROVAL_FILE = envValue("NEO_CORE_FOREGROUND_GUI_APPROVAL_FILE", "MAC_DEV_BRIDGE_FOREGROUND_GUI_APPROVAL_FILE")
+const FOREGROUND_GUI_APPROVAL_FILE = process.env.NEO_CORE_FOREGROUND_GUI_APPROVAL_FILE
   || path.join(APP_SUPPORT_DIR, "FOREGROUND_GUI_APPROVED");
 const FOREGROUND_GUI_MAX_TTL_MS = 5 * 60 * 1000;
 
@@ -729,7 +724,6 @@ function advertisedTools() {
 // authority over "is full access permitted right now" belongs here, next to the
 // tools it gates. One stat+read per call is nothing beside spawning a login shell.
 //
-// MAC_DEV_BRIDGE_FULL_ACCESS_ACK in the environment still unlocks, unchanged —
 // but that is the operator's own process env, not a file anyone can revoke, so
 // it is deliberately not a kill-switch surface.
 // Foreground shell_exec children, so revocation can reclaim them.

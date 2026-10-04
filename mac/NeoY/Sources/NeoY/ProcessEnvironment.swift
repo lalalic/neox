@@ -6,6 +6,9 @@ enum NeoYProcessEnvironment {
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> [String: String] {
         var environment = base
+        for key in environment.keys where key.hasPrefix("MAC_DEV_BRIDGE_") {
+            environment.removeValue(forKey: key)
+        }
         var entries = (base["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin")
             .split(separator: ":", omittingEmptySubsequences: true)
             .map(String.init)

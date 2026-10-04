@@ -6,6 +6,7 @@ import Foundation
 import UserNotifications
 
 enum NeoYPermissionKind: String, Codable, CaseIterable, Sendable {
+    case fullDiskAccess = "full-disk-access"
     case accessibility
     case screenRecording = "screen-recording"
     case camera
@@ -18,6 +19,7 @@ enum NeoYPermissionKind: String, Codable, CaseIterable, Sendable {
 extension NeoYPermissionKind {
     var title: String {
         switch self {
+        case .fullDiskAccess: "Full Disk Access"
         case .accessibility: "Accessibility"
         case .screenRecording: "Screen Recording"
         case .camera: "Camera"
@@ -29,6 +31,7 @@ extension NeoYPermissionKind {
 
     var dependentFeatures: [String] {
         switch self {
+        case .fullDiskAccess: ["Core filesystem and shell access"]
         case .accessibility: ["Computer Use", "Demo semantic targeting"]
         case .screenRecording: ["Computer Use screenshots", "Demo recording"]
         case .camera: ["Capture Tour"]
@@ -58,6 +61,12 @@ enum NeoYPermissionService {
     static func snapshot() async -> [NeoYPermissionStatus] {
         let notificationState = await notificationPermissionState()
         return [
+            .init(
+                kind: .fullDiskAccess,
+                state: fullDiskAccessState(),
+                humanApprovalRequired: true,
+                guidance: "Grant Full Disk Access to NeoY only in System Settings > Privacy & Security > Full Disk Access. Do not grant Node, zsh, Codex, PM2, or individual folders separately."
+            ),
             .init(
                 kind: .accessibility,
                 state: AXIsProcessTrusted() ? .authorized : .denied,
@@ -101,6 +110,7 @@ enum NeoYPermissionService {
     static func open(_ kind: NeoYPermissionKind) -> Bool {
         let suffix: String
         switch kind {
+        case .fullDiskAccess: suffix = "Privacy_AllFiles"
         case .accessibility: suffix = "Privacy_Accessibility"
         case .screenRecording: suffix = "Privacy_ScreenCapture"
         case .camera: suffix = "Privacy_Camera"
@@ -121,6 +131,18 @@ enum NeoYPermissionService {
         case .restricted: .restricted
         case .notDetermined: .notDetermined
         @unknown default: .restricted
+        }
+    }
+
+    private static func fullDiskAccessState() -> NeoYPermissionState {
+        let tccDatabase = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/com.apple.TCC/TCC.db")
+        do {
+            let handle = try FileHandle(forReadingFrom: tccDatabase)
+            try handle.close()
+            return .authorized
+        } catch {
+            return .denied
         }
     }
 

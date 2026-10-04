@@ -6,6 +6,12 @@ enum NeoYBundledRuntime {
     static var coreEnvironment: [String: String] {
         [
             "NEO_CORE_FULL_ACCESS_ACK": "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS",
+            "NEO_CORE_DATA_DIR": NeoYPaths.supportDirectory.appendingPathComponent("core", isDirectory: true).path,
+            "NEO_CORE_LOG_DIR": FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library", isDirectory: true)
+                .appendingPathComponent("Logs", isDirectory: true)
+                .appendingPathComponent("NeoY", isDirectory: true)
+                .appendingPathComponent("Core", isDirectory: true).path,
             "NEOY_VERSION": NeoYCoreRuntime.version,
         ]
     }
