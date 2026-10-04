@@ -32,6 +32,29 @@ During review, verify those answers against the actual diff. A review is not
 complete if it only checks code correctness while ignoring a violated applicable
 NeoY design principle.
 
+### NeoY local deployment completion contract
+
+For any change under `mac/NeoY` that affects the native app, UI, bundled runtime,
+permissions, launch behavior, or MCP behavior, PR merge is **not** completion. The
+orchestrator owns the local deployment lifecycle and MUST, after the change is
+merged to `main`:
+
+1. Fast-forward the canonical local checkout to merged `origin/main`.
+2. Run `mac/NeoY/install-local.sh` from that canonical checkout.
+3. Let the transactional installer perform build, signing, backup, app replacement,
+   launchd restart, health verification, and automatic rollback if the candidate
+   fails. Do not bypass the installer with ad-hoc `killall`, direct app copying,
+   Xcode Run, or a different signing identity.
+4. Verify the installed NeoY is healthy after deployment, including MCP
+   connectivity and any task-relevant UI/runtime behavior.
+5. Treat rollback or failed post-deploy health verification as deployment failure;
+   the Job is not complete until the merged version is successfully deployed and
+   verified.
+
+The orchestrator should perform this flow itself for local NeoY work; the user
+should not need to separately ask to install or restart NeoY after a Job finishes.
+`/Applications/NeoY.app` remains the single macOS permission identity.
+
 ## Repo layout
 
 ```
