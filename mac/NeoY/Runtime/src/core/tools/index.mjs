@@ -6,6 +6,7 @@ import { handleCodex, CODEX_TOOLS } from "./codex.mjs";
 import { handleAudit, AUDIT_TOOLS } from "./audit.mjs";
 import { configurePty, handlePty, ptyReady, ptyStatus, teardownPty, PTY_TOOLS } from "./pty.mjs";
 import { commandFacade } from "./command-facade.mjs";
+import { XCHAT_LIFECYCLE_TOOLS, scheduleXChatLifecycle } from "./xchat.mjs";
 
 import { execFileSync, spawn } from "node:child_process";
 import crypto from "node:crypto";
@@ -689,6 +690,7 @@ const BASE_TOOLS = [
   ...PATCH_TOOLS,
   codexFacade.tool,
   ...AUDIT_TOOLS,
+  ...XCHAT_LIFECYCLE_TOOLS,
 ];
 
 function advertisedTools() {
@@ -902,6 +904,14 @@ async function dispatchTool(name, args) {
     case "codex": return codexFacade.execute(args, (tool, commandArgs) => handleCodex(tool, commandArgs, context));
     case "audit_tail": return handleAudit(name, args, context);
     case "terminal": return terminalFacade.execute(args, (tool, commandArgs) => handlePty(tool, commandArgs, context));
+    case "chatgpt": {
+      const result = scheduleXChatLifecycle(name, args);
+      const text = result?.content?.find?.((item) => item?.type === "text")?.text;
+      if (typeof text === "string") {
+        try { return JSON.parse(text); } catch {}
+      }
+      return result;
+    }
 
 
 
