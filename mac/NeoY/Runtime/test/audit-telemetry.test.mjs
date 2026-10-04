@@ -29,3 +29,10 @@ test('audit_tail filters tool quality telemetry', async () => {
   assert.match(result.text, /"tool":"chatgpt"/);
   assert.doesNotMatch(result.text, /"tool":"fs"/);
 });
+
+test('non-zero command exit is classified as command_failure', async () => {
+  const source = fs.readFileSync(new URL('../src/core/tools/index.mjs', import.meta.url), 'utf8');
+  assert.match(source, /const commandFailed = Number\.isInteger\(summary\?\.exitCode\) && summary\.exitCode !== 0;/);
+  assert.match(source, /commandFailed \? "command_failure" : "success"/);
+  assert.match(source, /commandFailed \? "command_failure" : "tool_call"/);
+});

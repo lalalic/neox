@@ -417,11 +417,12 @@ async function audit(tool, argsInput, summary = {}, error = null, meta = {}) {
   try {
     const args = auditSafeArguments(tool, argsInput);
     const raw = safeJson(args ?? {});
+    const commandFailed = Number.isInteger(summary?.exitCode) && summary.exitCode !== 0;
     const entry = {
       timestamp: nowIso(),
       pid: process.pid,
-      event: meta.event || (error ? "tool_failure" : "tool_call"),
-      category: meta.category || (error ? classifyToolFailure(error) : "success"),
+      event: meta.event || (error ? "tool_failure" : commandFailed ? "command_failure" : "tool_call"),
+      category: meta.category || (error ? classifyToolFailure(error) : commandFailed ? "command_failure" : "success"),
       stage: meta.stage || "handler",
       tool,
       command: typeof args?.command === "string" ? args.command : null,
