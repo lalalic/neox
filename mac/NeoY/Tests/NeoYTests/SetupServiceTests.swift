@@ -144,9 +144,10 @@ final class SetupServiceTests: XCTestCase {
 
     func testCanonicalCoreToolSetIsSmallAndStable() {
         XCTAssertEqual(NeoYCoreRuntime.toolNames, [
-            "setup", "cluster", "bridge_status", "shell", "fs", "apply_patch",
+            "setup", "cluster", "status", "shell", "fs", "apply_patch",
             "codex", "audit_tail", "terminal"
         ])
+        XCTAssertFalse(NeoYCoreRuntime.toolNames.contains("bridge_status"))
         XCTAssertFalse(NeoYCoreRuntime.toolNames.contains("shell_exec"))
         XCTAssertFalse(NeoYCoreRuntime.toolNames.contains("pty_start"))
     }
@@ -281,6 +282,7 @@ final class SetupServiceTests: XCTestCase {
 
     func testRemoteFeatureClassification() {
         XCTAssertTrue(NeoYRemoteFeature.mcpServices.matches(toolName: "events"))
+        XCTAssertTrue(NeoYRemoteFeature.terminal.matches(toolName: "status"))
         XCTAssertTrue(NeoYRemoteFeature.terminal.matches(toolName: "shell"))
         XCTAssertTrue(NeoYRemoteFeature.files.matches(toolName: "fs"))
         XCTAssertTrue(NeoYRemoteFeature.codex.matches(toolName: "codex"))

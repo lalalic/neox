@@ -678,8 +678,8 @@ const terminalFacade = commandFacade({
 
 const BASE_TOOLS = [
   {
-    name: "bridge_status",
-    title: "Bridge status",
+    name: "status",
+    title: "Neo status",
     description: "Inspect the host identity, runtime paths, permissions context, configured shell, audit log, and Codex executable. This is read-only.",
     inputSchema: { type: "object", additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -810,7 +810,7 @@ async function assertStillUnlocked(tool, args) {
   if (FULL_ACCESS_ACK_FROM_ENV === FULL_ACCESS_ACK) return;
   const state = await readUnlockLatch();
   if (state === "unreadable") return;
-  // Keep bridge_status honest: this field previously froze at the startup value
+  // Keep status honest: this field previously froze at the startup value
   // and would report `true` while the file was gone.
   const ok = state === "unlocked";
   fullAccessUnlocked = ok;
@@ -851,7 +851,7 @@ unlockRecheckTimer.unref();
 async function dispatchTool(name, args) {
   await assertStillUnlocked(name, args);
   switch (name) {
-    case "bridge_status": {
+    case "status": {
       const status = {
         bridgeVersion: CORE_VERSION,
         pid: process.pid,

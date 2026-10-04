@@ -45,17 +45,17 @@ const XCHAT_COMMAND_TOOLS = [
 ];
 
 const XCHAT_COMMAND_MAP = new Map([
-  ["turn.new", XCHAT_COMMAND_TOOLS.find((tool) => tool.name === "xchat.turn.new")],
-  ["thread.new", XCHAT_COMMAND_TOOLS.find((tool) => tool.name === "xchat.thread.new")],
+  ["turn", XCHAT_COMMAND_TOOLS.find((tool) => tool.name === "xchat.turn.new")],
+  ["thread", XCHAT_COMMAND_TOOLS.find((tool) => tool.name === "xchat.thread.new")],
 ]);
 
 export const XCHAT_LIFECYCLE_TOOLS = [{
-  name: "xchat",
-  description: "Transfer control to a new turn or thread. Use command='help' to discover exact subcommand schemas.",
+  name: "chatgpt",
+  description: "Transfer control to a ChatGPT turn or thread. Use command='help' to discover exact subcommand schemas.",
   inputSchema: {
     type: "object",
     properties: {
-      command: { type: "string", description: "turn.new, thread.new, or help" },
+      command: { type: "string", description: "turn, thread, or help" },
       args: { type: "object", description: "Subcommand arguments. Use help for the exact schema." },
     },
     required: ["command"],
@@ -64,7 +64,7 @@ export const XCHAT_LIFECYCLE_TOOLS = [{
 }];
 
 export function isXChatLifecycleTool(name) {
-  return name === "xchat";
+  return name === "chatgpt";
 }
 
 function requireText(args, key) {
@@ -98,7 +98,7 @@ function resultText(payload) {
 }
 
 export function scheduleXChatLifecycle(name, input, options = {}) {
-  if (!isXChatLifecycleTool(name)) throw new Error(`unknown XChat lifecycle tool: ${name}`);
+  if (!isXChatLifecycleTool(name)) throw new Error(`unknown ChatGPT lifecycle tool: ${name}`);
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("arguments must be an object");
   const command = typeof input.command === "string" ? input.command.trim() : "";
   const args = input.args === undefined ? {} : input.args;
@@ -107,13 +107,13 @@ export function scheduleXChatLifecycle(name, input, options = {}) {
     const named = typeof args.command === "string" ? args.command.trim() : "";
     if (named) {
       const tool = XCHAT_COMMAND_MAP.get(named);
-      if (!tool) throw new Error(`Unknown xchat command '${named}'`);
+      if (!tool) throw new Error(`Unknown chatgpt command '${named}'`);
       return resultText({ command: named, description: tool.description || "", schema: tool.inputSchema });
     }
     return resultText({ commands: [...XCHAT_COMMAND_MAP].map(([subcommand, tool]) => ({ command: subcommand, description: tool.description || "" })) });
   }
   const tool = XCHAT_COMMAND_MAP.get(command);
-  if (!tool) throw new Error(`Unknown xchat command '${command}'`);
+  if (!tool) throw new Error(`Unknown chatgpt command '${command}'`);
   const internalName = tool.name;
   const parsed = validate(args, internalName);
   const transferId = options.transferId || crypto.randomUUID();
