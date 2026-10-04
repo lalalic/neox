@@ -60,6 +60,10 @@ NEO_RUNTIME_SPEC="$RUNTIME_TARBALL" "$DEST/Contents/Resources/bootstrap-runtime.
 rm -rf "$RUNTIME_TARBALL_DIR"
 
 RUNTIME="$DEST/Contents/Resources/runtime-control.sh"
+# Legacy developer override could pin the public gateway to an obsolete source
+# checkout even after the app/runtime was upgraded. Production NeoY always uses
+# the installed @lalalic/neo runtime.
+rm -f "$HOME/Library/Application Support/NeoY/runtime-source"
 mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.neoy"
 
 # NeoY itself is always supervised by macOS launchd. PM2 is reserved for
