@@ -100,7 +100,7 @@ computer(command,args)  native macOS Computer Use
 demo(command,args)      demo recording/annotation
 phone(command,args)     paired NeoX phone/media
 tour(command,args)      Capture Tours
-xchat(command,args)     Browser Workspace lifecycle transfer
+chatgpt(command,args)     Browser Workspace lifecycle transfer
 ```
 
 The migrated Core handlers preserve their typed subcommand schemas behind the compact facades; NeoY does not

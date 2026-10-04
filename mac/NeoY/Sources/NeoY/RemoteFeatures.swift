@@ -32,7 +32,7 @@ enum NeoYRemoteFeature: String, CaseIterable, Identifiable, Codable, Sendable {
     func matches(toolName: String) -> Bool {
         switch self {
         case .setup: toolName == "setup"
-        case .terminal: toolName == "bridge_status" || toolName == "audit_tail" || toolName == "shell" || toolName == "terminal"
+        case .terminal: toolName == "status" || toolName == "audit_tail" || toolName == "shell" || toolName == "terminal"
         case .files: toolName == "fs" || toolName == "apply_patch"
         case .codex: toolName == "codex"
         case .nodes: toolName == "cluster"
