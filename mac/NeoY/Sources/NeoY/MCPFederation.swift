@@ -544,9 +544,17 @@ final class NeoYMCPFederation {
             }
             let descriptor = federatedCommandFacadeDescriptor(provider: configuration.name)
             let facadeTools = rewritten.filter { !isAppOnlyTool($0.descriptor) }
+            let rewrittenInvoke: @Sendable (String, JSONValue) async throws -> String = { name, arguments in
+                try rewriteFederatedToolResult(
+                    try await invoke(name, arguments),
+                    provider: configuration.name
+                )
+            }
             server.registerFederatedTool(descriptor: descriptor, name: facadeName, protected: true,
                                          provider: configuration.name) { arguments in
-                try await dispatchFederatedCommandFacade(provider: configuration.name, tools: facadeTools, arguments: arguments, invoke: invoke)
+                try await dispatchFederatedCommandFacade(
+                    provider: configuration.name, tools: facadeTools, arguments: arguments, invoke: rewrittenInvoke
+                )
             }
             names.append(facadeName)
 
@@ -557,7 +565,7 @@ final class NeoYMCPFederation {
                 let directName = directFederatedToolName(provider: configuration.name, child: tool.name)
                 server.registerFederatedTool(descriptor: tool.descriptor, name: directName, protected: true,
                                              provider: configuration.name) { arguments in
-                    try await invoke(tool.name, arguments)
+                    try await rewrittenInvoke(tool.name, arguments)
                 }
                 names.append(directName)
             }
@@ -719,6 +727,35 @@ private func isAppOnlyTool(_ descriptor: JSONValue) -> Bool {
           case .object(let ui)? = meta["ui"],
           case .array(let visibility)? = ui["visibility"] else { return false }
     return visibility.contains { $0 == .string("app") }
+}
+
+private func rewriteFederatedToolResult(_ encoded: String, provider: String) throws -> String {
+    guard encoded.hasPrefix(federatedResultPrefix),
+          let data = Data(base64Encoded: String(encoded.dropFirst(federatedResultPrefix.count))),
+          var result = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        throw NeoYRuntimeControlError.federation("remote tool result is invalid")
+    }
+
+    if var meta = result["_meta"] as? [String: Any] {
+        if var ui = meta["ui"] as? [String: Any], let uri = ui["resourceUri"] as? String {
+            ui["resourceUri"] = proxyFederatedResourceURI(provider: provider, original: uri)
+            meta["ui"] = ui
+        }
+        if let uri = meta["ui/resourceUri"] as? String {
+            meta["ui/resourceUri"] = proxyFederatedResourceURI(provider: provider, original: uri)
+        }
+        if let uri = meta["openai/outputTemplate"] as? String {
+            meta["openai/outputTemplate"] = proxyFederatedResourceURI(provider: provider, original: uri)
+        }
+        result["_meta"] = meta
+    }
+
+    if var structuredContent = result["structuredContent"] as? [String: Any],
+       let uri = structuredContent["resourceUri"] as? String {
+        structuredContent["resourceUri"] = proxyFederatedResourceURI(provider: provider, original: uri)
+        result["structuredContent"] = structuredContent
+    }
+    return try encodeFederatedResult(result)
 }
 
 private func rewriteFederatedResourceResult(_ encoded: String, provider: String) throws -> String {
