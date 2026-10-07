@@ -8,6 +8,7 @@ final class NativeUISmokeTests: XCTestCase {
     func testNativeSmokeDescriptorResourceAndResultShareOneURI() async throws {
         let server = MCPServer(name: "test", port: 0)
         NativeUISmoke.register(on: server)
+        XCTAssertEqual(NativeUISmoke.resourceURI, "ui://widget/neoy-smoke-v2.html")
 
         let descriptorData = Data(server.toolDescriptorsJSON.utf8)
         let descriptors = try XCTUnwrap(try JSONSerialization.jsonObject(with: descriptorData) as? [[String: Any]])
@@ -25,6 +26,19 @@ final class NativeUISmokeTests: XCTestCase {
         XCTAssertEqual(structured["resourceUri"] as? String, NativeUISmoke.resourceURI)
         let resultMeta = try XCTUnwrap(resultObject["_meta"] as? [String: Any])
         XCTAssertEqual((resultMeta["ui"] as? [String: Any])?["resourceUri"] as? String, NativeUISmoke.resourceURI)
+    }
+
+    func testNativeSmokeResourceCanBeExplicitlyAllowedRemotelyWithoutOpeningWidgetProvider() {
+        XCTAssertTrue(MCPServer.remoteResourceAllowed(
+            uri: NativeUISmoke.resourceURI,
+            explicitURIs: [NativeUISmoke.resourceURI],
+            providers: []
+        ))
+        XCTAssertFalse(MCPServer.remoteResourceAllowed(
+            uri: "ui://widget/other.html",
+            explicitURIs: [NativeUISmoke.resourceURI],
+            providers: []
+        ))
     }
 
     private func decodeResult(_ encoded: String) throws -> [String: Any] {

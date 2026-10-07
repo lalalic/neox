@@ -62,6 +62,7 @@ public final class MCPServer {
     private var oauthService: NeoYOAuthService?
     private var remoteAllowedTools: Set<String> = []
     private var remoteAllowedProviders: Set<String> = []
+    private var remoteAllowedResourceURIs: Set<String> = []
     private var httpRoutes: [String: HTTPRouteHandler] = [:]
     // Dedicated queue for all network I/O — avoids blocking on MainActor
     private let httpQueue = DispatchQueue(label: "mcp-server-http", qos: .userInitiated)
@@ -80,6 +81,7 @@ public final class MCPServer {
     nonisolated(unsafe) private var _snapshotOAuthService: NeoYOAuthService?
     nonisolated(unsafe) private var _snapshotRemoteAllowedTools: Set<String> = []
     nonisolated(unsafe) private var _snapshotRemoteAllowedProviders: Set<String> = []
+    nonisolated(unsafe) private var _snapshotRemoteAllowedResourceURIs: Set<String> = []
     nonisolated(unsafe) private var _snapshotHTTPRoutes: [String: HTTPRouteHandler] = [:]
 
     /// Whether the server is currently listening.
@@ -205,6 +207,11 @@ public final class MCPServer {
         refreshSnapshots()
     }
 
+    func setRemoteAllowedResourceURIs(_ uris: Set<String>) {
+        remoteAllowedResourceURIs = uris
+        refreshSnapshots()
+    }
+
     private func refreshSnapshots() {
         _snapshotName = name
         _snapshotVersion = version
@@ -219,6 +226,7 @@ public final class MCPServer {
         _snapshotOAuthService = oauthService
         _snapshotRemoteAllowedTools = remoteAllowedTools
         _snapshotRemoteAllowedProviders = remoteAllowedProviders
+        _snapshotRemoteAllowedResourceURIs = remoteAllowedResourceURIs
         _snapshotHTTPRoutes = httpRoutes
     }
 
@@ -274,6 +282,7 @@ public final class MCPServer {
         _snapshotOAuthService = oauthService
         _snapshotRemoteAllowedTools = remoteAllowedTools
         _snapshotRemoteAllowedProviders = remoteAllowedProviders
+        _snapshotRemoteAllowedResourceURIs = remoteAllowedResourceURIs
         _snapshotHTTPRoutes = httpRoutes
 
         let parameters = NWParameters.tcp
@@ -336,6 +345,13 @@ public final class MCPServer {
             return rest.split(separator: "/", maxSplits: 1).first.map(String.init)
         }
         return nil
+    }
+
+    nonisolated static func remoteResourceAllowed(uri: String,
+                                                  explicitURIs: Set<String>,
+                                                  providers: Set<String>) -> Bool {
+        if explicitURIs.contains(uri) { return true }
+        return remoteProvider(forResourceURI: uri).map { providers.contains($0) } ?? false
     }
 
     // MARK: - HTTP Connection Handling (runs on httpQueue, NOT MainActor)
@@ -596,7 +612,9 @@ public final class MCPServer {
             } else if authorized {
                 visibleResources = _snapshotResources.filter { resource in
                     guard let uri = resource["uri"] as? String else { return false }
-                    return Self.remoteProvider(forResourceURI: uri).map { _snapshotRemoteAllowedProviders.contains($0) } ?? false
+                    return Self.remoteResourceAllowed(uri: uri,
+                                                      explicitURIs: _snapshotRemoteAllowedResourceURIs,
+                                                      providers: _snapshotRemoteAllowedProviders)
                 }
             } else {
                 visibleResources = []
@@ -613,8 +631,9 @@ public final class MCPServer {
                     sendJSONRPCError(connection: connection, id: id, code: -32001, message: "Remote MCP requires a valid NeoY token")
                     return
                 }
-                let providerAllowed = Self.remoteProvider(forResourceURI: uri).map { _snapshotRemoteAllowedProviders.contains($0) } ?? false
-                guard providerAllowed else {
+                guard Self.remoteResourceAllowed(uri: uri,
+                                                 explicitURIs: _snapshotRemoteAllowedResourceURIs,
+                                                 providers: _snapshotRemoteAllowedProviders) else {
                     sendJSONRPCError(connection: connection, id: id, code: -32003, message: "MCP resource is not enabled for remote access")
                     return
                 }
