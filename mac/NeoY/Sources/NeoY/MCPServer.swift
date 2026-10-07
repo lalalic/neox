@@ -221,6 +221,23 @@ public final class MCPServer {
         Array(toolHandlers.keys).sorted()
     }
 
+    /// Tool descriptors for in-process federation tests and diagnostics.
+    /// External MCP clients use tools/list instead.
+    var toolDescriptorsJSON: String {
+        guard JSONSerialization.isValidJSONObject(mcpTools),
+              let data = try? JSONSerialization.data(withJSONObject: mcpTools),
+              let value = String(data: data, encoding: .utf8) else { return "[]" }
+        return value
+    }
+
+    @MainActor
+    func invokeRegisteredTool(_ name: String, arguments: JSONValue) async throws -> String {
+        guard let handler = toolHandlers[name] else {
+            throw NeoYRuntimeControlError.federation("Unknown registered tool '\(name)'")
+        }
+        return try await handler(arguments)
+    }
+
     public var resourceURIs: [String] {
         Array(resourceHandlers.keys).sorted()
     }

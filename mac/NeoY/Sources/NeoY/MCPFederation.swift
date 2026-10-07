@@ -547,6 +547,17 @@ final class NeoYMCPFederation {
                 try await dispatchFederatedCommandFacade(provider: configuration.name, tools: rewritten, arguments: arguments, invoke: invoke)
             }
             names.append(facadeName)
+
+            // MCP Apps need the child tool's descriptor metadata at the public
+            // boundary so the host can discover and render its resource. Keep
+            // ordinary commands behind the compact facade.
+            for tool in rewritten where hasMCPAppUIMetadata(tool.descriptor) {
+                let directName = directFederatedToolName(provider: configuration.name, child: tool.name)
+                server.registerFederatedTool(descriptor: tool.descriptor, name: directName, protected: true) { arguments in
+                    try await invoke(tool.name, arguments)
+                }
+                names.append(directName)
+            }
         }
         exposedByServer[configuration.name] = names
         resourcesByServer[configuration.name] = resourceURIs
@@ -675,6 +686,22 @@ private func rewriteToolResourceMetadata(_ descriptor: JSONValue, provider: Stri
     }
     object["_meta"] = .object(meta)
     return .object(object)
+}
+
+private func directFederatedToolName(provider: String, child: String) -> String {
+    "mcp.\(provider).\(child)"
+}
+
+private func hasMCPAppUIMetadata(_ descriptor: JSONValue) -> Bool {
+    guard case .object(let object) = descriptor,
+          case .object(let meta)? = object["_meta"] else { return false }
+    if case .object(let ui)? = meta["ui"], case .string = ui["resourceUri"] {
+        return true
+    }
+    if case .string = meta["openai/outputTemplate"] {
+        return true
+    }
+    return false
 }
 
 private func rewriteFederatedResourceResult(_ encoded: String, provider: String) throws -> String {
