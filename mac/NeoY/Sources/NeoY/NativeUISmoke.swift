@@ -4,11 +4,12 @@ import Foundation
 /// from NeoY's federation layer. Remove after the host-side issue is resolved.
 enum NativeUISmoke {
     static let toolName = "neoy.ui_smoke"
-    static let resourceURI = "ui://neoy/smoke-v1.html"
+    static let resourceURI = "ui://widget/neoy-smoke-v2.html"
     static let mimeType = "text/html;profile=mcp-app"
 
     @MainActor
     static func register(on server: MCPServer) {
+        server.setRemoteAllowedResourceURIs([resourceURI])
         let resourceMeta: JSONValue = .object([
             "ui": .object([
                 "prefersBorder": .bool(true),
