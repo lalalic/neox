@@ -53,6 +53,7 @@ public final class MCPServer {
 
     private var listener: NWListener?
     private var toolHandlers: [String: ToolHandler] = [:]
+    private var federatedToolProviders: [String: String] = [:]
     private var mcpTools: [[String: Any]] = []
     private var protectedToolNames: Set<String> = []
     private var mcpResources: [[String: Any]] = []
@@ -70,6 +71,7 @@ public final class MCPServer {
     nonisolated(unsafe) private var _snapshotVersion: String = ""
     nonisolated(unsafe) private var _snapshotTools: [[String: Any]] = []
     nonisolated(unsafe) private var _snapshotHandlers: [String: ToolHandler] = [:]
+    nonisolated(unsafe) private var _snapshotFederatedToolProviders: [String: String] = [:]
     nonisolated(unsafe) private var _snapshotToolNames: [String] = []
     nonisolated(unsafe) private var _snapshotProtectedToolNames: Set<String> = []
     nonisolated(unsafe) private var _snapshotResources: [[String: Any]] = []
@@ -134,10 +136,12 @@ public final class MCPServer {
     }
 
     /// Register a federated MCP tool while preserving its full descriptor metadata.
-    public func registerFederatedTool(descriptor: JSONValue, name: String, protected: Bool = true, handler: @escaping ToolHandler) {
+    public func registerFederatedTool(descriptor: JSONValue, name: String, protected: Bool = true,
+                                      provider: String? = nil, handler: @escaping ToolHandler) {
         guard case .object(var object) = descriptor else { return }
         object["name"] = .string(name)
         toolHandlers[name] = handler
+        federatedToolProviders[name] = provider
         mcpTools.removeAll { ($0["name"] as? String) == name }
         mcpTools.append(object.mapValues(Self.jsonValueToAny))
         if protected { protectedToolNames.insert(name) }
@@ -175,6 +179,7 @@ public final class MCPServer {
     /// Unregister a tool by name.
     public func unregister(name: String) {
         toolHandlers.removeValue(forKey: name)
+        federatedToolProviders.removeValue(forKey: name)
         mcpTools.removeAll { ($0["name"] as? String) == name }
         protectedToolNames.remove(name)
         refreshSnapshots()
@@ -205,6 +210,7 @@ public final class MCPServer {
         _snapshotVersion = version
         _snapshotTools = mcpTools
         _snapshotHandlers = toolHandlers
+        _snapshotFederatedToolProviders = federatedToolProviders
         _snapshotToolNames = toolNames
         _snapshotProtectedToolNames = protectedToolNames
         _snapshotResources = mcpResources
@@ -259,6 +265,7 @@ public final class MCPServer {
         _snapshotVersion = version
         _snapshotTools = mcpTools
         _snapshotHandlers = toolHandlers
+        _snapshotFederatedToolProviders = federatedToolProviders
         _snapshotToolNames = toolNames
         _snapshotProtectedToolNames = protectedToolNames
         _snapshotResources = mcpResources
@@ -312,7 +319,9 @@ public final class MCPServer {
         isRunning = false
     }
 
-    nonisolated private static func remoteProvider(forToolName name: String) -> String? {
+    nonisolated static func remoteProvider(forToolName name: String,
+                                           ownership: [String: String]) -> String? {
+        if let owner = ownership[name] { return owner }
         if name.hasPrefix("mcp.") {
             let parts = name.split(separator: ".", maxSplits: 2).map(String.init)
             return parts.count >= 2 ? parts[1] : nil
@@ -636,7 +645,7 @@ public final class MCPServer {
                 visibleTools = _snapshotTools.filter {
                     guard let name = $0["name"] as? String else { return false }
                     return _snapshotRemoteAllowedTools.contains(name)
-                        || Self.remoteProvider(forToolName: name).map { _snapshotRemoteAllowedProviders.contains($0) } == true
+                        || Self.remoteProvider(forToolName: name, ownership: _snapshotFederatedToolProviders).map { _snapshotRemoteAllowedProviders.contains($0) } == true
                 }
             } else {
                 visibleTools = []
@@ -655,7 +664,7 @@ public final class MCPServer {
                     return
                 }
                 let toolAllowed = _snapshotRemoteAllowedTools.contains(toolName)
-                let providerAllowed = Self.remoteProvider(forToolName: toolName).map { _snapshotRemoteAllowedProviders.contains($0) } ?? false
+                let providerAllowed = Self.remoteProvider(forToolName: toolName, ownership: _snapshotFederatedToolProviders).map { _snapshotRemoteAllowedProviders.contains($0) } ?? false
                 guard toolAllowed || providerAllowed else {
                     sendJSONRPCError(connection: connection, id: id, code: -32003,
                         message: "Tool '\(toolName)' is not enabled for remote access")

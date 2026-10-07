@@ -103,13 +103,28 @@ final class MCPFederationTests: XCTestCase {
         XCTAssertEqual(statuses.first?.exposedTools, ["events"])
     }
 
+    func testDirectFederatedToolAuthorizationUsesRegisteredProviderOwnership() {
+        XCTAssertEqual(
+            MCPServer.remoteProvider(
+                forToolName: "markcut.preview",
+                ownership: ["markcut.preview": "markcut"]
+            ),
+            "markcut"
+        )
+        XCTAssertNil(MCPServer.remoteProvider(forToolName: "markcut.preview", ownership: [:]))
+        XCTAssertEqual(
+            MCPServer.remoteProvider(forToolName: "mcp.events.preview", ownership: [:]),
+            "events"
+        )
+    }
+
     func testExternalProviderExposesUIChildWithRewrittenMetadataAndRoutesCalls() async throws {
         let fixture = try Self.makeFixture(requireCoreAuthorization: false, includeUIMetadata: true)
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let server = await MainActor.run { MCPServer(name: "test", port: 0) }
         let federation = await MainActor.run { NeoYMCPFederation(server: server) }
         let configuration = NeoYMCPServerConfiguration(
-            name: "events",
+            name: "markcut",
             url: Self.stdioURL(node: fixture.node, script: fixture.server.path),
             isEnabled: true
         )
@@ -117,21 +132,33 @@ final class MCPFederationTests: XCTestCase {
         defer { Task { @MainActor in federation.stop() } }
 
         let names = await MainActor.run { server.toolNames }
-        XCTAssertEqual(names, ["events", "mcp.events.action", "mcp.events.preview"])
+        XCTAssertEqual(names, ["markcut.output", "markcut.preview", "markcut.preview.submit", "mcp.markcut"])
         let descriptorData = await MainActor.run { Data(server.toolDescriptorsJSON.utf8) }
         let descriptors = try XCTUnwrap(try JSONSerialization.jsonObject(with: descriptorData) as? [[String: Any]])
-        let preview = try XCTUnwrap(descriptors.first { $0["name"] as? String == "mcp.events.preview" })
+        let preview = try XCTUnwrap(descriptors.first { $0["name"] as? String == "markcut.preview" })
         let previewMeta = try XCTUnwrap(preview["_meta"] as? [String: Any])
         let previewUI = try XCTUnwrap(previewMeta["ui"] as? [String: Any])
-        XCTAssertTrue((previewUI["resourceUri"] as? String)?.hasPrefix("ui://events/") == true)
+        XCTAssertTrue((previewUI["resourceUri"] as? String)?.hasPrefix("ui://markcut/") == true)
 
-        let action = try XCTUnwrap(descriptors.first { $0["name"] as? String == "mcp.events.action" })
+        let action = try XCTUnwrap(descriptors.first { $0["name"] as? String == "markcut.preview.submit" })
         let actionMeta = try XCTUnwrap(action["_meta"] as? [String: Any])
         let actionUI = try XCTUnwrap(actionMeta["ui"] as? [String: Any])
         XCTAssertEqual(actionUI["visibility"] as? [String], ["app"])
+        XCTAssertTrue((actionMeta["ui/resourceUri"] as? String)?.hasPrefix("ui://markcut/") == true)
 
-        let result = try await server.invokeRegisteredTool("mcp.events.preview", arguments: .object([:]))
+        let output = try XCTUnwrap(descriptors.first { $0["name"] as? String == "markcut.output" })
+        let outputMeta = try XCTUnwrap(output["_meta"] as? [String: Any])
+        XCTAssertTrue((outputMeta["openai/outputTemplate"] as? String)?.hasPrefix("ui://markcut/") == true)
+
+        let result = try await server.invokeRegisteredTool("markcut.preview", arguments: .object([:]))
         XCTAssertTrue(try Self.text(result).contains("preview-called"))
+
+        let facadeHelp = try await server.invokeRegisteredTool("mcp.markcut", arguments: .object([
+            "command": .string("help")
+        ]))
+        XCTAssertFalse(facadeHelp.contains("preview.submit"))
+        let submit = try await server.invokeRegisteredTool("markcut.preview.submit", arguments: .object([:]))
+        XCTAssertTrue(try Self.text(submit).contains("submit-called"))
     }
 
     func testExternalProviderRemovalUnregistersUIChildToolsAndResources() async throws {
@@ -140,7 +167,7 @@ final class MCPFederationTests: XCTestCase {
         let server = await MainActor.run { MCPServer(name: "test", port: 0) }
         let federation = await MainActor.run { NeoYMCPFederation(server: server) }
         let configuration = NeoYMCPServerConfiguration(
-            name: "events",
+            name: "markcut",
             url: Self.stdioURL(node: fixture.node, script: fixture.server.path),
             isEnabled: true
         )
@@ -202,7 +229,8 @@ final class MCPFederationTests: XCTestCase {
           name, description: name, inputSchema: { type: "object", properties: {} }
         })).concat(includeUIMetadata ? [
           { name: "preview", description: "Preview", inputSchema: { type: "object", properties: {} }, _meta: { ui: { resourceUri: "ui://markcut/preview.html" } } },
-          { name: "action", description: "Action", inputSchema: { type: "object", properties: {} }, _meta: { ui: { resourceUri: "ui://markcut/action.html", visibility: ["app"] } } }
+          { name: "markcut.preview.submit", description: "Submit", inputSchema: { type: "object", properties: {} }, _meta: { "ui/resourceUri": "ui://markcut/submit.html", ui: { visibility: ["app"] } } },
+          { name: "output", description: "Output", inputSchema: { type: "object", properties: {} }, _meta: { "openai/outputTemplate": "ui://markcut/output.html" } }
         ] : []);
         const result = text => ({ content: [{ type: "text", text }] });
         const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -228,6 +256,7 @@ final class MCPFederationTests: XCTestCase {
               value = result(JSON.stringify({ exit_code: 0 }));
             }
             if (name === "preview") value = result("preview-called");
+            if (name === "markcut.preview.submit") value = result("submit-called");
           }
           process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: value }) + "\n");
         });

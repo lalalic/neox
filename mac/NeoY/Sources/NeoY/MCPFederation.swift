@@ -543,8 +543,10 @@ final class NeoYMCPFederation {
                 NeoYRemoteTool(name: tool.name, descriptor: rewriteToolResourceMetadata(tool.descriptor, provider: configuration.name))
             }
             let descriptor = federatedCommandFacadeDescriptor(provider: configuration.name)
-            server.registerFederatedTool(descriptor: descriptor, name: facadeName, protected: true) { arguments in
-                try await dispatchFederatedCommandFacade(provider: configuration.name, tools: rewritten, arguments: arguments, invoke: invoke)
+            let facadeTools = rewritten.filter { !isAppOnlyTool($0.descriptor) }
+            server.registerFederatedTool(descriptor: descriptor, name: facadeName, protected: true,
+                                         provider: configuration.name) { arguments in
+                try await dispatchFederatedCommandFacade(provider: configuration.name, tools: facadeTools, arguments: arguments, invoke: invoke)
             }
             names.append(facadeName)
 
@@ -553,7 +555,8 @@ final class NeoYMCPFederation {
             // ordinary commands behind the compact facade.
             for tool in rewritten where hasMCPAppUIMetadata(tool.descriptor) {
                 let directName = directFederatedToolName(provider: configuration.name, child: tool.name)
-                server.registerFederatedTool(descriptor: tool.descriptor, name: directName, protected: true) { arguments in
+                server.registerFederatedTool(descriptor: tool.descriptor, name: directName, protected: true,
+                                             provider: configuration.name) { arguments in
                     try await invoke(tool.name, arguments)
                 }
                 names.append(directName)
@@ -681,6 +684,9 @@ private func rewriteToolResourceMetadata(_ descriptor: JSONValue, provider: Stri
         ui["resourceUri"] = .string(proxyFederatedResourceURI(provider: provider, original: uri))
         meta["ui"] = .object(ui)
     }
+    if case .string(let uri)? = meta["ui/resourceUri"] {
+        meta["ui/resourceUri"] = .string(proxyFederatedResourceURI(provider: provider, original: uri))
+    }
     if case .string(let uri)? = meta["openai/outputTemplate"] {
         meta["openai/outputTemplate"] = .string(proxyFederatedResourceURI(provider: provider, original: uri))
     }
@@ -689,7 +695,7 @@ private func rewriteToolResourceMetadata(_ descriptor: JSONValue, provider: Stri
 }
 
 private func directFederatedToolName(provider: String, child: String) -> String {
-    "mcp.\(provider).\(child)"
+    child.hasPrefix("\(provider).") ? child : "\(provider).\(child)"
 }
 
 private func hasMCPAppUIMetadata(_ descriptor: JSONValue) -> Bool {
@@ -698,10 +704,21 @@ private func hasMCPAppUIMetadata(_ descriptor: JSONValue) -> Bool {
     if case .object(let ui)? = meta["ui"], case .string = ui["resourceUri"] {
         return true
     }
+    if case .string = meta["ui/resourceUri"] {
+        return true
+    }
     if case .string = meta["openai/outputTemplate"] {
         return true
     }
     return false
+}
+
+private func isAppOnlyTool(_ descriptor: JSONValue) -> Bool {
+    guard case .object(let object) = descriptor,
+          case .object(let meta)? = object["_meta"],
+          case .object(let ui)? = meta["ui"],
+          case .array(let visibility)? = ui["visibility"] else { return false }
+    return visibility.contains { $0 == .string("app") }
 }
 
 private func rewriteFederatedResourceResult(_ encoded: String, provider: String) throws -> String {
