@@ -39,6 +39,24 @@ public typealias MCPResourceHandler = @Sendable (String) async throws -> String
 @MainActor
 public final class MCPServer {
 
+    nonisolated static let mcpAppExtensionID = "io.modelcontextprotocol/ui"
+    nonisolated static let mcpAppMimeType = "text/html;profile=mcp-app"
+
+    nonisolated static var advertisedCapabilities: JSONValue {
+        .object([
+            "tools": .object(["listChanged": .bool(false)]),
+            "resources": .object([
+                "listChanged": .bool(false),
+                "subscribe": .bool(false),
+            ]),
+            "extensions": .object([
+                mcpAppExtensionID: .object([
+                    "mimeTypes": .array([.string(mcpAppMimeType)]),
+                ]),
+            ]),
+        ])
+    }
+
     /// Server identity shown to MCP clients.
     public let name: String
 
@@ -597,10 +615,7 @@ public final class MCPServer {
         case "initialize":
             let result: [String: Any] = [
                 "protocolVersion": "2025-03-26",
-                "capabilities": [
-                    "tools": ["listChanged": false],
-                    "resources": ["listChanged": false, "subscribe": false],
-                ],
+                "capabilities": Self.jsonValueToAny(Self.advertisedCapabilities),
                 "serverInfo": ["name": _snapshotName, "version": _snapshotVersion]
             ]
             sendJSONRPCResult(connection: connection, id: id, result: result)
