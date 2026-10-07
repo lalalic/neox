@@ -28,6 +28,23 @@ final class NativeUISmokeTests: XCTestCase {
         XCTAssertEqual((resultMeta["ui"] as? [String: Any])?["resourceUri"] as? String, NativeUISmoke.resourceURI)
     }
 
+    func testServerAdvertisesMCPAppsExtension() throws {
+        guard case .object(let capabilities) = MCPServer.advertisedCapabilities,
+              case .object(let extensions)? = capabilities["extensions"],
+              case .object(let ui)? = extensions[MCPServer.mcpAppExtensionID],
+              case .array(let mimeTypes)? = ui["mimeTypes"] else {
+            return XCTFail("MCP Apps extension capability missing")
+        }
+        XCTAssertEqual(mimeTypes, [.string(NativeUISmoke.mimeType)])
+    }
+
+    func testNativeSmokeHTMLPerformsMCPAppsViewHandshake() {
+        XCTAssertTrue(NativeUISmoke.html.contains("ui/initialize"))
+        XCTAssertTrue(NativeUISmoke.html.contains("ui/notifications/initialized"))
+        XCTAssertTrue(NativeUISmoke.html.contains("appInfo"))
+        XCTAssertTrue(NativeUISmoke.html.contains("appCapabilities"))
+    }
+
     func testNativeSmokeResourceCanBeExplicitlyAllowedRemotelyWithoutOpeningWidgetProvider() {
         XCTAssertTrue(MCPServer.remoteResourceAllowed(
             uri: NativeUISmoke.resourceURI,
