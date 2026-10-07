@@ -164,6 +164,9 @@ final class MCPFederationTests: XCTestCase {
         }
         let submit = try await server.invokeRegisteredTool("markcut.preview.submit", arguments: .object([:]))
         XCTAssertTrue(try Self.text(submit).contains("submit-called"))
+        await XCTAssertThrowsErrorAsync { _ = try await server.invokeRegisteredTool("mcp.markcut", arguments: .object([
+            "command": .string("preview.submit")
+        ])) }
     }
 
     func testExternalProviderRemovalUnregistersUIChildToolsAndResources() async throws {
