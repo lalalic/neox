@@ -45,6 +45,15 @@ final class NativeUISmokeTests: XCTestCase {
         XCTAssertTrue(NativeUISmoke.html.contains("appCapabilities"))
     }
 
+    func testNativeSmokeResourcesReturnPrivateNoCacheHints() throws {
+        for uri in [NativeUISmoke.resourceURI, NativeUISmoke.legacyResourceURI] {
+            let result = try NativeUISmoke.resourceResult(uri: uri)
+            let object = try decodeResult(result)
+            XCTAssertEqual(object["ttlMs"] as? Int, 0)
+            XCTAssertEqual(object["cacheScope"] as? String, "private")
+        }
+    }
+
     func testNativeSmokeResourceCanBeExplicitlyAllowedRemotelyWithoutOpeningWidgetProvider() {
         XCTAssertTrue(MCPServer.remoteResourceAllowed(
             uri: NativeUISmoke.resourceURI,
