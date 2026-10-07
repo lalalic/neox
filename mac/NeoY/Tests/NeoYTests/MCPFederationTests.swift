@@ -144,7 +144,7 @@ final class MCPFederationTests: XCTestCase {
         let actionMeta = try XCTUnwrap(action["_meta"] as? [String: Any])
         let actionUI = try XCTUnwrap(actionMeta["ui"] as? [String: Any])
         XCTAssertEqual(actionUI["visibility"] as? [String], ["app"])
-        XCTAssertTrue((actionMeta["ui/resourceUri"] as? String)?.hasPrefix("ui://markcut/") == true)
+        XCTAssertNil(actionMeta["ui/resourceUri"])
 
         let output = try XCTUnwrap(descriptors.first { $0["name"] as? String == "markcut.output" })
         let outputMeta = try XCTUnwrap(output["_meta"] as? [String: Any])
@@ -157,6 +157,11 @@ final class MCPFederationTests: XCTestCase {
             "command": .string("help")
         ]))
         XCTAssertFalse(facadeHelp.contains("preview.submit"))
+        await XCTAssertThrowsErrorAsync {
+            _ = try await server.invokeRegisteredTool("mcp.markcut", arguments: .object([
+                "command": .string("markcut.preview.submit")
+            ]))
+        }
         let submit = try await server.invokeRegisteredTool("markcut.preview.submit", arguments: .object([:]))
         XCTAssertTrue(try Self.text(submit).contains("submit-called"))
     }
@@ -229,7 +234,7 @@ final class MCPFederationTests: XCTestCase {
           name, description: name, inputSchema: { type: "object", properties: {} }
         })).concat(includeUIMetadata ? [
           { name: "preview", description: "Preview", inputSchema: { type: "object", properties: {} }, _meta: { ui: { resourceUri: "ui://markcut/preview.html" } } },
-          { name: "markcut.preview.submit", description: "Submit", inputSchema: { type: "object", properties: {} }, _meta: { "ui/resourceUri": "ui://markcut/submit.html", ui: { visibility: ["app"] } } },
+          { name: "markcut.preview.submit", description: "Submit", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["app"] } } },
           { name: "output", description: "Output", inputSchema: { type: "object", properties: {} }, _meta: { "openai/outputTemplate": "ui://markcut/output.html" } }
         ] : []);
         const result = text => ({ content: [{ type: "text", text }] });

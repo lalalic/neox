@@ -553,7 +553,7 @@ final class NeoYMCPFederation {
             // MCP Apps need the child tool's descriptor metadata at the public
             // boundary so the host can discover and render its resource. Keep
             // ordinary commands behind the compact facade.
-            for tool in rewritten where hasMCPAppUIMetadata(tool.descriptor) {
+            for tool in rewritten where hasMCPAppUIMetadata(tool.descriptor) || isAppOnlyTool(tool.descriptor) {
                 let directName = directFederatedToolName(provider: configuration.name, child: tool.name)
                 server.registerFederatedTool(descriptor: tool.descriptor, name: directName, protected: true,
                                              provider: configuration.name) { arguments in
