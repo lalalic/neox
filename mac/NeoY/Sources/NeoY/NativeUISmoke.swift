@@ -5,11 +5,12 @@ import Foundation
 enum NativeUISmoke {
     static let toolName = "neoy.ui_smoke"
     static let resourceURI = "ui://widget/neoy-smoke-v3.html"
+    static let legacyResourceURI = "ui://widget/neoy-smoke-v2.html"
     static let mimeType = MCPServer.mcpAppMimeType
 
     @MainActor
     static func register(on server: MCPServer) {
-        server.setRemoteAllowedResourceURIs([resourceURI])
+        server.setRemoteAllowedResourceURIs([resourceURI, legacyResourceURI])
         let resourceMeta: JSONValue = .object([
             "ui": .object([
                 "prefersBorder": .bool(true),
@@ -44,18 +45,24 @@ enum NativeUISmoke {
                 ],
             ])
         }
+        registerResource(on: server, uri: resourceURI, name: "NeoY Native UI Smoke", resourceMeta: resourceMeta)
+        registerResource(on: server, uri: legacyResourceURI, name: "NeoY Native UI Smoke (compatibility alias)", resourceMeta: resourceMeta)
+    }
+
+    @MainActor
+    private static func registerResource(on server: MCPServer, uri: String, name: String, resourceMeta: JSONValue) {
         server.registerFederatedResource(
             descriptor: .object([
-                "uri": .string(resourceURI),
-                "name": .string("NeoY Native UI Smoke"),
+                "uri": .string(uri),
+                "name": .string(name),
                 "mimeType": .string(mimeType),
                 "_meta": resourceMeta,
             ]),
-            uri: resourceURI
+            uri: uri
         ) { _ in
             try encodeResult([
                 "contents": [[
-                    "uri": resourceURI,
+                    "uri": uri,
                     "mimeType": mimeType,
                     "text": html,
                     "_meta": [

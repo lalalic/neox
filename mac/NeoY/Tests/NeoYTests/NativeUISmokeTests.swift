@@ -18,7 +18,7 @@ final class NativeUISmokeTests: XCTestCase {
         XCTAssertEqual(ui["resourceUri"] as? String, NativeUISmoke.resourceURI)
         XCTAssertEqual(meta["ui/resourceUri"] as? String, NativeUISmoke.resourceURI)
         XCTAssertEqual(meta["openai/outputTemplate"] as? String, NativeUISmoke.resourceURI)
-        XCTAssertEqual(server.resourceURIs, [NativeUISmoke.resourceURI])
+        XCTAssertEqual(Set(server.resourceURIs), Set([NativeUISmoke.resourceURI, NativeUISmoke.legacyResourceURI]))
 
         let result = try await server.invokeRegisteredTool(NativeUISmoke.toolName, arguments: .object([:]))
         let resultObject = try decodeResult(result)
@@ -48,12 +48,17 @@ final class NativeUISmokeTests: XCTestCase {
     func testNativeSmokeResourceCanBeExplicitlyAllowedRemotelyWithoutOpeningWidgetProvider() {
         XCTAssertTrue(MCPServer.remoteResourceAllowed(
             uri: NativeUISmoke.resourceURI,
-            explicitURIs: [NativeUISmoke.resourceURI],
+            explicitURIs: [NativeUISmoke.resourceURI, NativeUISmoke.legacyResourceURI],
+            providers: []
+        ))
+        XCTAssertTrue(MCPServer.remoteResourceAllowed(
+            uri: NativeUISmoke.legacyResourceURI,
+            explicitURIs: [NativeUISmoke.resourceURI, NativeUISmoke.legacyResourceURI],
             providers: []
         ))
         XCTAssertFalse(MCPServer.remoteResourceAllowed(
             uri: "ui://widget/other.html",
-            explicitURIs: [NativeUISmoke.resourceURI],
+            explicitURIs: [NativeUISmoke.resourceURI, NativeUISmoke.legacyResourceURI],
             providers: []
         ))
     }
