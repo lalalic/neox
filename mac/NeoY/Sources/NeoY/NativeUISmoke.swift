@@ -4,7 +4,7 @@ import Foundation
 /// from NeoY's federation layer. Remove after the host-side issue is resolved.
 enum NativeUISmoke {
     static let toolName = "neoy.ui_smoke"
-    static let resourceURI = "ui://widget/neoy-smoke-v2.html"
+    static let resourceURI = "ui://widget/neoy-smoke-v3.html"
     static let mimeType = MCPServer.mcpAppMimeType
 
     @MainActor

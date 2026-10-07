@@ -8,7 +8,7 @@ final class NativeUISmokeTests: XCTestCase {
     func testNativeSmokeDescriptorResourceAndResultShareOneURI() async throws {
         let server = MCPServer(name: "test", port: 0)
         NativeUISmoke.register(on: server)
-        XCTAssertEqual(NativeUISmoke.resourceURI, "ui://widget/neoy-smoke-v2.html")
+        XCTAssertEqual(NativeUISmoke.resourceURI, "ui://widget/neoy-smoke-v3.html")
 
         let descriptorData = Data(server.toolDescriptorsJSON.utf8)
         let descriptors = try XCTUnwrap(try JSONSerialization.jsonObject(with: descriptorData) as? [[String: Any]])
