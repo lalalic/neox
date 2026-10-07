@@ -152,6 +152,20 @@ final class MCPFederationTests: XCTestCase {
 
         let result = try await server.invokeRegisteredTool("markcut.preview", arguments: .object([:]))
         XCTAssertTrue(try Self.text(result).contains("preview-called"))
+        let resultObject = try Self.resultObject(result)
+        let resultMeta = try XCTUnwrap(resultObject["_meta"] as? [String: Any])
+        let resultUI = try XCTUnwrap(resultMeta["ui"] as? [String: Any])
+        let proxiedResultURI = try XCTUnwrap(resultUI["resourceUri"] as? String)
+        XCTAssertTrue(proxiedResultURI.hasPrefix("ui://markcut/"))
+        XCTAssertNotEqual(proxiedResultURI, "ui://markcut/preview.html")
+        XCTAssertEqual(resultMeta["ui/resourceUri"] as? String, proxiedResultURI)
+        XCTAssertEqual(resultMeta["openai/outputTemplate"] as? String, proxiedResultURI)
+        XCTAssertEqual(resultMeta["untouched"] as? String, "ui://markcut/preview.html")
+        let nestedProps = try XCTUnwrap(resultUI["props"] as? [String: Any])
+        XCTAssertEqual(nestedProps["untouched"] as? String, "ui://markcut/preview.html")
+        let structured = try XCTUnwrap(resultObject["structuredContent"] as? [String: Any])
+        XCTAssertEqual(structured["resourceUri"] as? String, proxiedResultURI)
+        XCTAssertEqual(structured["untouched"] as? String, "ui://other/not-a-resource-pointer")
 
         let facadeHelp = try await server.invokeRegisteredTool("mcp.markcut", arguments: .object([
             "command": .string("help")
@@ -263,7 +277,16 @@ final class MCPFederationTests: XCTestCase {
               if (run.status !== 0) throw new Error(run.stderr);
               value = result(JSON.stringify({ exit_code: 0 }));
             }
-            if (name === "preview") value = result("preview-called");
+            if (name === "preview") value = {
+              content: [{ type: "text", text: "preview-called" }],
+              structuredContent: { resourceUri: "ui://markcut/preview.html", untouched: "ui://other/not-a-resource-pointer" },
+              _meta: {
+                ui: { resourceUri: "ui://markcut/preview.html", props: { untouched: "ui://markcut/preview.html" } },
+                "ui/resourceUri": "ui://markcut/preview.html",
+                "openai/outputTemplate": "ui://markcut/preview.html",
+                untouched: "ui://markcut/preview.html"
+              }
+            };
             if (name === "markcut.preview.submit") value = result("submit-called");
           }
           process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: value }) + "\n");
@@ -289,10 +312,14 @@ final class MCPFederationTests: XCTestCase {
         return components.string!
     }
 
-    private static func text(_ encoded: String) throws -> String {
+    private static func resultObject(_ encoded: String) throws -> [String: Any] {
         let prefix = "mcpresult:"
         let data = try XCTUnwrap(Data(base64Encoded: String(encoded.dropFirst(prefix.count))))
-        let result = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        return try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    private static func text(_ encoded: String) throws -> String {
+        let result = try resultObject(encoded)
         let content = try XCTUnwrap(result["content"] as? [[String: Any]])
         return try XCTUnwrap(content.first?["text"] as? String)
     }
