@@ -60,23 +60,29 @@ enum NativeUISmoke {
             ]),
             uri: uri
         ) { _ in
-            try encodeResult([
-                "contents": [[
-                    "uri": uri,
-                    "mimeType": mimeType,
-                    "text": html,
-                    "_meta": [
-                        "ui": [
-                            "prefersBorder": true,
-                            "csp": [
-                                "connectDomains": [],
-                                "resourceDomains": [],
-                            ],
+            try resourceResult(uri: uri)
+        }
+    }
+
+    static func resourceResult(uri: String) throws -> String {
+        try encodeResult([
+            "ttlMs": 0,
+            "cacheScope": "private",
+            "contents": [[
+                "uri": uri,
+                "mimeType": mimeType,
+                "text": html,
+                "_meta": [
+                    "ui": [
+                        "prefersBorder": true,
+                        "csp": [
+                            "connectDomains": [],
+                            "resourceDomains": [],
                         ],
                     ],
-                ]],
-            ])
-        }
+                ],
+            ]],
+        ])
     }
 
     static let html = """
