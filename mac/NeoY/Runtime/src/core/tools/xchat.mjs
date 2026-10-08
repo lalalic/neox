@@ -182,7 +182,7 @@ function runWorker(action, configPath, statusPath) {
   const started = new Date().toISOString();
   try {
     writeWorkerStatus(statusPath, { transfer_id: path.basename(statusPath, ".status.json"), status: "running", mode: action, started_at: started });
-    const result = spawnSync(cli, ["platform", "run", "chatgpt", action, "--config", configPath], {
+    const result = spawnSync(cli, ["platform", "run", "chatgpt", action, "--auto-session", "--config", configPath], {
       encoding: "utf8",
       timeout: Number(process.env.XCHAT_LIFECYCLE_TIMEOUT_MS || 600_000),
       maxBuffer: 4 * 1024 * 1024,
