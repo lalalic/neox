@@ -113,3 +113,44 @@ test("shell_job_kill preserves the terminating signal", async () => {
   assert.equal(finished.signal, "SIGTERM");
   assert.equal(finished.exitCode, null);
 });
+
+test("shell_start persists exit when child finishes before metadata write", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "neoy-shell-fast-"));
+  const base = await makeContext(root);
+  const originalWrite = base.writeJobMetadata;
+  const context = { ...base, writeJobMetadata: async (value) => {
+    if (!value.finishedAt) await new Promise((resolve) => setTimeout(resolve, 60));
+    return originalWrite(value);
+  }};
+  try {
+    const started = await handleShell("shell_start", { command: "exit 17" }, context);
+    const finished = await waitForExit(context, started.id);
+    assert.equal(finished.exitCode, 17);
+    assert.ok(finished.finishedAt);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("shell_start kills an unrecordable child and removes orphan logs", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "neoy-shell-fail-"));
+  let killed = false;
+  const base = await makeContext(root);
+  const context = { ...base,
+    writeJobMetadata: async () => { throw new Error("metadata storage unavailable"); },
+    killProcessGroup: (pid, signal) => {
+      killed = true;
+      return base.killProcessGroup(pid, signal);
+    },
+  };
+  try {
+    await assert.rejects(
+      () => handleShell("shell_start", { command: "sleep 20" }, context),
+      /Could not record job metadata/,
+    );
+    assert.equal(killed, true);
+    assert.deepEqual(await fsp.readdir(context.JOB_DIR), []);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});

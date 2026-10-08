@@ -46,6 +46,215 @@ const PTY_TTY_SCAN_TIMEOUT_MS = 1_000;
 const PTY_TTY_SCAN_BUDGET_MS = 1_000;
 const PTY_TTY_REFRESH_MS = 150;
 
+function processGroupGone(pgid) {
+  if (!Number.isInteger(pgid) || pgid <= 1) return true;
+  try { process.kill(-pgid, 0); return false; }
+  catch (error) { return error?.code === "ESRCH"; }
+}
+
+function processGone(pid) {
+  if (!Number.isInteger(pid) || pid <= 1) return true;
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return error?.code === "ESRCH";
+  }
+}
+
+// A process-GROUP kill does not contain a pty session.
+//
+// Interactive job control puts every background job in its own pgid. Measured on
+// a plain `/bin/zsh -i`: `sleep & ` produced leader pgid 29441 and job pgid 29650,
+// and pty_close reported containmentVerified:true while the job was still running,
+// reparented to pid 1. No setsid(), no attacker, the single most ordinary thing
+// anyone types in a terminal.
+//
+// What every descendant DOES keep on Darwin is the controlling terminal, so the
+// pts is the session identity a group id only approximates.
+
+// Only ever called while the helper still holds the master fd, so the device
+// cannot have been recycled to someone else's session between the scan and the
+// kill. That ordering is the whole safety argument — /dev/ttysNNN is reused as
+// freely as a pid, and killing by a stale device name would be the recycled-pgid
+// mistake in a new costume.
+// Bounds the work every reclaim path does. A session with more processes than
+// this on its terminal is pathological, and this runs between a revocation
+// decision and process.exit.
+// The kill switch must never become slower than the thing it contains. Consulting
+// ps costs 1.1ms measured, but a hung ps would cost the timeout, and a reclaim
+// sweep touches every session: 8 sessions x 2 calls x a 2s timeout is 32 seconds
+// of delay before the bridge exits. One budget covers a whole sweep, and the
+// per-call timeout bounds the last call that starts inside it, so the worst case
+// the revocation path can pay is BUDGET + TIMEOUT.
+let ptyTtyScanDeadline = 0;
+
+function beginPtyTtyScanBudget() {
+  ptyTtyScanDeadline = Date.now() + PTY_TTY_SCAN_BUDGET_MS;
+}
+
+function psRows(args) {
+  // Out of budget means the terminal sweep is skipped, not that the kill is: the
+  // process-group kill has already happened and is not gated on this.
+  if (Date.now() >= ptyTtyScanDeadline) return new Map();
+  let stdout;
+  try {
+    stdout = execFileSync("/bin/ps", args, {
+      encoding: "utf8",
+      timeout: PTY_TTY_SCAN_TIMEOUT_MS,
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 1_000_000,
+    });
+  } catch (error) {
+    // ps exits non-zero when the device or the pid is already gone, which is the
+    // normal outcome once the leader has been reaped.
+    stdout = typeof error?.stdout === "string" ? error.stdout : "";
+  }
+  const rows = new Map();
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const space = trimmed.indexOf(" ");
+    if (space < 0) continue;
+    const pid = Number.parseInt(trimmed.slice(0, space), 10);
+    if (!Number.isInteger(pid) || pid <= 1) continue;
+    rows.set(pid, trimmed.slice(space + 1).trim());
+  }
+  return rows;
+}
+
+// Records who shares the session's controlling terminal, as pid -> start time.
+//
+// A pid on its own is not an identity: between this snapshot and the kill the
+// process can exit and the number be reused, and killing a recycled pid is the
+// recycled-pgid mistake scripts/disable.sh already had to fix, in a new costume.
+// The start time is what makes the later kill provably aimed at the same process.
+//
+// Only ever called while the HELPER still owns the master fd, because once that
+// is gone /dev/ttysNNN can belong to somebody else's session entirely.
+function snapshotPtyTtyProcesses(session) {
+  if (typeof session.pts !== "string" || !PTS_PATTERN.test(session.pts)) return;
+  if (!Number.isInteger(session.helperPid) || processGone(session.helperPid)) return;
+  if (!session.ttyTargets) session.ttyTargets = new Map();
+  for (const [pid, lstart] of psRows(["-t", session.pts, "-o", "pid=,lstart="])) {
+    if (pid === process.pid || pid === process.ppid) continue;
+    if (pid === session.leaderPid || pid === session.helperPid) continue;
+    if (session.ttyTargets.size >= PTY_TTY_SCAN_MAX) break;
+    if (!session.ttyTargets.has(pid)) session.ttyTargets.set(pid, lstart);
+  }
+}
+
+// SIGKILLs everything recorded by snapshotPtyTtyProcesses whose start time still
+// matches. A pid whose start time has changed is somebody else now, and is left
+// alone and reported rather than killed.
+function killPtyTtyStragglers(session, result) {
+  const targets = session.ttyTargets;
+  result.ttyProcessesKilled = [];
+  result.ttyRecycledSkipped = [];
+  if (!targets || targets.size === 0) return;
+  const alive = [...targets.keys()].filter((pid) => !processGone(pid));
+  if (alive.length === 0) return;
+  const current = psRows(["-o", "pid=,lstart=", "-p", alive.join(",")]);
+  for (const pid of alive) {
+    const now = current.get(pid);
+    if (now === undefined) continue;
+    if (now !== targets.get(pid)) {
+      // Recorded so the containment check does not count somebody else's process
+      // as one of ours that survived.
+      if (!session.ttyRecycled) session.ttyRecycled = new Set();
+      session.ttyRecycled.add(pid);
+      result.ttyRecycledSkipped.push(pid);
+      continue;
+    }
+    try {
+      process.kill(pid, "SIGKILL");
+      result.ttyProcessesKilled.push(pid);
+    } catch (error) {
+      if (error?.code !== "ESRCH") result.ttyKillErrors = (result.ttyKillErrors || []).concat(`${pid}:${error?.code || error}`);
+    }
+  }
+}
+
+// The membership record has to be kept fresh WHILE the session lives, because
+// after it dies there is nothing left to scan.
+//
+// Measured on this machine: the instant the session leader exits, Darwin
+// revoke()s the controlling terminal. `ps -t /dev/ttys001` then fails with "No
+// such file or directory" and the surviving background job's tty reads as "??" —
+// and that is true even at the helper's own "exited" event, with the helper
+// still holding the master fd. So the last possible moment to learn that
+// `nohup sleep &` exists is before the shell exits, not after.
+//
+// Throttled to one scan per session per interval, because pty_read/pty_write are
+// the hot path and each scan is a ps fork (1.1ms measured). It arms the same
+// budget every other caller uses, so a wedged ps costs the same bounded
+// PTY_TTY_SCAN_TIMEOUT_MS here as it does on a reclaim path.
+// 150ms, not 1000ms, and a pty_write scans unconditionally.
+//
+// At 1000ms the terminal-sweep fix did not fix the case its own comment cites:
+// `nohup sleep 995 & ; disown ; exit` creates the job and ends the session inside one
+// throttle window, so nothing is ever recorded and the job survives every reclaim path
+// — including disable.sh, because the job metadata names the already-dead leader.
+// Measured across the gap between backgrounding and exit: 0ms SURVIVED, 300ms SURVIVED,
+// 1100ms REAPED. Two consecutive tool calls do not clear a 1s bar.
+//
+// The headroom is real: 400 back-to-back pty_read calls cost 76ms total, p50 0.09ms, so
+// the scan was never the expensive part. A write is also the only thing that CREATES
+// processes, so deferring the scan after one to a later, throttled call was backwards.
+
+function refreshPtyTtyTargets(session, { force = false } = {}) {
+  if (session.exited || session.closed) return;
+  if (!Number.isInteger(session.helperPid) || processGone(session.helperPid)) return;
+  const now = Date.now();
+  // force is used after a pty_write, which is the only operation that can create a new
+  // terminal member. Letting the throttle skip that scan is precisely how a job
+  // backgrounded and abandoned in the same breath went unrecorded.
+  if (!force && now - (session.ttyScanAt || 0) < PTY_TTY_REFRESH_MS) return;
+  session.ttyScanAt = now;
+  // Dead entries are dropped first. The record is capped at PTY_TTY_SCAN_MAX and
+  // an interactive session churns pids — every command run at the prompt is one
+  // more — so without pruning the cap would fill with corpses and the single pid
+  // that matters, the background job started an hour in, would never be recorded.
+  // Pruning only ever removes pids that are already gone, so it cannot lose a
+  // target; it is also what keeps a recycled pid from lingering in the record.
+  if (session.ttyTargets) {
+    for (const pid of [...session.ttyTargets.keys()]) {
+      if (processGone(pid)) session.ttyTargets.delete(pid);
+    }
+  }
+  beginPtyTtyScanBudget();
+  snapshotPtyTtyProcesses(session);
+}
+
+// A session that ends NATURALLY used to get only reclaimLeaderGroup() +
+// markPtyExited(), and killPtyTtyStragglers ran solely from killPtySession.
+// Measured: `nohup sleep 995 & ; disown ; exit` left the sleep running, and a
+// later killPtySessions("revoked") could not even see it — the helper is gone by
+// then, so snapshotPtyTtyProcesses returns early, and the group kill is aimed at
+// a leader that is already dead. The job metadata scripts/disable.sh reads names
+// that same dead leader, so the reclaimer skipped it too: an unrestricted process
+// with no reclaim path anywhere, exactly the hole the pty sweep exists to close.
+//
+// Safe to run after the helper is gone: this kills by pid from the record taken
+// while the helper still owned the device, and re-verifies each pid's start time
+// with `ps -p` first, which keeps working after the terminal is revoked.
+function sweepPtyTtyOnClose(session) {
+  if (!session.ttyTargets || session.ttyTargets.size === 0) return;
+  beginPtyTtyScanBudget();
+  const result = { sessionId: session.id, reason: session.closeReason || "session_ended" };
+  killPtyTtyStragglers(session, result);
+  session.closeSweep = result;
+  const killed = result.ttyProcessesKilled || [];
+  const skipped = result.ttyRecycledSkipped || [];
+  // Reported, not silent. leaderGroupError and ttyKillErrors are surfaced
+  // precisely because unreported reclaim failures are this project's history, and
+  // this path has no tool response to carry them.
+  if (killed.length || skipped.length || result.ttyKillErrors) {
+    stderr(`pty session ${session.id} ended; ${killed.length} process(es) still holding its terminal were reclaimed${killed.length ? ` (${killed.join(", ")})` : ""}${skipped.length ? `; ${skipped.length} recycled pid(s) deliberately not signalled (${skipped.join(", ")})` : ""}${result.ttyKillErrors ? `; kill errors ${result.ttyKillErrors.join(", ")}` : ""}.`);
+  }
+}
+
+
 // Interactive pty sessions
 // ---------------------------------------------------------------------------
 
@@ -460,7 +669,7 @@ function getPtySession(sessionId) {
 // Same character class readJobMetadata enforces, because the id becomes a filename
 // in the jobs directory.
 function requirePtySessionId(args) {
-  const sessionId = requireString(args, "session_id");
+  const sessionId = ptyRuntime.requireString(args, "session_id");
   if (!/^[A-Za-z0-9._-]{1,128}$/.test(sessionId)) throw new Error("Invalid session_id");
   return sessionId;
 }
