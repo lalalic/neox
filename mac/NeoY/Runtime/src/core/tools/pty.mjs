@@ -57,6 +57,9 @@ let ptySweeper = null;
 let ptyRuntime = null;
 
 export function configurePty(context) {
+  if (!context || typeof context.JOB_DIR !== "string" || context.JOB_DIR.length === 0) {
+    throw new Error("PTY job directory is not configured");
+  }
   ptyRuntime = context;
 }
 
@@ -748,7 +751,7 @@ async function startPtySessionInSlot({ command, args, cwd, env, cols, rows, term
     closed: false,
     closeReason: null,
     startError: null,
-    metadataPath: path.join(JOB_DIR, `${id}.json`),
+    metadataPath: path.join(ptyRuntime.JOB_DIR, `${id}.json`),
   };
   ptySessions.set(id, session);
   syncPtyTimers();
