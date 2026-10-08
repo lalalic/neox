@@ -130,7 +130,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
             consentToken: coreToken,
             stateURL: NeoYPaths.supportDirectory.appendingPathComponent("native-oauth-state.json")
         )
-        value.setRemoteAllowedTools(deployment.enabledRemoteTools)
+        value.setRemoteAllowedTools(NeoYRemoteToolCatalog.remoteTools(for: deployment.enabledRemoteTools))
         value.setRemoteAllowedProviders(deployment.enabledRemoteProviders)
         NativeUISmoke.register(on: value)
         AskQuestions.register(on: value)

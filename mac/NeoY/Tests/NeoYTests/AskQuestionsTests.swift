@@ -27,6 +27,7 @@ final class AskQuestionsTests: XCTestCase {
         let object = try resultObject(result)
         let structured = try XCTUnwrap(object["structuredContent"] as? [String: Any])
         XCTAssertEqual(structured["prompt"] as? String, "# Choose\n- **A** or B")
+        XCTAssertEqual(structured["prompt_html"] as? String, AskQuestions.renderMarkdown("# Choose\n- **A** or B"))
         XCTAssertNotNil(structured["session_id"] as? String)
         XCTAssertTrue((structured["continuation"] as? String)?.contains("new MCP turn") == true)
     }
@@ -48,6 +49,21 @@ final class AskQuestionsTests: XCTestCase {
         XCTAssertTrue(AskQuestions.html.contains("ui/initialize"))
         XCTAssertTrue(AskQuestions.html.contains("ui/notifications/initialized"))
         XCTAssertTrue(AskQuestions.html.contains(AskQuestions.submitToolName))
+        XCTAssertTrue(AskQuestions.html.contains("promptEl.innerHTML=d.prompt_html"))
+    }
+
+    func testAskQuestionsIsRemoteCatalogableAndAppOnlyToolsFollowTheirIntent() {
+        let catalog = Set(NeoYRemoteToolCatalog.availableToolNames(configuration: NeoYControlPlaneConfiguration()))
+        XCTAssertTrue(catalog.isSuperset(of: NeoYRemoteToolCatalog.askQuestionsToolNames))
+        XCTAssertEqual(
+            NeoYRemoteToolCatalog.remoteTools(for: [AskQuestions.toolName]),
+            NeoYRemoteToolCatalog.askQuestionsToolNames
+        )
+        let unrelatedRemoteTools = NeoYRemoteToolCatalog.remoteTools(for: [
+            "shell", AskQuestions.submitToolName, AskQuestions.cancelToolName,
+        ])
+        XCTAssertTrue(unrelatedRemoteTools.contains("shell"))
+        XCTAssertTrue(unrelatedRemoteTools.isDisjoint(with: NeoYRemoteToolCatalog.askQuestionsToolNames))
     }
 
     @MainActor
