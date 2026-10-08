@@ -684,12 +684,22 @@ const shellFacade = commandFacade({
     shell_exec: "exec", shell_start: "start", shell_job_status: "job.status",
     shell_job_list: "job.list", shell_job_kill: "job.kill",
   })[name] || name,
+  examples: [
+    { command: "exec", args: { command: "pwd" } },
+    { command: "start", args: { command: "npm test", label: "tests" } },
+    { command: "job.status", args: { job_id: "<job id from start>" } },
+  ],
 });
 const filesystemFacade = commandFacade({
   name: "fs",
   description: "Read, write, inspect, and manage filesystem paths.",
   commands: FILESYSTEM_TOOLS,
   commandName: (name) => name.startsWith("fs_") ? name.slice(3) : name,
+  examples: [
+    { command: "read", args: { path: "~/README.md", encoding: "utf8" } },
+    { command: "write", args: { path: "~/tmp/example.txt", content: "hello" } },
+    { command: "list", args: { path: ".", max_entries: 20 } },
+  ],
 });
 const codexFacade = commandFacade({
   name: "codex",
@@ -705,6 +715,11 @@ const terminalFacade = commandFacade({
   description: "Create and interact with persistent pseudo-terminal sessions.",
   commands: PTY_TOOLS,
   commandName: (name) => name.startsWith("pty_") ? name.slice(4) : name,
+  examples: [
+    { command: "start", args: { command: "/bin/zsh", args: ["-i"] } },
+    { command: "write", args: { session_id: "<session id>", data: "echo ready\\r" } },
+    { command: "read", args: { session_id: "<session id>", cursor: 0 } },
+  ],
 });
 
 const BASE_TOOLS = [
