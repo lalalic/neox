@@ -77,7 +77,7 @@ export const SHELL_TOOLS = [
 ];
 
 export async function handleShell(name, args, context) {
-  const { HOME, SHELL, JOB_DIR, DEFAULT_OUTPUT_BYTES, MAX_OUTPUT_BYTES, SHELL_EXEC_DEFAULT_TIMEOUT_MS, GUI_FOCUS_POLICY, readOperatorSettings, guiFocusRisk, consumeForegroundGuiApproval, normalizeEnv, optionalString, optionalInteger, resolvePath, crypto, fs, fsp, path, spawn, mergedEnv, nowIso, writeJobMetadata, readJobMetadata, processRunning, tailFile, killProcessGroup, audit, runCommand, requireString } = context;
+  const { HOME, SHELL, JOB_DIR, DEFAULT_OUTPUT_BYTES, MAX_OUTPUT_BYTES, SHELL_EXEC_DEFAULT_TIMEOUT_MS, GUI_FOCUS_POLICY, readOperatorSettings, guiFocusRisk, consumeForegroundGuiApproval, normalizeEnv, optionalString, optionalInteger, resolvePath, validateWorkingDirectory, crypto, fs, fsp, path, spawn, mergedEnv, nowIso, writeJobMetadata, readJobMetadata, processRunning, tailFile, killProcessGroup, audit, runCommand, requireString } = context;
   switch (name) {
         case "shell_exec": {
           const command = requireString(args, "command");
@@ -122,15 +122,18 @@ export async function handleShell(name, args, context) {
             }
           }
           const cwd = resolvePath(optionalString(args, "cwd", HOME));
+          await validateWorkingDirectory(cwd);
           const env = normalizeEnv(args?.env);
           const label = optionalString(args, "label", "background-job").replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 80) || "background-job";
           const id = `${Date.now()}-${crypto.randomBytes(5).toString("hex")}-${label}`;
           const stdoutPath = path.join(JOB_DIR, `${id}.stdout.log`);
           const stderrPath = path.join(JOB_DIR, `${id}.stderr.log`);
-          const stdoutFd = fs.openSync(stdoutPath, "a", 0o600);
-          const stderrFd = fs.openSync(stderrPath, "a", 0o600);
+          let stdoutFd;
+          let stderrFd;
           let child;
           try {
+            stdoutFd = fs.openSync(stdoutPath, "a", 0o600);
+            stderrFd = fs.openSync(stderrPath, "a", 0o600);
             child = spawn(SHELL, ["-lc", command], {
               cwd,
               env: mergedEnv(env),
@@ -141,12 +144,15 @@ export async function handleShell(name, args, context) {
               child.once("spawn", resolve);
               child.once("error", reject);
             });
+          } catch (error) {
+            await Promise.allSettled([fsp.unlink(stdoutPath), fsp.unlink(stderrPath)]);
+            throw error;
           } finally {
-            fs.closeSync(stdoutFd);
-            fs.closeSync(stderrFd);
+            if (stdoutFd !== undefined) fs.closeSync(stdoutFd);
+            if (stderrFd !== undefined) fs.closeSync(stderrFd);
           }
           child.unref();
-          const metadata = {
+          let metadata = {
             id,
             label,
             pid: child.pid,
@@ -156,7 +162,22 @@ export async function handleShell(name, args, context) {
             startedAt: nowIso(),
             stdoutPath,
             stderrPath,
+            exitCode: null,
+            signal: null,
+            finishedAt: null,
           };
+          let metadataWritten = false;
+          let exitResult = null;
+          let exitPersist = Promise.resolve();
+          const persistExit = () => {
+            if (!metadataWritten || !exitResult) return;
+            metadata = { ...metadata, ...exitResult };
+            exitPersist = exitPersist.then(() => writeJobMetadata(metadata)).catch(() => {});
+          };
+          child.once("close", (code, signal) => {
+            exitResult = { exitCode: code, signal, finishedAt: nowIso() };
+            persistExit();
+          });
           // Fail closed, as pty sessions and federated children already do. This job is
           // detached and unref'd, so if the metadata write fails (EACCES on JOB_DIR, ENOSPC)
           // nothing in $DATA_DIR/jobs names it and scripts/disable.sh can never find it — an
@@ -164,8 +185,16 @@ export async function handleShell(name, args, context) {
           // leave it running unrecorded.
           try {
             await writeJobMetadata(metadata);
+            metadataWritten = true;
+            persistExit();
+            await exitPersist;
           } catch (metadataError) {
             killProcessGroup(child.pid, "SIGKILL");
+            await Promise.allSettled([
+              fsp.unlink(stdoutPath),
+              fsp.unlink(stderrPath),
+              fsp.unlink(path.join(JOB_DIR, `${id}.json`)),
+            ]);
             throw new Error(
               `Could not record job metadata, so the job was killed rather than left unreclaimable: ${metadataError?.message || metadataError}`,
             );

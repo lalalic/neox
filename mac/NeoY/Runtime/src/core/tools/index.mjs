@@ -351,6 +351,17 @@ function resolvePath(input, cwd = HOME) {
   return path.resolve(cwd, input);
 }
 
+async function validateWorkingDirectory(cwd) {
+  try {
+    const stat = await fsp.stat(cwd);
+    if (!stat.isDirectory()) throw new Error(`Working directory '${cwd}' is not a directory`);
+  } catch (error) {
+    if (error?.message?.includes("is not a directory")) throw error;
+    throw new Error(`Working directory '${cwd}' is unusable: ${error?.code || error}`);
+  }
+  return cwd;
+}
+
 function normalizeEnv(input) {
   if (input === undefined || input === null) return {};
   if (typeof input !== "object" || Array.isArray(input)) throw new Error("'env' must be an object");
@@ -476,6 +487,7 @@ function boundedCollector(maxBytes) {
 
 async function runCommand({ command, cwd, env = {}, stdin = undefined, timeoutMs = SHELL_EXEC_DEFAULT_TIMEOUT_MS, maxOutputBytes = DEFAULT_OUTPUT_BYTES }) {
   const effectiveCwd = resolvePath(cwd || HOME);
+  await validateWorkingDirectory(effectiveCwd);
   const stdout = boundedCollector(Math.min(maxOutputBytes, MAX_OUTPUT_BYTES));
   const stderrOutput = boundedCollector(Math.min(maxOutputBytes, MAX_OUTPUT_BYTES));
   const startedAt = Date.now();
@@ -858,7 +870,7 @@ async function assertStillUnlocked(tool, args) {
   }
 }
 
-const context = { HOME, SHELL, JOB_DIR, DEFAULT_OUTPUT_BYTES, MAX_OUTPUT_BYTES, SHELL_EXEC_DEFAULT_TIMEOUT_MS, GUI_FOCUS_POLICY, readOperatorSettings, guiFocusRisk, consumeForegroundGuiApproval, normalizeEnv, optionalString, optionalInteger, optionalBoolean, optionalStringArray, requireString, requireInteger, resolvePath, crypto, fs, fsp, path, process, spawn, mergedEnv, nowIso, writeJobMetadata, readJobMetadata, processRunning, tailFile, killProcessGroup, audit, runCommand, CODEX_BIN, callCodexAppServer, AUDIT_LOG };
+const context = { HOME, SHELL, JOB_DIR, DEFAULT_OUTPUT_BYTES, MAX_OUTPUT_BYTES, SHELL_EXEC_DEFAULT_TIMEOUT_MS, GUI_FOCUS_POLICY, readOperatorSettings, guiFocusRisk, consumeForegroundGuiApproval, normalizeEnv, optionalString, optionalInteger, optionalBoolean, optionalStringArray, requireString, requireInteger, resolvePath, validateWorkingDirectory, crypto, fs, fsp, path, process, spawn, mergedEnv, nowIso, writeJobMetadata, readJobMetadata, processRunning, tailFile, killProcessGroup, audit, runCommand, CODEX_BIN, callCodexAppServer, AUDIT_LOG };
 configurePty(context);
 
 let unlockRecheckInFlight = false;
