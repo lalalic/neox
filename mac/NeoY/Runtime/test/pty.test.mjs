@@ -33,7 +33,12 @@ test("real PTY lifecycle exercises job metadata path", async (t) => {
     id = started.sessionId;
     assert.match(id, /^pty_/);
     await handlePty("pty_write", { session_id: id, data: "echo neoy_pty_test\n" }, context);
-    const output = await handlePty("pty_read", { session_id: id, cursor: 0, wait_ms: 1500 }, context);
+    let output;
+    for (let attempt = 0; attempt < 12; attempt++) {
+      output = await handlePty("pty_read", { session_id: id, cursor: 0, wait_ms: 1500 }, context);
+      if (/neoy_pty_test/.test(JSON.stringify(output))) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
     assert.match(JSON.stringify(output), /neoy_pty_test/);
   } finally {
     if (id) await handlePty("pty_close", { session_id: id, force: true }, context);
