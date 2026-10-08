@@ -133,6 +133,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
         value.setRemoteAllowedTools(deployment.enabledRemoteTools)
         value.setRemoteAllowedProviders(deployment.enabledRemoteProviders)
         NativeUISmoke.register(on: value)
+        AskQuestions.register(on: value)
 
         let configuration = (try? NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)
             .loadOrCreate().document.configuration) ?? NeoYControlPlaneConfiguration()

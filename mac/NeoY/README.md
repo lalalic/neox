@@ -54,6 +54,21 @@ See `docs/neoy-v2-architecture.md` and `docs/neoy-v2-migration-matrix.md`.
 
 Demo/capture keeps the shared primitive contract and ScreenCaptureKit recording. Accessibility/computer-use stays native because macOS TCC permissions belong to the signed app identity. NeoX phone media discovery/export and phone-to-Mac handoff remain compatible with the existing protocol.
 
+## Ask questions MCP App
+
+`ask_questions` accepts one required Markdown `prompt` string and returns a
+private `text/html;profile=mcp-app` widget with safely escaped Markdown, a
+multiline answer field, and submit/cancel controls. The app-only companion
+tools `ask_questions.submit` and `ask_questions.cancel` use a random session
+ID, enforce one submission, and expire unanswered sessions after ten minutes.
+
+The initial tool call completes after registering the session so the MCP Apps
+host can render its tool result. In the verified MCP Apps contract,
+`ui/message` starts a new conversation turn; it does not resume a completed
+tool call. Consequently, the structured answer is returned by
+`ask_questions.submit` and sent through `ui/message` as a new turn. NeoY does
+not claim same-turn suspension/resumption or hold the gateway request open.
+
 ## Build and test
 
 ```bash
