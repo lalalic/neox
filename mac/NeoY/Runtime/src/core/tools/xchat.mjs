@@ -177,12 +177,12 @@ function writeWorkerStatus(statusPath, payload) {
 
 function runWorker(action, configPath, statusPath) {
   if (!["new-turn", "new-thread"].includes(action) || !configPath || !statusPath) return 64;
-  const cli = process.env.BROWSER_WORKSPACE_CLI
-    || path.join(os.homedir(), ".agents/skills/browser-workspace/bin/browser-workspace");
+  const cli = process.env.BROWSER_WORKSPACE_CLI || "uvx";
+  const prefix = process.env.BROWSER_WORKSPACE_CLI ? [] : ["browser-workspace"];
   const started = new Date().toISOString();
   try {
     writeWorkerStatus(statusPath, { transfer_id: path.basename(statusPath, ".status.json"), status: "running", mode: action, started_at: started });
-    const result = spawnSync(cli, ["platform", "run", "chatgpt", action, "--config", configPath], {
+    const result = spawnSync(cli, [...prefix, "platform", "run", "chatgpt", action, "--auto-session", "--config", configPath], {
       encoding: "utf8",
       timeout: Number(process.env.XCHAT_LIFECYCLE_TIMEOUT_MS || 600_000),
       maxBuffer: 4 * 1024 * 1024,

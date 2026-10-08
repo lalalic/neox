@@ -225,15 +225,13 @@ actor NeoYFeatureManager {
         let data = try JSONSerialization.data(withJSONObject: ["prompt": prompt], options: [.prettyPrinted, .sortedKeys])
         try data.write(to: configURL, options: .atomic)
 
-        let cli = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".agents/skills/browser-workspace/bin/browser-workspace")
-        guard FileManager.default.isExecutableFile(atPath: cli.path) else {
+        guard let cli = Self.executable("uvx") else {
             throw NSError(domain: "NeoYFeature", code: 10, userInfo: [NSLocalizedDescriptionKey: "browser-workspace is required for feature setup"])
         }
         // The setup conversation belongs to NeoY, not to the one-shot platform action.
         // Keep a caller-owned Browser Workspace session alive until setup completes.
         stopSetupSession(id: id)
-        let started = try Self.run(cli.path, ["session", "start", "--url", "https://chatgpt.com/"])
+        let started = try Self.run(cli, ["browser-workspace", "session", "start", "--url", "https://chatgpt.com/"])
         guard started.status == 0,
               let startedData = started.output.data(using: .utf8),
               let startedJSON = try? JSONSerialization.jsonObject(with: startedData) as? [String: Any],
@@ -243,7 +241,7 @@ actor NeoYFeatureManager {
         let sessionData = try JSONSerialization.data(withJSONObject: ["session_id": sessionID], options: [.prettyPrinted, .sortedKeys])
         try sessionData.write(to: setupSessionURL(id: id), options: .atomic)
 
-        let result = try Self.run(cli.path, ["platform", "run", "chatgpt", "temporary-submit", "--config", configURL.path, "--session-id", sessionID])
+        let result = try Self.run(cli, ["browser-workspace", "platform", "run", "chatgpt", "temporary-submit", "--config", configURL.path, "--session-id", sessionID])
         guard result.status == 0 else {
             stopSetupSession(id: id)
             throw NSError(domain: "NeoYFeature", code: 12, userInfo: [NSLocalizedDescriptionKey: result.output])
@@ -339,10 +337,8 @@ actor NeoYFeatureManager {
         guard let data = try? Data(contentsOf: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let sessionID = json["session_id"] as? String, !sessionID.isEmpty else { return }
-        let cli = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".agents/skills/browser-workspace/bin/browser-workspace")
-        guard FileManager.default.isExecutableFile(atPath: cli.path) else { return }
-        _ = try? Self.run(cli.path, ["session", "stop", sessionID])
+        guard let cli = Self.executable("uvx") else { return }
+        _ = try? Self.run(cli, ["browser-workspace", "session", "stop", sessionID])
     }
 
     private func productRoot(id: String) -> URL { root.appendingPathComponent(id, isDirectory: true) }

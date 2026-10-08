@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { XCHAT_LIFECYCLE_TOOLS, isXChatLifecycleTool, scheduleXChatLifecycle } from "../src/core/tools/xchat.mjs";
 
 const call = (command, args = {}, options = {}) => scheduleXChatLifecycle("chatgpt", { command, args }, options);
@@ -72,4 +74,26 @@ test("validates stable ids and facade commands", () => {
   assert.throws(() => call("turn", { project_id: "bad", thread_id: "thread_12345678", message: "x" }), /project_id/);
   assert.throws(() => call("turn", { thread_id: "bad", message: "x" }), /thread_id/);
   assert.throws(() => call("nope", {}), /Unknown chatgpt command/);
+});
+
+
+test("worker invokes uvx with browser-workspace and does not require npm or local source", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "neoy-xchat-uvx-"));
+  const config = path.join(dir, "config.json");
+  const status = path.join(dir, "transfer.status.json");
+  const fakeBin = path.join(dir, "uvx");
+  const argvPath = path.join(dir, "argv.json");
+  fs.writeFileSync(config, JSON.stringify({ message: "test" }));
+  fs.writeFileSync(fakeBin, `#!/bin/sh\nprintf '%s\\n' "$@" > "${argvPath}"\nprintf '{"ok":true}\\n'\n`, { mode: 0o755 });
+  const worker = fileURLToPath(new URL("../src/core/tools/xchat.mjs", import.meta.url));
+  const ran = spawnSync(process.execPath, [worker, "new-turn", config, status], {
+    env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, BROWSER_WORKSPACE_CLI: "", XCHAT_LIFECYCLE_TIMEOUT_MS: "2000" },
+    encoding: "utf8",
+  });
+  assert.equal(ran.status, 0, ran.stderr);
+  assert.deepEqual(fs.readFileSync(argvPath, "utf8").trim().split("\n"), [
+    "browser-workspace", "platform", "run", "chatgpt", "new-turn", "--auto-session", "--config", config,
+  ]);
+  assert.equal(JSON.parse(fs.readFileSync(status, "utf8")).status, "completed");
+  assert.equal(fs.existsSync(config), false);
 });
