@@ -8,6 +8,8 @@ on:
 
 permissions:
   contents: read
+  issues: write
+  pull-requests: read
   id-token: write
 
 jobs:
@@ -25,4 +27,24 @@ jobs:
       - run: npm install --global npm@11.15.0
       - run: npm ci
       - run: npm test
+      - name: Resolve publication identity
+        id: publication
+        shell: bash
+        run: |
+          echo "name=$(node -p \"require('./package.json').name\")" >> "$GITHUB_OUTPUT"
+          echo "version=$(node -p \"require('./package.json').version\")" >> "$GITHUB_OUTPUT"
       - run: npm publish --provenance --access public
+      - name: Report verified publication
+        uses: lalalic/agents-relay/.github/actions/report-publication@publication-v1
+        with:
+          token: ${{ github.token }}
+          artifact: ${{ steps.publication.outputs.name }}
+          version: ${{ steps.publication.outputs.version }}
+          channel: https://registry.npmjs.org
+      - name: Report release failure
+        if: ${{ failure() }}
+        continue-on-error: true
+        uses: lalalic/agents-relay/.github/actions/report-publication-failure@publication-v1
+        with:
+          token: ${{ github.token }}
+          stage: runtime npm publish workflow
