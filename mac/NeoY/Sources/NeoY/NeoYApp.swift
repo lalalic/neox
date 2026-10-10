@@ -131,9 +131,10 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
             stateURL: NeoYPaths.supportDirectory.appendingPathComponent("native-oauth-state.json"),
             gatewayStateURL: NeoYPaths.supportDirectory.appendingPathComponent("oauth-state.json")
         )
-        value.setRemoteAllowedTools(deployment.enabledRemoteTools)
+        value.setRemoteAllowedTools(NeoYRemoteToolCatalog.remoteTools(for: deployment.enabledRemoteTools))
         value.setRemoteAllowedProviders(deployment.enabledRemoteProviders)
         NativeUISmoke.register(on: value)
+        AskQuestions.register(on: value)
 
         let configuration = (try? NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)
             .loadOrCreate().document.configuration) ?? NeoYControlPlaneConfiguration()

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Network
 import Combine
 
@@ -548,7 +549,8 @@ public final class MCPServer {
                 body: body,
                 connection: connection,
                 isLocal: isDirectLoopback,
-                authorized: isPrivileged
+                authorized: isPrivileged,
+                principal: presentedToken.map { token in SHA256.hash(data: Data(token.utf8)).map { String(format: "%02x", $0) }.joined() }
             )
 
         case ("GET", "/mcp"):
@@ -593,7 +595,7 @@ public final class MCPServer {
     // MARK: - MCP JSON-RPC Handler (nonisolated)
 
     nonisolated private func handleMCPPostNonisolated(
-        body: Data?, connection: NWConnection, isLocal: Bool, authorized: Bool
+        body: Data?, connection: NWConnection, isLocal: Bool, authorized: Bool, principal: String?
     ) {
         guard let body,
               let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
@@ -745,7 +747,7 @@ public final class MCPServer {
             Task.detached { [weak self] in
                 defer { self?.onToolCallFinished?(callID) }
                 do {
-                    let result = try await handler(jsonArgs)
+                    let result = try await AskQuestions.$requestPrincipal.withValue(principal) { try await handler(jsonArgs) }
                     // Image results come back as "b64:<mime>,<base64>"; everything else is text.
                     // (Never infer from length/newlines — a long single-line JSON result is text.)
                     if result.hasPrefix("mcpresult:"),

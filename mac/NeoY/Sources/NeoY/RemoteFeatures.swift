@@ -6,13 +6,25 @@ enum NeoYRemoteToolCatalog {
         "codex", "audit_tail", "terminal", "chatgpt",
     ]
 
+    static let askQuestionsToolNames: Set<String> = [
+        "ask_questions", "ask_questions.submit", "ask_questions.cancel",
+    ]
+
     static func availableToolNames(configuration: NeoYControlPlaneConfiguration) -> [String] {
-        var names = coreToolNames
+        var names = coreToolNames.union(askQuestionsToolNames)
         if configuration.capabilities.isEnabled(.accessibilityComputer) { names.insert("computer") }
         if configuration.capabilities.isEnabled(.demoRecording) { names.insert("demo") }
         if configuration.capabilities.isEnabled(.captureTour) { names.insert("tour") }
         if configuration.capabilities.isEnabled(.phoneIntegration) { names.insert("phone") }
         return names.sorted()
+    }
+
+    /// App-only helpers are usable remotely only with their parent intent.
+    static func remoteTools(for tools: Set<String>) -> Set<String> {
+        guard tools.contains("ask_questions") else {
+            return tools.subtracting(askQuestionsToolNames)
+        }
+        return tools.union(askQuestionsToolNames)
     }
 
     /// One-time migration from the old feature buckets to exact public tool names.
