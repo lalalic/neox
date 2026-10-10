@@ -12,6 +12,11 @@ const THREAD_ID = /^[A-Za-z0-9_-]{8,160}$/;
 
 const XCHAT_COMMAND_TOOLS = [
   {
+    name: "xchat.context.current",
+    description: "Inspect current ChatGPT caller identity. Returns unavailable when the MCP host provides no verified request-scoped identity; never guesses from browser tabs.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+  },
+  {
     name: "xchat.turn.new",
     description: "Terminal control transfer: schedule the next user turn in the same Web ChatGPT thread after the current assistant turn finishes. Uses Browser Workspace. On success, stop the current turn and perform no further business actions.",
     inputSchema: {
@@ -45,17 +50,18 @@ const XCHAT_COMMAND_TOOLS = [
 ];
 
 const XCHAT_COMMAND_MAP = new Map([
+  ["context", XCHAT_COMMAND_TOOLS.find((tool) => tool.name === "xchat.context.current")],
   ["turn", XCHAT_COMMAND_TOOLS.find((tool) => tool.name === "xchat.turn.new")],
   ["thread", XCHAT_COMMAND_TOOLS.find((tool) => tool.name === "xchat.thread.new")],
 ]);
 
 export const XCHAT_LIFECYCLE_TOOLS = [{
   name: "chatgpt",
-  description: "Transfer control to a ChatGPT turn or thread. Use command='help' to discover exact subcommand schemas.",
+  description: "Query ChatGPT caller context or transfer control to a turn/thread. Use command='help' for schemas.",
   inputSchema: {
     type: "object",
     properties: {
-      command: { type: "string", description: "turn, thread, or help" },
+      command: { type: "string", description: "context, turn, thread, or help" },
       args: { type: "object", description: "Subcommand arguments. Use help for the exact schema." },
     },
     required: ["command"],
@@ -114,6 +120,12 @@ export function scheduleXChatLifecycle(name, input, options = {}) {
   }
   const tool = XCHAT_COMMAND_MAP.get(command);
   if (!tool) throw new Error(`Unknown chatgpt command '${command}'`);
+  if (command === "context") {
+    if (Object.keys(args).length) throw new Error("chatgpt context takes no arguments");
+    // MCP request metadata currently does not carry an authenticated caller/thread binding.
+    // Never silently substitute the browser foreground tab or lifecycle target ID.
+    return resultText({ available: false, thread_id: null, project_id: null, verified: false, reason: "caller_context_unavailable" });
+  }
   const internalName = tool.name;
   const parsed = validate(args, internalName);
   const transferId = options.transferId || crypto.randomUUID();

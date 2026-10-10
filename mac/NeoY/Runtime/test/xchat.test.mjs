@@ -97,3 +97,15 @@ test("worker invokes uvx with browser-workspace and does not require npm or loca
   assert.equal(JSON.parse(fs.readFileSync(status, "utf8")).status, "completed");
   assert.equal(fs.existsSync(config), false);
 });
+
+
+test("context is discoverable and explicitly unavailable without verified caller binding", () => {
+  const help = JSON.parse(call("help").content[0].text);
+  assert.ok(help.commands.some((item) => item.command === "context"));
+  const schema = JSON.parse(call("help", { command: "context" }).content[0].text);
+  assert.deepEqual(schema.schema.properties, {});
+  const context = JSON.parse(call("context").content[0].text);
+  assert.deepEqual(context, { available: false, thread_id: null, project_id: null, verified: false, reason: "caller_context_unavailable" });
+  assert.throws(() => call("context", { thread_id: "thread_12345678" }), /no arguments/);
+  assert.deepEqual(JSON.parse(call("context").content[0].text), context);
+});
