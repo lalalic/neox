@@ -1,3 +1,6 @@
+import { piEdit } from "./pi-filesystem-edit.mjs";
+import { piFind, piGrep } from "./pi-filesystem-search.mjs";
+
 export const FILESYSTEM_TOOLS = [
 {
     name: "fs_read",
@@ -35,6 +38,66 @@ export const FILESYSTEM_TOOLS = [
       additionalProperties: false,
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  },
+{
+    name: "fs_edit",
+    title: "Edit file",
+    description: "Apply one or more precise, unique text replacements to a file atomically. Same-file mutations are serialized.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        edits: {
+          type: "array", minItems: 1, maxItems: 100,
+          items: {
+            type: "object",
+            properties: { old_text: { type: "string", minLength: 1 }, new_text: { type: "string" } },
+            required: ["old_text", "new_text"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["path", "edits"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  },
+{
+    name: "fs_grep",
+    title: "Search file contents",
+    description: "Search file contents with ripgrep. Respects ignore files, bounds result size, and truncates long match lines.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pattern: { type: "string", minLength: 1 },
+        path: { type: "string", default: "." },
+        glob: { type: "string" },
+        ignore_case: { type: "boolean", default: false },
+        literal: { type: "boolean", default: false },
+        max_results: { type: "integer", minimum: 1, maximum: 5000, default: 100 },
+        timeout_ms: { type: "integer", minimum: 1000, maximum: 120000, default: 60000 },
+      },
+      required: ["pattern"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+{
+    name: "fs_find",
+    title: "Find files",
+    description: "Find files by glob with fd. Respects ignore files and bounds result size.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pattern: { type: "string", minLength: 1 },
+        path: { type: "string", default: "." },
+        max_results: { type: "integer", minimum: 1, maximum: 10000, default: 500 },
+        timeout_ms: { type: "integer", minimum: 1000, maximum: 120000, default: 60000 },
+      },
+      required: ["pattern"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
 {
     name: "fs_list",
@@ -154,6 +217,26 @@ export async function handleFilesystem(name, args, context) {
           return result;
         }
     
+        case "fs_edit": {
+          const result = await piEdit(args, context);
+          await audit(name, { path: args.path, edits: args.edits?.length }, result);
+          return result;
+        }
+
+        case "fs_grep": {
+          const toolsDir = path.join(context.APP_SUPPORT_DIR, "tools");
+          const result = await piGrep(args, { ...context, toolsDir });
+          await audit(name, { pattern: args.pattern, path: args.path ?? ".", glob: args.glob ?? null }, { count: result.count, truncated: result.truncated });
+          return result;
+        }
+
+        case "fs_find": {
+          const toolsDir = path.join(context.APP_SUPPORT_DIR, "tools");
+          const result = await piFind(args, { ...context, toolsDir });
+          await audit(name, { pattern: args.pattern, path: args.path ?? "." }, { count: result.count, truncated: result.truncated });
+          return result;
+        }
+
         case "fs_list": {
           const root = resolvePath(requireString(args, "path"));
           const recursive = optionalBoolean(args, "recursive", false);

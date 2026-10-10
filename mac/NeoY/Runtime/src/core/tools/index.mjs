@@ -698,6 +698,9 @@ const filesystemFacade = commandFacade({
   examples: [
     { command: "read", args: { path: "~/README.md", encoding: "utf8" } },
     { command: "write", args: { path: "~/tmp/example.txt", content: "hello" } },
+    { command: "edit", args: { path: "~/tmp/example.txt", edits: [{ old_text: "hello", new_text: "hello world" }] } },
+    { command: "grep", args: { pattern: "TODO", path: ".", glob: "*.mjs" } },
+    { command: "find", args: { pattern: "**/*.mjs", path: "." } },
     { command: "list", args: { path: ".", max_entries: 20 } },
   ],
 });
@@ -885,7 +888,7 @@ async function assertStillUnlocked(tool, args) {
   }
 }
 
-const context = { HOME, SHELL, JOB_DIR, DEFAULT_OUTPUT_BYTES, MAX_OUTPUT_BYTES, SHELL_EXEC_DEFAULT_TIMEOUT_MS, GUI_FOCUS_POLICY, readOperatorSettings, guiFocusRisk, consumeForegroundGuiApproval, normalizeEnv, optionalString, optionalInteger, optionalBoolean, optionalStringArray, requireString, requireInteger, resolvePath, validateWorkingDirectory, crypto, fs, fsp, path, process, spawn, mergedEnv, nowIso, writeJobMetadata, readJobMetadata, processRunning, tailFile, killProcessGroup, audit, runCommand, CODEX_BIN, callCodexAppServer, AUDIT_LOG };
+const context = { HOME, APP_SUPPORT_DIR, SHELL, JOB_DIR, DEFAULT_OUTPUT_BYTES, MAX_OUTPUT_BYTES, SHELL_EXEC_DEFAULT_TIMEOUT_MS, GUI_FOCUS_POLICY, readOperatorSettings, guiFocusRisk, consumeForegroundGuiApproval, normalizeEnv, optionalString, optionalInteger, optionalBoolean, optionalStringArray, requireString, requireInteger, resolvePath, validateWorkingDirectory, crypto, fs, fsp, path, process, spawn, mergedEnv, nowIso, writeJobMetadata, readJobMetadata, processRunning, tailFile, killProcessGroup, audit, runCommand, CODEX_BIN, callCodexAppServer, AUDIT_LOG };
 configurePty(context);
 
 let unlockRecheckInFlight = false;
