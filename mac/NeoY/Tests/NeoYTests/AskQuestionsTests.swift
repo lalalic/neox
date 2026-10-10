@@ -93,6 +93,35 @@ final class AskQuestionsTests: XCTestCase {
         } catch { }
     }
 
+    @MainActor
+    func testRemotePrincipalBindingRejectsAnotherCaller() async throws {
+        let server = MCPServer(name: "test", port: 0)
+        AskQuestions.register(on: server)
+        let created = try await AskQuestions.$requestPrincipal.withValue("principal-A") {
+            try await server.invokeRegisteredTool(AskQuestions.toolName, arguments: .object(["prompt": .string("Private question")]))
+        }
+        let data = try resultObject(created)
+        let session = try XCTUnwrap(data["structuredContent"] as? [String: Any])
+        let id = try XCTUnwrap(session["session_id"] as? String)
+        let args: JSONValue = .object(["session_id": .string(id), "answer": .string("private answer")])
+        do {
+            _ = try await AskQuestions.$requestPrincipal.withValue("principal-B") {
+                try await server.invokeRegisteredTool(AskQuestions.submitToolName, arguments: args)
+            }
+            XCTFail("another authenticated caller must not submit")
+        } catch { }
+        let submitted = try await AskQuestions.$requestPrincipal.withValue("principal-A") {
+            try await server.invokeRegisteredTool(AskQuestions.submitToolName, arguments: args)
+        }
+        XCTAssertEqual((try resultObject(submitted)["structuredContent"] as? [String: Any])?["status"] as? String, "submitted")
+    }
+
+    func testWidgetKeepsSubmittedStateAfterMessageFailure() {
+        XCTAssertTrue(AskQuestions.html.contains("Retry notification"))
+        XCTAssertTrue(AskQuestions.html.contains("window.addEventListener('pagehide'"))
+        XCTAssertTrue(AskQuestions.html.contains("if(response?.isError)"))
+    }
+
     private func resultObject(_ encoded: String) throws -> [String: Any] {
         XCTAssertTrue(encoded.hasPrefix("mcpresult:"))
         let data = try XCTUnwrap(Data(base64Encoded: String(encoded.dropFirst("mcpresult:".count))))

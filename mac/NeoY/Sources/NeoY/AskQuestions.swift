@@ -8,6 +8,7 @@ import Foundation
 /// do not resume the already-completed `ask_questions` call, so the answer is
 /// returned by the submission call and message separately.
 enum AskQuestions {
+    @TaskLocal static var requestPrincipal: String?
     static let toolName = "ask_questions"
     static let submitToolName = "ask_questions.submit"
     static let cancelToolName = "ask_questions.cancel"
@@ -105,7 +106,7 @@ enum AskQuestions {
             throw AskQuestionsError.invalidPrompt
         }
         let sessionID = UUID().uuidString
-        await sessions.create(id: sessionID, prompt: prompt)
+        await sessions.create(id: sessionID, prompt: prompt, principal: requestPrincipal)
         return try result([
             "content": [["type": "text", "text": "Clarification requested."]],
             "structuredContent": [
@@ -127,7 +128,7 @@ enum AskQuestions {
         guard case .object(let object) = arguments,
               case .string(let sessionID)? = object["session_id"],
               case .string(let answer)? = object["answer"] else { throw AskQuestionsError.invalidSubmission }
-        let record = try await sessions.submit(id: sessionID, answer: answer)
+        let record = try await sessions.submit(id: sessionID, answer: answer, principal: requestPrincipal)
         return try result([
             "content": [["type": "text", "text": "Answer submitted."]],
             "structuredContent": [
@@ -142,7 +143,7 @@ enum AskQuestions {
     private static func cancel(arguments: JSONValue) async throws -> String {
         guard case .object(let object) = arguments,
               case .string(let sessionID)? = object["session_id"] else { throw AskQuestionsError.invalidSubmission }
-        try await sessions.cancel(id: sessionID)
+        try await sessions.cancel(id: sessionID, principal: requestPrincipal)
         return try result([
             "content": [["type": "text", "text": "Clarification cancelled."]],
             "structuredContent": ["session_id": sessionID, "status": "cancelled"],
@@ -221,8 +222,10 @@ enum AskQuestions {
     function send(message){window.parent.postMessage(message,'*')}function rpc(method,params){const id=nextId++;send({jsonrpc:'2.0',id,method,params});return new Promise((resolve,reject)=>pending.set(id,{resolve,reject}))}
     window.addEventListener('message',event=>{if(event.source!==window.parent)return;const m=event.data;if(!m||typeof m!=='object'||m.jsonrpc!=='2.0')return;if(m.id!==undefined&&pending.has(m.id)){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(new Error(m.error.message||'MCP request failed')):p.resolve(m.result);return}if(m.method==='ui/notifications/tool-result'){const r=m.params?.result||m.params||{},d=r.structuredContent||r.structured_content||{};if(typeof d.prompt_html==='string'){sessionId=d.session_id;promptEl.innerHTML=d.prompt_html}}});
     async function init(){try{await rpc('ui/initialize',{protocolVersion:'2026-01-26',appInfo:{name:'NeoY Ask Questions',version:'1.0.0'},appCapabilities:{}});send({jsonrpc:'2.0',method:'ui/notifications/initialized'})}catch(e){statusEl.textContent='MCP App host unavailable.'}}
-    async function finish(method,args,label){if(done||!sessionId)return;done=true;submitEl.disabled=true;cancelEl.disabled=true;statusEl.textContent=label+'…';try{await rpc('tools/call',{name:method,arguments:args});await rpc('ui/message',{role:'user',content:[{type:'text',text:JSON.stringify(args)}]});statusEl.textContent=label+'.'}catch(e){done=false;submitEl.disabled=false;cancelEl.disabled=false;statusEl.textContent=e.message||'Unable to submit.'}}
+    async function notify(message){await rpc('ui/message',{role:'user',content:[{type:'text',text:message}]});statusEl.textContent='Conversation notified.'}
+    async function finish(method,args,label){if(done||!sessionId)return;done=true;submitEl.disabled=true;cancelEl.disabled=true;statusEl.textContent=label+'…';try{const response=await rpc('tools/call',{name:method,arguments:args});if(response?.isError)throw new Error('Tool rejected submission');const message=JSON.stringify(args);statusEl.textContent=label+'. Notifying conversation…';try{await notify(message)}catch(e){statusEl.textContent=label+'. Notification failed; retry notification.';submitEl.textContent='Retry notification';submitEl.disabled=false;submitEl.onclick=()=>{submitEl.disabled=true;notify(message).catch(()=>{submitEl.disabled=false;statusEl.textContent='Notification failed; retry notification.'})}}}catch(e){done=false;submitEl.disabled=false;cancelEl.disabled=false;statusEl.textContent=e.message||'Unable to submit.'}}
     submitEl.onclick=()=>finish('ask_questions.submit',{session_id:sessionId,answer:answerEl.value},'Submitted');cancelEl.onclick=()=>finish('ask_questions.cancel',{session_id:sessionId},'Cancelled');init();
+    window.addEventListener('pagehide',()=>{if(!done&&sessionId)send({jsonrpc:'2.0',id:nextId++,method:'tools/call',params:{name:'ask_questions.cancel',arguments:{session_id:sessionId}}})});
     </script></body></html>
     """
 
@@ -231,28 +234,29 @@ enum AskQuestions {
         return "mcpresult:" + data.base64EncodedString()
     }
 
-    struct SessionRecord: Sendable { let id: String; let prompt: String; let answer: String? }
+    struct SessionRecord: Sendable { let id: String; let prompt: String; let answer: String?; let principal: String? }
 
     actor AskQuestionSessions {
         private var records: [String: SessionRecord] = [:]
-        func create(id: String, prompt: String) {
+        func create(id: String, prompt: String, principal: String?) {
             purgeExpired()
-            records[id] = SessionRecord(id: id, prompt: prompt, answer: nil)
+            records[id] = SessionRecord(id: id, prompt: prompt, answer: nil, principal: principal)
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(AskQuestions.sessionTTL))
                 await self?.expire(id: id)
             }
         }
-        func submit(id: String, answer: String) throws -> SessionRecord {
+        func submit(id: String, answer: String, principal: String?) throws -> SessionRecord {
             purgeExpired()
-            guard let record = records[id] else { throw AskQuestionsError.sessionUnavailable }
+            guard let record = records[id], record.principal == principal else { throw AskQuestionsError.sessionUnavailable }
             guard record.answer == nil else { throw AskQuestionsError.alreadySubmitted }
-            let updated = SessionRecord(id: record.id, prompt: record.prompt, answer: answer)
+            let updated = SessionRecord(id: record.id, prompt: record.prompt, answer: answer, principal: record.principal)
             records[id] = updated
             return updated
         }
-        func cancel(id: String) throws {
-            guard records.removeValue(forKey: id) != nil else { throw AskQuestionsError.sessionUnavailable }
+        func cancel(id: String, principal: String?) throws {
+            guard let record = records[id], record.principal == principal else { throw AskQuestionsError.sessionUnavailable }
+            records.removeValue(forKey: id)
         }
         private func expire(id: String) { records.removeValue(forKey: id) }
         private func purgeExpired() { /* individual expiry tasks bound memory and lifetime */ }
