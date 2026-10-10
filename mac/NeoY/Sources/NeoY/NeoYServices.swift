@@ -4,6 +4,8 @@ import Foundation
 enum NeoYPaths {
     static let supportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("NeoY", isDirectory: true)
+    static let logsDirectory = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("Logs/NeoY", isDirectory: true)
     static let exports = supportDirectory.appendingPathComponent("exports", isDirectory: true)
 
     static func prepare() throws {

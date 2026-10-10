@@ -47,12 +47,36 @@ final class NeoYOAuthService: @unchecked Sendable {
         let expiresAt: TimeInterval
     }
 
+    private struct RegisteredClient: Codable {
+        let id: String
+        let redirectUris: [String]?
+        let clientName: String
+        let createdAt: TimeInterval
+    }
+
     private struct StoreFile: Codable {
         var version: Int = 1
         var clientID: String
         var tokenEpoch: String
         var access: [StoredToken]
         var refresh: [StoredToken]
+        var migratedGatewayEpoch: String?
+        var clients: [RegisteredClient]?
+        var gatewayMigrationVersion: Int?
+    }
+
+    private struct GatewayToken: Decodable {
+        let d: String
+        let exp: TimeInterval
+        let cid: String
+        let aud: String?
+    }
+
+    private struct GatewayStore: Decodable {
+        let bearerEpoch: String
+        let access: [GatewayToken]
+        let refresh: [GatewayToken]
+        let clients: [RegisteredClient]?
     }
 
     private let lock = NSLock()
@@ -64,6 +88,9 @@ final class NeoYOAuthService: @unchecked Sendable {
     private var codes: [String: PendingCode] = [:]
     private var access: [String: StoredToken] = [:]
     private var refresh: [String: StoredToken] = [:]
+    private var clients: [String: RegisteredClient] = [:]
+    private var migratedGatewayEpoch: String?
+    private var gatewayMigrationVersion = 0
 
     private let scope = "mcp"
     private let accessTTL: TimeInterval = 3600
@@ -71,12 +98,13 @@ final class NeoYOAuthService: @unchecked Sendable {
     private let codeTTL: TimeInterval = 60
     private let authTTL: TimeInterval = 300
 
-    init(clientID: String, consentToken: String, stateURL: URL) {
+    init(clientID: String, consentToken: String, stateURL: URL, gatewayStateURL: URL? = nil) {
         self.clientID = clientID
         self.consentToken = consentToken
         self.tokenEpoch = Self.sha256(Self.sha256(consentToken))
         self.stateURL = stateURL
         loadStore()
+        if let gatewayStateURL { importGatewayStoreIfNeeded(from: gatewayStateURL) }
     }
 
     func isAuthorizedBearer(_ token: String?) -> Bool {
@@ -143,6 +171,8 @@ final class NeoYOAuthService: @unchecked Sendable {
             return tokenPOST(body: body, headers: headers)
         case ("POST", "/revoke"):
             return revokePOST(body: body)
+        case ("POST", "/register"):
+            return registerPOST(body: body)
         default:
             return nil
         }
@@ -153,6 +183,7 @@ final class NeoYOAuthService: @unchecked Sendable {
             "issuer": origin,
             "authorization_endpoint": origin + "/authorize",
             "token_endpoint": origin + "/token",
+            "registration_endpoint": origin + "/register",
             "revocation_endpoint": origin + "/revoke",
             "revocation_endpoint_auth_methods_supported": ["none"],
             "response_types_supported": ["code"],
@@ -172,10 +203,10 @@ final class NeoYOAuthService: @unchecked Sendable {
         let q = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).compactMap { item in
             item.value.map { (item.name, $0) }
         })
-        guard q["client_id"] == clientID else {
+        guard let requestedClientID = q["client_id"], let client = knownClient(requestedClientID) else {
             return html(status: 400, title: "Authorization failed", body: "Unrecognised client_id.")
         }
-        guard let redirect = q["redirect_uri"], Self.allowedRedirect(redirect) else {
+        guard let redirect = q["redirect_uri"], redirectAllowed(redirect, for: client) else {
             return html(status: 400, title: "Authorization failed", body: "Unrecognised redirect_uri.")
         }
         guard q["response_type"] == "code" else {
@@ -192,7 +223,7 @@ final class NeoYOAuthService: @unchecked Sendable {
         let rid = Self.randomToken(bytes: 16)
         lock.withLock {
             sweepPendingLocked()
-            pendingAuth[rid] = PendingAuth(clientID: clientID, redirectURI: redirect, challenge: challenge,
+            pendingAuth[rid] = PendingAuth(clientID: requestedClientID, redirectURI: redirect, challenge: challenge,
                                            state: q["state"], resource: q["resource"], issuer: origin,
                                            expiresAt: Date().addingTimeInterval(authTTL))
         }
@@ -247,7 +278,9 @@ final class NeoYOAuthService: @unchecked Sendable {
                 form["client_id"] = String(decoded[..<colon]).removingPercentEncoding ?? String(decoded[..<colon])
             }
         }
-        guard form["client_id"] == clientID else { return oauthError(status: 401, code: "invalid_client", description: "unknown client_id") }
+        guard let requestedClientID = form["client_id"], knownClient(requestedClientID) != nil else {
+            return oauthError(status: 401, code: "invalid_client", description: "unknown client_id")
+        }
 
         switch form["grant_type"] {
         case "authorization_code":
@@ -255,6 +288,9 @@ final class NeoYOAuthService: @unchecked Sendable {
             let digest = Self.sha256(code)
             guard let record = lock.withLock({ codes.removeValue(forKey: digest) }), record.expiresAt > Date() else {
                 return oauthError(status: 400, code: "invalid_grant", description: "unknown or expired authorization code")
+            }
+            guard record.clientID == requestedClientID else {
+                return oauthError(status: 400, code: "invalid_grant", description: "client_id mismatch")
             }
             if let redirect = form["redirect_uri"], redirect != record.redirectURI {
                 return oauthError(status: 400, code: "invalid_grant", description: "redirect_uri mismatch")
@@ -265,7 +301,7 @@ final class NeoYOAuthService: @unchecked Sendable {
             guard Self.pkceChallenge(verifier) == record.challenge else {
                 return oauthError(status: 400, code: "invalid_grant", description: "PKCE verification failed")
             }
-            return issueTokens(audience: record.resource)
+            return issueTokens(clientID: record.clientID, audience: record.resource)
 
         case "refresh_token":
             guard let token = form["refresh_token"], !token.isEmpty else { return oauthError(status: 400, code: "invalid_request", description: "refresh_token is required") }
@@ -277,7 +313,10 @@ final class NeoYOAuthService: @unchecked Sendable {
             }), record.expiresAt > now else {
                 return oauthError(status: 400, code: "invalid_grant", description: "unknown or expired refresh token")
             }
-            return issueTokens(audience: record.audience)
+            guard record.clientID == requestedClientID else {
+                return oauthError(status: 400, code: "invalid_grant", description: "client_id mismatch")
+            }
+            return issueTokens(clientID: record.clientID, audience: record.audience)
 
         default:
             return oauthError(status: 400, code: "unsupported_grant_type", description: "unsupported grant_type")
@@ -297,7 +336,70 @@ final class NeoYOAuthService: @unchecked Sendable {
         return NeoYOAuthHTTPResponse(status: 200, headers: ["Cache-Control": "no-store"])
     }
 
-    private func issueTokens(audience: String?) -> NeoYOAuthHTTPResponse {
+    private func registerPOST(body: Data?) -> NeoYOAuthHTTPResponse {
+        guard let body,
+              let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+            return oauthError(status: 400, code: "invalid_client_metadata", description: "registration body must be JSON")
+        }
+        guard let redirectUris = object["redirect_uris"] as? [String], !redirectUris.isEmpty,
+              redirectUris.allSatisfy(Self.allowedRedirect) else {
+            return oauthError(status: 400, code: "invalid_redirect_uri",
+                              description: "all redirect_uris must be approved ChatGPT callback URLs")
+        }
+        if let method = object["token_endpoint_auth_method"] as? String, method != "none" {
+            return oauthError(status: 400, code: "invalid_client_metadata",
+                              description: "only token_endpoint_auth_method=none is supported")
+        }
+        if let grants = object["grant_types"] as? [String],
+           grants.contains(where: { !["authorization_code", "refresh_token"].contains($0) }) {
+            return oauthError(status: 400, code: "invalid_client_metadata", description: "unsupported grant_types")
+        }
+        if let responses = object["response_types"] as? [String], responses.contains(where: { $0 != "code" }) {
+            return oauthError(status: 400, code: "invalid_client_metadata", description: "unsupported response_types")
+        }
+
+        let redirects = Array(Set(redirectUris)).sorted()
+        let name = String((object["client_name"] as? String ?? "ChatGPT").prefix(200))
+        let fingerprint = redirects.joined(separator: "\u{0}") + "\u{1}" + name
+        let id = "neo-dcr-" + Self.sha256(fingerprint).prefix(32)
+        let record = lock.withLock { () -> RegisteredClient? in
+            if let existing = clients[id] { return existing }
+            guard clients.count < 32 else { return nil }
+            let created = RegisteredClient(id: id, redirectUris: redirects, clientName: name,
+                                           createdAt: Date().timeIntervalSince1970)
+            clients[id] = created
+            saveStoreLocked()
+            return created
+        }
+        guard let record else {
+            return oauthError(status: 429, code: "temporarily_unavailable",
+                              description: "dynamic client registration capacity reached")
+        }
+        return json(status: 201, [
+            "client_id": record.id,
+            "client_id_issued_at": Int(record.createdAt),
+            "client_name": record.clientName,
+            "redirect_uris": record.redirectUris ?? [],
+            "grant_types": ["authorization_code", "refresh_token"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "none",
+        ], headers: ["Cache-Control": "no-store"])
+    }
+
+    private func knownClient(_ id: String) -> RegisteredClient? {
+        guard !id.isEmpty else { return nil }
+        if id == clientID {
+            return RegisteredClient(id: id, redirectUris: nil, clientName: "Configured OAuth client", createdAt: 0)
+        }
+        return lock.withLock { clients[id] }
+    }
+
+    private func redirectAllowed(_ value: String, for client: RegisteredClient) -> Bool {
+        guard Self.allowedRedirect(value) else { return false }
+        return client.redirectUris?.contains(value) ?? true
+    }
+
+    private func issueTokens(clientID: String, audience: String?) -> NeoYOAuthHTTPResponse {
         let now = Date().timeIntervalSince1970
         let accessToken = Self.randomToken(bytes: 32)
         let refreshToken = Self.randomToken(bytes: 32)
@@ -363,17 +465,62 @@ final class NeoYOAuthService: @unchecked Sendable {
             }
             access = Dictionary(uniqueKeysWithValues: stored.access.map { ($0.digest, $0) })
             refresh = Dictionary(uniqueKeysWithValues: stored.refresh.map { ($0.digest, $0) })
+            clients = Dictionary(uniqueKeysWithValues: (stored.clients ?? []).map { ($0.id, $0) })
+            migratedGatewayEpoch = stored.migratedGatewayEpoch
+            gatewayMigrationVersion = stored.gatewayMigrationVersion ?? 0
             sweepLocked(now: Date().timeIntervalSince1970)
         }
     }
 
     private func saveStoreLocked() {
-        let file = StoreFile(clientID: clientID, tokenEpoch: tokenEpoch, access: Array(access.values), refresh: Array(refresh.values))
+        let file = StoreFile(clientID: clientID, tokenEpoch: tokenEpoch, access: Array(access.values),
+                             refresh: Array(refresh.values), migratedGatewayEpoch: migratedGatewayEpoch,
+                             clients: Array(clients.values), gatewayMigrationVersion: gatewayMigrationVersion)
         guard let data = try? JSONEncoder().encode(file) else { return }
         let dir = stateURL.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try? data.write(to: stateURL, options: .atomic)
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: stateURL.path)
+    }
+
+    private func importGatewayStoreIfNeeded(from url: URL) {
+        guard let data = try? Data(contentsOf: url),
+              let gateway = try? JSONDecoder().decode(GatewayStore.self, from: data),
+              gateway.bearerEpoch == Self.gatewayTokenEpoch(consentToken) else { return }
+        let now = Date().timeIntervalSince1970
+        lock.withLock {
+            guard gatewayMigrationVersion < 2 else { return }
+            for client in gateway.clients ?? [] where Self.validRegisteredClient(client) {
+                clients[client.id] = client
+            }
+            let knownClientIDs = Set(clients.keys).union([clientID])
+            for token in gateway.access where knownClientIDs.contains(token.cid) && token.exp / 1000 > now && Self.validDigest(token.d) {
+                access[token.d] = StoredToken(digest: token.d, clientID: token.cid,
+                                              audience: token.aud, expiresAt: token.exp / 1000)
+            }
+            for token in gateway.refresh where knownClientIDs.contains(token.cid) && token.exp / 1000 > now && Self.validDigest(token.d) {
+                refresh[token.d] = StoredToken(digest: token.d, clientID: token.cid,
+                                               audience: token.aud, expiresAt: token.exp / 1000)
+            }
+            migratedGatewayEpoch = gateway.bearerEpoch
+            gatewayMigrationVersion = 2
+            saveStoreLocked()
+        }
+    }
+
+    private static func gatewayTokenEpoch(_ token: String) -> String {
+        let first = SHA256.hash(data: Data(token.utf8))
+        return SHA256.hash(data: Data(first)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func validDigest(_ value: String) -> Bool {
+        value.range(of: #"^[0-9a-f]{64}$"#, options: .regularExpression) != nil
+    }
+
+    private static func validRegisteredClient(_ client: RegisteredClient) -> Bool {
+        client.id.range(of: #"^neo-dcr-[0-9a-f]{32}$"#, options: .regularExpression) != nil
+            && !(client.redirectUris ?? []).isEmpty
+            && (client.redirectUris ?? []).allSatisfy(allowedRedirect)
     }
 
     private func sweepLocked(now: TimeInterval) {

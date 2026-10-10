@@ -128,7 +128,8 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
         value.configureOAuth(
             clientID: oauthCredentials.clientID,
             consentToken: coreToken,
-            stateURL: NeoYPaths.supportDirectory.appendingPathComponent("native-oauth-state.json")
+            stateURL: NeoYPaths.supportDirectory.appendingPathComponent("native-oauth-state.json"),
+            gatewayStateURL: NeoYPaths.supportDirectory.appendingPathComponent("oauth-state.json")
         )
         value.setRemoteAllowedTools(deployment.enabledRemoteTools)
         value.setRemoteAllowedProviders(deployment.enabledRemoteProviders)
@@ -145,15 +146,9 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
             runtime: runtimeControl,
             onDeploymentChanged: { [weak self] in
                 await MainActor.run { self?.restartPrimaryMCPServer() }
-                await Self.controlTunnelRuntime(action: "tunnel-restart")
             },
-            onCapabilitiesChanged: { [weak self] updated in
+            onCapabilitiesChanged: { [weak self] _ in
                 await MainActor.run { self?.restartPrimaryMCPServer() }
-                if updated.capabilities.isEnabled(.publicTunnel) {
-                    await Self.controlTunnelRuntime(action: "tunnel-restart")
-                } else {
-                    await Self.controlTunnelRuntime(action: "tunnel-stop")
-                }
             }
         )
         self.runtimeControl = runtimeControl
@@ -222,18 +217,6 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
             ),
             capabilities: Self.runtimeCapabilities()
         )
-    }
-
-    nonisolated private static func controlTunnelRuntime(action: String) async {
-        guard let script = Bundle.main.url(forResource: "runtime-control", withExtension: "sh") else { return }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = [script.path, action]
-        process.environment = NeoYProcessEnvironment.childEnvironment()
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try? process.run()
-        process.waitUntilExit()
     }
 
     private static func runtimeCapabilities() -> [String] {

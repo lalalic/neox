@@ -3,6 +3,18 @@ import XCTest
 @testable import NeoY
 
 final class SetupServiceTests: XCTestCase {
+    func testTunnelNameIsStableAndHostnameScoped() {
+        XCTAssertEqual(
+            NeoYTunnelRuntime.defaultTunnelName(hostname: "NeoY.Example.com"),
+            NeoYTunnelRuntime.defaultTunnelName(hostname: "neoy.example.com")
+        )
+        XCTAssertTrue(NeoYTunnelRuntime.defaultTunnelName(hostname: "neoy.example.com").hasPrefix("neoy-neoy-example-com-"))
+        XCTAssertNotEqual(
+            NeoYTunnelRuntime.defaultTunnelName(hostname: "neoy.example.com"),
+            NeoYTunnelRuntime.defaultTunnelName(hostname: "other.example.com")
+        )
+    }
+
     func testParserAcceptsAliasAndStatus() throws {
         XCTAssertEqual(try NeoYSetupParser.parse("neoy.setup status"), .status)
         XCTAssertEqual(try NeoYSetupParser.parse("setup"), .help(topic: nil))

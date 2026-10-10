@@ -32,9 +32,17 @@ test("real PTY lifecycle exercises job metadata path", async (t) => {
     const started = await handlePty("pty_start", { command: "/bin/sh", args: ["-i"], cwd: root }, context);
     id = started.sessionId;
     assert.match(id, /^pty_/);
+    const initial = await handlePty("pty_read", { session_id: id, cursor: 0 }, context);
     await handlePty("pty_write", { session_id: id, data: "echo neoy_pty_test\n" }, context);
-    const output = await handlePty("pty_read", { session_id: id, cursor: 0, wait_ms: 1500 }, context);
-    assert.match(JSON.stringify(output), /neoy_pty_test/);
+    let cursor = initial.nextCursor;
+    let text = "";
+    const deadline = Date.now() + 1500;
+    while (!text.includes("neoy_pty_test") && Date.now() < deadline) {
+      const output = await handlePty("pty_read", { session_id: id, cursor, wait_ms: 100 }, context);
+      cursor = output.nextCursor;
+      text += output.text;
+    }
+    assert.match(text, /neoy_pty_test/);
   } finally {
     if (id) await handlePty("pty_close", { session_id: id, force: true }, context);
     await fs.rm(root, { recursive: true, force: true });

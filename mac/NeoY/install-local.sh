@@ -36,10 +36,6 @@ rm -rf "$APP"
 xcodebuild -project "$PROJECT" -scheme NeoY -configuration Debug \
   -derivedDataPath "$DERIVED" build
 
-mkdir -p "$APP/Contents/Resources"
-cp "$HERE/Resources/Scripts/runtime-control.sh" "$APP/Contents/Resources/runtime-control.sh"
-chmod 755 "$APP/Contents/Resources/runtime-control.sh"
-
 codesign --force --deep --sign "$identity" \
   --entitlements "$ENTITLEMENTS" --timestamp=none "$APP"
 codesign --verify --deep --strict "$APP"
@@ -85,15 +81,16 @@ killall NeoY 2>/dev/null || true
 rm -rf "$DEST"
 mv "$DEST.new" "$DEST"
 
-RUNTIME="$DEST/Contents/Resources/runtime-control.sh"
 # Runtime code is loaded directly from the NeoY repo; remove all legacy runtime copies/overrides.
 rm -rf "$HOME/Library/Application Support/NeoY/runtime"
 rm -f "$HOME/Library/Application Support/NeoY/runtime-source"
 mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.neoy"
 
-# NeoY itself is always supervised by macOS launchd. PM2 is reserved for
-# NeoY-managed background/feature services and is invoked through npx.
-npx --yes pm2 delete neoy >/dev/null 2>&1 || true
+# NeoY and its cloudflared child are supervised without PM2. Remove obsolete
+# PM2 entries once during installation; optional products may still use PM2.
+for process_name in neoy neoy-tunnel neoy-runtime-gateway neoy-mcp-gateway; do
+  npx --yes pm2 delete "$process_name" >/dev/null 2>&1 || true
+done
 npx --yes pm2 save --force >/dev/null 2>&1 || true
 rm -f "$HOME/Library/Application Support/NeoY/neoy-pm2.config.cjs"
 

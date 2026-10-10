@@ -147,13 +147,18 @@ The migrated typed tool names remain stable; NeoY's allowlists and remote featur
 policy track those names. Cluster routing remains NeoY-owned.
 
 Generic execution is implemented by `@lalalic/neo` Core tools and does not
-depend on PM2. PM2 remains the product deployment/keepalive supervisor for NeoY
-and the Cloudflare tunnel. `runtime-control.sh` remains deployment/tunnel glue
-only.
+depend on PM2. macOS launchd supervises NeoY; NeoY directly launches, stops, and
+restarts its `cloudflared` child. PM2 is not part of the NeoY or public tunnel
+lifecycle.
 
 ### Public transport
 
-The v2.1 public MCP endpoint stays usable for ChatGPT/plugin discovery of
-non-privileged optional tools. Privileged Core tools and configured federated
-MCP tools are hidden on untrusted/public requests. A trusted token can authorize
-Core access; the token is generated locally and stored with mode `0600`.
+Cloudflare forwards directly to NeoY's configured native MCP port (normally
+`127.0.0.1:6767`). NeoY owns OAuth, ChatGPT protocol compatibility, remote
+allowlists, and native tools; there is no deployed Node HTTP gateway or stdio
+proxy between Cloudflare and NeoY. Core remains a private stdio child, and NeoY
+matches concurrent JSON-RPC responses by request ID so one slow Core call does
+not block unrelated requests. Privileged Core tools and configured federated MCP
+tools are hidden on unauthenticated public requests. A trusted token can
+authorize Core access; the token is generated locally and stored with mode
+`0600`.

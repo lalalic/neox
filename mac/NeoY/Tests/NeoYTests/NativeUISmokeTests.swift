@@ -72,6 +72,28 @@ final class NativeUISmokeTests: XCTestCase {
         ))
     }
 
+    func testRemoteToolNormalizationAddsChatGPTMetadataAndRepairsNumericBooleans() throws {
+        let normalized = MCPServer.normalizeRemoteTool([
+            "name": "shell.exec",
+            "inputSchema": [
+                "type": "object",
+                "properties": ["items": ["type": "array", "minItems": true]],
+            ],
+        ])
+
+        XCTAssertEqual(normalized["title"] as? String, "Shell Exec")
+        let schemes = try XCTUnwrap(normalized["securitySchemes"] as? [[String: Any]])
+        XCTAssertEqual(schemes.first?["type"] as? String, "oauth2")
+        let metadata = try XCTUnwrap(normalized["_meta"] as? [String: Any])
+        XCTAssertNotNil(metadata["securitySchemes"])
+        let annotations = try XCTUnwrap(normalized["annotations"] as? [String: Any])
+        XCTAssertEqual(annotations["readOnlyHint"] as? Bool, false)
+        let schema = try XCTUnwrap(normalized["inputSchema"] as? [String: Any])
+        let properties = try XCTUnwrap(schema["properties"] as? [String: Any])
+        let items = try XCTUnwrap(properties["items"] as? [String: Any])
+        XCTAssertEqual(items["minItems"] as? Int, 1)
+    }
+
     private func decodeResult(_ encoded: String) throws -> [String: Any] {
         let prefix = "mcpresult:"
         XCTAssertTrue(encoded.hasPrefix(prefix))

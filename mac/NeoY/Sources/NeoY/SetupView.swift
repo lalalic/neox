@@ -79,9 +79,6 @@ final class NeoYSetupModel: ObservableObject {
             value.mcpPort = port
             try NeoYDeploymentSettingsStore.save(value)
             NotificationCenter.default.post(name: .neoYDeploymentSettingsChanged, object: nil)
-            if value.tunnelMode != .off {
-                Task { await runRuntimeControl("tunnel-restart") }
-            }
             result = "MCP port changed to \(port)."
         } catch {
             result = error.localizedDescription
@@ -94,21 +91,12 @@ final class NeoYSetupModel: ObservableObject {
             var value = NeoYDeploymentSettingsStore.load()
             value.tunnelMode = enabled ? (remoteMode == .ownDomain ? .named : .quick) : .off
             try NeoYDeploymentSettingsStore.save(value)
-            if enabled {
-                if remoteMode == .ownDomain && publicHostname.isEmpty {
-                    result = "Enter a hostname to enable your own domain."
-                    return
-                }
-                Task {
-                    if remoteMode == .ownDomain {
-                        await runRuntimeControl("named-apply")
-                    } else {
-                        await runRuntimeControl("tunnel-start")
-                    }
-                }
-            } else {
-                Task { await runRuntimeControl("tunnel-stop") }
+            if enabled && remoteMode == .ownDomain && publicHostname.isEmpty {
+                result = "Enter a hostname to enable your own domain."
+                return
             }
+            NotificationCenter.default.post(name: .neoYDeploymentSettingsChanged, object: nil)
+            result = enabled ? "Remote access is starting." : "Remote access stopped."
         } catch {
             result = error.localizedDescription
         }
@@ -125,13 +113,8 @@ final class NeoYSetupModel: ObservableObject {
             result = "Enter a hostname to use your own domain."
             return
         }
-        Task {
-            if mode == .ownDomain {
-                await runRuntimeControl("named-apply")
-            } else {
-                await runRuntimeControl("tunnel-restart")
-            }
-        }
+        NotificationCenter.default.post(name: .neoYDeploymentSettingsChanged, object: nil)
+        result = "Remote access is updating."
     }
 
     func applyHostname() {
@@ -144,7 +127,8 @@ final class NeoYSetupModel: ObservableObject {
         remoteEnabled = true
         remoteMode = .ownDomain
         persistRemoteSettings()
-        Task { await runRuntimeControl("named-apply") }
+        NotificationCenter.default.post(name: .neoYDeploymentSettingsChanged, object: nil)
+        result = "Remote access is updating."
     }
 
     func setRemoteTool(_ tool: String, enabled: Bool) {
@@ -310,34 +294,6 @@ final class NeoYSetupModel: ObservableObject {
         }
     }
 
-    private func runRuntimeControl(_ action: String) async {
-        isBusy = true
-        defer { isBusy = false }
-        guard let script = Bundle.main.url(forResource: "runtime-control", withExtension: "sh") else {
-            result = "Runtime control is unavailable."
-            return
-        }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = [script.path, action]
-        process.environment = NeoYProcessEnvironment.childEnvironment()
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        do {
-            try process.run()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            let output = String(decoding: data, as: UTF8.self)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            result = process.terminationStatus == 0
-                ? (output.isEmpty ? "Done." : output)
-                : "Failed: \(output)"
-            reload()
-        } catch {
-            result = error.localizedDescription
-        }
-    }
 }
 
 struct NeoYSetupView: View {

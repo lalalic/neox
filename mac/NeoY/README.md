@@ -9,7 +9,7 @@ and principle-level review requirements.
 
 ## Runtime endpoints
 
-- MCP: configurable local port (default `http://127.0.0.1:9224/mcp`), Bonjour `_mcp._tcp` / `NeoY`
+- MCP: configurable local port (default `http://127.0.0.1:6767/mcp`), Bonjour `_mcp._tcp` / `NeoY`
 - Public MCP: optional Cloudflare Temporary tunnel or named-domain tunnel; the Setup window can start, stop, and test either mode
 - Phone handoff: TCP `8686`, Bonjour `_neoy._tcp`, `POST /agent`
 - Handoff queue: `GET /agent/peek`, `GET /agent/next?timeout=0..30`
@@ -38,13 +38,13 @@ deployment set hostname <host>
 
 Changing deployment settings persists them, restarts the MCP listener after the current response completes, and reconciles the Cloudflare tunnel. The menu-bar **Setup…** window exposes the same port/tunnel values plus local/public test buttons and MCP app credentials.
 
-Optional/product MCP providers appear as one CLI-style facade per provider (`events` or `mcp.<server>`) and are configured in the control plane. Runtime code is grouped by owner under `Runtime/src/core`: `gateway.mjs` and `stdio-proxy.mjs` own transport; `tools/` owns Core capabilities; `tools/xchat.mjs` is the thin Browser Workspace lifecycle adapter; and `lib/` contains Core helpers. The migrated implementation and MIT attribution are documented in `core/UPSTREAM.md`. MacBridge is not an npm dependency or separate installed service. `~/Workspace/neox/mac/NeoY/Runtime` is the single runtime source of truth: Swift starts the Core stdio provider from that repo directory and the public MCP gateway runs from the same source. Runtime source changes require restarting the Core/public gateway services; no runtime package copy is installed under Application Support.
+Optional/product MCP providers appear as one CLI-style facade per provider (`events` or `mcp.<server>`) and are configured in the control plane. Runtime code is grouped by owner under `Runtime/src/core`: `tools/` owns Core capabilities; `tools/xchat.mjs` is the thin Browser Workspace lifecycle adapter; and `lib/` contains Core helpers. The migrated implementation and MIT attribution are documented in `core/UPSTREAM.md`. MacBridge is not an npm dependency or separate installed service. `~/Workspace/neox/mac/NeoY/Runtime` is the single runtime source of truth: Swift starts the Core stdio provider from that repo directory, while NeoY itself owns the local and public HTTP MCP transport. Runtime source changes require restarting the Core provider; no runtime package copy is installed under Application Support.
 
-NeoY explicitly authorizes only that trusted Core child at spawn time; unrelated stdio providers receive no such authorization. Federation initializes the child, requires a successful `tools/list` before publishing it as ready, removes stale registrations on an unexpected exit, and respawns with bounded backoff without restarting NeoY Core.
+NeoY explicitly authorizes only that trusted Core child at spawn time; unrelated stdio providers receive no such authorization. Federation initializes the child, requires a successful `tools/list` before publishing it as ready, routes concurrent JSON-RPC responses by request ID, removes stale registrations on an unexpected exit, and respawns with bounded backoff without restarting NeoY.
 
 Core capabilities use compact CLI-style facades (`shell`, `terminal`, `fs`, `codex`) with exact subcommand schemas available through `command=help`; legacy MacBridge configuration is normalized out of `mcpServers`.
 
-The Node.js runtime package owns the Web ChatGPT gateway/proxy scripts and direct Node dependencies. Swift remains the signed host, public auth boundary, native capability owner, and MCP federation host.
+Swift is the signed host, public OAuth/MCP boundary, native capability owner, and MCP federation host. Cloudflare connects directly to NeoY's configured port; the legacy Node gateway/proxy scripts are not launched in the deployed topology.
 
 Control state is schema-versioned and validated. v1 diagnostics-only state migrates explicitly to v2. Malformed state is preserved and surfaced as degraded health rather than silently discarded.
 
@@ -77,7 +77,7 @@ cd mac/NeoY
 ./install-local.sh
 ```
 
-The installer uses a valid Apple Development identity and installs `/Applications/NeoY.app`. When PM2 is available it becomes the primary supervisor for `neoy` (and `neoy-tunnel` when enabled); the legacy per-user LaunchAgent is only a fallback. PM2 state is saved so runtime/tunnel services survive daemon resurrection. Stable signing lets macOS associate one-time TCC grants with `com.neox.neoy` across local rebuilds.
+The installer uses a valid Apple Development identity and installs `/Applications/NeoY.app`. macOS launchd keeps NeoY alive, and NeoY directly owns the `cloudflared` child whenever remote access is enabled. PM2 is not part of the NeoY/tunnel path. Stable signing lets macOS associate one-time TCC grants with `com.neox.neoy` across local rebuilds.
 
 An MCP client can point its remote entry at the stable HTTPS endpoint. NeoY's MCP tools are discovered dynamically rather than duplicated in a client manifest.
 
@@ -138,13 +138,11 @@ rotation invalidates the previous token while preserving the client ID.
 
 For Web ChatGPT, create the MCP App with the display name **`neo`** and point it at
 the public **`https://<host>/mcp`** endpoint. The public endpoint publishes MCP
-protected-resource and OAuth authorization-server metadata, including an RFC 7591
-dynamic-client-registration endpoint, so Web ChatGPT can obtain its own public
-`client_id` without a copied client secret. Authorization uses code + PKCE S256 and
-returns access/refresh tokens after the local approval step. The Client ID shown by
-NeoY remains supported for existing/manual connections. Keep the existing legacy
-NeoY/Mac Bridge connection installed while migration/E2E verification is still in
-progress.
+protected-resource and OAuth authorization-server metadata. Authorization uses the
+configured Client ID with code + PKCE S256 and returns access/refresh tokens after
+the local approval step. During migration NeoY adopts the previous gateway Client ID
+and valid token state, so an existing configured `neo` connection continues to work
+without rebuilding the connector.
 
 Remote access can use a temporary Cloudflare address or a hostname managed by the
 user's Cloudflare account. Own-domain addresses remain stable across restarts;

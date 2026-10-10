@@ -15,6 +15,7 @@ enum NeoYRuntimeControlError: LocalizedError {
 final class NeoYRuntimeControl {
     private let federation: NeoYMCPFederation
     private let phone: NeoXPhoneClient
+    private let tunnel = NeoYTunnelRuntime()
 
     init(server: MCPServer, phone: NeoXPhoneClient) {
         self.federation = NeoYMCPFederation(server: server)
@@ -26,6 +27,10 @@ final class NeoYRuntimeControl {
         let providers = Set(featureServers.map(\.name))
         let userServers = configuration.mcpServers.filter { !providers.contains($0.name) } + featureServers
         await federation.reconcile(NeoYBundledRuntime.resolvedMCPServers(userServers: userServers))
+        await tunnel.reconcile(
+            settings: NeoYDeploymentSettingsStore.load(),
+            enabled: configuration.capabilities.isEnabled(.publicTunnel)
+        )
     }
 
     func permissions() async -> [NeoYPermissionStatus] {
@@ -53,5 +58,8 @@ final class NeoYRuntimeControl {
         ]))
     }
 
-    func stop() { federation.stop() }
+    func stop() {
+        federation.stop()
+        tunnel.stop()
+    }
 }

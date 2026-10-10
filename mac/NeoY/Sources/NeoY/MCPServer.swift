@@ -41,6 +41,8 @@ public final class MCPServer {
 
     nonisolated static let mcpAppExtensionID = "io.modelcontextprotocol/ui"
     nonisolated static let mcpAppMimeType = "text/html;profile=mcp-app"
+    nonisolated static let modernProtocolVersion = "2026-07-28"
+    nonisolated static let supportedProtocolVersions = [modernProtocolVersion, "2025-11-25", "2025-06-18", "2025-03-26"]
 
     nonisolated static var advertisedCapabilities: JSONValue {
         .object([
@@ -210,8 +212,10 @@ public final class MCPServer {
         refreshSnapshots()
     }
 
-    public func configureOAuth(clientID: String, consentToken: String, stateURL: URL) {
-        oauthService = NeoYOAuthService(clientID: clientID, consentToken: consentToken, stateURL: stateURL)
+    public func configureOAuth(clientID: String, consentToken: String, stateURL: URL,
+                               gatewayStateURL: URL? = nil) {
+        oauthService = NeoYOAuthService(clientID: clientID, consentToken: consentToken,
+                                        stateURL: stateURL, gatewayStateURL: gatewayStateURL)
         refreshSnapshots()
     }
 
@@ -600,6 +604,7 @@ public final class MCPServer {
         let id = json["id"]
         let method = json["method"] as? String
         let params = json["params"] as? [String: Any] ?? [:]
+        let modern = Self.isModernRequest(params)
 
         guard id != nil else {
             sendHTTP(connection: connection, status: 202, body: nil)
@@ -612,9 +617,23 @@ public final class MCPServer {
         }
 
         switch method {
-        case "initialize":
+        case "server/discover":
             let result: [String: Any] = [
-                "protocolVersion": "2025-03-26",
+                "resultType": "complete",
+                "supportedVersions": Self.supportedProtocolVersions,
+                "capabilities": Self.jsonValueToAny(Self.advertisedCapabilities),
+                "instructions": "NeoY exposes the native and configured Core capabilities enabled for remote access.",
+                "ttlMs": 3_600_000,
+                "cacheScope": "private",
+                "_meta": ["io.modelcontextprotocol/serverInfo": Self.serverInfo(name: _snapshotName, version: _snapshotVersion)],
+            ]
+            sendJSONRPCResult(connection: connection, id: id, result: result)
+
+        case "initialize":
+            let requested = params["protocolVersion"] as? String
+            let selected = requested.flatMap { Self.supportedProtocolVersions.contains($0) ? $0 : nil } ?? "2025-03-26"
+            let result: [String: Any] = [
+                "protocolVersion": selected,
                 "capabilities": Self.jsonValueToAny(Self.advertisedCapabilities),
                 "serverInfo": ["name": _snapshotName, "version": _snapshotVersion]
             ]
@@ -634,7 +653,7 @@ public final class MCPServer {
             } else {
                 visibleResources = []
             }
-            sendJSONRPCResult(connection: connection, id: id, result: ["resources": visibleResources])
+            sendJSONRPCResult(connection: connection, id: id, result: ["resources": visibleResources], modern: modern)
 
         case "resources/read":
             guard let uri = params["uri"] as? String, !uri.isEmpty else {
@@ -665,7 +684,7 @@ public final class MCPServer {
                           let forwarded = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                         throw NeoYRuntimeControlError.federation("federated resource result is invalid")
                     }
-                    self?.sendJSONRPCResult(connection: connection, id: id, result: forwarded)
+                    self?.sendJSONRPCResult(connection: connection, id: id, result: forwarded, modern: modern)
                 } catch {
                     self?.sendJSONRPCError(connection: connection, id: id, code: -32002, message: error.localizedDescription)
                 }
@@ -680,11 +699,11 @@ public final class MCPServer {
                     guard let name = $0["name"] as? String else { return false }
                     return _snapshotRemoteAllowedTools.contains(name)
                         || Self.remoteProvider(forToolName: name, ownership: _snapshotFederatedToolProviders).map { _snapshotRemoteAllowedProviders.contains($0) } == true
-                }
+                }.map(Self.normalizeRemoteTool)
             } else {
                 visibleTools = []
             }
-            sendJSONRPCResult(connection: connection, id: id, result: ["tools": visibleTools])
+            sendJSONRPCResult(connection: connection, id: id, result: ["tools": visibleTools], modern: modern)
 
         case "tools/call":
             guard let toolName = params["name"] as? String else {
@@ -732,7 +751,7 @@ public final class MCPServer {
                     if result.hasPrefix("mcpresult:"),
                        let data = Data(base64Encoded: String(result.dropFirst("mcpresult:".count))),
                        let forwarded = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                        self?.sendJSONRPCResult(connection: connection, id: id, result: forwarded)
+                        self?.sendJSONRPCResult(connection: connection, id: id, result: forwarded, modern: modern)
                         return
                     }
                     let content: [[String: Any]]
@@ -745,29 +764,96 @@ public final class MCPServer {
                     }
                     self?.sendJSONRPCResult(connection: connection, id: id, result: [
                         "content": content, "isError": false
-                    ])
+                    ], modern: modern)
                 } catch {
                     self?.sendJSONRPCResult(connection: connection, id: id, result: [
                         "content": [["type": "text", "text": "Error: \(error.localizedDescription)"]],
                         "isError": true
-                    ])
+                    ], modern: modern)
                 }
             }
 
         case "ping":
-            sendJSONRPCResult(connection: connection, id: id, result: [:] as [String: Any])
+            sendJSONRPCResult(connection: connection, id: id, result: [:] as [String: Any], modern: modern)
 
         default:
             sendJSONRPCError(connection: connection, id: id, code: -32601, message: "Method not found: \(method)")
         }
     }
 
+    nonisolated static func normalizeRemoteTool(_ tool: [String: Any]) -> [String: Any] {
+        var value = tool
+        let name = tool["name"] as? String ?? "tool"
+        value["title"] = tool["title"] ?? name
+            .split(whereSeparator: { ".-_".contains($0) })
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined(separator: " ")
+        value["inputSchema"] = normalizeSchema(tool["inputSchema"] ?? ["type": "object", "properties": [:]])
+        var annotations: [String: Any] = [
+            "readOnlyHint": false,
+            "destructiveHint": false,
+            "idempotentHint": false,
+            "openWorldHint": false,
+        ]
+        for (key, item) in tool["annotations"] as? [String: Any] ?? [:] { annotations[key] = item }
+        let schemes: [[String: Any]] = [["type": "oauth2", "scopes": ["mcp"]]]
+        value["annotations"] = annotations
+        value["securitySchemes"] = schemes
+        var metadata = tool["_meta"] as? [String: Any] ?? [:]
+        metadata["securitySchemes"] = schemes
+        value["_meta"] = metadata
+        return value
+    }
+
+    nonisolated private static func normalizeSchema(_ raw: Any) -> Any {
+        if let array = raw as? [Any] { return array.map(normalizeSchema) }
+        guard let object = raw as? [String: Any] else { return raw }
+        let numericKeywords: Set<String> = [
+            "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+            "minLength", "maxLength", "minItems", "maxItems", "minProperties", "maxProperties",
+        ]
+        var result: [String: Any] = [:]
+        for (key, item) in object {
+            let normalized = normalizeSchema(item)
+            if numericKeywords.contains(key), let boolean = normalized as? Bool {
+                result[key] = boolean ? 1 : 0
+            } else if key == "const", let boolean = normalized as? Bool,
+                      ["integer", "number"].contains(object["type"] as? String ?? "") {
+                result[key] = boolean ? 1 : 0
+            } else {
+                result[key] = normalized
+            }
+        }
+        return result
+    }
+
+    nonisolated private static func isModernRequest(_ params: [String: Any]) -> Bool {
+        guard let metadata = params["_meta"] as? [String: Any] else { return false }
+        return metadata["io.modelcontextprotocol/protocolVersion"] as? String == modernProtocolVersion
+    }
+
+    nonisolated private static func serverInfo(name: String, version: String) -> [String: Any] {
+        ["name": name, "title": "neo", "version": version,
+         "description": "Privileged NeoY runtime for the host Mac."]
+    }
+
+    nonisolated private static func completeModern(_ result: [String: Any], name: String,
+                                                   version: String) -> [String: Any] {
+        var value = result
+        value["resultType"] = value["resultType"] ?? "complete"
+        var metadata = value["_meta"] as? [String: Any] ?? [:]
+        metadata["io.modelcontextprotocol/serverInfo"] = serverInfo(name: name, version: version)
+        value["_meta"] = metadata
+        return value
+    }
+
     // MARK: - HTTP Response Helpers (nonisolated for httpQueue access)
 
-    nonisolated private func sendJSONRPCResult(connection: NWConnection, id: Any?, result: [String: Any]) {
+    nonisolated private func sendJSONRPCResult(connection: NWConnection, id: Any?, result: [String: Any],
+                                               modern: Bool = false) {
         var response: [String: Any] = [
             "jsonrpc": "2.0",
-            "result": result
+            "result": modern ? Self.completeModern(result, name: _snapshotName, version: _snapshotVersion) : result
         ]
         if let id { response["id"] = id }
         sendJSON(connection: connection, status: 200, json: response)

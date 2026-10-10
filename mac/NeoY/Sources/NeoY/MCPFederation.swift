@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 struct NeoYFederatedServerStatus: Codable, Equatable, Sendable {
@@ -98,27 +99,37 @@ enum NeoYMCPStdioEvent: Sendable {
     case ready(NeoYMCPStdioSnapshot)
 }
 
+private struct NeoYSendableBox<Value>: @unchecked Sendable {
+    let value: Value
+}
+
 actor NeoYMCPStdioClient {
     private let executable: String
     private let arguments: [String]
     private let environment: [String: String]
     private let retryDelays: [Duration]
+    private let requestTimeout: Duration
     private let onEvent: @Sendable (NeoYMCPStdioEvent) async -> Void
     private var process: Process?
     private var input: FileHandle?
     private var output: FileHandle?
     private var readBuffer = Data()
+    private var pending: [String: CheckedContinuation<NeoYSendableBox<[String: Any]>, Error>] = [:]
+    private var timeouts: [String: Task<Void, Never>] = [:]
     private var processGeneration: UUID?
+    private var readyGeneration: UUID?
     private var recoveryTask: Task<Void, Never>?
     private var stopping = false
 
     init(executable: String, arguments: [String], environment: [String: String] = [:],
          retryDelays: [Duration] = [.zero, .milliseconds(250), .seconds(1), .seconds(5)],
+         requestTimeout: Duration = .seconds(660),
          onEvent: @escaping @Sendable (NeoYMCPStdioEvent) async -> Void = { _ in }) {
         self.executable = executable
         self.arguments = arguments
         self.environment = environment
         self.retryDelays = retryDelays.isEmpty ? [.seconds(5)] : retryDelays
+        self.requestTimeout = requestTimeout
         self.onEvent = onEvent
     }
 
@@ -137,36 +148,26 @@ actor NeoYMCPStdioClient {
                                   environment: environment, onEvent: onEvent)
     }
 
-    func connect() throws -> NeoYMCPStdioSnapshot {
+    func connect() async throws -> NeoYMCPStdioSnapshot {
         stopping = false
-        do { return try startAndProbe() }
+        do { return try await startAndProbe() }
         catch {
             failAndRecover(error)
             throw error
         }
     }
 
-    func readResource(uri: String) throws -> String {
-        do {
-            let result = try rpc(method: "resources/read", params: ["uri": uri])
-            return try encodeFederatedResult(result)
-        } catch {
-            failAndRecover(error)
-            throw error
-        }
+    func readResource(uri: String) async throws -> String {
+        let result = try await rpc(method: "resources/read", params: ["uri": uri])
+        return try encodeFederatedResult(result)
     }
 
-    func call(name: String, arguments: JSONValue) throws -> String {
-        do {
-            let result = try rpc(
-                method: "tools/call",
-                params: ["name": name, "arguments": arguments.anyJSON]
-            )
-            return try encodeFederatedResult(result)
-        } catch {
-            failAndRecover(error)
-            throw error
-        }
+    func call(name: String, arguments: JSONValue) async throws -> String {
+        let result = try await rpc(
+            method: "tools/call",
+            params: ["name": name, "arguments": arguments.anyJSON]
+        )
+        return try encodeFederatedResult(result)
     }
 
     func stop() {
@@ -177,14 +178,15 @@ actor NeoYMCPStdioClient {
     }
 
     func processIdentifier() -> Int32? {
-        guard process?.isRunning == true else { return nil }
+        guard process?.isRunning == true, readyGeneration == processGeneration else { return nil }
         return process?.processIdentifier
     }
 
-    private func startAndProbe() throws -> NeoYMCPStdioSnapshot {
+    private func startAndProbe() async throws -> NeoYMCPStdioSnapshot {
         if process?.isRunning == true {
-            let tools = try decodeTools(rawRPC(method: "tools/list", params: [:]))
-            let resources = (try? rawRPC(method: "resources/list", params: [:])).map(decodeResources) ?? []
+            let tools = try decodeTools(await rawRPC(method: "tools/list", params: [:]))
+            let resources = (try? await rawRPC(method: "resources/list", params: [:])).map(decodeResources) ?? []
+            readyGeneration = processGeneration
             return .init(tools: tools, resources: resources)
         }
 
@@ -217,9 +219,13 @@ actor NeoYMCPStdioClient {
         self.output = stdoutPipe.fileHandleForReading
         self.processGeneration = generation
         self.readBuffer.removeAll(keepingCapacity: false)
+        self.output?.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            Task { await self?.received(data, generation: generation) }
+        }
 
         do {
-            _ = try rawRPC(
+            _ = try await rawRPC(
                 method: "initialize",
                 params: [
                     "protocolVersion": "2025-06-18",
@@ -232,8 +238,9 @@ actor NeoYMCPStdioClient {
                 "method": "notifications/initialized",
                 "params": [:],
             ])
-            let tools = try decodeTools(rawRPC(method: "tools/list", params: [:]))
-            let resources = (try? rawRPC(method: "resources/list", params: [:])).map(decodeResources) ?? []
+            let tools = try decodeTools(await rawRPC(method: "tools/list", params: [:]))
+            let resources = (try? await rawRPC(method: "resources/list", params: [:])).map(decodeResources) ?? []
+            readyGeneration = generation
             return .init(tools: tools, resources: resources)
         } catch {
             discardCurrentProcess()
@@ -241,34 +248,41 @@ actor NeoYMCPStdioClient {
         }
     }
 
-    private func rpc(method: String, params: [String: Any]) throws -> [String: Any] {
+    private func rpc(method: String, params: [String: Any]) async throws -> [String: Any] {
         guard process?.isRunning == true else {
             throw NeoYRuntimeControlError.federation("stdio MCP process is not running")
         }
-        return try rawRPC(method: method, params: params)
+        return try await rawRPC(method: method, params: params)
     }
 
-    private func rawRPC(method: String, params: [String: Any]) throws -> [String: Any] {
+    private func rawRPC(method: String, params: [String: Any]) async throws -> [String: Any] {
         let id = UUID().uuidString
-        try send([
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": method,
-            "params": params,
-        ])
-        while true {
-            let message = try readMessage()
-            guard let responseID = message["id"] as? String, responseID == id else { continue }
-            if let error = message["error"] as? [String: Any] {
-                throw NeoYRuntimeControlError.federation(
-                    "stdio MCP error: \(error["message"] ?? error)"
-                )
+        let generation = processGeneration
+        let boxed = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                pending[id] = continuation
+                do {
+                    try send([
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "method": method,
+                        "params": params,
+                    ])
+                } catch {
+                    failAndRecover(error)
+                    return
+                }
+                let timeout = requestTimeout
+                timeouts[id] = Task { [weak self] in
+                    try? await Task.sleep(for: timeout)
+                    guard !Task.isCancelled else { return }
+                    await self?.requestTimedOut(id: id, generation: generation)
+                }
             }
-            guard let result = message["result"] as? [String: Any] else {
-                throw NeoYRuntimeControlError.federation("stdio MCP response has no result")
-            }
-            return result
+        } onCancel: {
+            Task { await self.cancelRequest(id: id) }
         }
+        return boxed.value
     }
 
     private func send(_ object: [String: Any]) throws {
@@ -285,26 +299,43 @@ actor NeoYMCPStdioClient {
         }
     }
 
-    private func readMessage() throws -> [String: Any] {
-        guard let output else {
-            throw NeoYRuntimeControlError.federation("stdio MCP output is unavailable")
+    private func received(_ data: Data, generation: UUID) {
+        guard processGeneration == generation else { return }
+        guard !data.isEmpty else {
+            failAndRecover(NeoYRuntimeControlError.federation("stdio MCP closed its output"))
+            return
         }
-        while true {
-            if let newline = readBuffer.firstIndex(of: 0x0A) {
-                let line = readBuffer.prefix(upTo: newline)
-                readBuffer.removeSubrange(...newline)
-                guard !line.isEmpty else { continue }
-                guard let object = try JSONSerialization.jsonObject(with: Data(line)) as? [String: Any] else {
-                    throw NeoYRuntimeControlError.federation("stdio MCP response is not JSON")
-                }
-                return object
+        readBuffer.append(data)
+        while let newline = readBuffer.firstIndex(of: 0x0A) {
+            let line = readBuffer.prefix(upTo: newline)
+            readBuffer.removeSubrange(...newline)
+            guard !line.isEmpty else { continue }
+            guard let message = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any] else {
+                failAndRecover(NeoYRuntimeControlError.federation("stdio MCP response is not JSON"))
+                return
             }
-            let chunk = output.availableData
-            guard !chunk.isEmpty else {
-                throw NeoYRuntimeControlError.federation("stdio MCP closed its output")
+            guard let id = message["id"] as? String, let continuation = pending.removeValue(forKey: id) else { continue }
+            timeouts.removeValue(forKey: id)?.cancel()
+            if let error = message["error"] as? [String: Any] {
+                continuation.resume(throwing: NeoYRuntimeControlError.federation(
+                    "stdio MCP error: \(error["message"] ?? error)"
+                ))
+            } else if let result = message["result"] as? [String: Any] {
+                continuation.resume(returning: NeoYSendableBox(value: result))
+            } else {
+                continuation.resume(throwing: NeoYRuntimeControlError.federation("stdio MCP response has no result"))
             }
-            readBuffer.append(chunk)
         }
+    }
+
+    private func cancelRequest(id: String) {
+        timeouts.removeValue(forKey: id)?.cancel()
+        pending.removeValue(forKey: id)?.resume(throwing: CancellationError())
+    }
+
+    private func requestTimedOut(id: String, generation: UUID?) {
+        guard pending[id] != nil, processGeneration == generation else { return }
+        failAndRecover(NeoYRuntimeControlError.federation("stdio MCP request timed out"))
     }
 
     private func processExited(generation: UUID, detail: String) async {
@@ -340,7 +371,7 @@ actor NeoYMCPStdioClient {
             attempt += 1
             await onEvent(.restarting(attempt, lastError))
             do {
-                let snapshot = try startAndProbe()
+                let snapshot = try await startAndProbe()
                 await onEvent(.ready(snapshot))
                 return
             } catch {
@@ -351,14 +382,28 @@ actor NeoYMCPStdioClient {
 
     private func discardCurrentProcess(terminate: Bool = true) {
         let current = process
+        let failure = NeoYRuntimeControlError.federation(stopping ? "stdio MCP stopped" : "stdio MCP connection reset")
         processGeneration = nil
+        readyGeneration = nil
         process = nil
+        output?.readabilityHandler = nil
         try? input?.close()
         try? output?.close()
         input = nil
         output = nil
         readBuffer.removeAll(keepingCapacity: false)
-        if terminate, current?.isRunning == true { current?.terminate() }
+        let continuations = pending.values
+        pending.removeAll()
+        for task in timeouts.values { task.cancel() }
+        timeouts.removeAll()
+        for continuation in continuations { continuation.resume(throwing: failure) }
+        if terminate, let current, current.isRunning {
+            let pid = current.processIdentifier
+            current.terminate()
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2) {
+                if kill(pid, 0) == 0 { kill(pid, SIGKILL) }
+            }
+        }
     }
 }
 

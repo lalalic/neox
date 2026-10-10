@@ -84,6 +84,56 @@ final class MCPFederationTests: XCTestCase {
         }
     }
 
+    func testStdioCallsCompleteInParallelByResponseID() async throws {
+        let fixture = try Self.makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let client = NeoYMCPStdioClient(
+            executable: fixture.node, arguments: [fixture.server.path],
+            environment: NeoYBundledRuntime.coreEnvironment,
+            requestTimeout: .seconds(2)
+        )
+        defer { Task { await client.stop() } }
+        _ = try await client.connect()
+
+        let slow = Task {
+            try await client.call(name: "shell", arguments: .object([
+                "command": .string("exec"), "args": .object(["command": .string("delay:250:slow")])
+            ]))
+        }
+        try await Task.sleep(for: .milliseconds(20))
+        let clock = ContinuousClock()
+        let started = clock.now
+        let fast = try await client.call(name: "shell", arguments: .object([
+            "command": .string("exec"), "args": .object(["command": .string("delay:10:fast")])
+        ]))
+        XCTAssertTrue(try Self.text(fast).contains("fast"))
+        XCTAssertLessThan(started.duration(to: clock.now), .milliseconds(150))
+        let slowResult = try await slow.value
+        XCTAssertTrue(try Self.text(slowResult).contains("slow"))
+    }
+
+    func testStdioTimeoutRestartsProvider() async throws {
+        let fixture = try Self.makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let client = NeoYMCPStdioClient(
+            executable: fixture.node, arguments: [fixture.server.path],
+            environment: NeoYBundledRuntime.coreEnvironment,
+            retryDelays: [.milliseconds(10)], requestTimeout: .milliseconds(300)
+        )
+        defer { Task { await client.stop() } }
+        _ = try await client.connect()
+        let currentPID = await client.processIdentifier()
+        let originalPID = try XCTUnwrap(currentPID)
+
+        await XCTAssertThrowsErrorAsync {
+            _ = try await client.call(name: "shell", arguments: .object([
+                "command": .string("exec"), "args": .object(["command": .string("hang")])
+            ]))
+        }
+        let replacementPID = try await Self.waitForPID(client, unlike: originalPID)
+        XCTAssertNotEqual(replacementPID, originalPID)
+    }
+
     func testExternalProviderPublishesOneCommandFacade() async throws {
         let fixture = try Self.makeFixture(requireCoreAuthorization: false)
         defer { try? FileManager.default.removeItem(at: fixture.root) }
@@ -265,6 +315,12 @@ final class MCPFederationTests: XCTestCase {
           if (message.method === "resources/list") value = { resources: includeUIMetadata ? [{ uri: "ui://markcut/preview.html", name: "Preview" }] : [] };
           if (message.method === "tools/call") {
             const { name, arguments: args = {} } = message.params;
+            if (name === "shell" && args.command === "exec" && args.args.command === "hang") return;
+            if (name === "shell" && args.command === "exec" && args.args.command.startsWith("delay:")) {
+              const [, delay, text] = args.args.command.split(":");
+              setTimeout(() => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: result(text) }) + "\n"), Number(delay));
+              return;
+            }
             if (name === "fs" && args.command === "read") value = result(fs.readFileSync(args.args.path, "utf8"));
             if (name === "shell" && args.command === "exec") {
               const run = spawnSync("/bin/zsh", ["-lc", args.args.command], { encoding: "utf8" });
@@ -330,6 +386,15 @@ final class MCPFederationTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(20))
         }
         XCTFail("stdio provider did not recover")
+        throw CocoaError(.coderReadCorrupt)
+    }
+
+    private static func waitForPID(_ client: NeoYMCPStdioClient, unlike oldPID: Int32) async throws -> Int32 {
+        for _ in 0..<100 {
+            if let pid = await client.processIdentifier(), pid != oldPID { return pid }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTFail("stdio provider did not restart")
         throw CocoaError(.coderReadCorrupt)
     }
 

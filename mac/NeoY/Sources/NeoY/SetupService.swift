@@ -64,7 +64,7 @@ enum NeoYSetupError: LocalizedError {
 enum NeoYSetupParser {
     static func parse(_ raw: String?) throws -> NeoYSetupCommand {
         var tokens = try tokenize(raw ?? "")
-        while tokens.first == "setup" || tokens.first == "setup" { tokens.removeFirst() }
+        while tokens.first == "neoy.setup" || tokens.first == "setup" { tokens.removeFirst() }
         guard let command = tokens.first else { return .help(topic: nil) }
 
         switch command {
