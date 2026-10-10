@@ -34,25 +34,43 @@ NeoY design principle.
 
 ### NeoY local deployment completion contract
 
-For any change under `mac/NeoY` that affects the native app, UI, bundled runtime,
-permissions, launch behavior, or MCP behavior, PR merge is **not** completion. The
-orchestrator owns the local deployment lifecycle and MUST, after the change is
-merged to `main`:
+PR merge is **not** completion for a NeoY change that must be applied locally.
+Choose the deployment path by what changed; do not rebuild/reinstall the native app
+for a Runtime-only change.
+
+**Runtime-only path** — use this when the change is confined to
+`mac/NeoY/Runtime/**` and does not change Swift, app resources, entitlements,
+launchd/install configuration, signing, or the native app bundle:
 
 1. Fast-forward the canonical local checkout to merged `origin/main`.
-2. Run `mac/NeoY/install-local.sh` from that canonical checkout.
-3. Let the transactional installer perform build, signing, backup, app replacement,
-   launchd restart, health verification, and automatic rollback if the candidate
-   fails. Do not bypass the installer with ad-hoc `killall`, direct app copying,
-   Xcode Run, or a different signing identity.
-4. Verify the installed NeoY is healthy after deployment, including MCP
-   connectivity and any task-relevant UI/runtime behavior.
-5. Treat rollback or failed post-deploy health verification as deployment failure;
-   the Job is not complete until the merged version is successfully deployed and
-   verified.
+2. Do **not** run `mac/NeoY/install-local.sh`. NeoY loads Runtime code directly
+   from the canonical repo; there is no installed Runtime copy to refresh.
+3. Restart/recycle the Core stdio provider so the running NeoY process loads the
+   new Runtime code. Prefer NeoY's own provider lifecycle/reconcile path; do not
+   restart the whole app unless the provider cannot be recovered independently.
+4. Verify Core readiness (`tools/list`) and the task-relevant Runtime behavior.
 
-The orchestrator should perform this flow itself for local NeoY work; the user
-should not need to separately ask to install or restart NeoY after a Job finishes.
+**Native-app path** — use this when Swift, UI, app resources, entitlements,
+permissions, launch behavior, installer/launchd configuration, signing, or the
+application bundle changes:
+
+1. Fast-forward the canonical local checkout to merged `origin/main`.
+2. Run `mac/NeoY/install-local.sh` **directly, exactly once**, from that canonical
+   checkout. The script already performs tests, build, signing, staging, backup,
+   app replacement, launchd restart, health verification, and rollback protection.
+3. Never wrap `install-local.sh` in `launchctl submit`, a KeepAlive job, PM2, cron,
+   a retry loop, or any other supervisor/background job that may re-run it. A
+   supervised installer repeatedly stops/replaces/restarts NeoY and causes a
+   start/stop loop.
+4. Do not bypass the installer with ad-hoc `killall`, direct app copying, Xcode Run,
+   or a different signing identity. `upgrade-watchdog.sh` is an internal rollback
+   helper used by `install-local.sh`; it is not a manual restart command.
+5. Verify the installed NeoY is healthy after deployment, including MCP
+   connectivity and any task-relevant UI/runtime behavior. Treat rollback or failed
+   post-deploy health verification as deployment failure.
+
+The orchestrator should perform the appropriate path itself; the user should not
+need to separately ask to apply or restart NeoY after a Job finishes.
 `/Applications/NeoY.app` remains the single macOS permission identity.
 
 ## Repo layout
@@ -248,6 +266,7 @@ Deployment gotchas (all hit in practice):
 
 ## Project learnings
 
+- 2026-10-10: NeoY deployment has two distinct paths: Runtime-only changes are applied by recycling the Core provider because Runtime is loaded directly from the canonical repo; native-app changes use `mac/NeoY/install-local.sh` exactly once. Never supervise or retry-loop the installer with launchd/PM2/cron.
 - 2026-10-10: For high-frequency Core filesystem work, keep one `fs` facade and reuse bounded agent-proven edit/grep/find internals; pin and checksum native search binaries while NeoY retains path, audit, permission, and packaging ownership.
 - 2026-09-27: For user-owned iCloud Drive workflows, prefer a native Files folder picker plus a persisted security-scoped bookmark over adding an app-owned iCloud container when the app only needs user-selected folder access. Write cross-device ready markers only after all referenced media bytes are complete.
 - 2026-10-03: A trusted bundled stdio provider must receive its authorization only at NeoY's spawn boundary, and its supervisor must unpublish stale tools, reinitialize, probe `tools/list`, and republish after child replacement; process launch alone is not provider readiness.
