@@ -112,6 +112,37 @@ final class MCPFederationTests: XCTestCase {
         XCTAssertTrue(try Self.text(slowResult).contains("slow"))
     }
 
+    func testManyConcurrentStdioResponsesDoNotCorruptJsonFraming() async throws {
+        let fixture = try Self.makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let client = NeoYMCPStdioClient(
+            executable: fixture.node, arguments: [fixture.server.path],
+            environment: NeoYBundledRuntime.coreEnvironment,
+            requestTimeout: .seconds(15)
+        )
+        defer { Task { await client.stop() } }
+        _ = try await client.connect()
+        let initialPID = await client.processIdentifier()
+        let originalPID = try XCTUnwrap(initialPID)
+
+        try await withThrowingTaskGroup(of: String.self) { group in
+            for i in 0..<120 {
+                group.addTask {
+                    let result = try await client.call(name: "shell", arguments: .object([
+                        "command": .string("exec"),
+                        "args": .object(["command": .string("delay:\(i % 9):reply-\(i)")])
+                    ]))
+                    return try Self.text(result)
+                }
+            }
+            var returned = Set<String>()
+            for try await value in group { returned.insert(value) }
+            XCTAssertEqual(returned.count, 120)
+        }
+        let finalPID = await client.processIdentifier()
+        XCTAssertEqual(finalPID, originalPID)
+    }
+
     func testStdioTimeoutRestartsProvider() async throws {
         let fixture = try Self.makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }

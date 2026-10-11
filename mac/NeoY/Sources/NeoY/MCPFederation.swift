@@ -114,6 +114,8 @@ actor NeoYMCPStdioClient {
     private var input: FileHandle?
     private var output: FileHandle?
     private var readBuffer = Data()
+    private var readerTask: Task<Void, Never>?
+    private var readContinuation: AsyncStream<Data>.Continuation?
     private var pending: [String: CheckedContinuation<NeoYSendableBox<[String: Any]>, Error>] = [:]
     private var timeouts: [String: Task<Void, Never>] = [:]
     private var processGeneration: UUID?
@@ -219,9 +221,17 @@ actor NeoYMCPStdioClient {
         self.output = stdoutPipe.fileHandleForReading
         self.processGeneration = generation
         self.readBuffer.removeAll(keepingCapacity: false)
-        self.output?.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            Task { await self?.received(data, generation: generation) }
+        // A separate Task per read chunk can reorder chunks before actor delivery.
+        // AsyncStream preserves the pipe callback's FIFO sequence, with one consumer.
+        let (chunks, continuation) = AsyncStream<Data>.makeStream()
+        self.readContinuation = continuation
+        self.readerTask = Task { [weak self] in
+            for await chunk in chunks {
+                await self?.received(chunk, generation: generation)
+            }
+        }
+        self.output?.readabilityHandler = { handle in
+            continuation.yield(handle.availableData)
         }
 
         do {
@@ -311,6 +321,7 @@ actor NeoYMCPStdioClient {
             readBuffer.removeSubrange(...newline)
             guard !line.isEmpty else { continue }
             guard let message = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any] else {
+                NSLog("NeoY stdio invalid JSON frame: pid=%d bytes=%ld generation=%@", process?.processIdentifier ?? -1, line.count, generation.uuidString)
                 failAndRecover(NeoYRuntimeControlError.federation("stdio MCP response is not JSON"))
                 return
             }
@@ -387,6 +398,10 @@ actor NeoYMCPStdioClient {
         readyGeneration = nil
         process = nil
         output?.readabilityHandler = nil
+        readContinuation?.finish()
+        readContinuation = nil
+        readerTask?.cancel()
+        readerTask = nil
         try? input?.close()
         try? output?.close()
         input = nil
