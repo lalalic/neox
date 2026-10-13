@@ -1,4 +1,7 @@
+import os from "node:os";
 const SHELL_EXEC_DEFAULT_TIMEOUT_MS = 600_000;
+const SHELL_PROMOTION_MS = 300_000;
+const SHELL_INLINE_BYTES = 16_384;
 
 export const SHELL_TOOLS = [
 {
@@ -12,8 +15,8 @@ export const SHELL_TOOLS = [
         cwd: { type: "string", description: "Working directory. Supports absolute paths, relative paths, and ~/ paths. Defaults to the user's home directory." },
         env: { type: "object", additionalProperties: { type: ["string", "number", "boolean", "null"] }, description: "Environment overrides. Set a value to null to remove it." },
         stdin: { type: "string", description: "Optional text to send to stdin." },
-        timeout_ms: { type: "integer", minimum: 0, maximum: 1_800_000, default: 600000, description: "0 disables the bridge timeout. Prefer shell_start for long-running services." },
-        max_output_bytes: { type: "integer", minimum: 1024, maximum: 64000000, description: "Maximum bytes captured separately from stdout and stderr." },
+        timeout_ms: { type: "integer", minimum: 0, maximum: 1_800_000, default: 600000, description: "Hard timeout in milliseconds; after 5 minutes a running command becomes a shell job without restarting. 0 disables hard timeout." },
+        max_output_bytes: { type: "integer", minimum: 0, maximum: 64000000, description: "Inline output budget (default 16 KiB); larger output is saved to a system temporary file." },
       },
       required: ["command"],
       additionalProperties: false,
@@ -97,14 +100,59 @@ export async function handleShell(name, args, context) {
           const env = normalizeEnv(args?.env);
           const stdin = optionalString(args, "stdin", undefined);
           const timeoutMs = optionalInteger(args, "timeout_ms", SHELL_EXEC_DEFAULT_TIMEOUT_MS, 0, 1_800_000);
-          const maxOutputBytes = optionalInteger(args, "max_output_bytes", DEFAULT_OUTPUT_BYTES, 1_024, MAX_OUTPUT_BYTES);
-          try {
-            const result = await runCommand({ command, cwd, env, stdin, timeoutMs, maxOutputBytes });
-            await audit(name, args, { exitCode: result.exitCode, signal: result.signal, timedOut: result.timedOut, durationMs: result.durationMs });
-            return result;
-          } catch (error) {
-            await audit(name, args, {}, error);
-            throw error;
+          const maxOutputBytes = optionalInteger(args, "max_output_bytes", SHELL_INLINE_BYTES, 0, MAX_OUTPUT_BYTES) || SHELL_INLINE_BYTES;
+          const effectiveCwd = resolvePath(cwd);
+          await validateWorkingDirectory(effectiveCwd);
+          const startedAt = Date.now();
+          // Register with the durable job supervisor before waiting. Promotion never
+          // re-executes or re-parents the running process.
+          const job = await handleShell("shell_start", { command, cwd: effectiveCwd, env, stdin, label: "exec" }, context);
+          const readOutput = async (file, suffix) => {
+            const stat = await fsp.stat(file);
+            if (stat.size <= maxOutputBytes) return { text: await fsp.readFile(file, "utf8"), file: null, bytes: stat.size };
+            const outputDirectory = await fsp.mkdtemp(path.join(os.tmpdir(), "neoy-outputs-"));
+            await fsp.chmod(outputDirectory, 0o700);
+            const destination = path.join(outputDirectory, suffix);
+            await fsp.copyFile(file, destination);
+            await fsp.chmod(destination, 0o600);
+            const handle = await fsp.open(file, "r");
+            let preview;
+            try {
+              const buffer = Buffer.alloc(maxOutputBytes);
+              const { bytesRead } = await handle.read(buffer, 0, maxOutputBytes, 0);
+              preview = buffer.subarray(0, bytesRead).toString("utf8");
+            } finally { await handle.close(); }
+            return { text: preview, file: destination, bytes: stat.size };
+          };
+          const promotionMs = context.SHELL_PROMOTION_MS ?? SHELL_PROMOTION_MS;
+          while (true) {
+            const metadata = await readJobMetadata(job.id);
+            const elapsed = Date.now() - startedAt;
+            if (metadata.finishedAt) {
+              const [out, err] = await Promise.all([readOutput(job.stdoutPath, "stdout.log"), readOutput(job.stderrPath, "stderr.log")]);
+              const result = {
+                command, shell: SHELL, cwd: effectiveCwd, exitCode: metadata.exitCode,
+                signal: metadata.signal, timedOut: false, durationMs: elapsed,
+                stdout: out.text, stderr: err.text,
+                stdoutFile: out.file, stderrFile: err.file,
+                capturedStdoutBytes: out.bytes, capturedStderrBytes: err.bytes,
+                stdoutTruncated: false, stderrTruncated: false,
+              };
+              await audit(name, args, { exitCode: result.exitCode, durationMs: elapsed, stdoutFile: out.file, stderrFile: err.file });
+              return result;
+            }
+            if (timeoutMs > 0 && elapsed >= timeoutMs && elapsed < promotionMs) {
+              killProcessGroup(job.processGroupId, "SIGTERM");
+              await audit(name, args, { jobId: job.id, timedOut: true });
+              return { status: "timed_out", timedOut: true, jobId: job.id, pid: job.pid, stdoutFile: job.stdoutPath, stderrFile: job.stderrPath };
+            }
+            if (elapsed >= promotionMs) {
+              await audit(name, args, { jobId: job.id, promoted: true, durationMs: elapsed });
+              return { status: "running", promoted: true, jobId: job.id, pid: job.pid,
+                processGroupId: job.processGroupId, durationMs: elapsed,
+                stdoutFile: job.stdoutPath, stderrFile: job.stderrPath };
+            }
+            await new Promise(resolve => setTimeout(resolve, 50));
           }
         }
     
@@ -124,6 +172,7 @@ export async function handleShell(name, args, context) {
           const cwd = resolvePath(optionalString(args, "cwd", HOME));
           await validateWorkingDirectory(cwd);
           const env = normalizeEnv(args?.env);
+          const input = optionalString(args, "stdin", undefined);
           const label = optionalString(args, "label", "background-job").replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 80) || "background-job";
           const id = `${Date.now()}-${crypto.randomBytes(5).toString("hex")}-${label}`;
           const stdoutPath = path.join(JOB_DIR, `${id}.stdout.log`);
@@ -131,25 +180,33 @@ export async function handleShell(name, args, context) {
           let stdoutFd;
           let stderrFd;
           let child;
+          let stdinPath;
+          let stdinFd;
           try {
             stdoutFd = fs.openSync(stdoutPath, "a", 0o600);
             stderrFd = fs.openSync(stderrPath, "a", 0o600);
+            if (input !== undefined) {
+              stdinPath = path.join(JOB_DIR, `${id}.stdin`);
+              await fsp.writeFile(stdinPath, input, { mode: 0o600 });
+              stdinFd = fs.openSync(stdinPath, "r");
+            }
             child = spawn(SHELL, ["-lc", command], {
               cwd,
               env: mergedEnv(env),
               detached: true,
-              stdio: ["ignore", stdoutFd, stderrFd],
+              stdio: [stdinFd ?? "ignore", stdoutFd, stderrFd],
             });
             await new Promise((resolve, reject) => {
               child.once("spawn", resolve);
               child.once("error", reject);
             });
           } catch (error) {
-            await Promise.allSettled([fsp.unlink(stdoutPath), fsp.unlink(stderrPath)]);
+            await Promise.allSettled([fsp.unlink(stdoutPath), fsp.unlink(stderrPath), ...(stdinPath ? [fsp.unlink(stdinPath)] : [])]);
             throw error;
           } finally {
             if (stdoutFd !== undefined) fs.closeSync(stdoutFd);
             if (stderrFd !== undefined) fs.closeSync(stderrFd);
+            if (stdinFd !== undefined) fs.closeSync(stdinFd);
           }
           child.unref();
           let metadata = {
@@ -175,6 +232,7 @@ export async function handleShell(name, args, context) {
             exitPersist = exitPersist.then(() => writeJobMetadata(metadata)).catch(() => {});
           };
           child.once("close", (code, signal) => {
+            if (stdinPath) fsp.unlink(stdinPath).catch(() => {});
             exitResult = { exitCode: code, signal, finishedAt: nowIso() };
             persistExit();
           });

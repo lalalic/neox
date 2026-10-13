@@ -154,3 +154,34 @@ test("shell_start kills an unrecordable child and removes orphan logs", async ()
     await fsp.rm(root, { recursive: true, force: true });
   }
 });
+
+test("shell_exec spills large output to system temp and retains full content", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "neoy-spill-test-"));
+  const context = await makeContext(root);
+  const result = await handleShell("shell_exec", { command: "yes x | head -c 2000", max_output_bytes: 512 }, context);
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdoutFile !== null, true);
+  assert.equal(result.capturedStdoutBytes, 2000);
+  assert.equal((await fsp.readFile(result.stdoutFile)).length, 2000);
+  assert.equal(result.stdout.length, 512);
+  assert.ok(result.stdoutFile.startsWith(os.tmpdir()));
+});
+
+test("shell_exec promotes the existing process without restart", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "neoy-promote-test-"));
+  const context = await makeContext(root, { SHELL_PROMOTION_MS: 80 });
+  const result = await handleShell("shell_exec", { command: "sleep 2" }, context);
+  assert.equal(result.promoted, true);
+  assert.equal(result.status, "running");
+  const metadata = await context.readJobMetadata(result.jobId);
+  assert.equal(metadata.pid, result.pid);
+  await handleShell("shell_job_kill", { job_id: result.jobId }, context);
+});
+
+test("shell_exec passes stdin through the durable process supervisor", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "neoy-stdin-test-"));
+  const context = await makeContext(root);
+  const result = await handleShell("shell_exec", { command: "cat", stdin: "hello stdin" }, context);
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout, "hello stdin");
+});
