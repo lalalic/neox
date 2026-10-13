@@ -79,101 +79,17 @@ export const SHELL_TOOLS = [
   }
 ];
 
-export async function handleShell(name, args, context) {
-  const { HOME, SHELL, JOB_DIR, DEFAULT_OUTPUT_BYTES, MAX_OUTPUT_BYTES, SHELL_EXEC_DEFAULT_TIMEOUT_MS, GUI_FOCUS_POLICY, readOperatorSettings, guiFocusRisk, consumeForegroundGuiApproval, normalizeEnv, optionalString, optionalInteger, resolvePath, validateWorkingDirectory, crypto, fs, fsp, path, spawn, mergedEnv, nowIso, writeJobMetadata, readJobMetadata, processRunning, tailFile, killProcessGroup, audit, runCommand, requireString } = context;
-  switch (name) {
-        case "shell_exec": {
-          const command = requireString(args, "command");
-          const cwd = optionalString(args, "cwd", HOME);
-          const focusRisk = guiFocusRisk(command);
-          const operatorSettings = await readOperatorSettings();
-          let foregroundGrant = null;
-          if (focusRisk && operatorSettings.strictApprovals) {
-            foregroundGrant = await consumeForegroundGuiApproval(focusRisk);
-            if (!foregroundGrant) {
-              const error = new Error(`Desktop GUI automation is blocked because Strict approvals is enabled (${focusRisk.reason}; targets: ${focusRisk.apps.join(", ")}). Use a background-capable API/connector/extension instead, or approve a one-time foreground action with scripts/approve-foreground-gui.sh.`);
-              error.code = "GUI_FOCUS_BLOCKED";
-              await audit(name, args, { guiFocusPolicy: GUI_FOCUS_POLICY, strictApprovals: true, blocked: true, focusRisk }, error);
-              throw error;
-            }
-          }
-          const env = normalizeEnv(args?.env);
-          const stdin = optionalString(args, "stdin", undefined);
-          const timeoutMs = optionalInteger(args, "timeout_ms", SHELL_EXEC_DEFAULT_TIMEOUT_MS, 0, 1_800_000);
-          const maxOutputBytes = optionalInteger(args, "max_output_bytes", SHELL_INLINE_BYTES, 0, MAX_OUTPUT_BYTES) || SHELL_INLINE_BYTES;
-          const effectiveCwd = resolvePath(cwd);
-          await validateWorkingDirectory(effectiveCwd);
-          const startedAt = Date.now();
-          // Register with the durable job supervisor before waiting. Promotion never
-          // re-executes or re-parents the running process.
-          const job = await handleShell("shell_start", { command, cwd: effectiveCwd, env, stdin, label: "exec" }, context);
-          const readOutput = async (file, suffix) => {
-            const stat = await fsp.stat(file);
-            if (stat.size <= maxOutputBytes) return { text: await fsp.readFile(file, "utf8"), file: null, bytes: stat.size };
-            const outputDirectory = await fsp.mkdtemp(path.join(os.tmpdir(), "neoy-outputs-"));
-            await fsp.chmod(outputDirectory, 0o700);
-            const destination = path.join(outputDirectory, suffix);
-            await fsp.copyFile(file, destination);
-            await fsp.chmod(destination, 0o600);
-            const handle = await fsp.open(file, "r");
-            let preview;
-            try {
-              const buffer = Buffer.alloc(maxOutputBytes);
-              const { bytesRead } = await handle.read(buffer, 0, maxOutputBytes, 0);
-              preview = buffer.subarray(0, bytesRead).toString("utf8");
-            } finally { await handle.close(); }
-            return { text: preview, file: destination, bytes: stat.size };
-          };
-          const promotionMs = context.SHELL_PROMOTION_MS ?? SHELL_PROMOTION_MS;
-          while (true) {
-            const metadata = await readJobMetadata(job.id);
-            const elapsed = Date.now() - startedAt;
-            if (metadata.finishedAt) {
-              const [out, err] = await Promise.all([readOutput(job.stdoutPath, "stdout.log"), readOutput(job.stderrPath, "stderr.log")]);
-              const result = {
-                command, shell: SHELL, cwd: effectiveCwd, exitCode: metadata.exitCode,
-                signal: metadata.signal, timedOut: false, durationMs: elapsed,
-                stdout: out.text, stderr: err.text,
-                stdoutFile: out.file, stderrFile: err.file,
-                capturedStdoutBytes: out.bytes, capturedStderrBytes: err.bytes,
-                stdoutTruncated: false, stderrTruncated: false,
-              };
-              await audit(name, args, { exitCode: result.exitCode, durationMs: elapsed, stdoutFile: out.file, stderrFile: err.file });
-              return result;
-            }
-            if (timeoutMs > 0 && elapsed >= timeoutMs && elapsed < promotionMs) {
-              killProcessGroup(job.processGroupId, "SIGTERM");
-              await audit(name, args, { jobId: job.id, timedOut: true });
-              return { status: "timed_out", timedOut: true, jobId: job.id, pid: job.pid, stdoutFile: job.stdoutPath, stderrFile: job.stderrPath };
-            }
-            if (elapsed >= promotionMs) {
-              await audit(name, args, { jobId: job.id, promoted: true, durationMs: elapsed });
-              return { status: "running", promoted: true, jobId: job.id, pid: job.pid,
-                processGroupId: job.processGroupId, durationMs: elapsed,
-                stdoutFile: job.stdoutPath, stderrFile: job.stderrPath };
-            }
-            await new Promise(resolve => setTimeout(resolve, 50));
-          }
-        }
-    
-        case "shell_start": {
-          const command = requireString(args, "command");
-          const operatorSettings = await readOperatorSettings();
-          const focusRisk = guiFocusRisk(command);
-          if (focusRisk && operatorSettings.strictApprovals) {
-            const foregroundGrant = await consumeForegroundGuiApproval(focusRisk);
-            if (!foregroundGrant) {
-              const error = new Error(`Desktop GUI automation is blocked because Strict approvals is enabled (${focusRisk.reason}; targets: ${focusRisk.apps.join(", ")}). Approve a one-time foreground action with scripts/approve-foreground-gui.sh, or use a background-capable API/web path.`);
-              error.code = "GUI_FOCUS_BLOCKED";
-              await audit(name, args, { guiFocusPolicy: GUI_FOCUS_POLICY, strictApprovals: true, blocked: true, focusRisk }, error);
-              throw error;
-            }
-          }
-          const cwd = resolvePath(optionalString(args, "cwd", HOME));
+// Both foreground and background shell commands begin as durable, supervised jobs.
+// No command is re-executed during promotion from exec to job.status.
+async function createJob(context, options) {
+  const { HOME, SHELL, JOB_DIR, resolvePath, validateWorkingDirectory, crypto, fs, fsp, path,
+    spawn, mergedEnv, nowIso, writeJobMetadata, processRunning, killProcessGroup } = context;
+  const { command } = options;
+          const cwd = resolvePath(options.cwd ?? HOME);
           await validateWorkingDirectory(cwd);
-          const env = normalizeEnv(args?.env);
-          const input = optionalString(args, "stdin", undefined);
-          const label = optionalString(args, "label", "background-job").replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 80) || "background-job";
+          const env = options.env ?? {};
+          const input = options.stdin;
+          const label = (options.label ?? "background-job").replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 80) || "background-job";
           const id = `${Date.now()}-${crypto.randomBytes(5).toString("hex")}-${label}`;
           const stdoutPath = path.join(JOB_DIR, `${id}.stdout.log`);
           const stderrPath = path.join(JOB_DIR, `${id}.stderr.log`);
@@ -257,10 +173,108 @@ export async function handleShell(name, args, context) {
               `Could not record job metadata, so the job was killed rather than left unreclaimable: ${metadataError?.message || metadataError}`,
             );
           }
-          await audit(name, args, { jobId: id, pid: child.pid });
-          return { ...metadata, running: processRunning(child.pid) };
+  return { ...metadata, running: processRunning(child.pid) };
+}
+
+export async function handleShell(name, args, context) {
+  const { HOME, SHELL, JOB_DIR, DEFAULT_OUTPUT_BYTES, MAX_OUTPUT_BYTES, SHELL_EXEC_DEFAULT_TIMEOUT_MS, GUI_FOCUS_POLICY, readOperatorSettings, guiFocusRisk, consumeForegroundGuiApproval, normalizeEnv, optionalString, optionalInteger, resolvePath, validateWorkingDirectory, crypto, fs, fsp, path, spawn, mergedEnv, nowIso, writeJobMetadata, readJobMetadata, processRunning, tailFile, killProcessGroup, audit, runCommand, requireString } = context;
+  switch (name) {
+        case "shell_exec": {
+          const command = requireString(args, "command");
+          const cwd = optionalString(args, "cwd", HOME);
+          const focusRisk = guiFocusRisk(command);
+          const operatorSettings = await readOperatorSettings();
+          let foregroundGrant = null;
+          if (focusRisk && operatorSettings.strictApprovals) {
+            foregroundGrant = await consumeForegroundGuiApproval(focusRisk);
+            if (!foregroundGrant) {
+              const error = new Error(`Desktop GUI automation is blocked because Strict approvals is enabled (${focusRisk.reason}; targets: ${focusRisk.apps.join(", ")}). Use a background-capable API/connector/extension instead, or approve a one-time foreground action with scripts/approve-foreground-gui.sh.`);
+              error.code = "GUI_FOCUS_BLOCKED";
+              await audit(name, args, { guiFocusPolicy: GUI_FOCUS_POLICY, strictApprovals: true, blocked: true, focusRisk }, error);
+              throw error;
+            }
+          }
+          const env = normalizeEnv(args?.env);
+          const stdin = optionalString(args, "stdin", undefined);
+          const timeoutMs = optionalInteger(args, "timeout_ms", SHELL_EXEC_DEFAULT_TIMEOUT_MS, 0, 1_800_000);
+          const maxOutputBytes = optionalInteger(args, "max_output_bytes", SHELL_INLINE_BYTES, 0, MAX_OUTPUT_BYTES) || SHELL_INLINE_BYTES;
+          const effectiveCwd = resolvePath(cwd);
+          await validateWorkingDirectory(effectiveCwd);
+          const startedAt = Date.now();
+          // Register with the durable job supervisor before waiting. Promotion never
+          // re-executes or re-parents the running process.
+          const job = await createJob(context, { command, cwd: effectiveCwd, env, stdin, label: "exec" });
+          await audit(name, args, { jobId: job.id, pid: job.pid, state: "started" });
+          const readOutput = async (file, suffix) => {
+            const stat = await fsp.stat(file);
+            if (stat.size <= maxOutputBytes) return { text: await fsp.readFile(file, "utf8"), file: null, bytes: stat.size };
+            const outputDirectory = await fsp.mkdtemp(path.join(os.tmpdir(), "neoy-outputs-"));
+            await fsp.chmod(outputDirectory, 0o700);
+            const destination = path.join(outputDirectory, suffix);
+            await fsp.copyFile(file, destination);
+            await fsp.chmod(destination, 0o600);
+            const handle = await fsp.open(file, "r");
+            let preview;
+            try {
+              const buffer = Buffer.alloc(maxOutputBytes);
+              const { bytesRead } = await handle.read(buffer, 0, maxOutputBytes, 0);
+              preview = buffer.subarray(0, bytesRead).toString("utf8");
+            } finally { await handle.close(); }
+            return { text: preview, file: destination, bytes: stat.size };
+          };
+          const promotionMs = context.SHELL_PROMOTION_MS ?? SHELL_PROMOTION_MS;
+          while (true) {
+            const metadata = await readJobMetadata(job.id);
+            const elapsed = Date.now() - startedAt;
+            if (metadata.finishedAt) {
+              const [out, err] = await Promise.all([readOutput(job.stdoutPath, "stdout.log"), readOutput(job.stderrPath, "stderr.log")]);
+              const result = {
+                command, shell: SHELL, cwd: effectiveCwd, exitCode: metadata.exitCode,
+                signal: metadata.signal, timedOut: false, durationMs: elapsed,
+                stdout: out.text, stderr: err.text,
+                stdoutFile: out.file, stderrFile: err.file,
+                capturedStdoutBytes: out.bytes, capturedStderrBytes: err.bytes,
+                stdoutTruncated: false, stderrTruncated: false,
+              };
+              await audit(name, args, { exitCode: result.exitCode, durationMs: elapsed, stdoutFile: out.file, stderrFile: err.file });
+              return result;
+            }
+            if (timeoutMs > 0 && elapsed >= timeoutMs && elapsed < promotionMs) {
+              killProcessGroup(job.processGroupId, "SIGTERM");
+              await audit(name, args, { jobId: job.id, timedOut: true });
+              return { status: "timed_out", timedOut: true, jobId: job.id, pid: job.pid, stdoutFile: job.stdoutPath, stderrFile: job.stderrPath };
+            }
+            if (elapsed >= promotionMs) {
+              await audit(name, args, { jobId: job.id, promoted: true, durationMs: elapsed });
+              return { status: "running", promoted: true, jobId: job.id, pid: job.pid,
+                processGroupId: job.processGroupId, durationMs: elapsed,
+                stdoutFile: job.stdoutPath, stderrFile: job.stderrPath };
+            }
+            await new Promise(resolve => setTimeout(resolve, 50));
+          }
         }
     
+        case "shell_start": {
+          const command = requireString(args, "command");
+          const operatorSettings = await readOperatorSettings();
+          const focusRisk = guiFocusRisk(command);
+          if (focusRisk && operatorSettings.strictApprovals) {
+            const foregroundGrant = await consumeForegroundGuiApproval(focusRisk);
+            if (!foregroundGrant) {
+              const error = new Error(`Desktop GUI automation is blocked because Strict approvals is enabled (${focusRisk.reason}; targets: ${focusRisk.apps.join(", ")}). Approve a one-time foreground action with scripts/approve-foreground-gui.sh, or use a background-capable API/web path.`);
+              error.code = "GUI_FOCUS_BLOCKED";
+              await audit(name, args, { guiFocusPolicy: GUI_FOCUS_POLICY, strictApprovals: true, blocked: true, focusRisk }, error);
+              throw error;
+            }
+          }
+          const job = await createJob(context, {
+            command, cwd: optionalString(args, "cwd", HOME), env: normalizeEnv(args?.env),
+            label: optionalString(args, "label", "background-job"),
+          });
+          await audit(name, args, { jobId: job.id, pid: job.pid });
+          return job;
+        }
+
         case "shell_job_status": {
           const jobId = requireString(args, "job_id");
           const maxLogBytes = optionalInteger(args, "max_log_bytes", 100_000, 1_024, 8_000_000);
