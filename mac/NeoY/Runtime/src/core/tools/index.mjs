@@ -3,7 +3,6 @@ import { handleShell, SHELL_TOOLS } from "./shell.mjs";
 import { handleFilesystem, FILESYSTEM_TOOLS } from "./filesystem.mjs";
 import { handlePatch, PATCH_TOOLS } from "./patch.mjs";
 import { handleCodex, CODEX_TOOLS } from "./codex.mjs";
-import { handleAudit, AUDIT_TOOLS } from "./audit.mjs";
 import { configurePty, handlePty, ptyReady, ptyStatus, teardownPty, PTY_TOOLS } from "./pty.mjs";
 import { commandFacade } from "./command-facade.mjs";
 import { XCHAT_LIFECYCLE_TOOLS, scheduleXChatLifecycle } from "./xchat.mjs";
@@ -713,12 +712,6 @@ const codexFacade = commandFacade({
     codex_thread_turns_list: "thread.turns.list",
   })[name] || name,
 });
-const auditFacade = commandFacade({
-  name: "audit",
-  description: "Read and filter the Core audit log.",
-  commands: AUDIT_TOOLS,
-  commandName: (name) => name === "audit_tail" ? "tail" : name,
-});
 const terminalFacade = commandFacade({
   name: "terminal",
   description: "Create and interact with persistent pseudo-terminal sessions.",
@@ -743,7 +736,6 @@ const BASE_TOOLS = [
   filesystemFacade.tool,
   ...PATCH_TOOLS,
   codexFacade.tool,
-  auditFacade.tool,
   ...XCHAT_LIFECYCLE_TOOLS,
 ];
 
@@ -957,8 +949,6 @@ async function dispatchTool(name, args) {
     case "fs": return filesystemFacade.execute(args, (tool, commandArgs) => handleFilesystem(tool, commandArgs, context));
     case "apply_patch": return handlePatch(name, args, context);
     case "codex": return codexFacade.execute(args, (tool, commandArgs) => handleCodex(tool, commandArgs, context));
-    case "audit": return auditFacade.execute(args, (tool, commandArgs) => handleAudit(tool, commandArgs, context));
-    case "audit_tail": return handleAudit(name, args, context); // backward-compatible dispatcher
     case "terminal": return terminalFacade.execute(args, (tool, commandArgs) => handlePty(tool, commandArgs, context));
     case "chatgpt": {
       const result = scheduleXChatLifecycle(name, args);

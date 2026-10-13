@@ -28,13 +28,16 @@ export async function piGrep(args, context) {
   const rg = await ensurePiNativeTool("rg", toolsDir);
   const maxResults = Math.max(1, Math.min(args.max_results ?? 100, 5000));
   const timeoutMs = Math.max(1000, Math.min(args.timeout_ms ?? 60_000, 120_000));
+  const contextLines = Math.max(0, Math.min(args.context ?? 0, 20));
   const argv = ["--json", "--line-number", "--color=never", "--hidden", "--no-require-git"];
+  if (contextLines) argv.push("--context", String(contextLines));
   if (args.ignore_case) argv.push("--ignore-case");
   if (args.literal) argv.push("--fixed-strings");
   if (args.glob) argv.push("--glob", args.glob);
   argv.push("--", args.pattern, root);
 
   const matches = [];
+  const seenLines = new Map();
   const bytes = { value: 0 };
   let resultLimitReached = false;
   let byteLimitReached = false;
@@ -46,7 +49,7 @@ export async function piGrep(args, context) {
       if (resultLimitReached || byteLimitReached) return;
       let event;
       try { event = JSON.parse(line); } catch { return; }
-      if (event.type !== "match") return;
+      if (event.type !== "match" && event.type !== "context") return;
       const filePath = event.data?.path?.text;
       const lineNumber = event.data?.line_number;
       if (!filePath || !Number.isInteger(lineNumber)) return;
@@ -54,7 +57,10 @@ export async function piGrep(args, context) {
       const clipped = truncatePiLine(raw);
       linesTruncated ||= clipped.truncated;
       const relative = path.relative(root, filePath) || path.basename(filePath);
-      const item = { path: relative.replace(/\\/g, "/"), line: lineNumber, text: clipped.text };
+      const normalizedPath = relative.replace(/\\/g, "/");
+      if (contextLines) seenLines.set(`${normalizedPath}:${lineNumber}`, clipped.text);
+      if (event.type !== "match") return;
+      const item = { path: normalizedPath, line: lineNumber, text: clipped.text };
       if (!appendWithinByteLimit(matches, item, bytes)) {
         byteLimitReached = true;
         child.kill("SIGTERM");
@@ -66,6 +72,20 @@ export async function piGrep(args, context) {
       }
     },
   });
+  if (contextLines) {
+    for (const item of matches) {
+      item.before = [];
+      item.after = [];
+      for (let line = Math.max(1, item.line - contextLines); line < item.line; line++) {
+        const key = `${item.path}:${line}`;
+        if (seenLines.has(key)) item.before.push({ line, text: seenLines.get(key) });
+      }
+      for (let line = item.line + 1; line <= item.line + contextLines; line++) {
+        const key = `${item.path}:${line}`;
+        if (seenLines.has(key)) item.after.push({ line, text: seenLines.get(key) });
+      }
+    }
+  }
   return { root, matches, count: matches.length, truncated: resultLimitReached || byteLimitReached || linesTruncated, resultLimitReached, byteLimitReached, linesTruncated };
 }
 

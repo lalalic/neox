@@ -13,6 +13,10 @@ export const FILESYSTEM_TOOLS = [
         encoding: { type: "string", enum: ["utf8", "base64"], default: "utf8" },
         offset: { type: "integer", minimum: 0, default: 0 },
         max_bytes: { type: "integer", minimum: 1, maximum: 64000000, default: 1000000 },
+        start_line: { type: "integer", minimum: 1, description: "Optional 1-based first line for UTF-8 line-range reads." },
+        end_line: { type: "integer", minimum: 1, description: "Optional inclusive 1-based last line for UTF-8 line-range reads." },
+        startLine: { type: "integer", minimum: 1, description: "Compatibility alias for start_line." },
+        endLine: { type: "integer", minimum: 1, description: "Compatibility alias for end_line." },
       },
       required: ["path"],
       additionalProperties: false,
@@ -74,6 +78,7 @@ export const FILESYSTEM_TOOLS = [
         glob: { type: "string" },
         ignore_case: { type: "boolean", default: false },
         literal: { type: "boolean", default: false },
+        context: { type: "integer", minimum: 0, maximum: 20, default: 0, description: "Include up to this many surrounding lines before and after each match." },
         max_results: { type: "integer", minimum: 1, maximum: 5000, default: 100 },
         timeout_ms: { type: "integer", minimum: 1000, maximum: 120000, default: 60000 },
       },
@@ -151,6 +156,25 @@ export async function handleFilesystem(name, args, context) {
         case "fs_read": {
           const filePath = resolvePath(requireString(args, "path"));
           const encoding = optionalString(args, "encoding", "utf8");
+          const startLine = args.start_line ?? args.startLine;
+          const endLine = args.end_line ?? args.endLine;
+          if (args.start_line !== undefined && args.startLine !== undefined) throw new Error("Use only one of start_line or startLine");
+          if (args.end_line !== undefined && args.endLine !== undefined) throw new Error("Use only one of end_line or endLine");
+          if (startLine !== undefined || endLine !== undefined) {
+            if (encoding !== "utf8") throw new Error("Line-range reads require encoding='utf8'");
+            if (args.offset !== undefined) throw new Error("Line-range reads cannot be combined with offset");
+            const first = startLine ?? 1;
+            const last = endLine ?? Number.MAX_SAFE_INTEGER;
+            if (last < first) throw new Error("end_line must be greater than or equal to start_line");
+            const text = await fsp.readFile(filePath, "utf8");
+            const lines = text.match(/.*(?:\n|$)/g)?.filter((line, index, all) => line || index < all.length - 1) || [];
+            const content = lines.slice(first - 1, last).join("");
+            const maxBytes = optionalInteger(args, "max_bytes", DEFAULT_OUTPUT_BYTES, 1, MAX_OUTPUT_BYTES);
+            if (Buffer.byteLength(content) > maxBytes) throw new Error(`Requested line range exceeds max_bytes (${maxBytes})`);
+            const result = { path: filePath, size: Buffer.byteLength(text), startLine: first, endLine: Math.min(last, lines.length), lineCount: lines.length, truncated: last < lines.length, encoding, content };
+            await audit(name, args, { path: filePath, startLine: result.startLine, endLine: result.endLine, bytesRead: Buffer.byteLength(content), truncated: result.truncated });
+            return result;
+          }
           const offset = optionalInteger(args, "offset", 0, 0, Number.MAX_SAFE_INTEGER);
           const maxBytes = optionalInteger(args, "max_bytes", DEFAULT_OUTPUT_BYTES, 1, MAX_OUTPUT_BYTES);
           const stat = await fsp.stat(filePath);

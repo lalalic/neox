@@ -71,3 +71,21 @@ test("same-file mutation queue serializes writers while different files remain i
   await Promise.all([first, second]);
   assert.deepEqual(events, ["first:start", "first:end", "second:start", "second:end"]);
 });
+
+test("fs_read supports line ranges and camelCase compatibility aliases", async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "neoy-fs-read-lines-"));
+  const file = path.join(dir, "sample.txt");
+  await fsp.writeFile(file, "one\ntwo\nthree\nfour\n", "utf8");
+  const base = { ...context(), DEFAULT_OUTPUT_BYTES: 1_000_000, MAX_OUTPUT_BYTES: 64_000_000,
+    optionalString: (args, key, fallback) => args[key] ?? fallback,
+    optionalInteger: (args, key, fallback) => args[key] ?? fallback,
+    requireString: (args, key) => args[key],
+  };
+  const snake = await handleFilesystem("fs_read", { path: file, start_line: 2, end_line: 3 }, base);
+  assert.equal(snake.content, "two\nthree\n");
+  const camel = await handleFilesystem("fs_read", { path: file, startLine: 3, endLine: 4 }, base);
+  assert.equal(camel.content, "three\nfour\n");
+  const grepSchema = FILESYSTEM_TOOLS.find((tool) => tool.name === "fs_grep").inputSchema;
+  assert.equal(grepSchema.properties.context.maximum, 20);
+  await fsp.rm(dir, { recursive: true, force: true });
+});
