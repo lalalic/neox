@@ -603,13 +603,14 @@ final class NeoYMCPFederation {
                 NeoYRemoteTool(name: tool.name, descriptor: rewriteToolResourceMetadata(tool.descriptor, provider: configuration.name))
             }
             let descriptor = federatedCommandFacadeDescriptor(provider: configuration.name)
-            let facadeTools = rewritten.filter { !isAppOnlyTool($0.descriptor) }
+            let facadeTools = rewritten.filter { !isAppOnlyTool($0.descriptor) && !hasMCPAppUIMetadata($0.descriptor) }
             let rewrittenInvoke: @Sendable (String, JSONValue) async throws -> String = { name, arguments in
                 try rewriteFederatedToolResult(
                     try await invoke(name, arguments),
                     provider: configuration.name
                 )
             }
+            if !facadeTools.isEmpty {
             server.registerFederatedTool(descriptor: descriptor, name: facadeName, protected: true,
                                          provider: configuration.name) { arguments in
                 try await dispatchFederatedCommandFacade(
@@ -617,6 +618,7 @@ final class NeoYMCPFederation {
                 )
             }
             names.append(facadeName)
+            }
 
             // MCP Apps need the child tool's descriptor metadata at the public
             // boundary so the host can discover and render its resource. Keep
