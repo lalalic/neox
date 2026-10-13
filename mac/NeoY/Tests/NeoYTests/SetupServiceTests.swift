@@ -156,8 +156,8 @@ final class SetupServiceTests: XCTestCase {
 
     func testCanonicalCoreToolSetIsSmallAndStable() {
         XCTAssertEqual(NeoYCoreRuntime.toolNames, [
-            "setup", "cluster", "status", "shell", "fs", "apply_patch",
-            "codex", "audit_tail", "terminal", "chatgpt"
+            "setup", "cluster", "status", "shell", "fs", "git_apply_patch",
+            "codex", "terminal", "chatgpt"
         ])
         XCTAssertFalse(NeoYCoreRuntime.toolNames.contains("bridge_status"))
         XCTAssertFalse(NeoYCoreRuntime.toolNames.contains("shell_exec"))
@@ -292,13 +292,22 @@ final class SetupServiceTests: XCTestCase {
         )
     }
 
+    func testRemovedAndRenamedRemoteToolsAreMigrated() {
+        XCTAssertEqual(
+            NeoYRemoteToolCatalog.normalizeToolNames(["apply_patch", "audit_tail", "shell"]),
+            Set(["git_apply_patch", "shell"])
+        )
+        XCTAssertFalse(NeoYRemoteToolCatalog.coreToolNames.contains("audit_tail"))
+        XCTAssertFalse(NeoYRemoteToolCatalog.coreToolNames.contains("apply_patch"))
+    }
+
     func testRemoteFeatureClassification() {
         XCTAssertEqual(
             NeoYRemoteToolCatalog.migrateLegacyFeatures(["terminal", "files", "nodes"]),
-            Set(["status", "audit_tail", "shell", "terminal", "fs", "apply_patch", "cluster"])
+            Set(["status", "shell", "terminal", "fs", "git_apply_patch", "cluster"])
         )
         let names = Set(NeoYRemoteToolCatalog.availableToolNames(configuration: NeoYControlPlaneConfiguration()))
-        XCTAssertTrue(names.isSuperset(of: ["setup", "cluster", "status", "shell", "fs", "apply_patch", "codex", "audit_tail", "terminal", "chatgpt"]))
+        XCTAssertTrue(names.isSuperset(of: ["setup", "cluster", "status", "shell", "fs", "git_apply_patch", "codex", "terminal", "chatgpt"]))
         XCTAssertTrue(names.contains("computer"))
     }
 
@@ -335,7 +344,7 @@ final class SetupServiceTests: XCTestCase {
 
     func testBundledCoreToolsAreFlat() {
         XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "core", tool: "terminal"), "terminal")
-        XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "core", tool: "apply_patch"), "apply_patch")
+        XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "core", tool: "git_apply_patch"), "git_apply_patch")
         XCTAssertNil(NeoYBundledRuntime.exposedToolName(provider: "macbridge", tool: "chrome_click"))
         XCTAssertNil(NeoYBundledRuntime.exposedToolName(provider: "macbridge", tool: "chatgpt_conversation_start"))
         XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "events", tool: "health"), "events")

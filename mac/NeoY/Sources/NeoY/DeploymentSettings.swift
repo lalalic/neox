@@ -73,6 +73,13 @@ enum NeoYDeploymentSettingsStore {
             }
             migrated = true
         }
+        if let selected = value.remoteTools {
+            let normalized = NeoYRemoteToolCatalog.normalizeToolNames(selected)
+            if normalized != selected {
+                value.remoteTools = normalized
+                migrated = true
+            }
+        }
         if value.remoteFeatures != nil {
             value.remoteFeatures = nil
             migrated = true

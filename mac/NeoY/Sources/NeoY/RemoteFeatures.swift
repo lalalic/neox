@@ -2,8 +2,8 @@ import Foundation
 
 enum NeoYRemoteToolCatalog {
     static let coreToolNames: Set<String> = [
-        "setup", "cluster", "status", "shell", "fs", "apply_patch",
-        "codex", "audit_tail", "terminal", "chatgpt",
+        "setup", "cluster", "status", "shell", "fs", "git_apply_patch",
+        "codex", "terminal", "chatgpt",
     ]
 
     static let askQuestionsToolNames: Set<String> = [
@@ -27,14 +27,21 @@ enum NeoYRemoteToolCatalog {
         return tools.union(askQuestionsToolNames)
     }
 
+    /// Normalize persisted tool selections when Core renames or removes tools.
+    static func normalizeToolNames(_ tools: Set<String>) -> Set<String> {
+        var normalized = tools.subtracting(["audit_tail", "apply_patch"])
+        if tools.contains("apply_patch") { normalized.insert("git_apply_patch") }
+        return normalized
+    }
+
     /// One-time migration from the old feature buckets to exact public tool names.
     static func migrateLegacyFeatures(_ features: Set<String>) -> Set<String> {
         var tools: Set<String> = []
         for feature in features {
             switch feature {
             case "setup": tools.insert("setup")
-            case "terminal": tools.formUnion(["status", "audit_tail", "shell", "terminal"])
-            case "files": tools.formUnion(["fs", "apply_patch"])
+            case "terminal": tools.formUnion(["status", "shell", "terminal"])
+            case "files": tools.formUnion(["fs", "git_apply_patch"])
             case "codex": tools.insert("codex")
             case "nodes": tools.insert("cluster")
             case "computer": tools.insert("computer")
@@ -47,6 +54,6 @@ enum NeoYRemoteToolCatalog {
                 tools.insert(feature)
             }
         }
-        return tools
+        return normalizeToolNames(tools)
     }
 }
