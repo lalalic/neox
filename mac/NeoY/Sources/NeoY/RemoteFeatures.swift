@@ -7,7 +7,7 @@ enum NeoYRemoteToolCatalog {
     ]
 
     static let askQuestionsToolNames: Set<String> = [
-        "ask_questions", "ask_questions.submit", "ask_questions.cancel",
+        "ask_questions",
     ]
 
     static func availableToolNames(configuration: NeoYControlPlaneConfiguration) -> [String] {
@@ -21,15 +21,12 @@ enum NeoYRemoteToolCatalog {
 
     /// App-only helpers are usable remotely only with their parent intent.
     static func remoteTools(for tools: Set<String>) -> Set<String> {
-        guard tools.contains("ask_questions") else {
-            return tools.subtracting(askQuestionsToolNames)
-        }
-        return tools.union(askQuestionsToolNames)
+        return tools.subtracting(["ask_questions.submit", "ask_questions.cancel"])
     }
 
     /// Normalize persisted tool selections when Core renames or removes tools.
     static func normalizeToolNames(_ tools: Set<String>) -> Set<String> {
-        var normalized = tools.subtracting(["audit_tail", "apply_patch"])
+        var normalized = tools.subtracting(["audit_tail", "apply_patch", "ask_questions.submit", "ask_questions.cancel"])
         if tools.contains("apply_patch") { normalized.insert("git_apply_patch") }
         return normalized
     }

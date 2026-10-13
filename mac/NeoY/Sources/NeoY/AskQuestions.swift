@@ -10,8 +10,6 @@ import Foundation
 enum AskQuestions {
     @TaskLocal static var requestPrincipal: String?
     static let toolName = "ask_questions"
-    static let submitToolName = "ask_questions.submit"
-    static let cancelToolName = "ask_questions.cancel"
     static let resourceURI = "ui://widget/neoy-ask-questions-v1.html"
     static let mimeType = MCPServer.mcpAppMimeType
     static let sessionTTL: TimeInterval = 10 * 60
@@ -33,16 +31,19 @@ enum AskQuestions {
 
         let askDescriptor: JSONValue = .object([
             "name": .string(toolName),
-            "description": .string("Ask a human for clarification using one or more Markdown questions."),
+            "description": .string("Ask a human or manage a pending question. Commands: ask (requires prompt), submit (requires session_id and answer), cancel (requires session_id)."),
             "inputSchema": .object([
                 "type": .string("object"),
                 "properties": .object([
+                    "command": .object(["type": .string("string"), "enum": .array([.string("ask"), .string("submit"), .string("cancel")])]),
+                    "session_id": .object(["type": .string("string")]),
+                    "answer": .object(["type": .string("string")]),
                     "prompt": .object([
                         "type": .string("string"),
                         "description": .string("Markdown containing the question or questions to answer."),
                     ]),
                 ]),
-                "required": .array([.string("prompt")]),
+                "required": .array([.string("command")]),
                 "additionalProperties": .bool(false),
             ]),
             "_meta": .object([
@@ -52,40 +53,14 @@ enum AskQuestions {
             ]),
         ])
         server.registerFederatedTool(descriptor: askDescriptor, name: toolName, protected: true) { arguments in
-            try await createSession(arguments: arguments)
-        }
-
-        let submitDescriptor: JSONValue = .object([
-            "name": .string(submitToolName),
-            "description": .string("Submit the answer from the ask_questions app."),
-            "inputSchema": .object([
-                "type": .string("object"),
-                "properties": .object([
-                    "session_id": .object(["type": .string("string")]),
-                    "answer": .object(["type": .string("string")]),
-                ]),
-                "required": .array([.string("session_id"), .string("answer")]),
-                "additionalProperties": .bool(false),
-            ]),
-            "_meta": .object(["ui": .object(["visibility": .array([.string("app")])])]),
-        ])
-        server.registerFederatedTool(descriptor: submitDescriptor, name: submitToolName, protected: true) { arguments in
-            try await submit(arguments: arguments)
-        }
-
-        let cancelDescriptor: JSONValue = .object([
-            "name": .string(cancelToolName),
-            "description": .string("Cancel an unanswered ask_questions session."),
-            "inputSchema": .object([
-                "type": .string("object"),
-                "properties": .object(["session_id": .object(["type": .string("string")])]),
-                "required": .array([.string("session_id")]),
-                "additionalProperties": .bool(false),
-            ]),
-            "_meta": .object(["ui": .object(["visibility": .array([.string("app")])])]),
-        ])
-        server.registerFederatedTool(descriptor: cancelDescriptor, name: cancelToolName, protected: true) { arguments in
-            try await cancel(arguments: arguments)
+            guard case .object(let args) = arguments,
+                  case .string(let command)? = args["command"] else { throw AskQuestionsError.invalidPrompt }
+            switch command {
+            case "ask": return try await createSession(arguments: arguments)
+            case "submit": return try await submit(arguments: arguments)
+            case "cancel": return try await cancel(arguments: arguments)
+            default: throw AskQuestionsError.invalidPrompt
+            }
         }
 
         server.registerFederatedResource(
@@ -224,8 +199,8 @@ enum AskQuestions {
     async function init(){try{await rpc('ui/initialize',{protocolVersion:'2026-01-26',appInfo:{name:'NeoY Ask Questions',version:'1.0.0'},appCapabilities:{}});send({jsonrpc:'2.0',method:'ui/notifications/initialized'})}catch(e){statusEl.textContent='MCP App host unavailable.'}}
     async function notify(message){await rpc('ui/message',{role:'user',content:[{type:'text',text:message}]});statusEl.textContent='Conversation notified.'}
     async function finish(method,args,label){if(done||!sessionId)return;done=true;submitEl.disabled=true;cancelEl.disabled=true;statusEl.textContent=label+'…';try{const response=await rpc('tools/call',{name:method,arguments:args});if(response?.isError)throw new Error('Tool rejected submission');const message=JSON.stringify(args);statusEl.textContent=label+'. Notifying conversation…';try{await notify(message)}catch(e){statusEl.textContent=label+'. Notification failed; retry notification.';submitEl.textContent='Retry notification';submitEl.disabled=false;submitEl.onclick=()=>{submitEl.disabled=true;notify(message).catch(()=>{submitEl.disabled=false;statusEl.textContent='Notification failed; retry notification.'})}}}catch(e){done=false;submitEl.disabled=false;cancelEl.disabled=false;statusEl.textContent=e.message||'Unable to submit.'}}
-    submitEl.onclick=()=>finish('ask_questions.submit',{session_id:sessionId,answer:answerEl.value},'Submitted');cancelEl.onclick=()=>finish('ask_questions.cancel',{session_id:sessionId},'Cancelled');init();
-    window.addEventListener('pagehide',()=>{if(!done&&sessionId)send({jsonrpc:'2.0',id:nextId++,method:'tools/call',params:{name:'ask_questions.cancel',arguments:{session_id:sessionId}}})});
+    submitEl.onclick=()=>finish('ask_questions',{command:'submit',session_id:sessionId,answer:answerEl.value},'Submitted');cancelEl.onclick=()=>finish('ask_questions',{command:'cancel',session_id:sessionId},'Cancelled');init();
+    window.addEventListener('pagehide',()=>{if(!done&&sessionId)send({jsonrpc:'2.0',id:nextId++,method:'tools/call',params:{name:'ask_questions',arguments:{command:'cancel',session_id:sessionId}}})});
     </script></body></html>
     """
 

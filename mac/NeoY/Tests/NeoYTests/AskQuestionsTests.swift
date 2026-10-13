@@ -10,20 +10,23 @@ final class AskQuestionsTests: XCTestCase {
         AskQuestions.register(on: server)
         let data = Data(server.toolDescriptorsJSON.utf8)
         let tools = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [[String: Any]])
-        XCTAssertEqual(Set(tools.compactMap { $0["name"] as? String }), [AskQuestions.toolName, AskQuestions.submitToolName, AskQuestions.cancelToolName])
+        XCTAssertEqual(tools.count, 1)
+        XCTAssertEqual(tools.first?["name"] as? String, AskQuestions.toolName)
         XCTAssertEqual(server.resourceURIs, [AskQuestions.resourceURI])
-        let ask = try XCTUnwrap(tools.first { $0["name"] as? String == AskQuestions.toolName })
+        let ask = try XCTUnwrap(tools.first)
         let meta = try XCTUnwrap(ask["_meta"] as? [String: Any])
         XCTAssertEqual((meta["ui"] as? [String: Any])?["resourceUri"] as? String, AskQuestions.resourceURI)
-        let submit = try XCTUnwrap(tools.first { $0["name"] as? String == AskQuestions.submitToolName })
-        XCTAssertEqual(((submit["_meta"] as? [String: Any])?["ui"] as? [String: Any])?["visibility"] as? [String], ["app"])
+        let schema = try XCTUnwrap(ask["inputSchema"] as? [String: Any])
+        let properties = try XCTUnwrap(schema["properties"] as? [String: Any])
+        let command = try XCTUnwrap(properties["command"] as? [String: Any])
+        XCTAssertEqual(command["enum"] as? [String], ["ask", "submit", "cancel"])
     }
 
     @MainActor
     func testAskResultContainsCorrelatedPromptAndContinuationLimitation() async throws {
         let server = MCPServer(name: "test", port: 0)
         AskQuestions.register(on: server)
-        let result = try await server.invokeRegisteredTool(AskQuestions.toolName, arguments: .object(["prompt": .string("# Choose\n- **A** or B")]))
+        let result = try await server.invokeRegisteredTool(AskQuestions.toolName, arguments: .object(["command": .string("ask"), "prompt": .string("# Choose\n- **A** or B")]))
         let object = try resultObject(result)
         let structured = try XCTUnwrap(object["structuredContent"] as? [String: Any])
         XCTAssertEqual(structured["prompt"] as? String, "# Choose\n- **A** or B")
@@ -48,7 +51,7 @@ final class AskQuestionsTests: XCTestCase {
         XCTAssertEqual(contents.first?["mimeType"] as? String, AskQuestions.mimeType)
         XCTAssertTrue(AskQuestions.html.contains("ui/initialize"))
         XCTAssertTrue(AskQuestions.html.contains("ui/notifications/initialized"))
-        XCTAssertTrue(AskQuestions.html.contains(AskQuestions.submitToolName))
+        XCTAssertTrue(AskQuestions.html.contains("command:'submit'"))
         XCTAssertTrue(AskQuestions.html.contains("promptEl.innerHTML=d.prompt_html"))
     }
 
@@ -60,7 +63,7 @@ final class AskQuestionsTests: XCTestCase {
             NeoYRemoteToolCatalog.askQuestionsToolNames
         )
         let unrelatedRemoteTools = NeoYRemoteToolCatalog.remoteTools(for: [
-            "shell", AskQuestions.submitToolName, AskQuestions.cancelToolName,
+            "shell", "ask_questions.submit", "ask_questions.cancel",
         ])
         XCTAssertTrue(unrelatedRemoteTools.contains("shell"))
         XCTAssertTrue(unrelatedRemoteTools.isDisjoint(with: NeoYRemoteToolCatalog.askQuestionsToolNames))
@@ -70,25 +73,25 @@ final class AskQuestionsTests: XCTestCase {
     func testSubmissionIsCorrelatedOneShotAndIsolationIsEnforced() async throws {
         let server = MCPServer(name: "test", port: 0)
         AskQuestions.register(on: server)
-        let created = try await server.invokeRegisteredTool(AskQuestions.toolName, arguments: .object(["prompt": .string("Question A")]))
+        let created = try await server.invokeRegisteredTool(AskQuestions.toolName, arguments: .object(["command": .string("ask"), "prompt": .string("Question A")]))
         let session = try XCTUnwrap(try resultObject(created)["structuredContent"] as? [String: Any])
         let id = try XCTUnwrap(session["session_id"] as? String)
-        let submitted = try await server.invokeRegisteredTool(AskQuestions.submitToolName, arguments: .object(["session_id": .string(id), "answer": .string("answer A")]))
+        let submitted = try await server.invokeRegisteredTool(AskQuestions.toolName, arguments: .object(["command": .string("submit"), "session_id": .string(id), "answer": .string("answer A")]))
         XCTAssertEqual((try resultObject(submitted)["structuredContent"] as? [String: Any])?["answer"] as? String, "answer A")
         do {
-            _ = try await server.invokeRegisteredTool(AskQuestions.submitToolName, arguments: .object(["session_id": .string(id), "answer": .string("answer again")]))
+            _ = try await server.invokeRegisteredTool(AskQuestions.toolName, arguments: .object(["command": .string("submit"), "session_id": .string(id), "answer": .string("answer again")]))
             XCTFail("second submission should be rejected")
         } catch { }
         do {
-            _ = try await server.invokeRegisteredTool(AskQuestions.submitToolName, arguments: .object(["session_id": .string(UUID().uuidString), "answer": .string("wrong session")]))
+            _ = try await server.invokeRegisteredTool(AskQuestions.toolName, arguments: .object(["command": .string("submit"), "session_id": .string(UUID().uuidString), "answer": .string("wrong session")]))
             XCTFail("unknown session should be rejected")
         } catch { }
 
-        let cancelled = try await server.invokeRegisteredTool(AskQuestions.toolName, arguments: .object(["prompt": .string("Question B")]))
+        let cancelled = try await server.invokeRegisteredTool(AskQuestions.toolName, arguments: .object(["command": .string("ask"), "prompt": .string("Question B")]))
         let cancelledID = try XCTUnwrap((try resultObject(cancelled)["structuredContent"] as? [String: Any])?["session_id"] as? String)
-        _ = try await server.invokeRegisteredTool(AskQuestions.cancelToolName, arguments: .object(["session_id": .string(cancelledID)]))
+        _ = try await server.invokeRegisteredTool(AskQuestions.toolName, arguments: .object(["command": .string("cancel"), "session_id": .string(cancelledID)]))
         do {
-            _ = try await server.invokeRegisteredTool(AskQuestions.submitToolName, arguments: .object(["session_id": .string(cancelledID), "answer": .string("late")]))
+            _ = try await server.invokeRegisteredTool(AskQuestions.toolName, arguments: .object(["command": .string("submit"), "session_id": .string(cancelledID), "answer": .string("late")]))
             XCTFail("cancelled session should be rejected")
         } catch { }
     }
@@ -98,20 +101,20 @@ final class AskQuestionsTests: XCTestCase {
         let server = MCPServer(name: "test", port: 0)
         AskQuestions.register(on: server)
         let created = try await AskQuestions.$requestPrincipal.withValue("principal-A") {
-            try await server.invokeRegisteredTool(AskQuestions.toolName, arguments: .object(["prompt": .string("Private question")]))
+            try await server.invokeRegisteredTool(AskQuestions.toolName, arguments: .object(["command": .string("ask"), "prompt": .string("Private question")]))
         }
         let data = try resultObject(created)
         let session = try XCTUnwrap(data["structuredContent"] as? [String: Any])
         let id = try XCTUnwrap(session["session_id"] as? String)
-        let args: JSONValue = .object(["session_id": .string(id), "answer": .string("private answer")])
+        let args: JSONValue = .object(["command": .string("submit"), "session_id": .string(id), "answer": .string("private answer")])
         do {
             _ = try await AskQuestions.$requestPrincipal.withValue("principal-B") {
-                try await server.invokeRegisteredTool(AskQuestions.submitToolName, arguments: args)
+                try await server.invokeRegisteredTool(AskQuestions.toolName, arguments: args)
             }
             XCTFail("another authenticated caller must not submit")
         } catch { }
         let submitted = try await AskQuestions.$requestPrincipal.withValue("principal-A") {
-            try await server.invokeRegisteredTool(AskQuestions.submitToolName, arguments: args)
+            try await server.invokeRegisteredTool(AskQuestions.toolName, arguments: args)
         }
         XCTAssertEqual((try resultObject(submitted)["structuredContent"] as? [String: Any])?["status"] as? String, "submitted")
     }

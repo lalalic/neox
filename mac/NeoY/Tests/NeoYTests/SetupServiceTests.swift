@@ -294,7 +294,7 @@ final class SetupServiceTests: XCTestCase {
 
     func testRemovedAndRenamedRemoteToolsAreMigrated() {
         XCTAssertEqual(
-            NeoYRemoteToolCatalog.normalizeToolNames(["apply_patch", "audit_tail", "shell"]),
+            NeoYRemoteToolCatalog.normalizeToolNames(["apply_patch", "audit_tail", "ask_questions.submit", "ask_questions.cancel", "shell"]),
             Set(["git_apply_patch", "shell"])
         )
         XCTAssertFalse(NeoYRemoteToolCatalog.coreToolNames.contains("audit_tail"))
