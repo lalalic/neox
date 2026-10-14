@@ -1,7 +1,7 @@
 import Foundation
 
 enum NeoYSetupTopic: String, CaseIterable, Sendable {
-    case overview, status, configuration, deployment, diagnostics, permissions, federation, features, events, capabilities, auth, roadmap
+    case overview, status, configuration, deployment, diagnostics, permissions, federation, features, events, capabilities, auth, files, roadmap
 }
 
 enum NeoYSetupCommand: Equatable, Sendable {
@@ -18,6 +18,10 @@ enum NeoYSetupCommand: Equatable, Sendable {
     case diagnosticsSet(NeoYDiagnosticsSetting)
     case permissionsStatus
     case permissionOpen(NeoYPermissionKind)
+    case filesList
+    case filesMount(name: String, path: String)
+    case filesUnmount(String)
+    case filesURL(String)
     case mcpList
     case mcpAdd(name: String, url: String)
     case mcpRemove(String)
@@ -79,6 +83,7 @@ enum NeoYSetupParser {
         case "diagnostics": return try diagnostics(tokens)
         case "permissions": return try permissions(tokens)
         case "mcp": return try mcp(tokens)
+        case "files": return try files(tokens)
         case "feature", "features": return try feature(tokens)
         case "events": return try events(tokens)
         case "capability", "capabilities": return try capability(tokens)
@@ -166,6 +171,23 @@ enum NeoYSetupParser {
                 throw NeoYSetupError.invalidValue("unknown permission '\(tokens[2])'")
             }
             return .permissionOpen(kind)
+        default: throw NeoYSetupError.unknownCommand(tokens.prefix(2).joined(separator: " "))
+        }
+    }
+
+    private static func files(_ tokens: [String]) throws -> NeoYSetupCommand {
+        guard tokens.count >= 2 else { return .filesList }
+        switch tokens[1] {
+        case "list": try exact(tokens, count: 2); return .filesList
+        case "mount":
+            guard tokens.count == 4 else { throw NeoYSetupError.missingArgument("files mount <name> <absolute-directory>") }
+            return .filesMount(name: tokens[2], path: tokens[3])
+        case "unmount":
+            guard tokens.count == 3 else { throw NeoYSetupError.missingArgument("files unmount <name>") }
+            return .filesUnmount(tokens[2])
+        case "url":
+            guard tokens.count == 3 else { throw NeoYSetupError.missingArgument("files url <absolute-file>") }
+            return .filesURL(tokens[2])
         default: throw NeoYSetupError.unknownCommand(tokens.prefix(2).joined(separator: " "))
         }
     }
@@ -394,6 +416,9 @@ actor NeoYSetupService {
             return Self.json(await runtime?.permissions() ?? [])
         case .permissionOpen(let kind):
             return Self.json(JSONValue.object(["opened": .bool(await runtime?.openPermission(kind) ?? false), "permission": .string(kind.rawValue)]))
+        case .filesList, .filesMount, .filesUnmount, .filesURL:
+            do { return try NeoYSetupFiles.execute(command) }
+            catch { return Self.json(JSONValue.object(["ok": .bool(false), "error": .string(error.localizedDescription)])) }
         case .mcpList:
             let configuration = await controlPlane.currentConfiguration()
             return Self.json(await runtime?.federationStatus(configuration) ?? [])
@@ -593,6 +618,8 @@ actor NeoYSetupService {
             "diagnostics enable|disable; diagnostics set level <info|warning|error>; diagnostics set retention-days <1...365>"
         case .permissions:
             "permissions status; permissions open <accessibility|screen-recording|camera|microphone|notifications|local-network>. Human approval remains required."
+        case .files:
+            "files list; files mount <name> <absolute-directory>; files unmount <name>; files url <absolute-file>. Mounts are PUBLIC read-only HTTPS shares."
         case .federation:
             """
             mcp list
@@ -641,6 +668,7 @@ actor NeoYSetupService {
               deployment show|set ...
               diagnostics ...
               permissions status|open ...
+              files list|mount|unmount|url ...
               mcp list|add|remove|enable|disable ...
               feature list|status|install|enable|disable|uninstall|configure|start|stop|restart|doctor|setup|complete ...
               events status|enable|disable|notify ...

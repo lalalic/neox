@@ -3,6 +3,14 @@ import XCTest
 @testable import NeoY
 
 final class SetupServiceTests: XCTestCase {
+    func testFilesSetupParsing() throws {
+        XCTAssertEqual(try NeoYSetupParser.parse("files list"), .filesList)
+        XCTAssertEqual(try NeoYSetupParser.parse("files mount vlog /tmp/vlog"), .filesMount(name: "vlog", path: "/tmp/vlog"))
+        XCTAssertEqual(try NeoYSetupParser.parse("files unmount vlog"), .filesUnmount("vlog"))
+        XCTAssertEqual(try NeoYSetupParser.parse("files url /tmp/vlog/video.md"), .filesURL("/tmp/vlog/video.md"))
+        XCTAssertEqual(try NeoYSetupParser.parse("help files"), .help(topic: .files))
+    }
+
     func testTunnelNameIsStableAndHostnameScoped() {
         XCTAssertEqual(
             NeoYTunnelRuntime.defaultTunnelName(hostname: "NeoY.Example.com"),
