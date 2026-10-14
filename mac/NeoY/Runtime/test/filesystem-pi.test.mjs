@@ -17,39 +17,15 @@ function context() {
   };
 }
 
-test("filesystem exposes edit, grep, and find as fs subcommands", () => {
+test("filesystem exposes grep and find but not edit", () => {
   const names = new Set(FILESYSTEM_TOOLS.map((tool) => tool.name));
-  assert.ok(names.has("fs_edit"));
+  assert.ok(!names.has("fs_edit"));
   assert.ok(names.has("fs_grep"));
   assert.ok(names.has("fs_find"));
 });
 
-test("fs_edit applies multiple unique replacements atomically and preserves CRLF", async () => {
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "neoy-fs-edit-"));
-  const file = path.join(dir, "sample.txt");
-  await fsp.writeFile(file, "alpha\r\nbeta\r\ngamma\r\n", "utf8");
-  const result = await handleFilesystem("fs_edit", {
-    path: file,
-    edits: [
-      { old_text: "alpha", new_text: "ALPHA" },
-      { old_text: "gamma", new_text: "GAMMA" },
-    ],
-  }, context());
-  assert.equal(result.replacements, 2);
-  assert.equal(result.atomic, true);
-  assert.equal(await fsp.readFile(file, "utf8"), "ALPHA\r\nbeta\r\nGAMMA\r\n");
-  await fsp.rm(dir, { recursive: true, force: true });
-});
-
-test("fs_edit rejects ambiguous replacement text", async () => {
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "neoy-fs-edit-"));
-  const file = path.join(dir, "sample.txt");
-  await fsp.writeFile(file, "same\nsame\n", "utf8");
-  await assert.rejects(
-    handleFilesystem("fs_edit", { path: file, edits: [{ old_text: "same", new_text: "new" }] }, context()),
-    /2 occurrences/,
-  );
-  await fsp.rm(dir, { recursive: true, force: true });
+test("fs_edit is not callable", async () => {
+  await assert.rejects(handleFilesystem("fs_edit", { path: "/tmp/test", edits: [] }, context()));
 });
 
 test("same-file mutation queue serializes writers while different files remain independent", async () => {

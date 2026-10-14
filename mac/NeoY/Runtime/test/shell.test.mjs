@@ -185,3 +185,16 @@ test("shell_exec passes stdin through the durable process supervisor", async () 
   assert.equal(result.exitCode, 0);
   assert.equal(result.stdout, "hello stdin");
 });
+
+test("shell_exec audits failed commands with original arguments, job ID and stderr diagnostic", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "neoy-diagnostics-test-"));
+  const calls = [];
+  const context = await makeContext(root, { audit: async (name, args, summary) => calls.push({ name, args, summary }) });
+  const command = "printf 'failure detail' >&2; exit 17";
+  const result = await handleShell("shell_exec", { command }, context);
+  assert.equal(result.exitCode, 17);
+  const event = calls.find(call => call.name === "shell_exec" && call.summary.exitCode === 17);
+  assert.equal(event.args.command, command);
+  assert.ok(event.summary.jobId);
+  assert.equal(event.summary.stderrPreview, "failure detail");
+});

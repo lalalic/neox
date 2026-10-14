@@ -205,6 +205,16 @@ export async function handleShell(name, args, context) {
           // re-executes or re-parents the running process.
           const job = await createJob(context, { command, cwd: effectiveCwd, env, stdin, label: "exec" });
           await audit(name, args, { jobId: job.id, pid: job.pid, state: "started" });
+          const diagnostic = async (file) => {
+            const handle = await fsp.open(file, "r");
+            try {
+              const stat = await handle.stat();
+              const size = Math.min(stat.size, 2048);
+              const buffer = Buffer.alloc(size);
+              await handle.read(buffer, 0, size, stat.size - size);
+              return buffer.toString("utf8");
+            } finally { await handle.close(); }
+          };
           const readOutput = async (file, suffix) => {
             const stat = await fsp.stat(file);
             if (stat.size <= maxOutputBytes) return { text: await fsp.readFile(file, "utf8"), file: null, bytes: stat.size };
@@ -236,7 +246,11 @@ export async function handleShell(name, args, context) {
                 capturedStdoutBytes: out.bytes, capturedStderrBytes: err.bytes,
                 stdoutTruncated: false, stderrTruncated: false,
               };
-              await audit(name, args, { exitCode: result.exitCode, durationMs: elapsed, stdoutFile: out.file, stderrFile: err.file });
+              await audit(name, args, {
+                exitCode: result.exitCode, durationMs: elapsed, jobId: job.id,
+                stdoutFile: out.file, stderrFile: err.file,
+                ...(result.exitCode !== 0 ? { stderrPreview: await diagnostic(job.stderrPath) } : {}),
+              });
               return result;
             }
             if (timeoutMs > 0 && elapsed >= timeoutMs && elapsed < promotionMs) {

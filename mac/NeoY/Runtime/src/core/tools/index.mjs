@@ -437,7 +437,7 @@ async function audit(tool, argsInput, summary = {}, error = null, meta = {}) {
       tool,
       command: typeof args?.command === "string" ? args.command : null,
       argumentsHash: crypto.createHash("sha256").update(raw).digest("hex"),
-      summary,
+      summary: summary?.stderrPreview ? { ...summary, stderrPreview: redactString(summary.stderrPreview) } : summary,
       error: error ? String(error?.message || error) : null,
     };
     if (AUDIT_MODE === "full") entry.arguments = JSON.parse(redactString(raw));

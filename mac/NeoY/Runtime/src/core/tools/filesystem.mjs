@@ -1,4 +1,3 @@
-import { piEdit } from "./pi-filesystem-edit.mjs";
 import { piFind, piGrep } from "./pi-filesystem-search.mjs";
 
 export const FILESYSTEM_TOOLS = [
@@ -39,29 +38,6 @@ export const FILESYSTEM_TOOLS = [
         mode: { type: "integer", minimum: 0, maximum: 4095, description: "Optional POSIX mode as a decimal integer, for example 420 for 0644." },
       },
       required: ["path", "content"],
-      additionalProperties: false,
-    },
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-  },
-{
-    name: "fs_edit",
-    title: "Edit file",
-    description: "Apply one or more precise, unique text replacements to a file atomically. Same-file mutations are serialized.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        path: { type: "string" },
-        edits: {
-          type: "array", minItems: 1, maxItems: 100,
-          items: {
-            type: "object",
-            properties: { old_text: { type: "string", minLength: 1 }, new_text: { type: "string" } },
-            required: ["old_text", "new_text"],
-            additionalProperties: false,
-          },
-        },
-      },
-      required: ["path", "edits"],
       additionalProperties: false,
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
@@ -241,12 +217,6 @@ export async function handleFilesystem(name, args, context) {
           return result;
         }
     
-        case "fs_edit": {
-          const result = await piEdit(args, context);
-          await audit(name, { path: args.path, edits: args.edits?.length }, result);
-          return result;
-        }
-
         case "fs_grep": {
           const toolsDir = path.join(context.APP_SUPPORT_DIR, "tools");
           const result = await piGrep(args, { ...context, toolsDir });
