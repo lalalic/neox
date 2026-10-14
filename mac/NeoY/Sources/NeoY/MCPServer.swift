@@ -120,12 +120,16 @@ public final class MCPServer {
     /// Called after a tool handler has returned or failed.
     public nonisolated(unsafe) var onToolCallFinished: ((UUID) -> Void)?
 
-    public init(name: String = "mcp-server", version: String = "1.0.0", port: UInt16 = 9223, bonjourName: String? = nil) {
+    public init(name: String = "mcp-server", version: String = "1.0.0", port: UInt16 = 9223,
+                bonjourName: String? = nil, toolCallAudit: ToolCallAudit = ToolCallAudit()) {
         self.name = name
         self.version = version
         self.port = port
         self.bonjourName = bonjourName
+        self.toolCallAudit = toolCallAudit
     }
+
+    public nonisolated(unsafe) let toolCallAudit: ToolCallAudit
 
     deinit {
         listener?.cancel()
@@ -709,11 +713,35 @@ public final class MCPServer {
 
         case "tools/call":
             guard let toolName = params["name"] as? String else {
+                let provenance = ToolCallAudit.Provenance(origin: isLocal ? .local : .remote, provider: nil)
+                toolCallAudit.record(
+                    callID: UUID(),
+                    toolName: "<unknown>",
+                    provenance: provenance,
+                    status: .denied,
+                    errorCode: .invalidRequest
+                )
                 sendJSONRPCError(connection: connection, id: id, code: -32602, message: "Missing tool name")
                 return
             }
+            let callID = UUID()
+            let provider = _snapshotFederatedToolProviders[toolName] ?? Self.remoteProvider(
+                forToolName: toolName,
+                ownership: _snapshotFederatedToolProviders
+            )
+            let provenance = ToolCallAudit.Provenance(
+                origin: isLocal ? .local : .remote,
+                provider: provider
+            )
             if !isLocal {
                 guard authorized else {
+                    toolCallAudit.record(
+                        callID: callID,
+                        toolName: toolName,
+                        provenance: provenance,
+                        status: .denied,
+                        errorCode: .authorizationDenied
+                    )
                     sendJSONRPCError(connection: connection, id: id, code: -32001,
                         message: "Remote MCP requires a valid NeoY token")
                     return
@@ -721,12 +749,26 @@ public final class MCPServer {
                 let toolAllowed = _snapshotRemoteAllowedTools.contains(toolName)
                 let providerAllowed = Self.remoteProvider(forToolName: toolName, ownership: _snapshotFederatedToolProviders).map { _snapshotRemoteAllowedProviders.contains($0) } ?? false
                 guard toolAllowed || providerAllowed else {
+                    toolCallAudit.record(
+                        callID: callID,
+                        toolName: toolName,
+                        provenance: provenance,
+                        status: .denied,
+                        errorCode: .authorizationDenied
+                    )
                     sendJSONRPCError(connection: connection, id: id, code: -32003,
                         message: "Tool '\(toolName)' is not enabled for remote access")
                     return
                 }
             }
             guard let handler = _snapshotHandlers[toolName] else {
+                toolCallAudit.record(
+                    callID: callID,
+                    toolName: toolName,
+                    provenance: provenance,
+                    status: .notFound,
+                    errorCode: .unknownTool
+                )
                 sendJSONRPCError(connection: connection, id: id, code: -32602,
                     message: "Tool '\(toolName)' not found. Available: \(_snapshotToolNames.joined(separator: ", "))")
                 return
@@ -734,7 +776,13 @@ public final class MCPServer {
 
             let arguments = params["arguments"] as? [String: Any] ?? [:]
             let jsonArgs = Self.toJSONValue(arguments)
-            let callID = UUID()
+            let startedAt = Date()
+            toolCallAudit.record(
+                callID: callID,
+                toolName: toolName,
+                provenance: provenance,
+                status: .started
+            )
             if let onToolCall {
                 let argsPreview: String
                 if let data = try? JSONSerialization.data(withJSONObject: Self.jsonValueToAny(jsonArgs), options: [.sortedKeys]) {
@@ -748,11 +796,26 @@ public final class MCPServer {
                 defer { self?.onToolCallFinished?(callID) }
                 do {
                     let result = try await AskQuestions.$requestPrincipal.withValue(principal) { try await handler(jsonArgs) }
+                    func recordTerminal(status: ToolCallAudit.Status, code: ToolCallAudit.ErrorCode) {
+                        self?.toolCallAudit.record(
+                            callID: callID,
+                            toolName: toolName,
+                            provenance: provenance,
+                            status: status,
+                            errorCode: code,
+                            startedAt: startedAt
+                        )
+                    }
                     // Image results come back as "b64:<mime>,<base64>"; everything else is text.
                     // (Never infer from length/newlines — a long single-line JSON result is text.)
                     if result.hasPrefix("mcpresult:"),
                        let data = Data(base64Encoded: String(result.dropFirst("mcpresult:".count))),
                        let forwarded = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        let forwardedFailed = (forwarded["isError"] as? Bool) == true
+                        recordTerminal(
+                            status: forwardedFailed ? .failed : .succeeded,
+                            code: forwardedFailed ? .forwardedToolError : .none
+                        )
                         self?.sendJSONRPCResult(connection: connection, id: id, result: forwarded, modern: modern)
                         return
                     }
@@ -764,10 +827,19 @@ public final class MCPServer {
                     } else {
                         content = [["type": "text", "text": result]]
                     }
+                    recordTerminal(status: .succeeded, code: .none)
                     self?.sendJSONRPCResult(connection: connection, id: id, result: [
                         "content": content, "isError": false
                     ], modern: modern)
                 } catch {
+                    self?.toolCallAudit.record(
+                        callID: callID,
+                        toolName: toolName,
+                        provenance: provenance,
+                        status: .failed,
+                        errorCode: .handlerError,
+                        startedAt: startedAt
+                    )
                     self?.sendJSONRPCResult(connection: connection, id: id, result: [
                         "content": [["type": "text", "text": "Error: \(error.localizedDescription)"]],
                         "isError": true
