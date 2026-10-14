@@ -56,6 +56,29 @@ function alive(pid) {
   try { process.kill(pid,0); return true; } catch { return false; }
 }
 function writePid(file,pid){ fs.writeFileSync(file,String(pid)); }
+
+function managedPids(role) {
+ const output=spawnSync("/bin/ps",["-axo","pid=,user=,command="],{encoding:"utf8"}).stdout||"";
+ const needle=role==="supervisor" ? SCRIPT+" run" : role==="server" ? SCRIPT+" serve" : "-R 127.0.0.1:"+HUB_MCP_PORT+":127.0.0.1:"+LOCAL_MCP_PORT;
+ return output.split("\n").flatMap(line=>{
+  const m=line.trim().match(/^(\d+)\s+(\S+)\s+(.*)$/);
+  if(!m||m[2]!==os.userInfo().username||!m[3].includes(needle))return [];
+  if(role==="tunnel"&&!m[3].includes(HUB_SSH_TARGET))return [];
+  const pid=Number(m[1]);return pid!==process.pid&&alive(pid)?[pid]:[];
+ });
+}
+function reconcile() {
+ for(const [role,file] of Object.entries(PIDS)) {
+  const ids=managedPids(role),known=readPid(file);
+  if(ids.includes(known))continue;
+  if(ids.length)writePid(file,ids[0]);else unlink(file);
+ }
+}
+function stopRole(role) {
+ for(const pid of managedPids(role))try{process.kill(pid,"SIGTERM")}catch{}
+ unlink(PIDS[role]);
+}
+
 function unlink(file){ try{fs.unlinkSync(file)}catch{} }
 function killPid(file) {
   const pid=readPid(file);
@@ -84,28 +107,26 @@ function tunnelArgs() {
   return args;
 }
 function startServer() {
-  const pid=readPid(PIDS.server); if (alive(pid)) return pid;
+  reconcile(); const pid=readPid(PIDS.server); if (managedPids("server").includes(pid)) return pid;
   unlink(PIDS.server);
   const child=spawnLogged(NODE_BIN,[SCRIPT,"serve"],"server.log",{env:{...process.env,NEO_NODE_CONFIG:CONFIG_FILE}});
   writePid(PIDS.server,child.pid); return child.pid;
 }
 function startTunnel() {
-  const pid=readPid(PIDS.tunnel); if (alive(pid)) return pid;
+  reconcile(); const pid=readPid(PIDS.tunnel); if (managedPids("tunnel").includes(pid)) return pid;
   unlink(PIDS.tunnel);
   const child=spawnLogged(SSH_BIN,tunnelArgs(),"tunnel.log");
   writePid(PIDS.tunnel,child.pid); return child.pid;
 }
 function stopAll() {
-  killPid(PIDS.tunnel); killPid(PIDS.server);
-  const sup=readPid(PIDS.supervisor);
-  if (alive(sup) && sup !== process.pid) { try{process.kill(sup,"SIGTERM")}catch{} }
-  if (sup !== process.pid) unlink(PIDS.supervisor);
+ reconcile();
+ stopRole("supervisor"); stopRole("tunnel"); stopRole("server");
 }
 async function runSupervisor() {
-  const existing=readPid(PIDS.supervisor);
-  if (alive(existing) && existing!==process.pid) return;
+  reconcile();
+  if (managedPids("supervisor").length) return;
   writePid(PIDS.supervisor,process.pid);
-  const cleanup=()=>{ killPid(PIDS.tunnel); killPid(PIDS.server); unlink(PIDS.supervisor); };
+  const cleanup=()=>{ stopRole("tunnel"); stopRole("server"); if(readPid(PIDS.supervisor)===process.pid)unlink(PIDS.supervisor); };
   process.on("SIGTERM",()=>{cleanup();process.exit(0)}); process.on("SIGINT",()=>{cleanup();process.exit(0)});
   let delay=1000;
   while(true) {
@@ -123,7 +144,7 @@ async function runSupervisor() {
   }
 }
 async function startSupervisor() {
-  if (alive(readPid(PIDS.supervisor))) return true;
+  reconcile(); if(managedPids("supervisor").length) return await health();
   unlink(PIDS.supervisor);
   const child=spawnLogged(NODE_BIN,[SCRIPT,"run"],"supervisor.log",{detached:true,env:{...process.env,NEO_NODE_CONFIG:CONFIG_FILE}});
   child.unref();
@@ -162,6 +183,7 @@ function uninstallPersistence() {
   unlink(PLIST);
 }
 async function status() {
+  reconcile();
   console.log(`node: ${NODE_NAME}`);
   console.log(`mode: ${NODE_MODE}`);
   console.log(`root: ${NODE_ROOT}`);
