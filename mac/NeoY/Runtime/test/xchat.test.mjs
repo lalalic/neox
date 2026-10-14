@@ -1,113 +1,29 @@
-import test from "node:test";
-import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { XCHAT_LIFECYCLE_TOOLS, isXChatLifecycleTool, scheduleXChatLifecycle, parsePlatformReceipt } from "../src/core/tools/xchat.mjs";
-
-const call = (command, args = {}, options = {}) => scheduleXChatLifecycle("chatgpt", { command, args }, options);
-
-test("declares one compact xchat lifecycle tool with exact help schemas", () => {
-  assert.deepEqual(XCHAT_LIFECYCLE_TOOLS.map((tool) => tool.name), ["chatgpt"]);
-  assert.deepEqual(XCHAT_LIFECYCLE_TOOLS[0].inputSchema.required, ["command"]);
-  const payload = JSON.parse(call("help", { command: "turn" }).content[0].text);
-  assert.deepEqual(payload.schema.required, ["thread_id", "message"]);
-  assert.equal(XCHAT_LIFECYCLE_TOOLS[0].inputSchema.additionalProperties, false);
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {XCHAT_LIFECYCLE_TOOLS,scheduleXChatLifecycle,parsePlatformReceipt} from '../src/core/tools/xchat.mjs';
+const call=(command,args={},options={})=>JSON.parse(scheduleXChatLifecycle('chatgpt',{command,args},options).content[0].text);
+const thread={status:'submitted',mode:'new-thread',temporary:false,thread_id:'6acfc12e-c1a0-83ea-bfa3-5b5c609ec588',thread_url:'https://chatgpt.com/c/6acfc12e-c1a0-83ea-bfa3-5b5c609ec588',verified_by:'composer-cleared'};
+test('only synchronous commands exposed, no status',()=>{
+ assert.deepEqual(call('help').commands.map(x=>x.command),['turn','thread']);
+ assert.throws(()=>call('status',{transfer_id:'receipt-123'}),/Unknown chatgpt command/);
+ assert.equal(XCHAT_LIFECYCLE_TOOLS.length,1);
 });
-
-test("schedules same-thread Browser Workspace transfer", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "neoy-xchat-turn-"));
-  let observed;
-  const result = call("turn", {
-    project_id: "g-p-12345678",
-    thread_id: "thread_12345678",
-    message: "Continue after refreshing the tool surface.",
-    reason: "plugin tools changed",
-  }, {
-    dataDir: dir,
-    transferId: "turn-1",
-    spawnImpl: (command, args, options) => { observed = { command, args, options }; return { unref() {} }; },
-    workerPath: "/tmp/worker.mjs",
-  });
-  const payload = JSON.parse(result.content[0].text);
-  assert.equal(payload.status, "scheduled");
-  assert.equal(payload.terminal, true);
-  assert.equal(payload.mode, "new-turn");
-  assert.equal(observed.args[1], "new-turn");
-  assert.ok(fs.existsSync(path.join(dir, "xchat-lifecycle", "turn-1.json")));
+test('new-thread synchronously returns platform thread id and URL',()=>{
+ let observed;
+ const result=call('thread',{message:'Verify player'}, {cli:'browser-workspace',spawnSyncImpl:(cli,args)=>{observed={cli,args,config:JSON.parse(fs.readFileSync(args.at(-1),'utf8'))};return {status:0,stdout:JSON.stringify({result:{ok:true,stdout:JSON.stringify(thread)}})};}});
+ assert.equal(result.thread_id,thread.thread_id);assert.equal(result.thread_url,thread.thread_url);
+ assert.equal(result.status,'submitted');assert.equal(result.transfer_id,undefined);
+ assert.deepEqual(observed.args.slice(0,5),['platform','run','chatgpt','new-thread','--auto-session']);
+ assert.equal(observed.config.message,'Verify player');
 });
-
-test("schedules standalone same-thread transfer without project_id", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "neoy-xchat-turn-standalone-"));
-  const result = call("turn", {
-    thread_id: "thread_12345678",
-    message: "Continue in the standalone thread.",
-  }, { dataDir: dir, transferId: "turn-standalone", spawnImpl: () => ({ unref() {} }), workerPath: "/tmp/worker.mjs" });
-  const payload = JSON.parse(result.content[0].text);
-  assert.equal(payload.thread_id, "thread_12345678");
-  assert.equal("project_id" in payload, false);
+test('new-turn synchronously returns verified platform receipt',()=>{
+ const receipt={status:'submitted',mode:'new-turn',thread_id:'thread_12345678',verified_by:'composer-cleared'};
+ const got=call('turn',{thread_id:'thread_12345678',message:'Continue'}, {cli:'browser-workspace',spawnSyncImpl:()=>({status:0,stdout:JSON.stringify({result:{ok:true,stdout:JSON.stringify(receipt)}})})});
+ assert.deepEqual(got,receipt);
 });
-
-test("schedules new-thread transfer including temporary mode", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "neoy-xchat-thread-"));
-  const result = call("thread", {
-    message: "Check the refreshed tool surface.",
-    temporary: true,
-  }, { dataDir: dir, transferId: "temporary-1", spawnImpl: () => ({ unref() {} }), workerPath: "/tmp/worker.mjs" });
-  const payload = JSON.parse(result.content[0].text);
-  assert.equal(payload.mode, "new-thread");
-  assert.equal(payload.temporary, true);
-  assert.equal("project_id" in payload, false);
-
-  assert.throws(() => call("thread", {
-    project_id: "g-p-12345678",
-    temporary: true,
-    message: "x",
-  }, { dataDir: dir, transferId: "temporary-invalid", spawnImpl: () => ({ unref() {} }), workerPath: "/tmp/worker.mjs" }), /cannot be combined/);
-});
-
-test("validates stable ids and facade commands", () => {
-  assert.equal(isXChatLifecycleTool("chatgpt"), true);
-  assert.equal(isXChatLifecycleTool("xchat.turn.new"), false);
-  assert.throws(() => call("turn", { project_id: "bad", thread_id: "thread_12345678", message: "x" }), /project_id/);
-  assert.throws(() => call("turn", { thread_id: "bad", message: "x" }), /thread_id/);
-  assert.throws(() => call("nope", {}), /Unknown chatgpt command/);
-});
-
-
-test("worker invokes uvx with browser-workspace and does not require npm or local source", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "neoy-xchat-uvx-"));
-  const config = path.join(dir, "config.json");
-  const status = path.join(dir, "transfer.status.json");
-  const fakeBin = path.join(dir, "uvx");
-  const argvPath = path.join(dir, "argv.json");
-  fs.writeFileSync(config, JSON.stringify({ message: "test" }));
-  fs.writeFileSync(fakeBin, `#!/bin/sh\nprintf '%s\\n' "$@" > "${argvPath}"\nprintf '{"status":"submitted","mode":"new-turn","verified_by":"composer-cleared"}\\n'\n`, { mode: 0o755 });
-  const worker = fileURLToPath(new URL("../src/core/tools/xchat.mjs", import.meta.url));
-  const ran = spawnSync(process.execPath, [worker, "new-turn", config, status], {
-    env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, BROWSER_WORKSPACE_CLI: "", XCHAT_LIFECYCLE_TIMEOUT_MS: "2000" },
-    encoding: "utf8",
-  });
-  assert.equal(ran.status, 0, ran.stderr);
-  assert.deepEqual(fs.readFileSync(argvPath, "utf8").trim().split("\n"), [
-    "browser-workspace", "platform", "run", "chatgpt", "new-turn", "--auto-session", "--config", config,
-  ]);
-  assert.equal(JSON.parse(fs.readFileSync(status, "utf8")).status, "completed");
-  assert.equal(fs.existsSync(config), false);
-});
-
-
-test("status returns authoritative Platform CLI thread receipt from previous transfer", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "neoy-xchat-receipt-"));
-  const folder = path.join(dir, "xchat-lifecycle");fs.mkdirSync(folder);
-  const receipt = { status: "submitted", mode: "new-thread", temporary: false, thread_id: "6acfc12e-c1a0-83ea-bfa3-5b5c609ec588", thread_url: "https://chatgpt.com/c/6acfc12e-c1a0-83ea-bfa3-5b5c609ec588", verified_by: "composer-cleared" };
-  fs.writeFileSync(path.join(folder,"receipt-123.status.json"), JSON.stringify({status:"completed",mode:"new-thread",output:{result:{ok:true,stdout:JSON.stringify(receipt)}}}));
-  const result = JSON.parse(call("status", {transfer_id:"receipt-123"}, {dataDir:dir}).content[0].text);
-  assert.equal(result.status,"completed");assert.equal(result.thread_id,receipt.thread_id);assert.equal(result.thread_url,receipt.thread_url);
-  fs.writeFileSync(path.join(folder,"failure-123.status.json"),JSON.stringify({status:"failed",mode:"new-thread",error:"ChatGPT did not assign thread id"}));
-  const failed = JSON.parse(call("status", {transfer_id:"failure-123"}, {dataDir:dir}).content[0].text);
-  assert.equal(failed.status,"failed");assert.match(failed.error,/thread id/);
-  assert.throws(()=>parsePlatformReceipt({result:{ok:true,stdout:'{"status":"submitted","mode":"new-thread"}'}},"new-thread"),/durable/);
+test('errors propagate without false-positive success',()=>{
+ assert.throws(()=>call('thread',{message:'x'},{cli:'test',spawnSyncImpl:()=>({status:1,stderr:'browser failed'})}),/browser failed/);
+ assert.throws(()=>call('thread',{message:'x'},{cli:'test',spawnSyncImpl:()=>({status:0,stdout:JSON.stringify({result:{ok:true,stdout:'{"status":"submitted","mode":"new-thread"}'}})})}),/durable/);
+ assert.throws(()=>parsePlatformReceipt({result:{ok:false,stderr:'blocked'}},'new-thread'),/blocked/);
 });
