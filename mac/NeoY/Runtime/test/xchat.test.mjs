@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { XCHAT_LIFECYCLE_TOOLS, isXChatLifecycleTool, scheduleXChatLifecycle } from "../src/core/tools/xchat.mjs";
+import { XCHAT_LIFECYCLE_TOOLS, isXChatLifecycleTool, scheduleXChatLifecycle, parsePlatformReceipt } from "../src/core/tools/xchat.mjs";
 
 const call = (command, args = {}, options = {}) => scheduleXChatLifecycle("chatgpt", { command, args }, options);
 
@@ -84,7 +84,7 @@ test("worker invokes uvx with browser-workspace and does not require npm or loca
   const fakeBin = path.join(dir, "uvx");
   const argvPath = path.join(dir, "argv.json");
   fs.writeFileSync(config, JSON.stringify({ message: "test" }));
-  fs.writeFileSync(fakeBin, `#!/bin/sh\nprintf '%s\\n' "$@" > "${argvPath}"\nprintf '{"ok":true}\\n'\n`, { mode: 0o755 });
+  fs.writeFileSync(fakeBin, `#!/bin/sh\nprintf '%s\\n' "$@" > "${argvPath}"\nprintf '{"status":"submitted","mode":"new-turn","verified_by":"composer-cleared"}\\n'\n`, { mode: 0o755 });
   const worker = fileURLToPath(new URL("../src/core/tools/xchat.mjs", import.meta.url));
   const ran = spawnSync(process.execPath, [worker, "new-turn", config, status], {
     env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, BROWSER_WORKSPACE_CLI: "", XCHAT_LIFECYCLE_TIMEOUT_MS: "2000" },
@@ -96,4 +96,18 @@ test("worker invokes uvx with browser-workspace and does not require npm or loca
   ]);
   assert.equal(JSON.parse(fs.readFileSync(status, "utf8")).status, "completed");
   assert.equal(fs.existsSync(config), false);
+});
+
+
+test("status returns authoritative Platform CLI thread receipt from previous transfer", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "neoy-xchat-receipt-"));
+  const folder = path.join(dir, "xchat-lifecycle");fs.mkdirSync(folder);
+  const receipt = { status: "submitted", mode: "new-thread", temporary: false, thread_id: "6acfc12e-c1a0-83ea-bfa3-5b5c609ec588", thread_url: "https://chatgpt.com/c/6acfc12e-c1a0-83ea-bfa3-5b5c609ec588", verified_by: "composer-cleared" };
+  fs.writeFileSync(path.join(folder,"receipt-123.status.json"), JSON.stringify({status:"completed",mode:"new-thread",output:{result:{ok:true,stdout:JSON.stringify(receipt)}}}));
+  const result = JSON.parse(call("status", {transfer_id:"receipt-123"}, {dataDir:dir}).content[0].text);
+  assert.equal(result.status,"completed");assert.equal(result.thread_id,receipt.thread_id);assert.equal(result.thread_url,receipt.thread_url);
+  fs.writeFileSync(path.join(folder,"failure-123.status.json"),JSON.stringify({status:"failed",mode:"new-thread",error:"ChatGPT did not assign thread id"}));
+  const failed = JSON.parse(call("status", {transfer_id:"failure-123"}, {dataDir:dir}).content[0].text);
+  assert.equal(failed.status,"failed");assert.match(failed.error,/thread id/);
+  assert.throws(()=>parsePlatformReceipt({result:{ok:true,stdout:'{"status":"submitted","mode":"new-thread"}'}},"new-thread"),/durable/);
 });

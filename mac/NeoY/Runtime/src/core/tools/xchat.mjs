@@ -97,12 +97,41 @@ function resultText(payload) {
   return { content: [{ type: "text", text: JSON.stringify(payload) }], isError: false };
 }
 
+// The Platform CLI owns the authoritative receipt. Never manufacture a thread ID.
+export function parsePlatformReceipt(output, action) {
+  const envelope = output?.result ?? output;
+  if (!envelope || envelope.ok === false) throw new Error(envelope?.stderr || "Browser Workspace action failed");
+  const raw = typeof envelope?.stdout === "string" ? envelope.stdout.trim() : envelope;
+  let receipt;
+  try { receipt = typeof raw === "string" ? JSON.parse(raw) : raw; }
+  catch { throw new Error("Browser Workspace returned no machine-readable receipt"); }
+  if (receipt?.status !== "submitted" || receipt?.mode !== action) throw new Error("Browser Workspace did not verify submission");
+  if (action === "new-thread" && !receipt.temporary && (!THREAD_ID.test(receipt.thread_id || "") || !/^https:\/\/chatgpt\.com\/c\//.test(receipt.thread_url || ""))) {
+    throw new Error("Browser Workspace did not return a durable ChatGPT thread ID and URL");
+  }
+  return receipt;
+}
+
+export function getXChatTransferStatus(transferId, options = {}) {
+  if (typeof transferId !== "string" || !/^[A-Za-z0-9_-]{8,160}$/.test(transferId)) throw new Error("transfer_id is invalid");
+  const dataRoot = options.dataDir || process.env.NEOY_DATA_DIR || path.join(os.homedir(), "Library/Application Support/NeoY");
+  const file = path.join(dataRoot, "xchat-lifecycle", `${transferId}.status.json`);
+  if (!fs.existsSync(file)) throw new Error("transfer not found");
+  const state = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (state.status === "completed") {
+    const receipt = state.receipt || parsePlatformReceipt(state.output, state.mode);
+    return { ...receipt, status: "completed", transfer_id: transferId };
+  }
+  return { status: state.status, transfer_id: transferId, mode: state.mode, ...(state.error ? { error: state.error } : {}) };
+}
+
 export function scheduleXChatLifecycle(name, input, options = {}) {
   if (!isXChatLifecycleTool(name)) throw new Error(`unknown ChatGPT lifecycle tool: ${name}`);
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("arguments must be an object");
   const command = typeof input.command === "string" ? input.command.trim() : "";
   const args = input.args === undefined ? {} : input.args;
   if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("args must be an object");
+  if (command === "status") return resultText(getXChatTransferStatus(requireText(args, "transfer_id"), options));
   if (command === "help") {
     const named = typeof args.command === "string" ? args.command.trim() : "";
     if (named) {
@@ -110,7 +139,7 @@ export function scheduleXChatLifecycle(name, input, options = {}) {
       if (!tool) throw new Error(`Unknown chatgpt command '${named}'`);
       return resultText({ command: named, description: tool.description || "", schema: tool.inputSchema });
     }
-    return resultText({ commands: [...XCHAT_COMMAND_MAP].map(([subcommand, tool]) => ({ command: subcommand, description: tool.description || "" })) });
+    return resultText({ commands: [...XCHAT_COMMAND_MAP].map(([subcommand, tool]) => ({ command: subcommand, description: tool.description || "" })), status: "Query a scheduled transfer using command=status, args={transfer_id}. The Platform CLI receipt contains the durable thread_id and thread_url or a failure." });
   }
   const tool = XCHAT_COMMAND_MAP.get(command);
   if (!tool) throw new Error(`Unknown chatgpt command '${command}'`);
@@ -193,10 +222,14 @@ function runWorker(action, configPath, statusPath) {
       writeWorkerStatus(statusPath, { status: "failed", mode: action, started_at: started, finished_at: new Date().toISOString(), exit_code: result.status, error: result.error?.message || stderr || stdout || "Browser Workspace lifecycle action failed" });
       return result.status || 1;
     }
-    let output = stdout;
-    try { output = JSON.parse(stdout || "{}"); } catch {}
-    writeWorkerStatus(statusPath, { status: "completed", mode: action, started_at: started, finished_at: new Date().toISOString(), output });
+    let output;
+    try { output = JSON.parse(stdout || "{}"); } catch { output = stdout; }
+    const receipt = parsePlatformReceipt(output, action);
+    writeWorkerStatus(statusPath, { status: "completed", mode: action, started_at: started, finished_at: new Date().toISOString(), receipt });
     return 0;
+  } catch (error) {
+    writeWorkerStatus(statusPath, { status: "failed", mode: action, started_at: started, finished_at: new Date().toISOString(), error: String(error?.message || error) });
+    return 1;
   } finally {
     try { fs.unlinkSync(configPath); } catch {}
   }
