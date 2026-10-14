@@ -69,6 +69,19 @@ tool call. Consequently, the structured answer is returned by
 `ask_questions.submit` and sent through `ui/message` as a new turn. NeoY does
 not claim same-turn suspension/resumption or hold the gateway request open.
 
+## Tool-call audit
+
+NeoY records metadata for every `tools/call` accepted at its authenticated MCP
+gateway in `~/Library/Logs/NeoY/tool-calls.jsonl`. Coverage includes native
+tools, bundled Core forwarding, and federated providers. A successful execution
+has one `started` and one terminal record; denied, invalid, and unknown tool
+requests have one terminal record. Provider results with `isError=true` are
+failures. Records contain only time, call ID, tool name, local/remote and
+provider provenance, phase/status, terminal duration, and a fixed sanitized
+error code; arguments and response bodies are never audited. The private
+directory and file modes are `0700` and `0600`. Internal services called
+directly without the gateway are outside this audit.
+
 ## Build and test
 
 ```bash
