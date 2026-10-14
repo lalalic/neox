@@ -185,3 +185,16 @@ NeoY optional products are installed features rather than code compiled into Neo
 Local MCP exposes every enabled feature. Remote access is independent: built-in capabilities and installed MCP providers are explicitly selected on the Remote tab, and newly installed providers default to remote-disabled. `mcp-services` remains only a legacy compatibility identifier and is migrated away from broad remote exposure.
 
 Family Tutor is the first feature using this contract. Family Tutor itself owns Browser Workspace, learner Project/thread bindings, Discord/Cloudflare integration, and tutoring runtime; NeoY owns only installation, lifecycle, setup orchestration, MCP federation, and remote exposure policy.
+
+## Project file mounts
+
+NeoY serves explicitly mounted, read-only project roots under the existing public HTTPS origin:
+
+```bash
+node Resources/Scripts/neoy-files.mjs mount vlog /absolute/path/to/vlog
+node Resources/Scripts/neoy-files.mjs list
+node Resources/Scripts/neoy-files.mjs url /absolute/path/to/vlog/runs/2026-09-27/video.md
+node Resources/Scripts/neoy-files.mjs unmount vlog
+```
+
+Mount definitions live in `~/Library/Application Support/NeoY/file-mounts.json` and are picked up on each request without restarting NeoY. `GET` and `HEAD /files/<mount>/<relative-path>` support Range requests and cross-origin media loading. Hidden paths and symlinks escaping the mounted root are forbidden. Mounts are **public**, so register only directories that are safe to expose; avoid mounting your home directory, credential stores, or private projects. Local files are never writable over HTTP. The reserved `/_neoy/` export namespace is for generated application assets.

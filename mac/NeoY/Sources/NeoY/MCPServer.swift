@@ -541,9 +541,15 @@ public final class MCPServer {
             return
         }
 
-        // CORS preflight (kept for completeness — MCP clients are not browsers)
+        // Files are publicly readable by browser-embedded players.
         if method == "OPTIONS" {
-            sendHTTP(connection: connection, status: 204, body: nil)
+            let filePreflight = path.hasPrefix("/files/") || path.hasPrefix("/public/")
+            sendHTTP(connection: connection, status: 204, body: nil,
+                     extraHeaders: filePreflight ? [
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+                        "Access-Control-Allow-Headers": "Range"
+                     ] : [:])
             return
         }
 
@@ -574,6 +580,14 @@ public final class MCPServer {
         default:
             // Static file serving: GET/HEAD /files/... (alias /public/... kept for compatibility)
             if ["GET", "HEAD"].contains(method),
+               path.hasPrefix("/files/"),
+               let tail = path.removingPercentEncoding?.dropFirst("/files/".count),
+               let slash = tail.firstIndex(of: "/"),
+               let mount = NeoYFileMounts.load()[String(tail[..<slash])] {
+                serveStaticFile(relativePath: String(tail[tail.index(after: slash)...]),
+                                root: mount, rangeHeader: rangeHeader,
+                                headOnly: method == "HEAD", connection: connection)
+            } else if ["GET", "HEAD"].contains(method),
                path.hasPrefix("/files/") || path.hasPrefix("/public/"),
                let root = _staticFileRoot {
                 let prefix = path.hasPrefix("/files/") ? "/files/" : "/public/"
@@ -1068,13 +1082,19 @@ public final class MCPServer {
         headOnly: Bool,
         connection: NWConnection
     ) {
+        // Never expose hidden project metadata, credentials, or traversal segments.
+        let segments = relativePath.split(separator: "/", omittingEmptySubsequences: false)
+        guard !segments.contains(where: { $0.isEmpty || $0 == ".." || $0 == "." || $0.hasPrefix(".") }),
+              !relativePath.contains("\\") else {
+            sendHTTP(connection: connection, status: 403, body: Data("Forbidden".utf8))
+            return
+        }
         // Security: prevent path traversal
-        let fileURL = root.appendingPathComponent(relativePath)
+        let fileURL = root.appendingPathComponent(relativePath).resolvingSymlinksInPath()
 
         // Verify the resolved path is still under root
-        let rootPath = root.standardizedFileURL.path.hasSuffix("/")
-            ? root.standardizedFileURL.path
-            : root.standardizedFileURL.path + "/"
+        let canonicalRoot = root.resolvingSymlinksInPath().standardizedFileURL.path
+        let rootPath = canonicalRoot.hasSuffix("/") ? canonicalRoot : canonicalRoot + "/"
         guard fileURL.standardizedFileURL.path.hasPrefix(rootPath) else {
             sendHTTP(connection: connection, status: 403, body: "Forbidden".data(using: .utf8))
             return
@@ -1082,11 +1102,13 @@ public final class MCPServer {
 
         guard FileManager.default.fileExists(atPath: fileURL.path),
               let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
-              let fileSize = (attrs[.size] as? NSNumber)?.uint64Value, fileSize > 0 else {
+              let fileSize = (attrs[.size] as? NSNumber)?.uint64Value,
+              attrs[.type] as? FileAttributeType == .typeRegular else {
             sendHTTP(connection: connection, status: 404, body: "Not found".data(using: .utf8))
             return
         }
 
+        guard fileSize > 0 else { sendHTTP(connection: connection, status: 200, body: Data()); return }
         let mime = Self.mime(forExtension: fileURL.pathExtension.lowercased())
 
         // Parse Range: bytes=a-b | bytes=a- | bytes=-suffix
@@ -1118,6 +1140,9 @@ public final class MCPServer {
                 "Content-Range: bytes \(start)-\(end)/\(fileSize)",
                 "Content-Length: \(contentLength)",
                 "Accept-Ranges: bytes",
+                "Access-Control-Allow-Origin: *",
+                "Cross-Origin-Resource-Policy: cross-origin",
+                "X-Content-Type-Options: nosniff",
                 "Connection: close"
             ]
         } else {
@@ -1126,6 +1151,9 @@ public final class MCPServer {
                 "Content-Type: \(mime)",
                 "Content-Length: \(contentLength)",
                 "Accept-Ranges: bytes",
+                "Access-Control-Allow-Origin: *",
+                "Cross-Origin-Resource-Policy: cross-origin",
+                "X-Content-Type-Options: nosniff",
                 "Connection: close"
             ]
         }
@@ -1190,6 +1218,8 @@ public final class MCPServer {
         case "heic": return "image/heic"
         case "webp": return "image/webp"
         case "json": return "application/json"
+        case "md": return "text/markdown; charset=utf-8"
+        case "svg": return "image/svg+xml"
         case "srt": return "text/plain"
         case "html", "htm": return "text/html"
         case "js": return "application/javascript"
