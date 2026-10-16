@@ -1036,7 +1036,7 @@ async function handleMessage(message) {
         : toolTextResult(value, { modern }));
     } catch (error) {
       stderr(`tool ${name} failed: ${error?.stack || error}`);
-      await audit(name, args, {}, error, { event: "tool_input_error", category: classifyToolFailure(error), stage: "handler" });
+      await audit(name, args, {}, error, { event: "tool_input_error", category: error?.code || "handler_error", stage: "handler" });
       // Include `code`. The pty taxonomy (PTY_WRITE_CANON_LIMIT and 14 others) was
       // built, documented in README, and then discarded here — no client could ever see
       // one, and the tests had to regex English prose instead. `name` is dropped: it was
