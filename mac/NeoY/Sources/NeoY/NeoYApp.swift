@@ -154,6 +154,12 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
         AskQuestions.register(on: value)
         voiceController.setCommandExecutor { [weak value] sessionID, correlationID, text in
             guard let value else { throw NeoYRuntimeControlError.event("NeoY MCP server is unavailable") }
+            if VoiceCommandRouting.isGatewayStatus(text) {
+                // This is a completed, read-only NeoY command, not a chat submission.
+                let result = try await value.invokeRegisteredTool("status", arguments: .object([:]))
+                guard !result.isEmpty else { throw NeoYRuntimeControlError.event("NeoY status returned no result") }
+                return .completed(result)
+            }
             let response = try await value.invokeRegisteredTool("chatgpt", arguments: .object([
                 "command": .string("thread"),
                 "args": .object([
@@ -162,7 +168,10 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
                     "temporary": .bool(true),
                 ]),
             ]))
-            return response
+            // ChatGPT thread returns a submission acknowledgement, not a Neo command answer.
+            // A submitted turn must never trigger completion TTS.
+            _ = response
+            return .submitted
         }
         VoiceSessionTools.register(on: value, controller: voiceController)
 

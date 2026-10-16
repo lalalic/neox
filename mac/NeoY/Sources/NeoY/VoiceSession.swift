@@ -16,6 +16,14 @@ struct VoiceCommandReceipt: Codable, Sendable, Equatable {
     let error: String?
 }
 
+struct VoiceCommandOutcome: Sendable {
+    let status: String
+    let result: String?
+
+    static func completed(_ text: String) -> Self { .init(status: "completed", result: text) }
+    static let submitted = Self(status: "submitted", result: nil)
+}
+
 protocol VoiceSynthesizer: AnyObject {
     func speak(_ text: String)
     func stop()
@@ -33,6 +41,13 @@ final class SystemVoiceSynthesizer: NSObject, VoiceSynthesizer {
     func stop() { synthesizer.stopSpeaking(at: .immediate) }
 }
 
+enum VoiceCommandRouting {
+    static func isGatewayStatus(_ text: String) -> Bool {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return ["neo status", "neoy status", "neo 状态", "检查 neo 状态", "检查 neoy 状态"].contains(normalized)
+    }
+}
+
 @MainActor
 final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecognizerDelegate {
     @Published private(set) var state: VoiceSessionState = .idle
@@ -43,23 +58,26 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
     private(set) var sessionID: String?
 
     private let synthesizer: VoiceSynthesizer
-    private var commandExecutor: @Sendable (String, String, String) async throws -> String
+    private var commandExecutor: @Sendable (String, String, String) async throws -> VoiceCommandOutcome
     private var engine: AVAudioEngine?
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var stopTask: Task<Void, Never>?
     private var recognizer: SFSpeechRecognizer?
+    private var didSubmitTurn = false
+    private var finalResultReceived = false
+    private var stopGeneration = 0
 
     init(
         synthesizer: VoiceSynthesizer = SystemVoiceSynthesizer(),
-        commandExecutor: @escaping @Sendable (String, String, String) async throws -> String = { _, _, text in text }
+        commandExecutor: @escaping @Sendable (String, String, String) async throws -> VoiceCommandOutcome = { _, _, text in .completed(text) }
     ) {
         self.synthesizer = synthesizer
         self.commandExecutor = commandExecutor
         super.init()
     }
 
-    func setCommandExecutor(_ executor: @escaping @Sendable (String, String, String) async throws -> String) {
+    func setCommandExecutor(_ executor: @escaping @Sendable (String, String, String) async throws -> VoiceCommandOutcome) {
         commandExecutor = executor
     }
 
@@ -68,7 +86,12 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
         state = .starting
         errorMessage = nil
         transcript = ""
+        didSubmitTurn = false
+        finalResultReceived = false
+        stopGeneration += 1
+        let generation = stopGeneration
         let speechStatus = await requestSpeechAuthorization()
+        guard state == .starting, generation == stopGeneration else { return }
         guard speechStatus == .authorized else {
             fail("Speech recognition permission is unavailable. Enable it in System Settings.")
             return
@@ -83,6 +106,7 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
             fail("Microphone access is unavailable. Enable it in System Settings.")
             return
         }
+        guard state == .starting, generation == stopGeneration else { return }
         guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: language)), recognizer.isAvailable else {
             fail("Speech recognition is unavailable for \(language). Try en-US or zh-CN.")
             return
@@ -116,8 +140,7 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
             Task { @MainActor in
                 guard let self else { return }
                 if let result {
-                    self.transcript = result.bestTranscription.formattedString
-                    if result.isFinal { await self.submit(text: self.transcript) }
+                    await self.acceptRecognition(text: result.bestTranscription.formattedString, isFinal: result.isFinal)
                 } else if let error, self.state == .listening {
                     self.fail("Speech recognition failed: \(error.localizedDescription)")
                 }
@@ -134,15 +157,17 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
     func stop() async {
         guard state == .starting || state == .listening || state == .muted else { return }
         state = .stopping
+        stopGeneration += 1
         stopTask?.cancel()
         engine?.inputNode.removeTap(onBus: 0)
         engine?.stop()
         request?.endAudio()
-        recognitionTask?.cancel()
-        recognitionTask = nil
-        request = nil
-        engine = nil
-        state = .completed
+        // After endAudio, Speech needs time to emit its final transcription.
+        // A bounded grace period prevents losing the last words if it never does.
+        for _ in 0..<20 where !finalResultReceived && !didSubmitTurn {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        await finishTurn()
     }
 
     func setMuted(_ value: Bool) {
@@ -154,6 +179,8 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
     // Deterministic seam for lifecycle tests; production callers use start().
     func beginTestingSession(id: String = "test-session") {
         sessionID = id
+        didSubmitTurn = false
+        finalResultReceived = false
         state = .listening
         muted = false
     }
@@ -168,13 +195,45 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
         synthesizer.speak(text)
     }
 
+    // Shared by native Speech callbacks and deterministic tests.
+    func acceptRecognition(text: String, isFinal: Bool) async {
+        guard !didSubmitTurn, state == .listening || state == .muted || state == .stopping else { return }
+        transcript = text
+        if isFinal {
+            finalResultReceived = true
+            await finishTurn()
+        }
+    }
+
+    // Both the Speech final callback and Stop converge here. Exactly one turn is sent.
+    private func finishTurn() async {
+        guard !didSubmitTurn else { return }
+        didSubmitTurn = true
+        stopTask?.cancel()
+        let finalText = transcript
+        engine?.inputNode.removeTap(onBus: 0)
+        engine?.stop()
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        request = nil
+        engine = nil
+        state = .completed
+        await submit(text: finalText)
+    }
+
     private func submit(text: String) async {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let sessionID else { return }
         let correlationID = UUID().uuidString
         do {
-            let result = try await commandExecutor(sessionID, correlationID, text)
-            lastReceipt = VoiceCommandReceipt(sessionID: sessionID, correlationID: correlationID, status: "completed", text: text, result: result, error: nil)
-            synthesizer.speak(result)
+            let outcome = try await commandExecutor(sessionID, correlationID, text)
+            guard outcome.status == "completed" || outcome.status == "submitted" else {
+                throw VoiceToolError.invalid("Unknown command outcome: \(outcome.status)")
+            }
+            guard outcome.status != "completed" || (outcome.result?.isEmpty == false) else {
+                throw VoiceToolError.invalid("Completed command has no answer")
+            }
+            lastReceipt = VoiceCommandReceipt(sessionID: sessionID, correlationID: correlationID, status: outcome.status, text: text, result: outcome.result, error: nil)
+            if outcome.status == "completed", let answer = outcome.result { synthesizer.speak(answer) }
         } catch {
             lastReceipt = VoiceCommandReceipt(sessionID: sessionID, correlationID: correlationID, status: "failed", text: text, result: nil, error: error.localizedDescription)
             errorMessage = error.localizedDescription
@@ -187,6 +246,8 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
         engine?.inputNode.removeTap(onBus: 0)
         engine?.stop()
         recognitionTask?.cancel()
+        stopTask?.cancel()
+        stopGeneration += 1
     }
 
     private func requestSpeechAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {

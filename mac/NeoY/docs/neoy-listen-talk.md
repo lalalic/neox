@@ -9,7 +9,7 @@ same controls exposed to trusted MCP callers.
 `voice.start` is an explicit session-start acknowledgement: it returns the
 current state and session ID after permission checks and engine startup. It is
 not speech recognition and it is not command completion. A recognized turn
-gets a separate correlation ID and a `completed` or `failed` receipt. `voice.stop`
+gets a separate correlation ID and a `submitted`, `completed`, or `failed` receipt. `voice.stop`
 ends capture; `voice.mute` pauses buffer delivery while keeping the session
 visible. Listening is bounded to 60 seconds per explicit start and never starts
 in the background.
@@ -28,8 +28,22 @@ manual start/stop/mute, a 60-second turn bound, and no wake word, diarization,
 barge-in, or voice identity authorization. Audio is not exposed as a network
 service. Roku control remains downstream of the command adapter.
 
-The command adapter submits a temporary ChatGPT thread through the existing
-protected `chatgpt` interface and returns its verified submission response;
-downstream answer delivery remains owned by that existing interface. A future
-session owner can replace the injected adapter without changing the voice
-contract.
+The `Neo status` / `Neo 状态` intent runs the authenticated NeoY gateway
+`status` command and speaks the returned result only after the tool completes.
+Other recognized speech is sent through the protected ChatGPT interface. This
+interface acknowledges **submission**, not an assistant answer; these turns have
+`submitted` receipts, no fabricated completion, and no automatic answer TTS.
+Full asynchronous answer delivery remains a future integration, not a delivered
+feature. Voice input is never interpolated into shell commands.
+
+To reproduce the selected Xcode test suite, first run `xcodegen generate` from
+`mac/NeoY` (the generated `.xcodeproj` is ignored by Git), then run:
+
+```sh
+xcodebuild test -project NeoY.xcodeproj -scheme NeoY -destination 'platform=macOS' \
+  -only-testing:NeoYTests/VoiceSessionTests CODE_SIGNING_ALLOWED=NO
+```
+
+The selected run must report a nonzero number of executed tests; exit code 0
+alone is not evidence of test discovery. The test suite checks submitted-vs-
+completed TTS behavior, explicit mute, stop, failure and safe intent routing.
