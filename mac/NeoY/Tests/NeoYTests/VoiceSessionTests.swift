@@ -52,6 +52,24 @@ final class VoiceSessionTests: XCTestCase {
         XCTAssertTrue(synthesizer.spoken.isEmpty)
     }
 
+    func testAsynchronousRealReplySpeaksOnceAndRejectsStaleCallbacks() async throws {
+        let synth = FakeSynthesizer()
+        let controller = VoiceSessionController(synthesizer: synth) { _, _, _ in .submitted }
+        controller.beginTestingSession(id: "voice-1")
+        let pending = await controller.inject(text: "今天天气怎么样")
+        XCTAssertEqual(pending.status, "submitted")
+        XCTAssertTrue(synth.spoken.isEmpty)
+        XCTAssertThrowsError(try controller.completeSubmittedReply(sessionID: "wrong", correlationID: pending.correlationID, answer: "wrong"))
+        let finished = try controller.completeSubmittedReply(sessionID: pending.sessionID, correlationID: pending.correlationID, answer: "实际回复")
+        XCTAssertEqual(finished.status, "completed")
+        XCTAssertEqual(controller.lastReceipt?.result, "实际回复")
+        XCTAssertEqual(synth.spoken, ["实际回复"])
+        XCTAssertThrowsError(try controller.completeSubmittedReply(sessionID: pending.sessionID, correlationID: pending.correlationID, answer: "repeat"))
+        controller.beginTestingSession(id: "voice-2")
+        XCTAssertThrowsError(try controller.completeSubmittedReply(sessionID: pending.sessionID, correlationID: pending.correlationID, answer: "stale"))
+        XCTAssertEqual(synth.spoken, ["实际回复"])
+    }
+
     func testFinalRecognitionAndStopSubmitOnce() async {
         let synthesizer = FakeSynthesizer()
         let controller = VoiceSessionController(synthesizer: synthesizer) { _, _, text in .completed("ok: \(text)") }

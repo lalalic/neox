@@ -163,7 +163,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
             let response = try await value.invokeRegisteredTool("chatgpt", arguments: .object([
                 "command": .string("thread"),
                 "args": .object([
-                    "message": .string(text),
+                    "message": .string("Voice request: \(text)\n\nWhen you have finished the actual response, call the connected NeoY voice.session command complete with session_id=\(sessionID), correlation_id=\(correlationID), and answer containing your final spoken response. Never call complete with an acknowledgement or guessed result. If the NeoY tool is unavailable, state that limitation in the chat; do not fabricate voice completion."),
                     "reason": .string("NeoY voice session \(sessionID), correlation \(correlationID)"),
                     "temporary": .bool(true),
                 ]),

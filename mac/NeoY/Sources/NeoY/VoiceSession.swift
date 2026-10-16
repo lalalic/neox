@@ -208,6 +208,26 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
         synthesizer.speak(text)
     }
 
+    // A submitted ChatGPT turn is an acknowledgement only. Only a matching
+    // completed response can be voiced, and duplicate callbacks are rejected.
+    @discardableResult
+    func completeSubmittedReply(sessionID: String, correlationID: String, answer: String) throws -> VoiceCommandReceipt {
+        guard !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw VoiceToolError.invalid("Completed voice answer must not be empty")
+        }
+        guard let receipt = lastReceipt,
+              receipt.sessionID == sessionID,
+              receipt.correlationID == correlationID,
+              receipt.status == "submitted" else {
+            throw VoiceToolError.invalid("No matching pending voice turn")
+        }
+        let completed = VoiceCommandReceipt(sessionID: sessionID, correlationID: correlationID,
+                                            status: "completed", text: receipt.text, result: answer, error: nil)
+        lastReceipt = completed
+        synthesizer.speak(answer)
+        return completed
+    }
+
     // Shared by native Speech callbacks and deterministic tests.
     func acceptRecognition(text: String, isFinal: Bool, generation: Int? = nil) async {
         guard generation == nil || generation == recognitionGeneration else { return }
@@ -313,6 +333,19 @@ enum VoiceSessionTools {
             ToolDefinition(name: "voice.inject", description: "Deterministic no-microphone text turn using the same command and TTS completion path.", parameters: schema(["text": .object(["type": .string("string")])], required: ["text"])) { args in
                 guard let text = string(args, "text") else { throw VoiceToolError.invalid("text is required") }
                 return encode(await controller.inject(text: text))
+            })
+        result.append(
+            ToolDefinition(name: "voice.complete", description: "Deliver the real completed answer for a pending, correlated voice turn; duplicate and stale replies are rejected.", parameters: schema([
+                "session_id": .object(["type": .string("string")]),
+                "correlation_id": .object(["type": .string("string")]),
+                "answer": .object(["type": .string("string")]),
+            ], required: ["session_id", "correlation_id", "answer"])) { args in
+                guard let session = string(args, "session_id"), let correlation = string(args, "correlation_id"),
+                      let answer = string(args, "answer") else { throw VoiceToolError.invalid("session_id, correlation_id and answer are required") }
+                return try await MainActor.run {
+                    let receipt = try controller.completeSubmittedReply(sessionID: session, correlationID: correlation, answer: answer)
+                    return encode(receipt)
+                }
             })
         result.append(
             ToolDefinition(name: "voice.speak", description: "Speak text through the selected macOS output device.", parameters: schema(["text": .object(["type": .string("string")])], required: ["text"])) { args in
