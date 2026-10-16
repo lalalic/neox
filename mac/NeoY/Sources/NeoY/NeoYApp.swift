@@ -9,6 +9,7 @@ struct NeoYApp: App {
     var body: some Scene {
         MenuBarExtra("NeoY", systemImage: "video") {
             Button("Open Current Tour") { appDelegate.showTourWindow() }
+            Button("Listen & Talk…") { appDelegate.showVoiceWindow() }
             Button("Setup…") { appDelegate.showSetupWindow() }
             Divider()
             Text("NeoY \(NeoYCoreRuntime.version)")
@@ -26,6 +27,8 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
     private var server: MCPServer?
     private var window: NSWindow?
     private var setupWindow: NSWindow?
+    private var voiceWindow: NSWindow?
+    private let voiceController = VoiceSessionController()
     private var runtimeControl: NeoYRuntimeControl?
     private let coreNodes = NeoYNodeService()
     private var observers: [NSObjectProtocol] = []
@@ -110,6 +113,20 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    func showVoiceWindow() {
+        if voiceWindow == nil {
+            let controller = NSHostingController(rootView: VoiceSessionView(controller: voiceController))
+            let value = NSWindow(contentViewController: controller)
+            value.title = "NeoY Listen & Talk"
+            value.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            value.isReleasedWhenClosed = false
+            value.center()
+            voiceWindow = value
+        }
+        voiceWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     private func restartPrimaryMCPServer() {
         runtimeControl?.stop()
         server?.stop()
@@ -135,6 +152,28 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
         value.setRemoteAllowedProviders(deployment.enabledRemoteProviders)
         NativeUISmoke.register(on: value)
         AskQuestions.register(on: value)
+        voiceController.setCommandExecutor { [weak value] sessionID, correlationID, text in
+            guard let value else { throw NeoYRuntimeControlError.event("NeoY MCP server is unavailable") }
+            if VoiceCommandRouting.isGatewayStatus(text) {
+                // This is a completed, read-only NeoY command, not a chat submission.
+                let result = try await value.invokeRegisteredTool("status", arguments: .object([:]))
+                guard !result.isEmpty else { throw NeoYRuntimeControlError.event("NeoY status returned no result") }
+                return .completed(result)
+            }
+            let response = try await value.invokeRegisteredTool("chatgpt", arguments: .object([
+                "command": .string("thread"),
+                "args": .object([
+                    "message": .string("Voice request: \(text)\n\nWhen you have finished the actual response, call the connected NeoY voice.session command complete with session_id=\(sessionID), correlation_id=\(correlationID), and answer containing your final spoken response. Never call complete with an acknowledgement or guessed result. If the NeoY tool is unavailable, state that limitation in the chat; do not fabricate voice completion."),
+                    "reason": .string("NeoY voice session \(sessionID), correlation \(correlationID)"),
+                    "temporary": .bool(true),
+                ]),
+            ]))
+            // ChatGPT thread returns a submission acknowledgement, not a Neo command answer.
+            // A submitted turn must never trigger completion TTS.
+            _ = response
+            return .submitted
+        }
+        VoiceSessionTools.register(on: value, controller: voiceController)
 
         let configuration = (try? NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)
             .loadOrCreate().document.configuration) ?? NeoYControlPlaneConfiguration()
