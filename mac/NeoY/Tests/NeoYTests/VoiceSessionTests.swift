@@ -74,6 +74,35 @@ final class VoiceSessionTests: XCTestCase {
         XCTAssertTrue(synthesizer.spoken.isEmpty)
     }
 
+    func testNewSessionClearsReceiptAndSilentStopDoesNotReuseIt() async {
+        let synth = FakeSynthesizer()
+        let controller = VoiceSessionController(synthesizer: synth) { _, _, text in .completed("ok: \(text)") }
+        controller.beginTestingSession(id: "first")
+        _ = await controller.inject(text: "first command")
+        XCTAssertEqual(controller.lastReceipt?.sessionID, "first")
+        controller.beginTestingSession(id: "second")
+        XCTAssertNil(controller.lastReceipt)
+        XCTAssertEqual(controller.transcript, "")
+        await controller.stop()
+        XCTAssertNil(controller.lastReceipt)
+    }
+
+    func testLatePriorSessionRecognitionCannotContaminateNewSession() async {
+        let controller = VoiceSessionController(synthesizer: FakeSynthesizer()) { _, _, text in .completed(text) }
+        controller.beginTestingSession(id: "first")
+        let oldGeneration = controller.currentRecognitionGeneration
+        await controller.acceptRecognition(text: "old words", isFinal: false, generation: oldGeneration)
+        controller.beginTestingSession(id: "second")
+        let currentGeneration = controller.currentRecognitionGeneration
+        XCTAssertNotEqual(oldGeneration, currentGeneration)
+        await controller.acceptRecognition(text: "stale final", isFinal: true, generation: oldGeneration)
+        XCTAssertEqual(controller.transcript, "")
+        XCTAssertNil(controller.lastReceipt)
+        await controller.acceptRecognition(text: "new final", isFinal: true, generation: currentGeneration)
+        XCTAssertEqual(controller.lastReceipt?.text, "new final")
+        XCTAssertEqual(controller.lastReceipt?.sessionID, "second")
+    }
+
     func testCommandFailureIsReportedWithoutInventingCompletion() async {
         let controller = VoiceSessionController(synthesizer: FakeSynthesizer()) { _, _, _ in
             throw NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "command unavailable"])

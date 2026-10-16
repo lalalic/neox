@@ -67,6 +67,8 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
     private var didSubmitTurn = false
     private var finalResultReceived = false
     private var stopGeneration = 0
+    private var recognitionGeneration = 0
+    private var tapInstalled = false
 
     init(
         synthesizer: VoiceSynthesizer = SystemVoiceSynthesizer(),
@@ -86,9 +88,13 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
         state = .starting
         errorMessage = nil
         transcript = ""
+        lastReceipt = nil
+        muted = false
         didSubmitTurn = false
         finalResultReceived = false
         stopGeneration += 1
+        recognitionGeneration += 1
+        let recognitionID = recognitionGeneration
         let generation = stopGeneration
         let speechStatus = await requestSpeechAuthorization()
         guard state == .starting, generation == stopGeneration else { return }
@@ -116,6 +122,7 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
         let audioEngine = AVAudioEngine()
         let speechRequest = SFSpeechAudioBufferRecognitionRequest()
         speechRequest.shouldReportPartialResults = true
+        self.engine = audioEngine
         let input = audioEngine.inputNode
         let format = input.outputFormat(forBus: 0)
         input.installTap(onBus: 0, bufferSize: 1_024, format: format) { [weak self] buffer, _ in
@@ -124,23 +131,23 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
                 self.request?.append(buffer)
             }
         }
+        tapInstalled = true
         do {
             audioEngine.prepare()
             try audioEngine.start()
         } catch {
-            input.removeTap(onBus: 0)
+            removeInputTap()
             fail("Microphone could not start: \(error.localizedDescription)")
             return
         }
-        self.engine = audioEngine
         self.request = speechRequest
         self.sessionID = UUID().uuidString
         self.state = .listening
         recognitionTask = recognizer.recognitionTask(with: speechRequest) { [weak self] result, error in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, recognitionID == self.recognitionGeneration else { return }
                 if let result {
-                    await self.acceptRecognition(text: result.bestTranscription.formattedString, isFinal: result.isFinal)
+                    await self.acceptRecognition(text: result.bestTranscription.formattedString, isFinal: result.isFinal, generation: recognitionID)
                 } else if let error, self.state == .listening {
                     self.fail("Speech recognition failed: \(error.localizedDescription)")
                 }
@@ -159,7 +166,7 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
         state = .stopping
         stopGeneration += 1
         stopTask?.cancel()
-        engine?.inputNode.removeTap(onBus: 0)
+        removeInputTap()
         engine?.stop()
         request?.endAudio()
         // After endAudio, Speech needs time to emit its final transcription.
@@ -177,8 +184,14 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
     }
 
     // Deterministic seam for lifecycle tests; production callers use start().
+    var currentRecognitionGeneration: Int { recognitionGeneration }
+
     func beginTestingSession(id: String = "test-session") {
         sessionID = id
+        recognitionGeneration += 1
+        lastReceipt = nil
+        transcript = ""
+        errorMessage = nil
         didSubmitTurn = false
         finalResultReceived = false
         state = .listening
@@ -196,7 +209,8 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
     }
 
     // Shared by native Speech callbacks and deterministic tests.
-    func acceptRecognition(text: String, isFinal: Bool) async {
+    func acceptRecognition(text: String, isFinal: Bool, generation: Int? = nil) async {
+        guard generation == nil || generation == recognitionGeneration else { return }
         guard !didSubmitTurn, state == .listening || state == .muted || state == .stopping else { return }
         transcript = text
         if isFinal {
@@ -211,7 +225,7 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
         didSubmitTurn = true
         stopTask?.cancel()
         let finalText = transcript
-        engine?.inputNode.removeTap(onBus: 0)
+        removeInputTap()
         engine?.stop()
         recognitionTask?.cancel()
         recognitionTask = nil
@@ -240,10 +254,17 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
         }
     }
 
+    private func removeInputTap() {
+        guard tapInstalled else { return }
+        tapInstalled = false
+        engine?.inputNode.removeTap(onBus: 0)
+    }
+
     private func fail(_ message: String) {
+        recognitionGeneration += 1
         errorMessage = message
         state = .error
-        engine?.inputNode.removeTap(onBus: 0)
+        removeInputTap()
         engine?.stop()
         recognitionTask?.cancel()
         stopTask?.cancel()
