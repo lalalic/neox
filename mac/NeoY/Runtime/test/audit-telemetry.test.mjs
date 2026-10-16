@@ -1,19 +1,17 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-test('audit logging remains internal and is not exposed as an MCP tool', () => {
+
+test('Core does not define or write a duplicate audit.jsonl', () => {
   const source = fs.readFileSync(new URL('../src/core/tools/index.mjs', import.meta.url), 'utf8');
-  assert.match(source, /const AUDIT_LOG =/);
-  assert.match(source, /async function audit\(/);
-  assert.match(source, /await fsp\.appendFile\(AUDIT_LOG/);
-  assert.doesNotMatch(source, /auditFacade/);
-  assert.doesNotMatch(source, /case "audit"/);
-  assert.doesNotMatch(source, /case "audit_tail"/);
+  assert.doesNotMatch(source, /AUDIT_LOG|AUDIT_MODE|NEO_CORE_AUDIT_LOG/);
+  assert.doesNotMatch(source, /appendFile\([^\n]*audit/);
+  assert.doesNotMatch(source, /auditLog:/);
 });
 
-test('non-zero command exit is classified as command_failure', async () => {
-  const source = fs.readFileSync(new URL('../src/core/tools/index.mjs', import.meta.url), 'utf8');
-  assert.match(source, /const commandFailed = Number\.isInteger\(summary\?\.exitCode\) && summary\.exitCode !== 0;/);
-  assert.match(source, /commandFailed \? "command_failure" : "success"/);
-  assert.match(source, /commandFailed \? "command_failure" : "tool_call"/);
+test('tool-call history is documented in AGENTS.md', () => {
+  const agents = fs.readFileSync(new URL('../../../../AGENTS.md', import.meta.url), 'utf8');
+  assert.match(agents, /tool-calls\.jsonl/);
+  assert.match(agents, /call_id/);
+  assert.match(agents, /timeout_ms/);
 });

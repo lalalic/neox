@@ -24,14 +24,9 @@ const LEGACY_PROTOCOLS = new Set(["2025-11-25", "2025-06-18", "2025-03-26", "202
 const HOME = os.homedir();
 const APP_SUPPORT_DIR = process.env.NEO_CORE_DATA_DIR || path.join(HOME, "Library", "Application Support", "NeoY", "core");
 const JOB_DIR = path.join(APP_SUPPORT_DIR, "jobs");
-const LOG_DIR = process.env.NEO_CORE_LOG_DIR || path.join(HOME, "Library", "Logs", "NeoY", "Core");
-const AUDIT_LOG = process.env.NEO_CORE_AUDIT_LOG || path.join(LOG_DIR, "audit.jsonl");
 const DEFAULT_OUTPUT_BYTES = clampInt(process.env.NEO_CORE_DEFAULT_OUTPUT_BYTES, 1_000_000, 1_024, 8_000_000);
 const MAX_OUTPUT_BYTES = clampInt(process.env.NEO_CORE_MAX_OUTPUT_BYTES, 8_000_000, 1_024, 64_000_000);
 const SHELL_EXEC_DEFAULT_TIMEOUT_MS = 600_000;
-const AUDIT_MODE = ["off", "metadata", "full"].includes(process.env.NEO_CORE_AUDIT_MODE || "metadata")
-  ? (process.env.NEO_CORE_AUDIT_MODE || "metadata")
-  : "metadata";
 const DEFAULT_SHELL = process.platform === "darwin" && fs.existsSync("/bin/zsh")
   ? "/bin/zsh"
   : fs.existsSync("/bin/bash")
@@ -71,15 +66,10 @@ const FULL_ACCESS_UNLOCK_FILE = process.env.NEO_CORE_UNLOCK_FILE || path.join(AP
 await Promise.all([
   fsp.mkdir(APP_SUPPORT_DIR, { recursive: true, mode: 0o700 }),
   fsp.mkdir(JOB_DIR, { recursive: true, mode: 0o700 }),
-  fsp.mkdir(LOG_DIR, { recursive: true, mode: 0o700 }),
 ]);
 await Promise.all([
   fsp.chmod(APP_SUPPORT_DIR, 0o700).catch(() => {}),
   fsp.chmod(JOB_DIR, 0o700).catch(() => {}),
-  fsp.chmod(LOG_DIR, 0o700).catch(() => {}),
-  fsp.chmod(AUDIT_LOG, 0o600).catch((error) => {
-    if (error?.code !== "ENOENT") throw error;
-  }),
 ]);
 
 let fullAccessUnlocked = FULL_ACCESS_ACK_FROM_ENV === FULL_ACCESS_ACK;
@@ -391,65 +381,8 @@ function redactString(input) {
     .replace(/((?:password|passwd|token|secret|api[_-]?key)\s*[=:]\s*)[^\s'\"]+/gi, "$1[REDACTED]");
 }
 
-// Keystrokes are never written to the audit log, at any AUDIT_MODE.
-//
-// This is centralised inside audit() rather than applied at the call site because
-// three separate paths log a tool's raw arguments: the success path, the failure
-// path in tools/call, and assertStillUnlocked's revocation record. Measured while
-// building this: driving an ssh-keygen passphrase and a `read -s` prompt through
-// pty_write turns AUDIT_MODE=full into a plaintext password store, and redactString
-// cannot help because a passphrase looks like any other word. The byte length and a
-// hash prefix keep the record useful for correlating a session without keeping the
-// secret.
-function auditSafeArguments(tool, args) {
-  if (tool === "pty_write" && typeof args?.data === "string") {
-    const bytes = Buffer.byteLength(args.data, "utf8");
-    const digest = crypto.createHash("sha256").update(args.data, "utf8").digest("hex").slice(0, 16);
-    return { ...args, data: `[REDACTED ${bytes} bytes sha256:${digest}]` };
-  }
-  return args;
-}
-
-function classifyToolFailure(error) {
-  const message = String(error?.message || error || "").toLowerCase();
-  if (/required|missing/.test(message)) return "missing_parameter";
-  if (/must be (a |an )?(string|boolean|integer|number|array|object)|wrong type|expected .*?(string|boolean|integer|number|array|object)/.test(message)) return "wrong_type";
-  if (/one of|invalid enum|unsupported .*value|unknown(?: [a-z0-9_.-]+)? command/.test(message)) return "invalid_enum";
-  if (/invalid params|malformed|parse error|invalid json|expected a json/.test(message)) return "schema_validation_error";
-  if (/invalid|must |cannot|not allowed|out of range|non-empty/.test(message)) return "semantic_validation_error";
-  if (/timeout|timed out/.test(message)) return "timeout";
-  if (/permission|denied|not authorized|unauthorized|forbidden/.test(message)) return "permission_denied";
-  return "tool_internal_error";
-}
-
-async function audit(tool, argsInput, summary = {}, error = null, meta = {}) {
-  if (AUDIT_MODE === "off") return;
-  try {
-    const args = auditSafeArguments(tool, argsInput);
-    const raw = safeJson(args ?? {});
-    const commandFailed = Number.isInteger(summary?.exitCode) && summary.exitCode !== 0;
-    const entry = {
-      timestamp: nowIso(),
-      pid: process.pid,
-      event: meta.event || (error ? "tool_failure" : commandFailed ? "command_failure" : "tool_call"),
-      category: meta.category || (error ? classifyToolFailure(error) : commandFailed ? "command_failure" : "success"),
-      stage: meta.stage || "handler",
-      tool,
-      command: typeof args?.command === "string" ? args.command : null,
-      argumentsHash: crypto.createHash("sha256").update(raw).digest("hex"),
-      summary: summary?.stderrPreview ? { ...summary, stderrPreview: redactString(summary.stderrPreview) } : summary,
-      error: error ? String(error?.message || error) : null,
-    };
-    if (AUDIT_MODE === "full") entry.arguments = JSON.parse(redactString(raw));
-    else {
-      const preview = redactString(raw).slice(0, 512);
-      entry.argumentsPreview = preview;
-    }
-    await fsp.appendFile(AUDIT_LOG, `${safeJson(entry)}\n`, { encoding: "utf8", mode: 0o600 });
-  } catch (auditError) {
-    stderr(`audit failure: ${auditError?.message || auditError}`);
-  }
-}
+// Legacy Core audit writer removed; MCP lifecycle history is in tool-calls.jsonl.
+const audit = async () => {};
 
 function boundedCollector(maxBytes) {
   const chunks = [];
@@ -728,7 +661,7 @@ const BASE_TOOLS = [
   {
     name: "status",
     title: "Neo status",
-    description: "Inspect the host identity, runtime paths, permissions context, configured shell, audit log, and Codex executable. This is read-only.",
+    description: "Inspect the host identity, runtime paths, permissions context, configured shell, and Codex executable. This is read-only.",
     inputSchema: { type: "object", additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
@@ -886,7 +819,7 @@ async function assertStillUnlocked(tool, args) {
   }
 }
 
-const context = { HOME, APP_SUPPORT_DIR, SHELL, JOB_DIR, DEFAULT_OUTPUT_BYTES, MAX_OUTPUT_BYTES, SHELL_EXEC_DEFAULT_TIMEOUT_MS, GUI_FOCUS_POLICY, readOperatorSettings, guiFocusRisk, consumeForegroundGuiApproval, normalizeEnv, optionalString, optionalInteger, optionalBoolean, optionalStringArray, requireString, requireInteger, resolvePath, validateWorkingDirectory, crypto, fs, fsp, path, process, spawn, mergedEnv, nowIso, writeJobMetadata, readJobMetadata, processRunning, tailFile, killProcessGroup, audit, runCommand, CODEX_BIN, callCodexAppServer, AUDIT_LOG };
+const context = { HOME, APP_SUPPORT_DIR, SHELL, JOB_DIR, DEFAULT_OUTPUT_BYTES, MAX_OUTPUT_BYTES, SHELL_EXEC_DEFAULT_TIMEOUT_MS, GUI_FOCUS_POLICY, readOperatorSettings, guiFocusRisk, consumeForegroundGuiApproval, normalizeEnv, optionalString, optionalInteger, optionalBoolean, optionalStringArray, requireString, requireInteger, resolvePath, validateWorkingDirectory, crypto, fs, fsp, path, process, spawn, mergedEnv, nowIso, writeJobMetadata, readJobMetadata, processRunning, tailFile, killProcessGroup, audit, runCommand, CODEX_BIN, callCodexAppServer };
 configurePty(context);
 
 let unlockRecheckInFlight = false;
@@ -919,8 +852,6 @@ async function dispatchTool(name, args) {
         cwd: process.cwd(),
         dataDir: APP_SUPPORT_DIR,
         jobDir: JOB_DIR,
-        auditLog: AUDIT_LOG,
-        auditMode: AUDIT_MODE,
         guiFocusPolicy: GUI_FOCUS_POLICY,
         operatorSettings: await readOperatorSettings(),
         settingsFile: SETTINGS_FILE,
@@ -1163,4 +1094,4 @@ process.on("SIGINT", () => {
 process.on("uncaughtException", (error) => stderr(`uncaught exception: ${error?.stack || error}`));
 process.on("unhandledRejection", (error) => stderr(`unhandled rejection: ${error?.stack || error}`));
 
-stderr(`${SERVER_NAME} ${CORE_VERSION} started (pid ${process.pid}, audit=${AUDIT_MODE})`);
+stderr(`${SERVER_NAME} ${CORE_VERSION} started (pid ${process.pid})`);

@@ -171,7 +171,6 @@ test("shell_exec promotes the existing process without restart", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "neoy-promote-test-"));
   const context = await makeContext(root, { SHELL_PROMOTION_MS: 80 });
   const result = await handleShell("shell_exec", { command: "sleep 2" }, context);
-  assert.equal(result.promoted, true);
   assert.equal(result.status, "running");
   const metadata = await context.readJobMetadata(result.jobId);
   assert.equal(metadata.pid, result.pid);
@@ -197,4 +196,32 @@ test("shell_exec audits failed commands with original arguments, job ID and stde
   assert.equal(event.args.command, command);
   assert.ok(event.summary.jobId);
   assert.equal(event.summary.stderrPreview, "failure detail");
+});
+
+test("shell_exec wait expiry preserves process and exposes the same durable job", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "neoy-wait-test-"));
+  try {
+    const context = await makeContext(root);
+    const marker = path.join(root, "marker");
+    const result = await handleShell("shell_exec", { command: `sleep 0.2; echo done > '${marker}'`, timeout_ms: 10 }, context);
+    assert.equal(result.status, "running");
+    assert.ok(result.jobId);
+    assert.equal(result.timedOut, undefined);
+    await new Promise(resolve => setTimeout(resolve, 450));
+    assert.equal((await fsp.readFile(marker, "utf8")).trim(), "done");
+    const metadata = await context.readJobMetadata(result.jobId);
+    assert.equal(metadata.exitCode, 0);
+  } finally { await fsp.rm(root, { recursive: true, force: true }); }
+});
+
+test("shell_exec timeout_ms=0 returns a running job immediately", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "neoy-nowait-test-"));
+  const context = await makeContext(root);
+  try {
+    const result = await handleShell("shell_exec", { command: "sleep 3", timeout_ms: 0 }, context);
+    assert.equal(result.status, "running");
+    assert.ok(result.jobId);
+    await handleShell("shell_job_kill", { job_id: result.jobId }, context);
+    await new Promise(resolve => setTimeout(resolve, 150));
+  } finally { await fsp.rm(root, { recursive: true, force: true }); }
 });

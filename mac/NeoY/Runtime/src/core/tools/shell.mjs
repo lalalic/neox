@@ -15,7 +15,7 @@ export const SHELL_TOOLS = [
         cwd: { type: "string", description: "Working directory. Supports absolute paths, relative paths, and ~/ paths. Defaults to the user's home directory." },
         env: { type: "object", additionalProperties: { type: ["string", "number", "boolean", "null"] }, description: "Environment overrides. Set a value to null to remove it." },
         stdin: { type: "string", description: "Optional text to send to stdin." },
-        timeout_ms: { type: "integer", minimum: 0, maximum: 1_800_000, default: 600000, description: "Hard timeout in milliseconds; after 5 minutes a running command becomes a shell job without restarting. 0 disables hard timeout." },
+        timeout_ms: { type: "integer", minimum: 0, maximum: 1_800_000, default: 600000, description: "Maximum synchronous wait in milliseconds. If still running, returns status=running and a jobId without stopping the process. 0 returns the job immediately." },
         max_output_bytes: { type: "integer", minimum: 0, maximum: 64000000, description: "Inline output budget (default 16 KiB); larger output is saved to a system temporary file." },
       },
       required: ["command"],
@@ -253,14 +253,9 @@ export async function handleShell(name, args, context) {
               });
               return result;
             }
-            if (timeoutMs > 0 && elapsed >= timeoutMs && elapsed < promotionMs) {
-              killProcessGroup(job.processGroupId, "SIGTERM");
-              await audit(name, args, { jobId: job.id, timedOut: true });
-              return { status: "timed_out", timedOut: true, jobId: job.id, pid: job.pid, stdoutFile: job.stdoutPath, stderrFile: job.stderrPath };
-            }
-            if (elapsed >= promotionMs) {
-              await audit(name, args, { jobId: job.id, promoted: true, durationMs: elapsed });
-              return { status: "running", promoted: true, jobId: job.id, pid: job.pid,
+            if (elapsed >= Math.min(timeoutMs, promotionMs)) {
+              await audit(name, args, { jobId: job.id, running: true, durationMs: elapsed });
+              return { status: "running", jobId: job.id, pid: job.pid,
                 processGroupId: job.processGroupId, durationMs: elapsed,
                 stdoutFile: job.stdoutPath, stderrFile: job.stderrPath };
             }
