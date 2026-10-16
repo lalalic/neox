@@ -3,7 +3,7 @@ import XCTest
 @testable import NeoY
 
 final class ToolCallAuditTests: XCTestCase {
-    func testGatewayAuditCoversOutcomesWithoutArgumentLeakage() async throws {
+    func testGatewayAuditPreservesRawInputOutputAndFailures() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("neoy-tool-call-audit", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -129,18 +129,47 @@ final class ToolCallAuditTests: XCTestCase {
         XCTAssertTrue(entries.contains { $0.status == .notFound && $0.error?.code == .unknownTool })
         XCTAssertTrue(entries.contains { $0.status == .failed && $0.error?.code == .handlerError })
         XCTAssertTrue(entries.contains { $0.status == .failed && $0.error?.code == .forwardedToolError })
-        XCTAssertFalse(serialized.contains("super-secret"))
-        XCTAssertFalse(serialized.contains("audit-secret"))
-        XCTAssertFalse(serialized.contains("/private/tmp"))
+        XCTAssertTrue(serialized.contains("super-secret"))
+        XCTAssertTrue(serialized.contains("audit-secret"))
         let handlerFailure = try XCTUnwrap(entries.first(where: {
             $0.tool == "audit.failure" && $0.status == .failed
         }))
         XCTAssertNotNil(handlerFailure.error?.type)
         XCTAssertNotNil(handlerFailure.error?.domain)
         XCTAssertNotNil(handlerFailure.error?.number)
-        XCTAssertFalse(serialized.contains("audit-secret"))
-        XCTAssertFalse(serialized.contains("/private/tmp/audit-secret"))
-        XCTAssertFalse(serialized.contains("forwarded failure"))
+        XCTAssertTrue(handlerFailure.error?.message?.contains("audit-secret") == true)
+        XCTAssertTrue(entries.contains { $0.status == .started && $0.input != nil })
+        let forwardedFailure = try XCTUnwrap(entries.first(where: {
+            $0.tool == "markcut.preview.is-error" && $0.status == .failed
+        }))
+        XCTAssertNotNil(forwardedFailure.output)
+        XCTAssertTrue(serialized.contains("forwarded failure"))
+        XCTAssertTrue(serialized.contains("audit-secret"))
+        XCTAssertTrue(serialized.contains("forwarded failure"))
+    }
+
+    func testShellExitCodeFromRawFederatedOutput() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("neoy-exit-code-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let audit = ToolCallAudit(url: url)
+        let callID = UUID()
+        let provenance = ToolCallAudit.Provenance(origin: .remote, provider: "shell")
+        audit.record(callID: callID, toolName: "shell", provenance: provenance,
+                     status: .started, input: .object(["command": .string("false")]))
+        audit.record(callID: callID, toolName: "shell", provenance: provenance,
+                     status: .succeeded,
+                     output: .object(["content": .array([
+                         .object(["type": .string("text"),
+                                  "text": .string("{\"exitCode\":7,\"stderr\":\"failure\"}")])
+                     ])]))
+        audit.flush()
+        let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\n")
+        let entries = try lines.map { try JSONDecoder().decode(ToolCallAudit.Entry.self, from: Data($0.utf8)) }
+        XCTAssertEqual(entries.count, 2)
+        XCTAssertEqual(entries[0].input, .object(["command": .string("false")]))
+        XCTAssertEqual(entries[1].exitCode, 7)
+        XCTAssertNotNil(entries[1].output)
     }
 
     @MainActor

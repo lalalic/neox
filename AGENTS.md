@@ -288,3 +288,5 @@ The canonical MCP tool-call lifecycle log is `~/Library/Logs/NeoY/tool-calls.jso
 NeoY Core's separate `~/Library/Logs/NeoY/Core/audit.jsonl` audit writer is retired; do not consult or recreate it. Prefer reporting aggregate counts and redacted diagnostics rather than exposing prompts, credentials, or complete shell arguments. Historical entries may have been cleared.
 
 NeoY `shell.exec` `timeout_ms` controls synchronous waiting only. If a command is still executing when that wait expires, the tool returns `status=running` with a durable `jobId`; **never rerun a side-effecting command** merely because its wait elapsed. Query `shell.job_status` (`shell_job_status`) for the same ID. Explicit `shell.job_kill` (`shell_job_kill`) is required to terminate it. `timeout_ms=0` returns immediately.
+
+Raw MCP auditing: `tool-calls.jsonl` records the complete JSON input at start and returned JSON output at completion, plus error messages, duration and exit code when present. No redaction is applied. This file can contain tokens, personal data and command output; restrict access (directory `0700`, file `0600`) and never paste its raw contents into public reports.

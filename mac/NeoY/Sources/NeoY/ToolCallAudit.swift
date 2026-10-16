@@ -39,17 +39,16 @@ public final class ToolCallAudit: @unchecked Sendable {
         let type: String?
         let domain: String?
         let number: Int?
+        let message: String?
+        let debug: String?
     }
 
-    /// Structured diagnostics only: never persist localizedDescription or exception
-    /// messages, which can embed access tokens, shell arguments and local paths.
+    /// Preserve the raw error message; access to the audit file is restricted to the user.
     private static func errorDetail(_ error: Error?, code: ErrorCode) -> ErrorDetail {
-        guard let error else { return ErrorDetail(code: code, type: nil, domain: nil, number: nil) }
+        guard let error else { return ErrorDetail(code: code, type: nil, domain: nil, number: nil, message: nil, debug: nil) }
         let ns = error as NSError
         let type = String(String(reflecting: Swift.type(of: error)).prefix(120))
-        let domain = ns.domain.range(of: "^[A-Za-z0-9_.-]{1,120}$", options: .regularExpression) != nil
-            ? ns.domain : "redacted"
-        return ErrorDetail(code: code, type: type, domain: domain, number: ns.code)
+        return ErrorDetail(code: code, type: type, domain: ns.domain, number: ns.code, message: error.localizedDescription, debug: String(reflecting: error))
     }
 
     public struct Entry: Codable, Sendable {
@@ -61,6 +60,9 @@ public final class ToolCallAudit: @unchecked Sendable {
         let status: Status
         let durationMS: Int?
         let error: ErrorDetail?
+        let input: JSONValue?
+        let output: JSONValue?
+        let exitCode: Int?
 
         enum CodingKeys: String, CodingKey {
             case time
@@ -71,6 +73,9 @@ public final class ToolCallAudit: @unchecked Sendable {
             case status
             case durationMS = "duration_ms"
             case error
+            case input
+            case output
+            case exitCode = "exit_code"
         }
     }
 
@@ -101,6 +106,8 @@ public final class ToolCallAudit: @unchecked Sendable {
         status: Status,
         errorCode: ErrorCode = .none,
         underlyingError: Error? = nil,
+        input: JSONValue? = nil,
+        output: JSONValue? = nil,
         startedAt: Date? = nil
     ) {
         let now = Date()
@@ -113,11 +120,31 @@ public final class ToolCallAudit: @unchecked Sendable {
             phase: status == .started ? "started" : "terminal",
             status: status,
             durationMS: status == .started ? nil : duration,
-            error: errorCode == .none ? nil : Self.errorDetail(underlyingError, code: errorCode)
+            error: errorCode == .none ? nil : Self.errorDetail(underlyingError, code: errorCode),
+            input: input,
+            output: output,
+            exitCode: Self.exitCode(from: output)
         )
         writeQueue.async { [url] in
             Self.append(entry, to: url)
         }
+    }
+
+    private static func exitCode(from output: JSONValue?) -> Int? {
+        guard case .object(let object) = output else { return nil }
+        if case .int(let code) = object["exitCode"] { return code }
+        if case .int(let code) = object["exit_code"] { return code }
+        // Federated shell providers may wrap their result as MCP text content.
+        if case .array(let content) = object["content"] {
+            for item in content {
+                guard case .object(let part) = item,
+                      case .string(let text) = part["text"],
+                      let data = text.data(using: .utf8),
+                      let parsed = try? JSONDecoder().decode(JSONValue.self, from: data) else { continue }
+                if let code = exitCode(from: parsed) { return code }
+            }
+        }
+        return nil
     }
 
     private static func append(_ entry: Entry, to url: URL) {

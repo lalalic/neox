@@ -795,7 +795,8 @@ public final class MCPServer {
                 callID: callID,
                 toolName: toolName,
                 provenance: provenance,
-                status: .started
+                status: .started,
+                input: jsonArgs
             )
             if let onToolCall {
                 let argsPreview: String
@@ -810,13 +811,14 @@ public final class MCPServer {
                 defer { self?.onToolCallFinished?(callID) }
                 do {
                     let result = try await AskQuestions.$requestPrincipal.withValue(principal) { try await handler(jsonArgs) }
-                    func recordTerminal(status: ToolCallAudit.Status, code: ToolCallAudit.ErrorCode) {
+                    func recordTerminal(status: ToolCallAudit.Status, code: ToolCallAudit.ErrorCode, output: JSONValue) {
                         self?.toolCallAudit.record(
                             callID: callID,
                             toolName: toolName,
                             provenance: provenance,
                             status: status,
                             errorCode: code,
+                            output: output,
                             startedAt: startedAt
                         )
                     }
@@ -828,7 +830,8 @@ public final class MCPServer {
                         let forwardedFailed = (forwarded["isError"] as? Bool) == true
                         recordTerminal(
                             status: forwardedFailed ? .failed : .succeeded,
-                            code: forwardedFailed ? .forwardedToolError : .none
+                            code: forwardedFailed ? .forwardedToolError : .none,
+                            output: Self.toJSONValue(forwarded)
                         )
                         self?.sendJSONRPCResult(connection: connection, id: id, result: forwarded, modern: modern)
                         return
@@ -841,7 +844,7 @@ public final class MCPServer {
                     } else {
                         content = [["type": "text", "text": result]]
                     }
-                    recordTerminal(status: .succeeded, code: .none)
+                    recordTerminal(status: .succeeded, code: .none, output: Self.toJSONValue(["content": content, "isError": false]))
                     self?.sendJSONRPCResult(connection: connection, id: id, result: [
                         "content": content, "isError": false
                     ], modern: modern)
@@ -853,6 +856,7 @@ public final class MCPServer {
                         status: .failed,
                         errorCode: .handlerError,
                         underlyingError: error,
+                        output: Self.toJSONValue(["content": [["type": "text", "text": "Error: \(error.localizedDescription)"]], "isError": true]),
                         startedAt: startedAt
                     )
                     self?.sendJSONRPCResult(connection: connection, id: id, result: [
