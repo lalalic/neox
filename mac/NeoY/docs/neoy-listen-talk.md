@@ -32,9 +32,13 @@ The `Neo status` / `Neo 状态` intent runs the authenticated NeoY gateway
 `status` command and speaks the returned result only after the tool completes.
 Other recognized speech is sent through the protected ChatGPT interface. This
 interface acknowledges **submission**, not an assistant answer; these turns have
-`submitted` receipts, no fabricated completion, and no automatic answer TTS.
-Full asynchronous answer delivery remains a future integration, not a delivered
-feature. Voice input is never interpolated into shell commands.
+`submitted` receipts and no fabricated completion. The authenticated
+`voice.complete` callback accepts an answer only for the matching pending
+session and correlation ID, changes the receipt to `completed`, and speaks the
+answer once. This callback path is implemented; automatic retrieval/delivery of
+ChatGPT replies to that callback is **not** implemented. An external trusted
+caller must invoke `voice.complete` with the actual completed reply. Early
+callbacks (before the submission acknowledgement returns) are supported. Voice input is never interpolated into shell commands.
 
 To reproduce the selected Xcode test suite, first run `xcodegen generate` from
 `mac/NeoY` (the generated `.xcodeproj` is ignored by Git), then run:

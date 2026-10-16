@@ -258,6 +258,10 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
     private func submit(text: String) async {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let sessionID else { return }
         let correlationID = UUID().uuidString
+        // Register correlation before dispatch: the callback can arrive before the
+        // command executor returns its submission acknowledgement.
+        lastReceipt = VoiceCommandReceipt(sessionID: sessionID, correlationID: correlationID,
+                                          status: "submitted", text: text, result: nil, error: nil)
         do {
             let outcome = try await commandExecutor(sessionID, correlationID, text)
             guard outcome.status == "completed" || outcome.status == "submitted" else {
@@ -266,9 +270,17 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
             guard outcome.status != "completed" || (outcome.result?.isEmpty == false) else {
                 throw VoiceToolError.invalid("Completed command has no answer")
             }
+            // Never replace a callback's completed receipt with a late submitted ack.
+            guard lastReceipt?.sessionID == sessionID,
+                  lastReceipt?.correlationID == correlationID,
+                  lastReceipt?.status == "submitted" else { return }
             lastReceipt = VoiceCommandReceipt(sessionID: sessionID, correlationID: correlationID, status: outcome.status, text: text, result: outcome.result, error: nil)
             if outcome.status == "completed", let answer = outcome.result { synthesizer.speak(answer) }
         } catch {
+            // A completed callback wins over a late transport error.
+            guard lastReceipt?.sessionID == sessionID,
+                  lastReceipt?.correlationID == correlationID,
+                  lastReceipt?.status == "submitted" else { return }
             lastReceipt = VoiceCommandReceipt(sessionID: sessionID, correlationID: correlationID, status: "failed", text: text, result: nil, error: error.localizedDescription)
             errorMessage = error.localizedDescription
         }

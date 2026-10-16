@@ -70,6 +70,28 @@ final class VoiceSessionTests: XCTestCase {
         XCTAssertEqual(synth.spoken, ["实际回复"])
     }
 
+    // The backend may deliver voice.complete before its submission call returns.
+    func testEarlyCompletedCallbackSurvivesLateSubmissionAck() async throws {
+        final class ControllerBox: @unchecked Sendable {
+            weak var value: VoiceSessionController?
+        }
+        let box = ControllerBox()
+        let synth = FakeSynthesizer()
+        let controller = VoiceSessionController(synthesizer: synth) { session, correlation, _ in
+            try await MainActor.run {
+                try box.value?.completeSubmittedReply(sessionID: session, correlationID: correlation, answer: "早到的回复")
+            }
+            return .submitted
+        }
+        box.value = controller
+        controller.beginTestingSession(id: "early")
+        let receipt = await controller.inject(text: "你好")
+        XCTAssertEqual(receipt.status, "completed")
+        XCTAssertEqual(receipt.result, "早到的回复")
+        XCTAssertEqual(synth.spoken, ["早到的回复"])
+        XCTAssertThrowsError(try controller.completeSubmittedReply(sessionID: "early", correlationID: receipt.correlationID, answer: "duplicate"))
+    }
+
     func testFinalRecognitionAndStopSubmitOnce() async {
         let synthesizer = FakeSynthesizer()
         let controller = VoiceSessionController(synthesizer: synthesizer) { _, _, text in .completed("ok: \(text)") }
