@@ -852,6 +852,7 @@ public final class MCPServer {
                         provenance: provenance,
                         status: .failed,
                         errorCode: .handlerError,
+                        underlyingError: error,
                         startedAt: startedAt
                     )
                     self?.sendJSONRPCResult(connection: connection, id: id, result: [

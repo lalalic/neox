@@ -132,6 +132,14 @@ final class ToolCallAuditTests: XCTestCase {
         XCTAssertFalse(serialized.contains("super-secret"))
         XCTAssertFalse(serialized.contains("audit-secret"))
         XCTAssertFalse(serialized.contains("/private/tmp"))
+        let handlerFailure = try XCTUnwrap(entries.first(where: {
+            $0.tool == "audit.failure" && $0.status == .failed
+        }))
+        XCTAssertNotNil(handlerFailure.error?.type)
+        XCTAssertNotNil(handlerFailure.error?.domain)
+        XCTAssertNotNil(handlerFailure.error?.number)
+        XCTAssertFalse(serialized.contains("audit-secret"))
+        XCTAssertFalse(serialized.contains("/private/tmp/audit-secret"))
         XCTAssertFalse(serialized.contains("forwarded failure"))
     }
 

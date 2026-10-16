@@ -36,6 +36,20 @@ public final class ToolCallAudit: @unchecked Sendable {
 
     struct ErrorDetail: Codable, Sendable {
         let code: ErrorCode
+        let type: String?
+        let domain: String?
+        let number: Int?
+    }
+
+    /// Structured diagnostics only: never persist localizedDescription or exception
+    /// messages, which can embed access tokens, shell arguments and local paths.
+    private static func errorDetail(_ error: Error?, code: ErrorCode) -> ErrorDetail {
+        guard let error else { return ErrorDetail(code: code, type: nil, domain: nil, number: nil) }
+        let ns = error as NSError
+        let type = String(String(reflecting: Swift.type(of: error)).prefix(120))
+        let domain = ns.domain.range(of: "^[A-Za-z0-9_.-]{1,120}$", options: .regularExpression) != nil
+            ? ns.domain : "redacted"
+        return ErrorDetail(code: code, type: type, domain: domain, number: ns.code)
     }
 
     public struct Entry: Codable, Sendable {
@@ -86,6 +100,7 @@ public final class ToolCallAudit: @unchecked Sendable {
         provenance: Provenance,
         status: Status,
         errorCode: ErrorCode = .none,
+        underlyingError: Error? = nil,
         startedAt: Date? = nil
     ) {
         let now = Date()
@@ -98,7 +113,7 @@ public final class ToolCallAudit: @unchecked Sendable {
             phase: status == .started ? "started" : "terminal",
             status: status,
             durationMS: status == .started ? nil : duration,
-            error: errorCode == .none ? nil : ErrorDetail(code: errorCode)
+            error: errorCode == .none ? nil : Self.errorDetail(underlyingError, code: errorCode)
         )
         writeQueue.async { [url] in
             Self.append(entry, to: url)
