@@ -203,7 +203,7 @@ test("shell_exec wait expiry preserves process and exposes the same durable job"
   try {
     const context = await makeContext(root);
     const marker = path.join(root, "marker");
-    const result = await handleShell("shell_exec", { command: `sleep 0.2; echo done > '${marker}'`, timeout_ms: 10 }, context);
+    const result = await handleShell("shell_exec", { command: `sleep 0.2; echo done > '${marker}'`, timeout: 10 }, context);
     assert.equal(result.status, "running");
     assert.ok(result.jobId);
     assert.equal(result.timedOut, undefined);
@@ -214,11 +214,11 @@ test("shell_exec wait expiry preserves process and exposes the same durable job"
   } finally { await fsp.rm(root, { recursive: true, force: true }); }
 });
 
-test("shell_exec timeout_ms=0 returns a running job immediately", async () => {
+test("shell_exec timeout=0 returns a running job immediately", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "neoy-nowait-test-"));
   const context = await makeContext(root);
   try {
-    const result = await handleShell("shell_exec", { command: "sleep 3", timeout_ms: 0 }, context);
+    const result = await handleShell("shell_exec", { command: "sleep 3", timeout: 0 }, context);
     assert.equal(result.status, "running");
     assert.ok(result.jobId);
     await handleShell("shell_job_kill", { job_id: result.jobId }, context);

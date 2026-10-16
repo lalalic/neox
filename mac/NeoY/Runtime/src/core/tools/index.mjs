@@ -1004,6 +1004,17 @@ async function handleMessage(message) {
       sendError(id, -32601, error.message);
       return;
     }
+    // Reject unknown arguments at the MCP boundary with a useful validation error.
+    const declared = advertisedTools().find((tool) => tool.name === name)?.inputSchema;
+    if (declared?.additionalProperties === false && args && typeof args === "object" && !Array.isArray(args)) {
+      const unknown = Object.keys(args).filter((key) => !Object.hasOwn(declared.properties ?? {}, key));
+      if (unknown.length) {
+        const allowed = Object.keys(declared.properties ?? {}).join(", ");
+        const detail = `Invalid arguments for ${name}: unknown parameter(s): ${unknown.join(", ")}. Allowed: ${allowed}`;
+        sendError(id, -32602, detail, { unknown, allowed: Object.keys(declared.properties ?? {}) });
+        return;
+      }
+    }
     try {
       const value = await dispatchTool(name, args);
       // Discriminated escape for federated results. toolTextResult flattens
@@ -1057,7 +1068,7 @@ rl.on("line", (line) => {
   }
   handleMessage(message).catch((error) => {
     stderr(`unhandled request error: ${error?.stack || error}`);
-    if (message?.id !== undefined) sendError(message.id, -32603, "Internal error", { detail: String(error?.message || error) });
+    if (message?.id !== undefined) sendError(message.id, -32603, `Internal error: ${String(error?.message || error)}`, { detail: String(error?.stack || error) });
   });
 });
 

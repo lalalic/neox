@@ -15,7 +15,7 @@ export const SHELL_TOOLS = [
         cwd: { type: "string", description: "Working directory. Supports absolute paths, relative paths, and ~/ paths. Defaults to the user's home directory." },
         env: { type: "object", additionalProperties: { type: ["string", "number", "boolean", "null"] }, description: "Environment overrides. Set a value to null to remove it." },
         stdin: { type: "string", description: "Optional text to send to stdin." },
-        timeout_ms: { type: "integer", minimum: 0, maximum: 1_800_000, default: 600000, description: "Maximum synchronous wait in milliseconds. If still running, returns status=running and a jobId without stopping the process. 0 returns the job immediately." },
+        timeout: { type: "integer", minimum: 0, maximum: 1_800_000, default: 600000, description: "Maximum synchronous wait in milliseconds. If still running, returns status=running and a jobId without stopping the process. 0 returns the job immediately." },
         max_output_bytes: { type: "integer", minimum: 0, maximum: 64000000, description: "Inline output budget (default 16 KiB); larger output is saved to a system temporary file." },
       },
       required: ["command"],
@@ -196,7 +196,7 @@ export async function handleShell(name, args, context) {
           }
           const env = normalizeEnv(args?.env);
           const stdin = optionalString(args, "stdin", undefined);
-          const timeoutMs = optionalInteger(args, "timeout_ms", SHELL_EXEC_DEFAULT_TIMEOUT_MS, 0, 1_800_000);
+          const timeoutMs = optionalInteger(args, "timeout", SHELL_EXEC_DEFAULT_TIMEOUT_MS, 0, 1_800_000);
           const maxOutputBytes = optionalInteger(args, "max_output_bytes", SHELL_INLINE_BYTES, 0, MAX_OUTPUT_BYTES) || SHELL_INLINE_BYTES;
           const effectiveCwd = resolvePath(cwd);
           await validateWorkingDirectory(effectiveCwd);

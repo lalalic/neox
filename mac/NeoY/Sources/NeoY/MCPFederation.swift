@@ -329,7 +329,7 @@ actor NeoYMCPStdioClient {
             timeouts.removeValue(forKey: id)?.cancel()
             if let error = message["error"] as? [String: Any] {
                 continuation.resume(throwing: NeoYRuntimeControlError.federation(
-                    "stdio MCP error: \(error["message"] ?? error)"
+                    "stdio MCP error (code: \(error["code"] ?? "unknown")): \(error["message"] ?? error); data: \(error["data"] ?? "none")"
                 ))
             } else if let result = message["result"] as? [String: Any] {
                 continuation.resume(returning: NeoYSendableBox(value: result))
