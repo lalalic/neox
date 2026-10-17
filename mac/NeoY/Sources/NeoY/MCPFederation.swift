@@ -164,6 +164,10 @@ actor NeoYMCPStdioClient {
         return try encodeFederatedResult(result)
     }
 
+    func listTools() async throws -> [NeoYRemoteTool] {
+        try decodeTools(await rpc(method: "tools/list", params: [:]))
+    }
+
     func call(name: String, arguments: JSONValue) async throws -> String {
         let result = try await rpc(
             method: "tools/call",
@@ -562,14 +566,16 @@ final class NeoYMCPFederation {
         publish(
             configuration: configuration, tools: snapshot.tools, resources: snapshot.resources, processAlive: true,
             invoke: { name, arguments in try await client.call(name: name, arguments: arguments) },
-            readResource: { uri in try await client.readResource(uri: uri) }
+            readResource: { uri in try await client.readResource(uri: uri) },
+            freshTools: { try await client.listTools() }
         )
     }
 
     private func publish(configuration: NeoYMCPServerConfiguration,
                          tools: [NeoYRemoteTool], resources: [NeoYRemoteResource], processAlive: Bool,
                          invoke: @escaping @Sendable (String, JSONValue) async throws -> String,
-                         readResource: @escaping @Sendable (String) async throws -> String) {
+                         readResource: @escaping @Sendable (String) async throws -> String,
+                         freshTools: (@Sendable () async throws -> [NeoYRemoteTool])? = nil) {
         var resourceURIs: [String] = []
         for resource in resources {
             let proxied = proxyFederatedResourceURI(provider: configuration.name, original: resource.uri)
@@ -613,8 +619,17 @@ final class NeoYMCPFederation {
             if !facadeTools.isEmpty {
             server.registerFederatedTool(descriptor: descriptor, name: facadeName, protected: true,
                                          provider: configuration.name) { arguments in
-                try await dispatchFederatedCommandFacade(
-                    provider: configuration.name, tools: facadeTools, arguments: arguments, invoke: rewrittenInvoke
+                let currentTools: [NeoYRemoteTool]
+                if let freshTools {
+                    currentTools = try await freshTools().map { tool in
+                        NeoYRemoteTool(name: tool.name,
+                            descriptor: rewriteToolResourceMetadata(tool.descriptor, provider: configuration.name))
+                    }.filter { !isAppOnlyTool($0.descriptor) && !hasMCPAppUIMetadata($0.descriptor) }
+                } else {
+                    currentTools = facadeTools
+                }
+                return try await dispatchFederatedCommandFacade(
+                    provider: configuration.name, tools: currentTools, arguments: arguments, invoke: rewrittenInvoke
                 )
             }
             names.append(facadeName)
