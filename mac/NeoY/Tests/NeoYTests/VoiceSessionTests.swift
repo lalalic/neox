@@ -1,12 +1,49 @@
 import XCTest
 @testable import NeoY
 
+private actor VoiceCommandGate {
+    private var opened = false
+    private var started = false
+    private var finished = false
+    private var waitContinuation: CheckedContinuation<Void, Never>?
+    private var startContinuation: CheckedContinuation<Void, Never>?
+
+    func hold() async {
+        started = true
+        startContinuation?.resume()
+        startContinuation = nil
+        if opened { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in waitContinuation = continuation }
+        finished = true
+    }
+
+    func waitUntilStarted() async {
+        if started { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in startContinuation = continuation }
+    }
+
+    func open() {
+        opened = true
+        waitContinuation?.resume()
+        waitContinuation = nil
+    }
+
+    func didFinish() -> Bool { finished }
+}
+
 @MainActor
 final class VoiceSessionTests: XCTestCase {
     final class FakeSynthesizer: VoiceSynthesizer {
         var spoken: [String] = []
-        func speak(_ text: String) { spoken.append(text) }
-        func stop() {}
+        var pending: ((Bool) -> Void)?
+        var deferPlayback = false
+        var didSpeak: (() -> Void)?
+        func speak(_ text: String, completion: @escaping (Bool) -> Void) {
+            spoken.append(text)
+            didSpeak?()
+            if deferPlayback { pending = completion } else { completion(true) }
+        }
+        func stop() { pending?(false); pending = nil }
     }
 
     func testReadOnlyNeoStatusIntentIsConstrained() {
@@ -59,15 +96,159 @@ final class VoiceSessionTests: XCTestCase {
         let pending = await controller.inject(text: "今天天气怎么样")
         XCTAssertEqual(pending.status, "submitted")
         XCTAssertTrue(synth.spoken.isEmpty)
-        XCTAssertThrowsError(try controller.completeSubmittedReply(sessionID: "wrong", correlationID: pending.correlationID, answer: "wrong"))
-        let finished = try controller.completeSubmittedReply(sessionID: pending.sessionID, correlationID: pending.correlationID, answer: "实际回复")
+        do { _ = try await controller.completeSubmittedReply(sessionID: "wrong", correlationID: pending.correlationID, answer: "wrong"); XCTFail("wrong session accepted") } catch {}
+        let finished = try await controller.completeSubmittedReply(sessionID: pending.sessionID, correlationID: pending.correlationID, answer: "实际回复")
         XCTAssertEqual(finished.status, "completed")
         XCTAssertEqual(controller.lastReceipt?.result, "实际回复")
         XCTAssertEqual(synth.spoken, ["实际回复"])
-        XCTAssertThrowsError(try controller.completeSubmittedReply(sessionID: pending.sessionID, correlationID: pending.correlationID, answer: "repeat"))
+        do { _ = try await controller.completeSubmittedReply(sessionID: pending.sessionID, correlationID: pending.correlationID, answer: "repeat"); XCTFail("duplicate accepted") } catch {}
         controller.beginTestingSession(id: "voice-2")
-        XCTAssertThrowsError(try controller.completeSubmittedReply(sessionID: pending.sessionID, correlationID: pending.correlationID, answer: "stale"))
+        do { _ = try await controller.completeSubmittedReply(sessionID: pending.sessionID, correlationID: pending.correlationID, answer: "stale"); XCTFail("stale session accepted") } catch {}
         XCTAssertEqual(synth.spoken, ["实际回复"])
+    }
+
+    func testReplySegmentsEnforceOrderAndDeduplicate() async throws {
+        let synth = FakeSynthesizer()
+        let controller = VoiceSessionController(synthesizer: synth) { _, _, _ in .submitted }
+        controller.beginTestingSession(id: "segments")
+        let pending = await controller.inject(text: "say hello")
+
+        do {
+            _ = try await controller.reply(sessionID: pending.sessionID, correlationID: pending.correlationID,
+                                           sequence: 1, text: "world", final: true)
+            XCTFail("out-of-order segment accepted")
+        } catch {}
+
+        let first = try await controller.reply(sessionID: pending.sessionID, correlationID: pending.correlationID,
+                                               sequence: 0, text: "Hello ", final: false)
+        XCTAssertEqual(first.status, "delivered")
+        XCTAssertEqual(first.sequence, 0)
+        XCTAssertEqual(first.final, false)
+        let duplicate = try await controller.reply(sessionID: pending.sessionID, correlationID: pending.correlationID,
+                                                   sequence: 0, text: "Hello ", final: false)
+        XCTAssertEqual(duplicate, first)
+        do {
+            _ = try await controller.reply(sessionID: pending.sessionID, correlationID: pending.correlationID,
+                                           sequence: 0, text: "changed", final: false)
+            XCTFail("conflicting duplicate accepted")
+        } catch {}
+
+        let final = try await controller.reply(sessionID: pending.sessionID, correlationID: pending.correlationID,
+                                               sequence: 1, text: "world.", final: true)
+        XCTAssertEqual(final.status, "completed")
+        XCTAssertEqual(final.result, "Hello world.")
+        XCTAssertEqual(final.sequence, 1)
+        XCTAssertEqual(final.final, true)
+        XCTAssertEqual(controller.lastReceipt, final)
+        XCTAssertEqual(synth.spoken, ["Hello ", "world."])
+        let duplicateFinal = try await controller.reply(sessionID: pending.sessionID, correlationID: pending.correlationID,
+                                                        sequence: 1, text: "world.", final: true)
+        XCTAssertEqual(duplicateFinal, final)
+    }
+
+    func testReplyMustMatchAuthenticatedActiveSessionAndCorrelation() async throws {
+        let controller = VoiceSessionController(synthesizer: FakeSynthesizer()) { _, _, _ in .submitted }
+        controller.beginTestingSession(id: "bound-session")
+        let pending = await controller.inject(text: "answer me")
+        do {
+            _ = try await controller.reply(sessionID: "other-session", correlationID: pending.correlationID,
+                                           sequence: 0, text: "forged", final: true)
+            XCTFail("foreign session accepted")
+        } catch {}
+        do {
+            _ = try await controller.reply(sessionID: pending.sessionID, correlationID: "other-correlation",
+                                           sequence: 0, text: "forged", final: true)
+            XCTFail("foreign correlation accepted")
+        } catch {}
+    }
+
+    func testNewTurnReplacesReplyBindingWithinSameSession() async throws {
+        let controller = VoiceSessionController(synthesizer: FakeSynthesizer()) { _, _, _ in .submitted }
+        controller.beginTestingSession(id: "multi-turn")
+        let first = await controller.inject(text: "first")
+        _ = try await controller.completeSubmittedReply(sessionID: first.sessionID, correlationID: first.correlationID, answer: "one")
+        let second = await controller.inject(text: "second")
+        let result = try await controller.completeSubmittedReply(sessionID: second.sessionID, correlationID: second.correlationID, answer: "two")
+        XCTAssertEqual(result.correlationID, second.correlationID)
+        XCTAssertEqual(result.result, "two")
+    }
+
+    func testFinalReceiptWaitsForPlaybackAndCancellationOnlyStopsAudio() async throws {
+        let synth = FakeSynthesizer()
+        synth.deferPlayback = true
+        let controller = VoiceSessionController(synthesizer: synth) { _, _, _ in .submitted }
+        controller.beginTestingSession(id: "playback")
+        let pending = await controller.inject(text: "reply")
+        let playbackStarted = expectation(description: "playback starts")
+        synth.didSpeak = { playbackStarted.fulfill() }
+        let reply = Task { try await controller.completeSubmittedReply(sessionID: pending.sessionID,
+                                                                         correlationID: pending.correlationID,
+                                                                         answer: "spoken answer") }
+        await fulfillment(of: [playbackStarted], timeout: 1)
+        XCTAssertNil(controller.lastReceipt?.result)
+        XCTAssertFalse(reply.isCancelled)
+        synth.pending?(true)
+        let delivered = try await reply.value
+        XCTAssertEqual(delivered.status, "completed")
+        XCTAssertEqual(delivered.deliveryStatus, "delivered")
+        XCTAssertEqual(controller.lastReceipt, delivered)
+
+        synth.pending = nil
+        synth.deferPlayback = true
+        controller.beginTestingSession(id: "cancel-audio")
+        let commandTask = Task { await controller.inject(text: "background tool call") }
+        await Task.yield()
+        controller.cancelAudio()
+        let commandReceipt = await commandTask.value
+        XCTAssertEqual(commandReceipt.status, "submitted")
+        XCTAssertNil(commandReceipt.result)
+    }
+
+    func testAudioCancellationDoesNotCancelBackgroundToolExecution() async throws {
+        let synth = FakeSynthesizer()
+        synth.deferPlayback = true
+        let gate = VoiceCommandGate()
+        let controller = VoiceSessionController(synthesizer: synth) { _, _, _ in
+            await gate.hold()
+            return .submitted
+        }
+        controller.beginTestingSession(id: "background-work")
+        let command = Task { await controller.inject(text: "long running tool") }
+        await gate.waitUntilStarted()
+        let correlation = try XCTUnwrap(controller.lastReceipt?.correlationID)
+        let playbackStarted = expectation(description: "playback starts")
+        synth.didSpeak = { playbackStarted.fulfill() }
+        let audio = Task { try await controller.completeSubmittedReply(sessionID: "background-work",
+                                                                         correlationID: correlation,
+                                                                         answer: "tool result") }
+        await fulfillment(of: [playbackStarted], timeout: 1)
+        controller.cancelAudio()
+        let audioReceipt = try await audio.value
+        XCTAssertEqual(audioReceipt.status, "cancelled")
+        await gate.open()
+        let commandReceipt = await command.value
+        let toolFinished = await gate.didFinish()
+        XCTAssertTrue(toolFinished)
+        XCTAssertEqual(commandReceipt.status, "submitted")
+    }
+
+    func testCancelledReplyReceiptMeansAudioDidNotFinish() async throws {
+        let synth = FakeSynthesizer()
+        synth.deferPlayback = true
+        let controller = VoiceSessionController(synthesizer: synth) { _, _, _ in .submitted }
+        controller.beginTestingSession(id: "cancelled-reply")
+        let pending = await controller.inject(text: "reply")
+        let playbackStarted = expectation(description: "playback starts")
+        synth.didSpeak = { playbackStarted.fulfill() }
+        let reply = Task { try await controller.completeSubmittedReply(sessionID: pending.sessionID,
+                                                                         correlationID: pending.correlationID,
+                                                                         answer: "interrupted") }
+        await fulfillment(of: [playbackStarted], timeout: 1)
+        controller.cancelAudio()
+        let receipt = try await reply.value
+        XCTAssertEqual(receipt.status, "cancelled")
+        XCTAssertEqual(receipt.deliveryStatus, "cancelled")
+        XCTAssertNil(receipt.result)
     }
 
     // The backend may deliver voice.complete before its submission call returns.
@@ -78,9 +259,7 @@ final class VoiceSessionTests: XCTestCase {
         let box = ControllerBox()
         let synth = FakeSynthesizer()
         let controller = VoiceSessionController(synthesizer: synth) { session, correlation, _ in
-            try await MainActor.run {
-                try box.value?.completeSubmittedReply(sessionID: session, correlationID: correlation, answer: "早到的回复")
-            }
+            try await box.value?.completeSubmittedReply(sessionID: session, correlationID: correlation, answer: "早到的回复")
             return .submitted
         }
         box.value = controller
@@ -89,7 +268,7 @@ final class VoiceSessionTests: XCTestCase {
         XCTAssertEqual(receipt.status, "completed")
         XCTAssertEqual(receipt.result, "早到的回复")
         XCTAssertEqual(synth.spoken, ["早到的回复"])
-        XCTAssertThrowsError(try controller.completeSubmittedReply(sessionID: "early", correlationID: receipt.correlationID, answer: "duplicate"))
+        do { _ = try await controller.completeSubmittedReply(sessionID: "early", correlationID: receipt.correlationID, answer: "duplicate"); XCTFail("duplicate accepted") } catch {}
     }
 
     func testFinalRecognitionAndStopSubmitOnce() async {

@@ -14,6 +14,9 @@ struct VoiceCommandReceipt: Codable, Sendable, Equatable {
     let text: String
     let result: String?
     let error: String?
+    var sequence: Int? = nil
+    var final: Bool? = nil
+    var deliveryStatus: String? = nil
 }
 
 struct VoiceCommandOutcome: Sendable {
@@ -24,21 +27,46 @@ struct VoiceCommandOutcome: Sendable {
     static let submitted = Self(status: "submitted", result: nil)
 }
 
+@MainActor
 protocol VoiceSynthesizer: AnyObject {
-    func speak(_ text: String)
+    func speak(_ text: String, completion: @escaping (Bool) -> Void)
     func stop()
 }
 
+@MainActor
 final class SystemVoiceSynthesizer: NSObject, VoiceSynthesizer {
     private let synthesizer = AVSpeechSynthesizer()
+    private var completions: [ObjectIdentifier: (Bool) -> Void] = [:]
 
-    func speak(_ text: String) {
+    override init() {
+        super.init()
+        synthesizer.delegate = self
+    }
+
+    func speak(_ text: String, completion: @escaping (Bool) -> Void) {
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: text.range(of: "[\\u4e00-\\u9fff]", options: .regularExpression) != nil ? "zh-CN" : "en-US")
+        completions[ObjectIdentifier(utterance)] = completion
         synthesizer.speak(utterance)
     }
 
     func stop() { synthesizer.stopSpeaking(at: .immediate) }
+}
+
+extension SystemVoiceSynthesizer: AVSpeechSynthesizerDelegate {
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        let identifier = ObjectIdentifier(utterance)
+        Task { @MainActor [weak self] in self?.complete(identifier, delivered: true) }
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        let identifier = ObjectIdentifier(utterance)
+        Task { @MainActor [weak self] in self?.complete(identifier, delivered: false) }
+    }
+
+    private func complete(_ identifier: ObjectIdentifier, delivered: Bool) {
+        completions.removeValue(forKey: identifier)?(delivered)
+    }
 }
 
 enum VoiceCommandRouting {
@@ -69,6 +97,20 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
     private var stopGeneration = 0
     private var recognitionGeneration = 0
     private var tapInstalled = false
+    private struct ReplySegment: Equatable {
+        let text: String
+        let final: Bool
+        let receipt: VoiceCommandReceipt
+    }
+    private struct ReplyState {
+        let sessionID: String
+        let correlationID: String
+        var nextSequence = 0
+        var segments: [Int: ReplySegment] = [:]
+        var finished = false
+        var isDelivering = false
+    }
+    private var replyState: ReplyState?
 
     init(
         synthesizer: VoiceSynthesizer = SystemVoiceSynthesizer(),
@@ -89,6 +131,7 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
         errorMessage = nil
         transcript = ""
         lastReceipt = nil
+        replyState = nil
         muted = false
         didSubmitTurn = false
         finalResultReceived = false
@@ -190,6 +233,7 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
         sessionID = id
         recognitionGeneration += 1
         lastReceipt = nil
+        replyState = nil
         transcript = ""
         errorMessage = nil
         didSubmitTurn = false
@@ -205,27 +249,96 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
     }
 
     func speak(_ text: String) {
-        synthesizer.speak(text)
+        synthesizer.speak(text) { _ in }
     }
 
-    // A submitted ChatGPT turn is an acknowledgement only. Only a matching
-    // completed response can be voiced, and duplicate callbacks are rejected.
+    // Bind delivery to the active session and its pending turn. The caller
+    // cannot select a room, device, or other destination.
     @discardableResult
-    func completeSubmittedReply(sessionID: String, correlationID: String, answer: String) throws -> VoiceCommandReceipt {
-        guard !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw VoiceToolError.invalid("Completed voice answer must not be empty")
+    func completeSubmittedReply(sessionID: String, correlationID: String, answer: String) async throws -> VoiceCommandReceipt {
+        try await reply(sessionID: sessionID, correlationID: correlationID, sequence: 0, text: answer, final: true)
+    }
+
+    func reply(sessionID: String, correlationID: String, sequence: Int, text: String, final: Bool) async throws -> VoiceCommandReceipt {
+        let clean = text
+        guard (0...255).contains(sequence), clean.utf8.count <= 12_000,
+              !clean.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw VoiceToolError.invalid("sequence must be 0...255 and text must contain 1...12000 UTF-8 bytes")
         }
-        guard let receipt = lastReceipt,
-              receipt.sessionID == sessionID,
-              receipt.correlationID == correlationID,
-              receipt.status == "submitted" else {
+        guard sessionID == self.sessionID else { throw VoiceToolError.invalid("No active voice session matches session_id") }
+        if replyState == nil {
+            guard sequence == 0, let pending = lastReceipt,
+                  pending.sessionID == sessionID, pending.correlationID == correlationID,
+                  pending.status == "submitted" else {
+                throw VoiceToolError.invalid("No matching pending voice turn")
+            }
+            replyState = ReplyState(sessionID: sessionID, correlationID: correlationID)
+        }
+        guard var state = replyState,
+              state.sessionID == sessionID, state.correlationID == correlationID else {
             throw VoiceToolError.invalid("No matching pending voice turn")
         }
-        let completed = VoiceCommandReceipt(sessionID: sessionID, correlationID: correlationID,
-                                            status: "completed", text: receipt.text, result: answer, error: nil)
-        lastReceipt = completed
-        synthesizer.speak(answer)
-        return completed
+        if sequence < state.nextSequence {
+            guard let previous = state.segments[sequence], previous.text == clean, previous.final == final else {
+                throw VoiceToolError.invalid("Conflicting or stale voice reply segment")
+            }
+            return previous.receipt
+        }
+        guard !state.finished, !state.isDelivering, sequence == state.nextSequence else {
+            throw VoiceToolError.invalid("Expected voice reply sequence \(state.nextSequence)")
+        }
+
+        let inbound = lastReceipt!
+        // Reserve before suspension so concurrent calls cannot enqueue a
+        // duplicate segment while the prior utterance is being played.
+        state.nextSequence += 1
+        state.isDelivering = true
+        let delivering = VoiceCommandReceipt(sessionID: sessionID, correlationID: correlationID,
+                                             status: "delivering", text: inbound.text, result: nil,
+                                             error: nil, sequence: sequence, final: final)
+        state.segments[sequence] = ReplySegment(text: clean, final: final, receipt: delivering)
+        replyState = state
+        guard await speakAndWait(clean) else {
+            guard var current = replyState, current.correlationID == correlationID else {
+                throw VoiceToolError.invalid("Voice reply is no longer active")
+            }
+            let cancelled = VoiceCommandReceipt(sessionID: sessionID, correlationID: correlationID,
+                                                status: "cancelled", text: inbound.text, result: nil,
+                                                error: "audio delivery cancelled", sequence: sequence, final: final,
+                                                deliveryStatus: "cancelled")
+            current.segments[sequence] = ReplySegment(text: clean, final: final, receipt: cancelled)
+            current.isDelivering = false
+            current.finished = true
+            replyState = current
+            return cancelled
+        }
+
+        guard var current = replyState, current.correlationID == correlationID,
+              lastReceipt?.correlationID == correlationID else {
+            throw VoiceToolError.invalid("Voice reply is no longer active")
+        }
+        let deliveredText = (0..<sequence).compactMap { current.segments[$0]?.text } + [clean]
+        let receipt = VoiceCommandReceipt(sessionID: sessionID, correlationID: correlationID,
+                                          status: final ? "completed" : "delivered", text: inbound.text,
+                                          result: final ? deliveredText.joined() : clean, error: nil,
+                                          sequence: sequence, final: final, deliveryStatus: "delivered")
+        current.segments[sequence] = ReplySegment(text: clean, final: final, receipt: receipt)
+        current.isDelivering = false
+        current.finished = final
+        replyState = current
+        if final { lastReceipt = receipt }
+        return receipt
+    }
+
+    // Playback cancellation leaves any submitted command/tool task running.
+    func cancelAudio() {
+        synthesizer.stop()
+    }
+
+    private func speakAndWait(_ text: String) async -> Bool {
+        await withCheckedContinuation { continuation in
+            synthesizer.speak(text) { delivered in continuation.resume(returning: delivered) }
+        }
     }
 
     // Shared by native Speech callbacks and deterministic tests.
@@ -260,6 +373,7 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
         let correlationID = UUID().uuidString
         // Register correlation before dispatch: the callback can arrive before the
         // command executor returns its submission acknowledgement.
+        replyState = nil
         lastReceipt = VoiceCommandReceipt(sessionID: sessionID, correlationID: correlationID,
                                           status: "submitted", text: text, result: nil, error: nil)
         do {
@@ -274,8 +388,19 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
             guard lastReceipt?.sessionID == sessionID,
                   lastReceipt?.correlationID == correlationID,
                   lastReceipt?.status == "submitted" else { return }
-            lastReceipt = VoiceCommandReceipt(sessionID: sessionID, correlationID: correlationID, status: outcome.status, text: text, result: outcome.result, error: nil)
-            if outcome.status == "completed", let answer = outcome.result { synthesizer.speak(answer) }
+            if outcome.status == "completed", let answer = outcome.result {
+                lastReceipt = VoiceCommandReceipt(sessionID: sessionID, correlationID: correlationID,
+                                                  status: "delivering", text: text, result: nil, error: nil)
+                let delivered = await speakAndWait(answer)
+                guard lastReceipt?.sessionID == sessionID, lastReceipt?.correlationID == correlationID,
+                      lastReceipt?.status == "delivering" else { return }
+                lastReceipt = VoiceCommandReceipt(sessionID: sessionID, correlationID: correlationID,
+                                                  status: "completed", text: text, result: answer,
+                                                  error: nil, deliveryStatus: delivered ? "delivered" : "cancelled")
+            } else {
+                lastReceipt = VoiceCommandReceipt(sessionID: sessionID, correlationID: correlationID,
+                                                  status: "submitted", text: text, result: nil, error: nil)
+            }
         } catch {
             // A completed callback wins over a late transport error.
             guard lastReceipt?.sessionID == sessionID,
@@ -347,17 +472,37 @@ enum VoiceSessionTools {
                 return encode(await controller.inject(text: text))
             })
         result.append(
-            ToolDefinition(name: "voice.complete", description: "Deliver the real completed answer for a pending, correlated voice turn; duplicate and stale replies are rejected.", parameters: schema([
+            ToolDefinition(name: "voice.complete", description: "Deliver one final answer for a pending, correlated voice turn; duplicate and stale replies are rejected.", parameters: schema([
                 "session_id": .object(["type": .string("string")]),
                 "correlation_id": .object(["type": .string("string")]),
                 "answer": .object(["type": .string("string")]),
             ], required: ["session_id", "correlation_id", "answer"])) { args in
                 guard let session = string(args, "session_id"), let correlation = string(args, "correlation_id"),
                       let answer = string(args, "answer") else { throw VoiceToolError.invalid("session_id, correlation_id and answer are required") }
-                return try await MainActor.run {
-                    let receipt = try controller.completeSubmittedReply(sessionID: session, correlationID: correlation, answer: answer)
-                    return encode(receipt)
+                return encode(try await controller.completeSubmittedReply(sessionID: session, correlationID: correlation, answer: answer))
+            })
+
+        result.append(
+            ToolDefinition(name: "voice.reply", description: "Deliver an ordered segment for the active voice turn. The final segment returns a receipt after playback completes.", parameters: schema([
+                "session_id": .object(["type": .string("string")]),
+                "correlation_id": .object(["type": .string("string")]),
+                "sequence": .object(["type": .string("integer"), "minimum": .int(0), "maximum": .int(255)]),
+                "text": .object(["type": .string("string"), "minLength": .int(1), "maxLength": .int(12_000)]),
+                "final": .object(["type": .string("boolean")]),
+            ], required: ["session_id", "correlation_id", "sequence", "text", "final"])) { args in
+                guard let session = string(args, "session_id"), let correlation = string(args, "correlation_id"),
+                      let text = string(args, "text"), let final = bool(args, "final"),
+                      let sequence = integer(args, "sequence") else {
+                    throw VoiceToolError.invalid("session_id, correlation_id, sequence (0...255), text and final are required")
                 }
+                return encode(try await controller.reply(sessionID: session, correlationID: correlation,
+                                                         sequence: sequence, text: text, final: final))
+            })
+
+        result.append(
+            ToolDefinition(name: "voice.cancel_audio", description: "Stop voice playback without cancelling submitted command or tool work.", parameters: schema([:])) { _ in
+                await MainActor.run { controller.cancelAudio() }
+                return encodeObject(["status": "cancelled"])
             })
         result.append(
             ToolDefinition(name: "voice.speak", description: "Speak text through the selected macOS output device.", parameters: schema(["text": .object(["type": .string("string")])], required: ["text"])) { args in
@@ -393,6 +538,13 @@ enum VoiceSessionTools {
     private static func bool(_ args: JSONValue, _ key: String) -> Bool? {
         guard case .object(let object) = args, case .bool(let value)? = object[key] else { return nil }
         return value
+    }
+
+    private static func integer(_ args: JSONValue, _ key: String) -> Int? {
+        guard case .object(let object) = args else { return nil }
+        if case .int(let value)? = object[key] { return value >= 0 ? value : nil }
+        if case .double(let value)? = object[key], value >= 0, value.rounded(.towardZero) == value { return Int(exactly: value) }
+        return nil
     }
 
     private static func schema(_ properties: [String: JSONValue], required: [String] = []) -> JSONValue {

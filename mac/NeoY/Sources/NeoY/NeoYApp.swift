@@ -160,12 +160,20 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
                 guard !result.isEmpty else { throw NeoYRuntimeControlError.event("NeoY status returned no result") }
                 return .completed(result)
             }
+            // Fail closed until Browser Workspace has produced a durable binding.
+            // A new temporary thread per utterance loses the entire conversation.
+            let binding = ProcessInfo.processInfo.environment
+            guard let threadID = binding["NEOY_VOICE_CHATGPT_THREAD_ID"], !threadID.isEmpty,
+                  let projectID = binding["NEOY_VOICE_CHATGPT_PROJECT_ID"], !projectID.isEmpty else {
+                throw NSError(domain: "NeoVoice", code: 1, userInfo: [NSLocalizedDescriptionKey: "Neo Voice needs NEOY_VOICE_CHATGPT_PROJECT_ID and NEOY_VOICE_CHATGPT_THREAD_ID from verified Browser Workspace project setup"])
+            }
             let response = try await value.invokeRegisteredTool("chatgpt", arguments: .object([
-                "command": .string("thread"),
+                "command": .string("turn"),
                 "args": .object([
-                    "message": .string("Voice request: \(text)\n\nWhen you have finished the actual response, call the connected NeoY voice.session command complete with session_id=\(sessionID), correlation_id=\(correlationID), and answer containing your final spoken response. Never call complete with an acknowledgement or guessed result. If the NeoY tool is unavailable, state that limitation in the chat; do not fabricate voice completion."),
+                    "project_id": .string(projectID),
+                    "thread_id": .string(threadID),
+                    "message": .string("Voice request: \(text)\n\nDeliver the actual response through the connected authenticated NeoY voice.session command reply, using session_id=\(sessionID), correlation_id=\(correlationID), sequence starting at 0, text for each segment, and final=true only on the last segment. Wait for the final delivery receipt; never treat submission acknowledgement as completion. Never send an acknowledgement or guessed result as the answer. If the NeoY tool is unavailable or delivery fails, state that limitation in chat; do not claim audible completion."),
                     "reason": .string("NeoY voice session \(sessionID), correlation \(correlationID)"),
-                    "temporary": .bool(true),
                 ]),
             ]))
             // ChatGPT thread returns a submission acknowledgement, not a Neo command answer.

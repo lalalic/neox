@@ -32,13 +32,23 @@ The `Neo status` / `Neo 状态` intent runs the authenticated NeoY gateway
 `status` command and speaks the returned result only after the tool completes.
 Other recognized speech is sent through the protected ChatGPT interface. This
 interface acknowledges **submission**, not an assistant answer; these turns have
-`submitted` receipts and no fabricated completion. The authenticated
-`voice.complete` callback accepts an answer only for the matching pending
-session and correlation ID, changes the receipt to `completed`, and speaks the
-answer once. This callback path is implemented; automatic retrieval/delivery of
-ChatGPT replies to that callback is **not** implemented. An external trusted
-caller must invoke `voice.complete` with the actual completed reply. Early
-callbacks (before the submission acknowledgement returns) are supported. Voice input is never interpolated into shell commands.
+`submitted` receipts and no fabricated completion. The protected `voice.reply`
+callback accepts ordered text segments only for the matching active session and
+pending correlation ID. Sequence starts at zero; identical retries return the
+same receipt without replaying audio, while stale, conflicting, or out-of-order
+segments are rejected. `final=true` completes the reply only after macOS speech
+playback finishes; each segment reports `delivered` only after its playback
+finishes. `voice.complete` remains the one-segment final compatibility command.
+`voice.cancel_audio` stops speech without cancelling submitted command or tool
+work. Replies go to the session's configured local output; callers cannot
+choose a room or destination. These MCP tools remain protected behind the
+existing NeoY authentication boundary.
+
+Automatic retrieval/delivery of ChatGPT replies is **not** implemented. An
+external trusted caller must invoke `voice.reply` with the actual response.
+Submission acknowledgements remain `submitted`; typed turns stay silent unless
+an explicit voice command is used. Voice input is never interpolated into shell
+commands.
 
 To reproduce the selected Xcode test suite, first run `xcodegen generate` from
 `mac/NeoY` (the generated `.xcodeproj` is ignored by Git), then run:
@@ -51,3 +61,38 @@ xcodebuild test -project NeoY.xcodeproj -scheme NeoY -destination 'platform=macO
 The selected run must report a nonzero number of executed tests; exit code 0
 alone is not evidence of test discovery. The test suite checks submitted-vs-
 completed TTS behavior, explicit mute, stop, failure and safe intent routing.
+
+## Persistent ChatGPT Project binding (Job 482 reviewer correction)
+
+The ChatGPT submission path now invokes `chatgpt turn` with a verified
+`project_id` and `thread_id` instead of creating a Temporary Chat on
+every spoken utterance. Configure `NEOY_VOICE_CHATGPT_PROJECT_ID` and
+`NEOY_VOICE_CHATGPT_THREAD_ID` **in the NeoY process environment** only
+after Browser Workspace returns real stable IDs. Do not use a tab ID or invent
+either identifier. Missing binding fails with a typed voice receipt and no
+ChatGPT submission. Both values are routing metadata, not credentials.
+
+This correction does **not** implement the LiveKit audio transport. The current
+macOS synthesizer speaks to the local system output, not an authenticated LiveKit
+room participant. NeoY's native app owns local microphone permission, while
+a future Worknode gateway must own LiveKit rooms, remote audio streams, streaming
+STT/TTS, room membership, barge-in and playback receipts. Audio cancellation
+must never cancel the submitted ChatGPT/tool task.
+
+### Acceptance evidence and remaining gates
+
+- 2026-10-18: `xcodebuild test -project NeoY.xcodeproj -scheme NeoY
+  -destination 'platform=macOS' -only-testing:NeoYTests/VoiceSessionTests
+  CODE_SIGNING_ALLOWED=NO`: **17 tests, 0 failures**.
+  Covers reply correlation, ordered sequence, deduplication, invalid/stale
+  segments, cancellation, transcript dispatch and local TTS receipts.
+- A NeoY trusted cluster `invoke work exec` attempt returned
+  `Could not connect to the server`; the LiveKit container and audio bridge
+  could not be inspected or tested in this execution.
+- Browser Workspace's most recent project setup failed at its project-name
+  field; the `neo` ChatGPT MCP app was disconnected. See
+  `neo-voice-project-setup-evidence.md`.
+- **Not accepted as real speech E2E:** no verified ChatGPT Project/thread binding,
+  real LiveKit room participants, recorded source speech, streaming STT, streamed
+  voice reply, or measured playback latency. Do not promote a synthetic or
+  no-mic test to real-speech acceptance.
