@@ -146,6 +146,48 @@ final class VoiceSessionTests: XCTestCase {
         XCTAssertEqual(duplicateFinal, final)
     }
 
+    func testNoMicMCPFacadeRoundTripSubmitsThenDeliversCorrelatedSegments() async throws {
+        let synth = FakeSynthesizer()
+        let server = MCPServer(name: "voice-e2e", port: 0)
+        let controller = VoiceSessionController(synthesizer: synth) { session, correlation, text in
+            XCTAssertEqual(session, "mcp-session")
+            XCTAssertEqual(text, "你好，今天天气怎么样？")
+            XCTAssertFalse(correlation.isEmpty)
+            return .submitted
+        }
+        controller.beginTestingSession(id: "mcp-session")
+        VoiceSessionTools.register(on: server, controller: controller)
+
+        let submitted = try await server.invokeRegisteredTool("voice.session", arguments: .object([
+            "command": .string("inject"),
+            "args": .object(["text": .string("你好，今天天气怎么样？")]),
+        ]))
+        let pending = try receiptObject(submitted)
+        XCTAssertEqual(pending["status"] as? String, "submitted")
+        let sessionID = try XCTUnwrap(pending["sessionID"] as? String)
+        let correlationID = try XCTUnwrap(pending["correlationID"] as? String)
+        XCTAssertTrue(synth.spoken.isEmpty)
+
+        let first = try await server.invokeRegisteredTool("voice.session", arguments: .object([
+            "command": .string("reply"), "args": .object([
+                "session_id": .string(sessionID), "correlation_id": .string(correlationID), "sequence": .int(0),
+                "text": .string("你好，"), "final": .bool(false),
+            ]),
+        ]))
+        XCTAssertEqual(try receiptObject(first)["status"] as? String, "delivered")
+        let final = try await server.invokeRegisteredTool("voice.session", arguments: .object([
+            "command": .string("reply"), "args": .object([
+                "session_id": .string(sessionID), "correlation_id": .string(correlationID), "sequence": .int(1),
+                "text": .string("今天晴转多云。"), "final": .bool(true),
+            ]),
+        ]))
+        let delivered = try receiptObject(final)
+        XCTAssertEqual(delivered["status"] as? String, "completed")
+        XCTAssertEqual(delivered["deliveryStatus"] as? String, "delivered")
+        XCTAssertEqual(delivered["result"] as? String, "你好，今天晴转多云。")
+        XCTAssertEqual(synth.spoken, ["你好，", "今天晴转多云。"])
+    }
+
     func testReplyMustMatchAuthenticatedActiveSessionAndCorrelation() async throws {
         let controller = VoiceSessionController(synthesizer: FakeSynthesizer()) { _, _, _ in .submitted }
         controller.beginTestingSession(id: "bound-session")
@@ -331,5 +373,9 @@ final class VoiceSessionTests: XCTestCase {
         XCTAssertEqual(receipt.status, "failed")
         XCTAssertNil(receipt.result)
         XCTAssertEqual(receipt.error, "command unavailable")
+    }
+
+    private func receiptObject(_ result: String) throws -> [String: Any] {
+        try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(result.utf8)) as? [String: Any])
     }
 }

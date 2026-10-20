@@ -35,3 +35,31 @@ The setup attempt used this instruction text, but ChatGPT did not save it becaus
 3. Re-run the Browser Workspace setup flow to apply the instructions and create the intended persistent thread. Once the platform returns real Project and thread IDs, persist those stable business IDs in the existing runtime owner and verify a new turn is submitted to that binding.
 
 No successful Project configuration or binding is claimed by this result.
+
+## 2026-10-20 follow-up
+
+- Retried the supported Browser Workspace `chatgpt project-setup` action in a
+  caller-owned session. It again stopped at `ChatGPT project name field not
+  found`. A fresh accessibility snapshot showed the Projects section, existing
+  project controls, and **Add new project**; invoking that control through the
+  session did not open a creation dialog. No Project or thread was created and
+  no IDs were returned.
+- Refreshed tools for the installed `neo` ChatGPT app, then re-read its status.
+  It remains `connected: false`, `permissions: false`; authenticated `voice.reply`
+  invocation from ChatGPT is therefore unavailable.
+- NeoY cluster discovery still lists `work`, but `cluster status work` returned
+  `Could not connect to the server`. Per the Worknode access rule, no direct SSH
+  or alternate access path was used. The `neo-livekit-smoke` container state,
+  LiveKit credentials, and room participants could not be verified or touched.
+- Added `testNoMicMCPFacadeRoundTripSubmitsThenDeliversCorrelatedSegments`, which
+  exercises the registered `voice.session` MCP facade: no-mic text injection
+  returns `submitted`, two correlated `voice.reply` segments reach the fake
+  synthesizer in order, and only the final segment returns a delivered receipt.
+  This is an in-process boundary injection test. It is not ChatGPT or LiveKit
+  E2E and does not represent real audio playback.
+- Focused VoiceSession suite: **18 tests, 0 failures** on 2026-10-20. No speech,
+  TTS/room media, playback latency, or ChatGPT delivery latency was measured.
+
+The required LiveKit pipeline and full no-microphone ChatGPT→LiveKit E2E remain
+unimplemented/unverified; this follow-up must not be treated as acceptance of
+those reviewer findings.

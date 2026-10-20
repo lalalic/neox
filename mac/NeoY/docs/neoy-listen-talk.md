@@ -96,3 +96,14 @@ must never cancel the submitted ChatGPT/tool task.
   real LiveKit room participants, recorded source speech, streaming STT, streamed
   voice reply, or measured playback latency. Do not promote a synthetic or
   no-mic test to real-speech acceptance.
+
+- 2026-10-20: the registered `voice.session` facade now has a no-microphone
+  round-trip injection test through correlated `voice.reply` segments. Focused
+  VoiceSession suite: **18 tests, 0 failures**. The test uses a fake synthesizer;
+  it verifies tool routing, sequence, and receipts only. It does not close the
+  LiveKit, ChatGPT Project, or real-speech E2E gates. Latest Browser Workspace
+  project setup still fails to find the project-name field; ChatGPT's `neo` app
+  reports disconnected. NeoY cluster `status work` returns
+  `Could not connect to the server`, so the existing Worknode LiveKit container
+  could not be inspected or exercised. See
+  `neo-voice-project-setup-evidence.md`.
