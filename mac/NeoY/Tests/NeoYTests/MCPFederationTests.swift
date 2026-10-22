@@ -9,7 +9,7 @@ final class MCPFederationTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let client = NeoYMCPStdioClient(
             executable: fixture.node, arguments: [fixture.server.path],
-            environment: NeoYBundledRuntime.coreEnvironment,
+            environment: Self.authorizedFixtureEnvironment,
             retryDelays: [.milliseconds(10)]
         )
         defer { Task { await client.stop() } }
@@ -52,7 +52,7 @@ final class MCPFederationTests: XCTestCase {
     }
 
     func testUnexpectedAndRepeatedChildExitsRecoverWithoutDuplicateTools() async throws {
-        let fixture = try Self.makeFixture()
+        let fixture = try Self.makeFixture(requireCoreAuthorization: false)
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let server = await MainActor.run { MCPServer(name: "test", port: 0) }
         let federation = await MainActor.run { NeoYMCPFederation(server: server) }
@@ -89,7 +89,7 @@ final class MCPFederationTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let client = NeoYMCPStdioClient(
             executable: fixture.node, arguments: [fixture.server.path],
-            environment: NeoYBundledRuntime.coreEnvironment,
+            environment: Self.authorizedFixtureEnvironment,
             requestTimeout: .seconds(2)
         )
         defer { Task { await client.stop() } }
@@ -117,7 +117,7 @@ final class MCPFederationTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let client = NeoYMCPStdioClient(
             executable: fixture.node, arguments: [fixture.server.path],
-            environment: NeoYBundledRuntime.coreEnvironment,
+            environment: Self.authorizedFixtureEnvironment,
             requestTimeout: .seconds(15)
         )
         defer { Task { await client.stop() } }
@@ -148,7 +148,7 @@ final class MCPFederationTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let client = NeoYMCPStdioClient(
             executable: fixture.node, arguments: [fixture.server.path],
-            environment: NeoYBundledRuntime.coreEnvironment,
+            environment: Self.authorizedFixtureEnvironment,
             retryDelays: [.milliseconds(10)], requestTimeout: .milliseconds(300)
         )
         defer { Task { await client.stop() } }
@@ -291,7 +291,7 @@ final class MCPFederationTests: XCTestCase {
         try Data().write(to: failure)
         let client = NeoYMCPStdioClient(
             executable: fixture.node, arguments: [fixture.server.path],
-            environment: NeoYBundledRuntime.coreEnvironment.merging([
+            environment: Self.authorizedFixtureEnvironment.merging([
                 "FAKE_MCP_FAIL_FILE": failure.path
             ]) { _, supplied in supplied },
             retryDelays: [.milliseconds(20), .milliseconds(50)]
@@ -306,6 +306,13 @@ final class MCPFederationTests: XCTestCase {
             "args": .object(["command": .string("printf recovered")])
         ]))
         XCTAssertTrue(try Self.text(recoveryResult).contains("recovered"))
+    }
+
+    // Explicit test-only authorization. Production Core environment remains fail-closed.
+    private static var authorizedFixtureEnvironment: [String: String] {
+        NeoYBundledRuntime.coreEnvironment.merging([
+            "NEO_CORE_FULL_ACCESS_ACK": "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS"
+        ]) { _, supplied in supplied }
     }
 
     private struct Fixture {

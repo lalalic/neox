@@ -16,6 +16,9 @@ targets:
         buildPhase: resources
       - path: Resources/features.json
         buildPhase: resources
+      - path: Runtime
+        type: folder
+        buildPhase: resources
     resources:
       - Resources/Scripts
     settings:

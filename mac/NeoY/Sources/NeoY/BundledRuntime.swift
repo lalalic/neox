@@ -5,7 +5,6 @@ enum NeoYBundledRuntime {
     static let legacyMacBridgeProviderName = "macbridge"
     static var coreEnvironment: [String: String] {
         [
-            "NEO_CORE_FULL_ACCESS_ACK": "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS",
             "NEO_CORE_DATA_DIR": NeoYPaths.supportDirectory.appendingPathComponent("core", isDirectory: true).path,
             "NEO_CORE_LOG_DIR": FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library", isDirectory: true)
@@ -13,6 +12,7 @@ enum NeoYBundledRuntime {
                 .appendingPathComponent("NeoY", isDirectory: true)
                 .appendingPathComponent("Core", isDirectory: true).path,
             "NEOY_VERSION": NeoYCoreRuntime.version,
+            "NEO_CORE_FULL_ACCESS_ACK": "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS",
         ]
     }
 
@@ -20,17 +20,15 @@ enum NeoYBundledRuntime {
         name == coreProviderName || name == legacyMacBridgeProviderName
     }
 
-    static var repoRuntimeURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Workspace", isDirectory: true)
-            .appendingPathComponent("neox", isDirectory: true)
-            .appendingPathComponent("mac", isDirectory: true)
-            .appendingPathComponent("NeoY", isDirectory: true)
+    // Copy Core into the signed app bundle at build time. Never use a developer checkout
+    // as an implicit production fallback. Missing Core remains an unavailable provider.
+    static var packagedRuntimeURL: URL {
+        (Bundle.main.resourceURL ?? Bundle.main.bundleURL)
             .appendingPathComponent("Runtime", isDirectory: true)
     }
 
     static func coreMCPServers(
-        runtimeURL: URL = repoRuntimeURL,
+        runtimeURL: URL = packagedRuntimeURL,
         fileManager: FileManager = .default
     ) -> [NeoYMCPServerConfiguration] {
         let tools = runtimeURL
@@ -69,7 +67,7 @@ enum NeoYBundledRuntime {
 
     static func resolvedMCPServers(
         userServers: [NeoYMCPServerConfiguration],
-        runtimeURL: URL = repoRuntimeURL,
+        runtimeURL: URL = packagedRuntimeURL,
         fileManager: FileManager = .default
     ) -> [NeoYMCPServerConfiguration] {
         let external = userServers.filter { !isBundledProviderName($0.name) }

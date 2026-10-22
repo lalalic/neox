@@ -35,6 +35,9 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        // Best-effort idempotent setup. Never overwrite an existing developer CLI
+        // or user-owned Global Skills. Missing release artifacts remain explicit.
+        Task.detached { _ = NeoCLISetup.setup() }
         startNativePhoneServices()
         startServer()
         observers.append(NotificationCenter.default.addObserver(

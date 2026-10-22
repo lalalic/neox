@@ -1,0 +1,85 @@
+{
+  "schema": "neo.p0.bom-candidate.v1",
+  "release_ready": false,
+  "generated_at": "2026-10-22T06:57:26.597140+00:00",
+  "warning": "Developer worktree and ad hoc build hashes are evidence, not released signed immutable artifacts. Do not publish this BOM as a release.",
+  "components": [
+    {
+      "component": "neo-native-app",
+      "owner": "lalalic/neox",
+      "source_sha": "acfa2a5abbce2e55f85afab2fefd0b5fba1739ab",
+      "source_dirty": true,
+      "version": "2.3.1",
+      "bundle_id": "com.neox.neoy",
+      "macos_min": "14.0",
+      "build_binary_sha256": "08fe3c44ec0fcafee084e8b25289d041d9fd424a589f6636320e19766cf6cb37",
+      "signed_release": false,
+      "artifact_uri": null,
+      "release_status": "NOT_VERIFIED"
+    },
+    {
+      "component": "neo-core",
+      "owner": "lalalic/neox/mac/NeoY/Runtime",
+      "source_sha": "acfa2a5abbce2e55f85afab2fefd0b5fba1739ab",
+      "source_dirty": true,
+      "version": "0.1.7",
+      "npm_name": "@lalalic/neo",
+      "artifact_filename": "lalalic-neo-0.1.7.tgz",
+      "candidate_artifact_sha256": "f95196b61affbd585f4e9aa93240e5d1ef68cffa2c4a46fa8a54f1d1774f3520",
+      "npm_integrity": "sha512-uxeP/uBaSiO9q9V0hClVuOtBEKUH2L77zpgtJgebJvdN47G5lZ0JJuEVCNkG57CiGfyex9piBw9ILOYk2uFY2A==",
+      "file_count": 17,
+      "release_status": "CANDIDATE_ONLY",
+      "source_tree_sha256": "835ed15cfd93f8f961d39a29aed6d4b74c3eae5b11b7cdc88033178eccae541f",
+      "bundled_resource_tree_sha256": "835ed15cfd93f8f961d39a29aed6d4b74c3eae5b11b7cdc88033178eccae541f",
+      "source_file_count": 26,
+      "bundled_file_count": 26,
+      "source_bundled_bytes_match": true,
+      "packaged_bom_note": "npm pack tarball hash is separate from app resource-tree hash; signed app release must attest both at build time.",
+      "excluded_local_dotfiles": [
+        ".DS_Store",
+        "src/.DS_Store",
+        "src/core/.DS_Store",
+        "src/core/bridge/.DS_Store"
+      ]
+    },
+    {
+      "component": "neo-legacy-cli",
+      "owner": "lalalic/neo",
+      "source_sha": "ea3bc390e42d6fcfc03fee74bfac14eff2a58ed4",
+      "source_dirty": true,
+      "version": "1.0.1",
+      "npm_name": "neo",
+      "bin": [
+        "neo",
+        "neo-queue"
+      ],
+      "artifact_uri": null,
+      "release_status": "NOT_VERIFIED"
+    },
+    {
+      "component": "agents-relay",
+      "owner": "lalalic/agents-relay",
+      "source_sha": "7197455c2a4e66531a0809c4b82b5d7b7245eb64",
+      "source_dirty": true,
+      "checkout_package_version": "2.0.1-e2e.20261010.43",
+      "installed_service_version": null,
+      "release_status": "NOT_VERIFIED"
+    },
+    {
+      "component": "browser-workspace",
+      "owner": "lalalic/browser-workspace",
+      "source_sha": "43ede9897c99e207f3a6bcbdd9918ba6989f22ad",
+      "source_dirty": true,
+      "checkout_package_version": "0.4.16",
+      "release_status": "NOT_VERIFIED"
+    }
+  ],
+  "missing_release_gates": [
+    "Signed/notarized product app",
+    "clean source commit + stable git ref",
+    "published package integrity verification",
+    "installed Neo CLI namespace migration",
+    "external component version constraints",
+    "installer/rollback/recovery E2E"
+  ]
+}
