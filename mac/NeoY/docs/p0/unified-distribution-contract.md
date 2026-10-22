@@ -98,3 +98,7 @@ Release P0 is **NOT PASSED** while blockers remain. No installation, restart, me
 - `Tests/NeoYTests/MCPFederationTests.swift` now passes an explicit synthetic acknowledgement **only to tests that check Core authorization**. The automatic recovery fixture sets `requireCoreAuthorization: false`, because its purpose is restart/reconnection, not the Core security gate. The negative unauthorized case still runs with no acknowledgement.
 - Re-run complete `xcodebuild ... CODE_SIGNING_ALLOWED=NO test`: **76/76 PASS**. No running services, signed applications or persisted user data were touched. This verifies unit/integration tests only; actual signed app installation and service recovery remain NOT_RUN.
 - Independent external Reviewer: **NOT_RUN** (no independent reviewer worker was launched). Local source/diff review checked owner boundaries, environment stripping and fixture-only elevated authorization.
+
+## Failure isolation follow-up
+
+Full native tests after adding missing-Core negative fixture: **77/77 PASS**. `testMissingPackagedCoreDoesNotHideExternalProviders` verifies missing app-bundled Core suppresses only Core and preserves configured external `events` provider. This validates resolver behavior, not a real process-crash or node-offline scenario. Real-service recovery remains NOT_RUN.

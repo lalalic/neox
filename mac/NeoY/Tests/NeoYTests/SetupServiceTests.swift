@@ -350,6 +350,18 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertFalse(normalized.contains("\"name\" : \"macbridge\""))
     }
 
+    func testMissingPackagedCoreDoesNotHideExternalProviders() {
+        let absent = Self.makeDirectory().appendingPathComponent("not-installed", isDirectory: true)
+        let external = NeoYMCPServerConfiguration(name: "events", url: "http://127.0.0.1:9999/mcp", isEnabled: true)
+        let legacy = NeoYMCPServerConfiguration(name: "macbridge", url: "stdio:///tmp/legacy", isEnabled: true)
+        let resolved = NeoYBundledRuntime.resolvedMCPServers(
+            userServers: [external, legacy], runtimeURL: absent
+        )
+        XCTAssertEqual(resolved.map(\.name), ["events"])
+        XCTAssertEqual(resolved.first?.url, external.url)
+        XCTAssertTrue(NeoYBundledRuntime.coreMCPServers(runtimeURL: absent).isEmpty)
+    }
+
     func testBundledCoreToolsAreFlat() {
         XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "core", tool: "terminal"), "terminal")
         XCTAssertEqual(NeoYBundledRuntime.exposedToolName(provider: "core", tool: "git_apply_patch"), "git_apply_patch")
