@@ -42,6 +42,12 @@ codesign --verify --deep --strict "$APP"
 
 # Fail before staging, changing launchd or replacing the currently running app.
 # An app without packaged Core would silently lose the Core MCP provider.
+# A previously functional Core must not disappear when the new build stops
+# injecting broad authorization. Never mint the unlock file automatically.
+if [[ -d "$DEST" && ! -f "$HOME/Library/Application Support/NeoY/core/FULL_ACCESS_ENABLED" ]]; then
+  print -u2 "NeoY install preflight blocked: Core authorization is not persisted. The new build will not auto-grant full shell/filesystem access. Explicit consent and a revocable unlock are required before replacing a working installation."
+  exit 1
+fi
 CORE_ENTRY="$APP/Contents/Resources/Runtime/src/core/tools/index.mjs"
 CORE_PACKAGE="$APP/Contents/Resources/Runtime/package.json"
 if [[ ! -f "$CORE_ENTRY" || ! -f "$CORE_PACKAGE" ]]; then
