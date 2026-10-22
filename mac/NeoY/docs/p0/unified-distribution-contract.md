@@ -11,7 +11,7 @@ The native app is necessary for signed host identity, TCC permissions, OAuth/MCP
 | Product | Source authority | Observed version | Release required proof | State |
 |---|---|---|---|---|
 | Native NeoY/Neo app | `neox/mac/NeoY` + Xcode project | 2.3.1 (earlier live observation) | signed bundle ID, code-sign team, git SHA, artifact SHA-256, macOS min version | NOT_VERIFIED for release |
-| Core Node provider | `neox/mac/NeoY/Runtime/package.json` | `@lalalic/neo@0.1.7` | npm integrity + tarball hash + lockfile + Node compatibility + bundle resource verification | NOT_VERIFIED |
+| Core Node provider | `neox/mac/NeoY/Runtime/package.json` | `@lalalic/neoy-core@0.1.7` | npm integrity + tarball hash + lockfile + Node compatibility + bundle resource verification | NOT_VERIFIED |
 | Core runtime identity | `CoreRuntime.swift` | independent app/runtime field, not package SemVer | published API/schema revision and provenance link | NOT_VERIFIED |
 | Historical Neo CLI | `neo/package.json` | `neo@1.0.1`; bins `neo`, `neo-queue` | frozen tarball + bin behavior golden fixtures | NOT_VERIFIED |
 | Relay | `agents-relay` owner, separately supervised | runtime-selected `@latest` historically | exact pinned package/integrity + SQLite schema + migration/rollback | NOT_VERIFIED |
@@ -46,7 +46,7 @@ Default install: no shell full-access acknowledgment, no unattended escalation, 
 | Capability | Implementation owner | Depends on | Permission/auth | State/health oracle | Lifecycle/data |
 |---|---|---|---|---|---|
 | Native gateway/setup/TCC | neox Swift | signed app, launchd | local consent, TCC | bound listener and authenticated MCP | Neo; Application Support/NeoY |
-| Core shell/fs/PTY/Codex/patch | @lalalic/neo scoped Core | Node + pinned runtime | scoped filesystem/process consent | stdio initialize + tools/list | Native supervisor; Core data/log dirs |
+| Core shell/fs/PTY/Codex/patch | @lalalic/neoy-core scoped Core | Node + pinned runtime | scoped filesystem/process consent | stdio initialize + tools/list | Native supervisor; Core data/log dirs |
 | Shared projects/skills resolver | neo repo | installed skill pack + workspace | filesystem access | resolver exit JSON and fixture tests | Neo dispatcher; user workspace |
 | Escalation | neo repo | Codex/provider credentials | explicit elevated approval | structured terminal result | owning CLI; logs and handoff |
 | Queue/packager/updater | neo repo | package tools, service owner | distinct service privileges | CLI checks + service health | independent process; owner-defined data |

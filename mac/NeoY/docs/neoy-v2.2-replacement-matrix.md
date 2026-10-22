@@ -1,6 +1,6 @@
 # NeoY Core ownership matrix
 
-NeoY preserves the needed developer capabilities in `@lalalic/neo` Core tools.
+NeoY preserves the needed developer capabilities in `@lalalic/neoy-core` Core tools.
 The implementation was migrated from MacBridge source; MacBridge is no longer a
 runtime dependency, and NeoY does not duplicate these capabilities in Swift.
 

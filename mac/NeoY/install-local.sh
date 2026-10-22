@@ -5,14 +5,14 @@ HERE="${0:A:h}"
 PROJECT="$HERE/NeoY.xcodeproj"
 DERIVED="$HERE/build"
 APP="$DERIVED/Build/Products/Debug/NeoY.app"
-DEST="/Applications/NeoY.app"
+DEST="/Applications/Neo.app"
 ENTITLEMENTS="$HERE/Resources/NeoY.entitlements"
 LAUNCH_LABEL="com.neox.neoy.keepalive"
 LAUNCH_PLIST="$HOME/Library/LaunchAgents/$LAUNCH_LABEL.plist"
 WATCHDOG_LABEL="com.neox.neoy.upgrade-watchdog"
 WATCHDOG_PLIST="$HOME/Library/LaunchAgents/$WATCHDOG_LABEL.plist"
 WATCHDOG="$HOME/Library/Application Support/NeoY/bin/upgrade-watchdog.sh"
-BACKUP="/Applications/NeoY.previous.app"
+BACKUP="/Applications/Neo.previous.app"
 UPGRADE_LOG="$HOME/Library/Logs/NeoY/upgrade.log"
 UPGRADE_TRIGGER="$HOME/Library/Application Support/NeoY/upgrade.trigger"
 
@@ -65,7 +65,11 @@ EXPECTED_HASH="$(shasum -a 256 "$DEST.new/Contents/MacOS/NeoY" | awk '{print $1}
 # Keep exactly one known-good previous app. Never delete the current working app
 # until the fully built and signed candidate has been staged.
 rm -rf "$BACKUP"
-if [[ -d "$DEST" ]]; then ditto "$DEST" "$BACKUP"; fi
+if [[ -d "$DEST" ]]; then
+  ditto "$DEST" "$BACKUP"
+elif [[ -d /Applications/NeoY.app ]]; then
+  ditto /Applications/NeoY.app "$BACKUP"
+fi
 
 # Arm the watchdog under launchd BEFORE the working NeoY is stopped. The watchdog
 # waits for UPGRADE_TRIGGER, so it cannot declare success against the old app.
@@ -80,6 +84,8 @@ cat > "$WATCHDOG_PLIST" <<PLIST
   <key>RunAtLoad</key><true/>
   <key>EnvironmentVariables</key><dict>
     <key>NEOY_EXPECTED_HASH</key><string>$EXPECTED_HASH</string>
+    <key>NEOY_DEST</key><string>$DEST</string>
+    <key>NEOY_BACKUP</key><string>$BACKUP</string>
     <key>NEOY_UPGRADE_LOG</key><string>$UPGRADE_LOG</string>
     <key>NEOY_TRIGGER_FILE</key><string>$UPGRADE_TRIGGER</string>
   </dict>
@@ -94,6 +100,9 @@ launchctl bootout "gui/$UID/$LAUNCH_LABEL" 2>/dev/null || true
 killall NeoY 2>/dev/null || true
 rm -rf "$DEST"
 mv "$DEST.new" "$DEST"
+# Migrate only after the new signed app is staged; retain the legacy app until
+# watchdog health confirmation, so failed upgrades can still be recovered.
+
 
 # Runtime code is loaded directly from the NeoY repo; remove all legacy runtime copies/overrides.
 rm -rf "$HOME/Library/Application Support/NeoY/runtime"

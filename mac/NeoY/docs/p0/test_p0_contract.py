@@ -13,7 +13,7 @@ SWIFT = ROOT / 'mac/NeoY/Sources/NeoY/BundledRuntime.swift'
 class P0SourceContracts(unittest.TestCase):
     def test_repository_identity_and_bins(self):
         app = json.loads((RUNTIME / 'package.json').read_text())
-        self.assertEqual(app['name'], '@lalalic/neo')
+        self.assertEqual(app['name'], '@lalalic/neoy-core')
         self.assertTrue((RUNTIME / 'src/core/tools/index.mjs').is_file())
         cli = json.loads((NEO / 'package.json').read_text())
         self.assertEqual(cli['name'], 'neo')

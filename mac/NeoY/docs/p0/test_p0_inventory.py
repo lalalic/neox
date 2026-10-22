@@ -42,7 +42,7 @@ class InventoryContractTests(unittest.TestCase):
     def test_release_bom_never_claims_unverified_candidate_is_ready(self):
         self.assertFalse(self.bom['release_ready'])
         components = {c['component']:c for c in self.bom['components']}
-        self.assertEqual(components['neo-core']['npm_name'], '@lalalic/neo')
+        self.assertEqual(components['neo-core']['npm_name'], '@lalalic/neoy-core')
         self.assertTrue(components['neo-core']['npm_integrity'].startswith('sha512-'))
         self.assertEqual(len(components['neo-core']['candidate_artifact_sha256']), 64)
         self.assertTrue(components['neo-core']['source_bundled_bytes_match'])

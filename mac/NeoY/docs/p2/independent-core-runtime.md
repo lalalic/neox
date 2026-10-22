@@ -1,6 +1,6 @@
 # P2 — Independently managed Neo Core runtime
 
-NeoY.app is the stable native control plane. The `@lalalic/neo` npm package supplies its Core MCP runtime independently of app release cycles.
+NeoY.app is the stable native control plane. The `@lalalic/neoy-core` npm package supplies its Core MCP runtime independently of app release cycles.
 
 ## Location and lifecycle
 
@@ -12,11 +12,11 @@ NeoY.app is the stable native control plane. The `@lalalic/neo` npm package supp
 
 ## Updating without replacing NeoY.app
 
-Open **NeoY Setup → Advanced → Runtime**. Enter a semver version, `latest`, or an absolute `.tgz` path for a verified local `@lalalic/neo` npm package. Click **Upgrade Core**.
+Open **NeoY Setup → Advanced → Runtime**. Enter a semver version, `latest`, or an absolute `.tgz` path for a verified local `@lalalic/neoy-core` npm package. Click **Upgrade Core**.
 
-The installer creates an isolated temporary npm prefix with `--ignore-scripts`, requires the exact `@lalalic/neo` identity and expected version, checks MCP initialization and `tools/list` using the candidate in isolation, and only then atomically activates it. The activated installed copy is probed again; failures restore the previous active runtime. NeoY reconnects the Core provider only, without replacing the signed app or restarting unrelated providers. **Rollback** switches to the previously active version. Existing version directories remain immutable.
+The installer creates an isolated temporary npm prefix with `--ignore-scripts`, requires the exact `@lalalic/neoy-core` identity and expected version, checks MCP initialization and `tools/list` using the candidate in isolation, and only then atomically activates it. The activated installed copy is probed again; failures restore the previous active runtime. NeoY reconnects the Core provider only, without replacing the signed app or restarting unrelated providers. **Rollback** switches to the previously active version. Existing version directories remain immutable.
 
-The npm package is managed by the `lalalic/neox/mac/NeoY/Runtime` source and published as `@lalalic/neo`. The public npm registry currently may be older than the app seed; automatic downgrade is blocked. Publish new Core versions separately from NeoY.app (the package version must advance). When npm credentials are unavailable, use a verified `.tgz` artifact; no registry publication is assumed.
+The npm package is managed by the `lalalic/neox/mac/NeoY/Runtime` source and published as `@lalalic/neoy-core`. The public npm registry currently may be older than the app seed; automatic downgrade is blocked. Publish new Core versions separately from NeoY.app (the package version must advance). When npm credentials are unavailable, use a verified `.tgz` artifact; no registry publication is assumed.
 
 ## Verification and boundaries
 

@@ -55,7 +55,7 @@ enum NeoYManagedCoreRuntime {
         guard valid(source) else { throw NSError(domain: "NeoYCore", code: 4, userInfo: [NSLocalizedDescriptionKey: "rollback version not installed"]) }
         try install(source: source, version: version, root: root)
     }
-    /// Upgrade from a separately acquired, unpacked and verified @lalalic/neo package.
+    /// Upgrade from a separately acquired, unpacked and verified @lalalic/neoy-core package.
     /// A candidate must pass a Node syntax check before atomically becoming active.
     static func upgrade(source: URL, version: String, root: URL = root, node: URL) throws {
         guard valid(source) else { throw NSError(domain: "NeoYCore", code: 5, userInfo: [NSLocalizedDescriptionKey: "invalid upgrade package"]) }
@@ -105,7 +105,7 @@ enum NeoYManagedCoreRuntime {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: npm)
         task.environment = ProcessInfo.processInfo.environment.merging(["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]) { _, configured in configured }
-        task.arguments = ["install", "--prefix", staging.path, "--ignore-scripts", "--no-audit", "--no-fund", "--save=false", local ? requested : "@lalalic/neo@\(requested)"]
+        task.arguments = ["install", "--prefix", staging.path, "--ignore-scripts", "--no-audit", "--no-fund", "--save=false", local ? requested : "@lalalic/neoy-core@\(requested)"]
         let output = Pipe()
         task.standardOutput = output
         task.standardError = output
@@ -115,11 +115,11 @@ enum NeoYManagedCoreRuntime {
         guard task.terminationStatus == 0 else {
             throw NSError(domain: "NeoYCore", code: 9, userInfo: [NSLocalizedDescriptionKey: "Core download failed: \(String(decoding: log, as: UTF8.self).suffix(400))"])
         }
-        let source = staging.appendingPathComponent("node_modules/@lalalic/neo")
+        let source = staging.appendingPathComponent("node_modules/@lalalic/neoy-core")
         guard valid(source) else { throw NSError(domain: "NeoYCore", code: 10, userInfo: [NSLocalizedDescriptionKey: "Downloaded Core has no entrypoint"]) }
         let metadata = try Data(contentsOf: source.appendingPathComponent("package.json"))
         let info = try JSONSerialization.jsonObject(with: metadata) as? [String: Any]
-        guard info?["name"] as? String == "@lalalic/neo", let version = info?["version"] as? String,
+        guard info?["name"] as? String == "@lalalic/neoy-core", let version = info?["version"] as? String,
               local || requested == "latest" || version == requested else {
             throw NSError(domain: "NeoYCore", code: 11, userInfo: [NSLocalizedDescriptionKey: "Downloaded Core identity/version mismatch"])
         }

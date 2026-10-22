@@ -1,4 +1,4 @@
-name: Publish Neo Runtime
+name: Publish NeoY Core Runtime
 
 on:
   push:
@@ -37,8 +37,8 @@ jobs:
         shell: bash
         run: |
           version="${{ steps.publication.outputs.version }}"
-          if npm view "@lalalic/neo@$version" version --json 2>/dev/null | grep -Fq "\"$version\""; then
-            echo "Refusing to republish existing @lalalic/neo@$version"
+          if npm view "@lalalic/neoy-core@$version" version --json 2>/dev/null | grep -Fq "\"$version\""; then
+            echo "Refusing to republish existing @lalalic/neoy-core@$version"
             exit 1
           fi
       - run: npm publish --provenance --access public

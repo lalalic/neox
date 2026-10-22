@@ -1,8 +1,8 @@
 #!/bin/zsh
 set -u
 
-DEST="${NEOY_DEST:-/Applications/NeoY.app}"
-BACKUP="${NEOY_BACKUP:-/Applications/NeoY.previous.app}"
+DEST="${NEOY_DEST:-/Applications/Neo.app}"
+BACKUP="${NEOY_BACKUP:-/Applications/Neo.previous.app}"
 LAUNCH_LABEL="${NEOY_LAUNCH_LABEL:-com.neox.neoy.keepalive}"
 LAUNCH_PLIST="${NEOY_LAUNCH_PLIST:-$HOME/Library/LaunchAgents/$LAUNCH_LABEL.plist}"
 PORT="${NEOY_PORT:-6767}"

@@ -6,7 +6,7 @@ final class ManagedCoreRuntimeTests: XCTestCase {
         let source = parent.appendingPathComponent("candidate-\(version)")
         let tools = source.appendingPathComponent("src/core/tools")
         try FileManager.default.createDirectory(at: tools, withIntermediateDirectories: true)
-        try Data("{\"name\":\"@lalalic/neo\",\"version\":\"\(version)\"}".utf8).write(to: source.appendingPathComponent("package.json"))
+        try Data("{\"name\":\"@lalalic/neoy-core\",\"version\":\"\(version)\"}".utf8).write(to: source.appendingPathComponent("package.json"))
         try Data("export const healthy = true;".utf8).write(to: tools.appendingPathComponent("index.mjs"))
         return source
     }
