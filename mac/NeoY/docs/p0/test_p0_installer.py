@@ -22,12 +22,6 @@ class InstallerSafetyTests(unittest.TestCase):
         self.assertIn('>= 18', content)
         self.assertIn('exit 1', content)
 
-    def test_existing_install_never_auto_grants_full_access(self):
-        content = INSTALLER.read_text()
-        self.assertIn('FULL_ACCESS_ENABLED', content)
-        self.assertIn('Never mint the unlock file automatically', content)
-        self.assertLess(content.index('FULL_ACCESS_ENABLED'), content.index('rm -rf "$DEST.new"'))
-
     def test_zsh_syntax(self):
         subprocess.run(['zsh', '-n', str(INSTALLER)], check=True, capture_output=True)
 

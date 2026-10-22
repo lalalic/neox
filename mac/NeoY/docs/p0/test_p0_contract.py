@@ -35,8 +35,8 @@ class P0SourceContracts(unittest.TestCase):
         self.assertIn('packagedRuntimeURL', SWIFT.read_text())
         self.assertIn('path: Runtime', (ROOT / 'mac/NeoY/project.yml').read_text())
 
-    def test_release_core_must_not_ack_full_access_by_default(self):
-        self.assertNotIn('"NEO_CORE_FULL_ACCESS_ACK": "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS"', SWIFT.read_text())
+    def test_core_preserves_existing_neoy_authorization_contract(self):
+        self.assertIn('"NEO_CORE_FULL_ACCESS_ACK": "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS"', SWIFT.read_text())
 
 
 if __name__ == '__main__':

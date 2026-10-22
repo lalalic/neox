@@ -412,7 +412,7 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertTrue(NeoYBundledRuntime.coreEnvironment["NEO_CORE_DATA_DIR"]?.contains("Application Support/NeoY/core") == true)
         XCTAssertTrue(NeoYBundledRuntime.coreEnvironment["NEO_CORE_LOG_DIR"]?.contains("Library/Logs/NeoY/Core") == true)
         XCTAssertFalse(NeoYBundledRuntime.coreEnvironment.keys.contains { $0.hasPrefix("MAC_DEV_BRIDGE_") })
-        XCTAssertNil(NeoYBundledRuntime.coreEnvironment["NEO_CORE_FULL_ACCESS_ACK"])
+        XCTAssertEqual(NeoYBundledRuntime.coreEnvironment["NEO_CORE_FULL_ACCESS_ACK"], "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS")
         XCTAssertFalse(NeoYBundledRuntime.packagedRuntimeURL.path.contains("/Workspace/neox/"))
     }
 

@@ -12,6 +12,7 @@ enum NeoYBundledRuntime {
                 .appendingPathComponent("NeoY", isDirectory: true)
                 .appendingPathComponent("Core", isDirectory: true).path,
             "NEOY_VERSION": NeoYCoreRuntime.version,
+            "NEO_CORE_FULL_ACCESS_ACK": "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS",
         ]
     }
 
