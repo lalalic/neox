@@ -31,7 +31,6 @@ if command -v node >/dev/null 2>&1; then
   npm test --prefix "$HERE/Runtime"
 fi
 
-"$HERE/prepare-neo-cli.sh"
 xcodegen generate --spec "$HERE/project.yml"
 rm -rf "$APP"
 xcodebuild -project "$PROJECT" -scheme NeoY -configuration Debug \

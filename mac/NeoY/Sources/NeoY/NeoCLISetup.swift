@@ -41,28 +41,29 @@ enum NeoCLISetup {
         guard let dest = try? FileManager.default.destinationOfSymbolicLink(atPath: path.path) else { return false }
         return URL(fileURLWithPath: dest, relativeTo: path.deletingLastPathComponent()).standardizedFileURL.path.contains("/Workspace/neo/")
     }
-    static var bundledPackage: URL? {
-        Bundle.main.url(forResource: "neo-cli", withExtension: "tgz", subdirectory: "Packages")
-    }
-
-    static func installIfMissing(packageTarball: URL? = bundledPackage) throws -> String {
-        if let path = cliPath() { return isDevelopmentLink(path) ? "Developer CLI retained: \(path.path)" : "CLI already installed: \(path.path)" }
-        guard let packageTarball, FileManager.default.fileExists(atPath: packageTarball.path) else {
-            return "CLI needs setup: no verified Neo package artifact configured"
+    static let npmCLI = "@lalalic/neo@1.0.2"
+    /// CLI is an independently published npm release, never a build-machine checkout.
+    static func installIfMissing() throws -> String {
+        if let path = cliPath() {
+            return isDevelopmentLink(path) ? "Developer CLI retained: \(path.path)" : "CLI already installed: \(path.path)"
         }
         guard let npm = ["/opt/homebrew/bin/npm", "/usr/local/bin/npm"].first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
             return "CLI needs setup: npm unavailable"
         }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: npm)
-        task.arguments = ["install", "--global", packageTarball.path, "--ignore-scripts", "--no-audit", "--no-fund"]
+        task.arguments = ["install", "--global", npmCLI, "--ignore-scripts", "--no-audit", "--no-fund"]
+        task.environment = ProcessInfo.processInfo.environment.merging(["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]) { _, configured in configured }
         let output = Pipe()
         task.standardOutput = output
         task.standardError = output
         try task.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
         task.waitUntilExit()
-        guard task.terminationStatus == 0, cliPath() != nil else { return "CLI installation failed (exit \(task.terminationStatus))" }
-        return "CLI installed from verified artifact"
+        guard task.terminationStatus == 0, cliPath() != nil else {
+            return "CLI npm install failed (exit \(task.terminationStatus)): \(String(decoding: data, as: UTF8.self).suffix(300))"
+        }
+        return "CLI installed from npm \(npmCLI)"
     }
     /// Install only NeoY dependencies. Existing user-installed skills are never replaced.
     /// webhelm is supplied by the browser-workspace skill repository, independently of lalalic/neo.

@@ -5,6 +5,15 @@ on:
     tags:
       - 'runtime-v*'
   workflow_dispatch:
+    inputs:
+      package:
+        description: Package to publish
+        required: true
+        type: choice
+        default: core
+        options:
+          - core
+          - neo-cli
 
 permissions:
   contents: read
@@ -14,6 +23,7 @@ permissions:
 
 jobs:
   publish:
+    if: github.event_name != 'workflow_dispatch' || inputs.package == 'core'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -56,3 +66,32 @@ jobs:
         with:
           token: ${{ github.token }}
           stage: runtime npm publish workflow
+
+  publish-neo-cli:
+    if: github.event_name == 'workflow_dispatch' && inputs.package == 'neo-cli'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: lalalic/neo
+          ref: main
+          path: cli-source
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm install --global npm@11.15.0
+      - name: Test CLI source
+        working-directory: cli-source
+        run: npm test
+      - name: Stage publishable CLI from source checkout
+        run: node cli-source/scripts/stage-neo-cli.mjs "$RUNNER_TEMP/neo-cli-dist"
+      - name: Validate distribution identity and npm metadata
+        working-directory: ${{ runner.temp }}/neo-cli-dist
+        run: |
+          node -e 'const p=require("./package.json"); if(p.name!=="@lalalic/neo" || p.version!=="1.0.2" || p.private) process.exit(1)'
+          node .bin/neo.mjs --help
+          npm pack --dry-run --ignore-scripts
+      - name: Publish Neo CLI through npm OIDC
+        working-directory: ${{ runner.temp }}/neo-cli-dist
+        run: npm publish --provenance --access public

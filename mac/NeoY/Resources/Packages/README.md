@@ -1,3 +1,1 @@
-# Neo CLI distribution
-
-The installer stages `neo-cli.tgz` here from a verified `lalalic/neo` package artifact before building NeoY. Never install `neo@latest` from the public registry implicitly. The generated tarball is intentionally excluded from git.
+Neo CLI is published independently as `@lalalic/neo` from `lalalic/neo`. Neo.app installs the pinned npm package on first launch; no build-time CLI tarball is required.

@@ -64,8 +64,11 @@ final class ManagedCoreRuntimeTests: XCTestCase {
             .filter { $0.pathExtension == "tgz" }
         guard archives.count == 1 else { return XCTFail("expected one Core archive") }
         let managed = base.appendingPathComponent("managed")
-        XCTAssertEqual(try NeoYManagedCoreRuntime.registryUpgrade(version: archives[0].path, root: managed), "0.1.7")
-        XCTAssertEqual(NeoYManagedCoreRuntime.active(in: managed)?.lastPathComponent, "0.1.7")
+        let packageData = try Data(contentsOf: bundleRoot.appendingPathComponent("package.json"))
+        let packageInfo = try XCTUnwrap(JSONSerialization.jsonObject(with: packageData) as? [String: Any])
+        let expectedVersion = try XCTUnwrap(packageInfo["version"] as? String)
+        XCTAssertEqual(try NeoYManagedCoreRuntime.registryUpgrade(version: archives[0].path, root: managed), expectedVersion)
+        XCTAssertEqual(NeoYManagedCoreRuntime.active(in: managed)?.lastPathComponent, expectedVersion)
         XCTAssertFalse(NeoYManagedCoreRuntime.selected(bundle: bundleRoot, root: managed).path.contains("Contents/Resources/Runtime"))
     }
 
