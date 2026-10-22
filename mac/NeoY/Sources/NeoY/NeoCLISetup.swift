@@ -70,11 +70,11 @@ enum NeoCLISetup {
         let missing = Set(requiredGlobalSkills).subtracting(installedGlobalSkills())
         if missing.contains("events-bus") || missing.contains("daemon-service-manage") {
             for skill in ["events-bus", "daemon-service-manage"] where missing.contains(skill) {
-                _ = try runSkills(["add", "lalalic/neo", "-g", "-y", "-a", "codex", "-s", skill])
+                _ = try runSkills(["add", "lalalic/neo", "-g", "-y", "-s", skill])
             }
         }
         if missing.contains("webhelm") {
-            _ = try runSkills(["add", "lalalic/browser-workspace", "-g", "-y", "-a", "codex", "-s", "webhelm"])
+            _ = try runSkills(["add", "lalalic/browser-workspace", "-g", "-y", "-s", "webhelm"])
         }
         let installed = installedGlobalSkills()
         let remaining = requiredGlobalSkills.filter { !installed.contains($0) }
