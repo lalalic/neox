@@ -114,3 +114,7 @@ A candidate copied from the isolated build was locally signed with an available 
 ## 2026-10-22 permission compatibility decision
 
 User confirmed Core permissions must remain identical to the original NeoY implementation. The NeoY-owned Core environment again supplies the historical `NEO_CORE_FULL_ACCESS_ACK` to the Core provider only. The shared child process environment still removes ambient inherited acknowledgments. Installer no longer blocks existing installations for lack of an added unlock file. This supersedes earlier proposals for a new consent gate; no new permission UX is part of this change.
+
+## Local Neo CLI compatibility acceptance (2026-10-22)
+
+Transitional CLI implementation remains owned by `lalalic/neo`, and the existing Neo app keeps the public product/control-plane identity. Locally packed unscoped `neo@1.0.2-p0.1` adds XChat project/skill wrappers and basic PM2 + native NeoY launchd status/start/stop/restart management. The current work node accepted the reversible local global CLI upgrade from old `neo@1.0.1`. PM2 disposable service lifecycle E2E and legacy XChat/queue/package compatibility probes PASS. Actual signed App-managed CLI installation, service manifest controller, automatic upgrades/rollback and multi-node deployment remain NOT_VERIFIED; this work does not redefine Phase P3/P4 gates.

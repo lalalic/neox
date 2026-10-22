@@ -22,6 +22,7 @@ class LegacyXChatFixtures(unittest.TestCase):
         self.workspace = self.home / 'Workspace'
         self.workspace.mkdir()
         self.env = dict(os.environ, HOME=str(self.home),
+                        NEO_SKILLS_ROOT=str(self.workspace / "neo/skills"),
                         PYTHONPATH=os.pathsep.join(filter(None,
                           [site.getusersitepackages(), os.environ.get("PYTHONPATH", "")])))
         (self.home / '.agents').mkdir()
