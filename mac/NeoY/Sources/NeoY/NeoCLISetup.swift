@@ -73,8 +73,7 @@ enum NeoCLISetup {
             _ = try runSkills(["add", "lalalic/neo", "-g", "-y", "-s"] + selected)
         }
         if missing.contains("webhelm") {
-            // Repository source must be configured/validated before any installation is attempted.
-            return "webhelm missing: install from its verified browser-workspace source"
+            _ = try runSkills(["add", "lalalic/browser-workspace", "-g", "-y", "-s", "webhelm"])
         }
         return "Global dependencies present: \(installedGlobalSkills().joined(separator: ", "))"
     }
