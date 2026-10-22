@@ -102,3 +102,7 @@ Release P0 is **NOT PASSED** while blockers remain. No installation, restart, me
 ## Failure isolation follow-up
 
 Full native tests after adding missing-Core negative fixture: **77/77 PASS**. `testMissingPackagedCoreDoesNotHideExternalProviders` verifies missing app-bundled Core suppresses only Core and preserves configured external `events` provider. This validates resolver behavior, not a real process-crash or node-offline scenario. Real-service recovery remains NOT_RUN.
+
+## 2026-10-22 install preflight hardening
+
+The local signed install script now refuses to stage a candidate unless the signed app contains `Runtime/package.json` and `Runtime/src/core/tools/index.mjs`, and `node` is present at major version >=18. This check occurs before destination staging, launchd mutation, or existing app replacement. The P0 test suite now includes installer ordering/negative-contract checks (**19/19 PASS**). This does not demonstrate a signed install or rollback rehearsal. Existing running NeoY remains unchanged.

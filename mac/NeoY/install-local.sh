@@ -40,6 +40,19 @@ codesign --force --deep --sign "$identity" \
   --entitlements "$ENTITLEMENTS" --timestamp=none "$APP"
 codesign --verify --deep --strict "$APP"
 
+# Fail before staging, changing launchd or replacing the currently running app.
+# An app without packaged Core would silently lose the Core MCP provider.
+CORE_ENTRY="$APP/Contents/Resources/Runtime/src/core/tools/index.mjs"
+CORE_PACKAGE="$APP/Contents/Resources/Runtime/package.json"
+if [[ ! -f "$CORE_ENTRY" || ! -f "$CORE_PACKAGE" ]]; then
+  print -u2 "NeoY install preflight failed: signed app does not contain packaged Core."
+  exit 1
+fi
+if ! command -v node >/dev/null 2>&1 || ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' ; then
+  print -u2 "NeoY install preflight failed: Node.js >=18 is required for packaged Core."
+  exit 1
+fi
+
 # Stage the candidate and install a rollback watchdog before touching the working app.
 mkdir -p "$HOME/Library/Application Support/NeoY/bin" "$HOME/Library/Logs/NeoY"
 cp "$HERE/Resources/Scripts/upgrade-watchdog.sh" "$WATCHDOG"
