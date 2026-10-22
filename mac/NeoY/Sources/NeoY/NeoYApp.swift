@@ -35,6 +35,8 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        // Initialize an independent Core install without touching a healthy active version.
+        try? NeoYManagedCoreRuntime.bootstrapIfMissing()
         // Best-effort idempotent setup. Never overwrite an existing developer CLI
         // or user-owned Global Skills. Missing release artifacts remain explicit.
         Task.detached { _ = NeoCLISetup.setup() }
@@ -70,6 +72,22 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
             forName: .neoYDeploymentSettingsChanged, object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.restartPrimaryMCPServer() }
+        })
+        observers.append(NotificationCenter.default.addObserver(
+            forName: Notification.Name("neoYCoreRuntimeChanged"), object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let runtimeControl = self.runtimeControl else { return }
+                await runtimeControl.reloadCore()
+            }
+        })
+        observers.append(NotificationCenter.default.addObserver(
+            forName: Notification.Name("neoYCoreRuntimeChanged"), object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let runtimeControl = self.runtimeControl else { return }
+                await runtimeControl.reloadCore()
+            }
         })
         observers.append(NotificationCenter.default.addObserver(
             forName: .neoYFeaturesChanged, object: nil, queue: .main

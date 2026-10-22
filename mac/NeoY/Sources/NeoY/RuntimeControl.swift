@@ -33,6 +33,10 @@ final class NeoYRuntimeControl {
         )
     }
 
+    func reloadCore() async {
+        await federation.reconcile(NeoYBundledRuntime.coreMCPServers(), onlyNames: [NeoYBundledRuntime.coreProviderName])
+    }
+
     func permissions() async -> [NeoYPermissionStatus] {
         await NeoYPermissionService.snapshot()
     }
