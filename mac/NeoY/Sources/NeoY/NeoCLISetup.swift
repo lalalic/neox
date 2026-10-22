@@ -69,13 +69,17 @@ enum NeoCLISetup {
     static func setupMissingGlobalSkills() throws -> String {
         let missing = Set(requiredGlobalSkills).subtracting(installedGlobalSkills())
         if missing.contains("events-bus") || missing.contains("daemon-service-manage") {
-            let selected = ["events-bus", "daemon-service-manage"].filter { missing.contains($0) }
-            _ = try runSkills(["add", "lalalic/neo", "-g", "-y", "-s"] + selected)
+            for skill in ["events-bus", "daemon-service-manage"] where missing.contains(skill) {
+                _ = try runSkills(["add", "lalalic/neo", "-g", "-y", "-s", skill])
+            }
         }
         if missing.contains("webhelm") {
             _ = try runSkills(["add", "lalalic/browser-workspace", "-g", "-y", "-s", "webhelm"])
         }
-        return "Global dependencies present: \(installedGlobalSkills().joined(separator: ", "))"
+        let installed = installedGlobalSkills()
+        let remaining = requiredGlobalSkills.filter { !installed.contains($0) }
+        guard remaining.isEmpty else { throw NSError(domain: "NeoCLISetup", code: 3, userInfo: [NSLocalizedDescriptionKey: "Global Skills missing after install: \(remaining.joined(separator: ", "))"]) }
+        return "Global dependencies present: \(installed.joined(separator: ", "))"
     }
 
     static func setup() -> String {

@@ -439,15 +439,16 @@ final class NeoYMCPFederation {
         self.server = server
     }
 
-    func reconcile(_ configurations: [NeoYMCPServerConfiguration]) async {
+    func reconcile(_ configurations: [NeoYMCPServerConfiguration], onlyNames: Set<String>? = nil) async {
         let desiredNames = Set(configurations.map(\.name))
         let knownNames = Set(exposedByServer.keys).union(resourcesByServer.keys).union(stdioClients.keys)
-        for name in knownNames where !desiredNames.contains(name) {
+        for name in knownNames where !desiredNames.contains(name) && (onlyNames?.contains(name) ?? true) {
             await clear(name)
             statusesByServer.removeValue(forKey: name)
         }
 
         for configuration in configurations {
+            if let onlyNames, !onlyNames.contains(configuration.name) { continue }
             await clear(configuration.name)
             guard configuration.isEnabled else {
                 statusesByServer[configuration.name] = .disabled(configuration)

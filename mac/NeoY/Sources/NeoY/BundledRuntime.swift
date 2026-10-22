@@ -28,7 +28,7 @@ enum NeoYBundledRuntime {
     }
 
     static func coreMCPServers(
-        runtimeURL: URL = packagedRuntimeURL,
+        runtimeURL: URL = NeoYManagedCoreRuntime.selected(),
         fileManager: FileManager = .default
     ) -> [NeoYMCPServerConfiguration] {
         let tools = runtimeURL
@@ -67,7 +67,7 @@ enum NeoYBundledRuntime {
 
     static func resolvedMCPServers(
         userServers: [NeoYMCPServerConfiguration],
-        runtimeURL: URL = packagedRuntimeURL,
+        runtimeURL: URL = NeoYManagedCoreRuntime.selected(),
         fileManager: FileManager = .default
     ) -> [NeoYMCPServerConfiguration] {
         let external = userServers.filter { !isBundledProviderName($0.name) }

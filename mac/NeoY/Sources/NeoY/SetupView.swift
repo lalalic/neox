@@ -28,6 +28,8 @@ final class NeoYSetupModel: ObservableObject {
     @Published private(set) var oauthClientID = ""
     @Published private(set) var oauthToken = ""
     @Published var result = ""
+    @Published var coreVersionInput = "latest"
+    @Published var coreRuntimeStatus = NeoYManagedCoreRuntime.active()?.lastPathComponent ?? "bootstrap Core (not installed)"
     @Published var neoCLIReport = NeoCLISetup.report()
     @Published var globalSkills = NeoCLISetup.globalSkills()
     @Published var isBusy = false
@@ -38,6 +40,35 @@ final class NeoYSetupModel: ObservableObject {
         Task {
             await refreshPermissions()
             await refreshFeatures()
+        }
+    }
+
+    func refreshCoreRuntime() {
+        coreRuntimeStatus = NeoYManagedCoreRuntime.active()?.lastPathComponent ?? "bootstrap Core (not installed)"
+    }
+
+    func changeCoreRuntime(rollback: Bool = false) {
+        guard !isBusy else { return }
+        let version = coreVersionInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        isBusy = true
+        Task.detached { [weak self] in
+            let message: String
+            do {
+                let selected = try rollback
+                    ? NeoYManagedCoreRuntime.rollbackPrevious()
+                    : NeoYManagedCoreRuntime.registryUpgrade(version: version)
+                message = "Core switched to \(selected); reconnecting Core provider"
+                await MainActor.run {
+                    NotificationCenter.default.post(name: Notification.Name("neoYCoreRuntimeChanged"), object: nil)
+                }
+            } catch {
+                message = "Core unchanged: \(error.localizedDescription)"
+            }
+            await MainActor.run {
+                self?.result = message
+                self?.refreshCoreRuntime()
+                self?.isBusy = false
+            }
         }
     }
 
@@ -502,6 +533,16 @@ struct NeoYSetupView: View {
             GroupBox("Runtime") {
                 VStack(alignment: .leading, spacing: 12) {
                     valueRow("NeoY version", value: NeoYCoreRuntime.version)
+                    valueRow("Active Core version", value: model.coreRuntimeStatus)
+                    HStack {
+                        TextField("Core version, latest, or /path/release.tgz", text: $model.coreVersionInput)
+                            .textFieldStyle(.roundedBorder)
+                        Button("Upgrade Core") { model.changeCoreRuntime() }.disabled(model.isBusy)
+                        Button("Rollback") { model.changeCoreRuntime(rollback: true) }.disabled(model.isBusy)
+                        Button("Refresh") { model.refreshCoreRuntime() }
+                    }
+                    Text("Core installs separately under Application Support/NeoY/runtimes/core. The signed App bundle remains unchanged.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 .padding(8)
             }
