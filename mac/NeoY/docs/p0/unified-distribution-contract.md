@@ -91,3 +91,10 @@ Release P0 is **NOT PASSED** while blockers remain. No installation, restart, me
 - P0 Python contract and CLI golden fixtures: 16/16 PASS with candidate built app path; Xcode native `SetupServiceTests`: 33/33 PASS; native build PASS; Core `tools/list`: 7 tools after test-only explicit unlock; without unlock exit 78. No tool/call or production action performed.
 - Architecture review: native app still owns signed MCP/federation and TCC, Core remains independent stdio provider, Relay/Browser retain own services. No new MCP tools or processes/supervisors were introduced. App bundle includes Core resources; no runtime Git checkout remains.
 - Outstanding: source-free *signed* clean install, CLI collision upgrade migration, end-user permission UX, real service recovery/rollback/multi-node, package dependency provisioning and independent external reviewer are NOT_VERIFIED/NOT_RUN.
+
+## 2026-10-22 full-suite review/fix iteration
+
+- Initial **full native test suite** exposed seven federation failures (76 total) after the fail-closed default change. Existing fake Core tests implicitly relied on production's unconditional full-access acknowledgement. This is a test-fixture defect, not grounds to restore insecure production defaults.
+- `Tests/NeoYTests/MCPFederationTests.swift` now passes an explicit synthetic acknowledgement **only to tests that check Core authorization**. The automatic recovery fixture sets `requireCoreAuthorization: false`, because its purpose is restart/reconnection, not the Core security gate. The negative unauthorized case still runs with no acknowledgement.
+- Re-run complete `xcodebuild ... CODE_SIGNING_ALLOWED=NO test`: **76/76 PASS**. No running services, signed applications or persisted user data were touched. This verifies unit/integration tests only; actual signed app installation and service recovery remain NOT_RUN.
+- Independent external Reviewer: **NOT_RUN** (no independent reviewer worker was launched). Local source/diff review checked owner boundaries, environment stripping and fixture-only elevated authorization.
