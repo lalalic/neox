@@ -385,6 +385,7 @@ final class SetupServiceTests: XCTestCase {
                 "MAC_DEV_BRIDGE_DATA_DIR": "/tmp/legacy",
                 "MAC_DEV_BRIDGE_UNLOCK_FILE": "/tmp/legacy/unlock",
                 "NEO_CORE_DATA_DIR": "/tmp/neoy",
+                "NEO_CORE_FULL_ACCESS_ACK": "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS",
             ],
             homeDirectory: URL(fileURLWithPath: "/Users/tester")
         )
@@ -392,12 +393,15 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertNil(environment["MAC_DEV_BRIDGE_DATA_DIR"])
         XCTAssertNil(environment["MAC_DEV_BRIDGE_UNLOCK_FILE"])
         XCTAssertEqual(environment["NEO_CORE_DATA_DIR"], "/tmp/neoy")
+        XCTAssertNil(environment["NEO_CORE_FULL_ACCESS_ACK"])
     }
 
     func testBundledCoreEnvironmentUsesNeoYOwnedPaths() {
         XCTAssertTrue(NeoYBundledRuntime.coreEnvironment["NEO_CORE_DATA_DIR"]?.contains("Application Support/NeoY/core") == true)
         XCTAssertTrue(NeoYBundledRuntime.coreEnvironment["NEO_CORE_LOG_DIR"]?.contains("Library/Logs/NeoY/Core") == true)
         XCTAssertFalse(NeoYBundledRuntime.coreEnvironment.keys.contains { $0.hasPrefix("MAC_DEV_BRIDGE_") })
+        XCTAssertNil(NeoYBundledRuntime.coreEnvironment["NEO_CORE_FULL_ACCESS_ACK"])
+        XCTAssertFalse(NeoYBundledRuntime.packagedRuntimeURL.path.contains("/Workspace/neox/"))
     }
 
     private static func makeDirectory() -> URL {
