@@ -3,10 +3,37 @@ import Foundation
 /// NeoY manages installation; lalalic/neo remains the CLI implementation owner.
 enum NeoCLISetup {
     static var skillsDirectory: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".agents/skills", isDirectory: true) }
-    static func globalSkills() -> [String] {
-        let paths = (try? FileManager.default.contentsOfDirectory(at: skillsDirectory, includingPropertiesForKeys: nil)) ?? []
-        return paths.filter { FileManager.default.fileExists(atPath: $0.appendingPathComponent("SKILL.md").path) }.map(\.lastPathComponent).sorted()
+    static let requiredGlobalSkills = ["events-bus", "daemon-service-manage", "webhelm"]
+    static func globalSkills() -> [String] { requiredGlobalSkills }
+
+    static func installedGlobalSkills() -> [String] {
+        let inventory = (try? runSkills(["list", "-g", "--json"])) ?? ""
+        guard let data = inventory.data(using: .utf8),
+              let records = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+        let names = Set(records.compactMap { $0["name"] as? String })
+        return requiredGlobalSkills.filter { names.contains($0) }
     }
+
+    static func runSkills(_ arguments: [String]) throws -> String {
+        guard let npx = ["/opt/homebrew/bin/npx", "/usr/local/bin/npx"].first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
+            throw NSError(domain: "NeoCLISetup", code: 1, userInfo: [NSLocalizedDescriptionKey: "npx unavailable"])
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: npx)
+        process.arguments = ["--yes", "skills"] + arguments
+        process.environment = ProcessInfo.processInfo.environment.merging(["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]) { _, configured in configured }
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw NSError(domain: "NeoCLISetup", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: "npx skills failed: \(String(decoding: data, as: UTF8.self).prefix(400))"])
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
     static func cliPath() -> URL? {
         ["/opt/homebrew/bin/neo", "/usr/local/bin/neo"].first { FileManager.default.isExecutableFile(atPath: $0) }.map(URL.init(fileURLWithPath:))
     }
@@ -37,39 +64,26 @@ enum NeoCLISetup {
         guard task.terminationStatus == 0, cliPath() != nil else { return "CLI installation failed (exit \(task.terminationStatus))" }
         return "CLI installed from verified artifact"
     }
-    /// Install only previously missing skills. Never replace user-owned directories or links.
-    /// Skill payloads are staged with the verified CLI, not downloaded ad hoc.
-    static func installMissingGlobalSkills(from packageRoot: URL) throws -> [String] {
-        let source = packageRoot.appendingPathComponent("skills", isDirectory: true)
-        let entries = try FileManager.default.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)
-        try FileManager.default.createDirectory(at: skillsDirectory, withIntermediateDirectories: true)
-        var installed: [String] = []
-        for entry in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
-            guard FileManager.default.fileExists(atPath: entry.appendingPathComponent("SKILL.md").path) else { continue }
-            let dest = skillsDirectory.appendingPathComponent(entry.lastPathComponent)
-            guard !FileManager.default.fileExists(atPath: dest.path) &&
-                  (try? FileManager.default.destinationOfSymbolicLink(atPath: dest.path)) == nil else { continue }
-            try FileManager.default.copyItem(at: entry, to: dest)
-            installed.append(entry.lastPathComponent)
+    /// Install only NeoY dependencies. Existing user-installed skills are never replaced.
+    /// webhelm is supplied by the browser-workspace skill repository, independently of lalalic/neo.
+    static func setupMissingGlobalSkills() throws -> String {
+        let missing = Set(requiredGlobalSkills).subtracting(installedGlobalSkills())
+        if missing.contains("events-bus") || missing.contains("daemon-service-manage") {
+            let selected = ["events-bus", "daemon-service-manage"].filter { missing.contains($0) }
+            _ = try runSkills(["add", "lalalic/neo", "-g", "-y", "-s"] + selected)
         }
-        return installed
-    }
-
-    static func installedPackageRoot() -> URL? {
-        guard let cli = cliPath() else { return nil }
-        let actual = cli.resolvingSymlinksInPath()
-        guard actual.lastPathComponent == "neo.mjs", actual.deletingLastPathComponent().lastPathComponent == ".bin" else { return nil }
-        let root = actual.deletingLastPathComponent().deletingLastPathComponent()
-        guard FileManager.default.fileExists(atPath: root.appendingPathComponent("skills").path) else { return nil }
-        return root
+        if missing.contains("webhelm") {
+            // Repository source must be configured/validated before any installation is attempted.
+            return "webhelm missing: install from its verified browser-workspace source"
+        }
+        return "Global dependencies present: \(installedGlobalSkills().joined(separator: ", "))"
     }
 
     static func setup() -> String {
         do {
             let cli = try installIfMissing()
-            guard let root = installedPackageRoot() else { return cli + "; skill source not available" }
-            let added = try installMissingGlobalSkills(from: root)
-            return cli + "; installed \(added.count) missing Global Skills"
+            let skills = try setupMissingGlobalSkills()
+            return cli + "; " + skills
         } catch {
             return "Neo CLI / Global Skills setup failed: \(error.localizedDescription)"
         }
@@ -77,6 +91,7 @@ enum NeoCLISetup {
 
     static func report() -> String {
         let location = cliPath().map { isDevelopmentLink($0) ? "developer link" : $0.path } ?? "missing"
-        return "CLI: \(location) | Global Skills: \(globalSkills().count) (~/.agents/skills/)"
+        let installed = Set(installedGlobalSkills())
+        return "CLI: \(location) | NeoY Global Skills: \(installed.count)/\(requiredGlobalSkills.count)"
     }
 }

@@ -491,7 +491,7 @@ struct NeoYSetupView: View {
                         Button("Check / Setup CLI") { model.setupNeoCLI() }
                         Button("Refresh") { model.refreshNeoCLI() }
                     }
-                    Text("Global Skills in ~/.agents/skills/ (read-only inventory; local project skills remain untouched)")
+                    Text("NeoY dependencies only (npx skills -g). Project-local Skills are untouched.")
                         .font(.caption).foregroundStyle(.secondary)
                     ForEach(model.globalSkills, id: \.self) { skill in
                         Text(skill).font(.caption.monospaced())

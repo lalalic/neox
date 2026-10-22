@@ -10,6 +10,6 @@ final class NeoCLISetupTests: XCTestCase {
     }
 
     func testGlobalSkillsReadOnlyInventory() {
-        XCTAssertEqual(NeoCLISetup.globalSkills(), NeoCLISetup.globalSkills().sorted())
+        XCTAssertEqual(NeoCLISetup.globalSkills(), ["events-bus", "daemon-service-manage", "webhelm"])
     }
 }
