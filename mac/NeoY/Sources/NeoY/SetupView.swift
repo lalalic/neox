@@ -28,6 +28,8 @@ final class NeoYSetupModel: ObservableObject {
     @Published private(set) var oauthClientID = ""
     @Published private(set) var oauthToken = ""
     @Published var result = ""
+    @Published var neoCLIReport = NeoCLISetup.report()
+    @Published var globalSkills = NeoCLISetup.globalSkills()
     @Published var isBusy = false
     @Published private(set) var permissions: [NeoYPermissionStatus] = []
 
@@ -36,6 +38,23 @@ final class NeoYSetupModel: ObservableObject {
         Task {
             await refreshPermissions()
             await refreshFeatures()
+        }
+    }
+
+    func refreshNeoCLI() {
+        neoCLIReport = NeoCLISetup.report()
+        globalSkills = NeoCLISetup.globalSkills()
+    }
+
+    func setupNeoCLI() {
+        isBusy = true
+        Task.detached { [weak self] in
+            let message = NeoCLISetup.setup()
+            await MainActor.run {
+                self?.result = message
+                self?.refreshNeoCLI()
+                self?.isBusy = false
+            }
         }
     }
 
@@ -464,6 +483,21 @@ struct NeoYSetupView: View {
     private var advancedTab: some View {
         VStack(alignment: .leading, spacing: 20) {
             heading("Advanced", "Runtime details and operational settings.")
+
+            GroupBox("Neo CLI & Global Skills") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(model.neoCLIReport).font(.caption.monospaced()).textSelection(.enabled)
+                    HStack {
+                        Button("Check / Setup CLI") { model.setupNeoCLI() }
+                        Button("Refresh") { model.refreshNeoCLI() }
+                    }
+                    Text("Global Skills in ~/.agents/skills/ (read-only inventory; local project skills remain untouched)")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(model.globalSkills, id: \.self) { skill in
+                        Text(skill).font(.caption.monospaced())
+                    }
+                }.padding(8)
+            }
 
             GroupBox("Runtime") {
                 VStack(alignment: .leading, spacing: 12) {
