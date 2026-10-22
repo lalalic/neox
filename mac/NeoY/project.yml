@@ -19,6 +19,9 @@ targets:
       - path: Runtime
         type: folder
         buildPhase: resources
+      - path: Resources/Packages
+        type: folder
+        buildPhase: resources
     resources:
       - Resources/Scripts
     settings:
