@@ -31,8 +31,16 @@ jobs:
         id: publication
         shell: bash
         run: |
-          echo "name=$(node -p \"require('./package.json').name\")" >> "$GITHUB_OUTPUT"
-          echo "version=$(node -p \"require('./package.json').version\")" >> "$GITHUB_OUTPUT"
+          echo "name=$(node -p 'require("./package.json").name')" >> "$GITHUB_OUTPUT"
+          echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+      - name: Verify release has not already been published
+        shell: bash
+        run: |
+          version="${{ steps.publication.outputs.version }}"
+          if npm view "@lalalic/neo@$version" version --json 2>/dev/null | grep -Fq "\"$version\""; then
+            echo "Refusing to republish existing @lalalic/neo@$version"
+            exit 1
+          fi
       - run: npm publish --provenance --access public
       - name: Report verified publication
         uses: lalalic/agents-relay/.github/actions/report-publication@publication-v1
