@@ -21,7 +21,7 @@ struct NeoYApp: App {
                 .renderingMode(.original)
                 .resizable()
                 .interpolation(.high)
-                .frame(width: 18, height: 18)
+                .frame(width: 14, height: 14)
                 .accessibilityLabel("Neo")
         }
     }
