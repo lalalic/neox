@@ -7,7 +7,7 @@ struct NeoYApp: App {
     @NSApplicationDelegateAdaptor(NeoYAppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra("NeoY", systemImage: "video") {
+        MenuBarExtra("Neo", image: "NeoMenuBarIcon") {
             Button("Open Current Tour") { appDelegate.showTourWindow() }
             Button("Listen & Talk…") { appDelegate.showVoiceWindow() }
             Button("Setup…") { appDelegate.showSetupWindow() }
