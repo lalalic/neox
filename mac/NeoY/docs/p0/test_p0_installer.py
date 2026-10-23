@@ -21,6 +21,13 @@ class InstallerSafetyTests(unittest.TestCase):
         self.assertIn('process.versions.node.split', content)
         self.assertIn('>= 18', content)
         self.assertIn('exit 1', content)
+        self.assertLess(content.index('Node.js >=18'), content.index('npm test --prefix'))
+        self.assertLess(content.index('npm test --prefix'), content.index('xcodegen generate'))
+
+    def test_build_tools_are_checked_before_tests(self):
+        content = INSTALLER.read_text()
+        self.assertIn('for dependency in xcodegen xcodebuild node npm;', content)
+        self.assertLess(content.index('for dependency in'), content.index('npm test --prefix'))
 
     def test_zsh_syntax(self):
         subprocess.run(['zsh', '-n', str(INSTALLER)], check=True, capture_output=True)

@@ -27,9 +27,18 @@ if [[ -z "$identity" ]]; then
   exit 1
 fi
 
-if command -v node >/dev/null 2>&1; then
-  npm test --prefix "$HERE/Runtime"
+for dependency in xcodegen xcodebuild node npm; do
+  if ! command -v "$dependency" >/dev/null 2>&1; then
+    print -u2 "NeoY local install requires '$dependency' on PATH."
+    exit 1
+  fi
+done
+if ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' ; then
+  print -u2 "NeoY local install requires Node.js >=18."
+  exit 1
 fi
+
+npm test --prefix "$HERE/Runtime"
 
 xcodegen generate --spec "$HERE/project.yml"
 rm -rf "$APP"
@@ -48,11 +57,6 @@ if [[ ! -f "$CORE_ENTRY" || ! -f "$CORE_PACKAGE" ]]; then
   print -u2 "NeoY install preflight failed: signed app does not contain packaged Core."
   exit 1
 fi
-if ! command -v node >/dev/null 2>&1 || ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' ; then
-  print -u2 "NeoY install preflight failed: Node.js >=18 is required for packaged Core."
-  exit 1
-fi
-
 # Stage the candidate and install a rollback watchdog before touching the working app.
 mkdir -p "$HOME/Library/Application Support/NeoY/bin" "$HOME/Library/Logs/NeoY"
 cp "$HERE/Resources/Scripts/upgrade-watchdog.sh" "$WATCHDOG"

@@ -71,7 +71,8 @@ application bundle changes:
 
 The orchestrator should perform the appropriate path itself; the user should not
 need to separately ask to apply or restart NeoY after a Job finishes.
-`/Applications/NeoY.app` remains the single macOS permission identity.
+`/Applications/Neo.app` remains the single macOS permission identity (bundle ID
+`com.neox.neoy`).
 
 ## Repo layout
 
@@ -266,6 +267,7 @@ Deployment gotchas (all hit in practice):
 
 ## Project learnings
 
+- 2026-10-23: Installer output and XcodeGen settings are authoritative for the app bundle's display/install name; update onboarding docs from those sources instead of carrying forward the historical `/Applications/NeoY.app` path.
 - 2026-10-10: NeoY deployment has two distinct paths: Runtime-only changes are applied by recycling the Core provider because Runtime is loaded directly from the canonical repo; native-app changes use `mac/NeoY/install-local.sh` exactly once. Never supervise or retry-loop the installer with launchd/PM2/cron.
 - 2026-10-10: For high-frequency Core filesystem work, keep one `fs` facade and reuse bounded agent-proven edit/grep/find internals; pin and checksum native search binaries while NeoY retains path, audit, permission, and packaging ownership.
 - 2026-09-27: For user-owned iCloud Drive workflows, prefer a native Files folder picker plus a persisted security-scoped bookmark over adding an app-owned iCloud container when the app only needs user-selected folder access. Write cross-device ready markers only after all referenced media bytes are complete.
