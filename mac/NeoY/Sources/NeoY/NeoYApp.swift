@@ -20,7 +20,7 @@ struct NeoYApp: App {
             Image("NeoStatusBadge")
                 .renderingMode(.original)
                 .resizable()
-                .interpolation(.none)
+                .interpolation(.high)
                 .frame(width: 26, height: 16)
                 .accessibilityLabel("Neo")
         }
