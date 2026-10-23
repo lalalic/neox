@@ -7,7 +7,8 @@ struct NeoYApp: App {
     @NSApplicationDelegateAdaptor(NeoYAppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra("Neo", image: "NeoMenuBarIcon") {
+        MenuBarExtra {
+
             Button("Open Current Tour") { appDelegate.showTourWindow() }
             Button("Listen & Talk…") { appDelegate.showVoiceWindow() }
             Button("Setup…") { appDelegate.showSetupWindow() }
@@ -15,6 +16,13 @@ struct NeoYApp: App {
             Text("NeoY \(NeoYCoreRuntime.version)")
                 .foregroundStyle(.secondary)
             Button("Quit NeoY") { NSApp.terminate(nil) }
+        } label: {
+            Image("NeoMenuBarIcon")
+                .renderingMode(.original)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 18, height: 18)
+                .accessibilityLabel("Neo")
         }
     }
 }
