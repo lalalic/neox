@@ -17,8 +17,11 @@ struct NeoYApp: App {
                 .foregroundStyle(.secondary)
             Button("Quit Neo") { NSApp.terminate(nil) }
         } label: {
-            Image("NeoMenuBarIcon")
+            Image("NeoStatusBadge")
                 .renderingMode(.original)
+                .resizable()
+                .interpolation(.none)
+                .frame(width: 26, height: 16)
                 .accessibilityLabel("Neo")
         }
     }
