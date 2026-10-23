@@ -440,7 +440,7 @@ enum VoiceSessionTools {
     static func register(on server: MCPServer, controller: VoiceSessionController) {
         server.register(tools: [CommandTool.facade(
             name: "voice.session",
-            description: "Start, stop, mute, inject text, inspect, or speak for the explicit single-speaker NeoY Listen/Talk session.",
+            description: "Start, stop, mute, inject text, inspect, or speak for the explicit single-speaker Neo Listen/Talk session.",
             commands: commands(controller: controller),
             commandName: CommandTool.stripPrefix("voice.")
         )], protected: true)

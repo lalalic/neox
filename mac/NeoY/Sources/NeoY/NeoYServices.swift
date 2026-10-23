@@ -83,7 +83,7 @@ final class PendingNeoYDemoRuntime: NeoYDemoRuntime {
 
 final class PendingNeoYAccessibilityService: NeoYAccessibilityService {
     func inspect(maxDepth: Int, maxNodes: Int) async throws -> String {
-        throw NeoYUnavailableError.unavailable("NeoY accessibility service is not configured yet")
+        throw NeoYUnavailableError.unavailable("Neo accessibility service is not configured yet")
     }
 }
 
@@ -96,11 +96,11 @@ final class NeoYDemoRecorderService: NeoYDemoRuntime {
 
 final class PendingNeoYRecordingService: NeoYRecordingService {
     func start() async throws {
-        throw NeoYUnavailableError.unavailable("NeoY recording service is provided by DemoRecorder")
+        throw NeoYUnavailableError.unavailable("Neo recording service is provided by DemoRecorder")
     }
 
     func stop() async throws -> URL {
-        throw NeoYUnavailableError.unavailable("NeoY recording service is provided by DemoRecorder")
+        throw NeoYUnavailableError.unavailable("Neo recording service is provided by DemoRecorder")
     }
 }
 

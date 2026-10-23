@@ -90,7 +90,7 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
             return Self.json([
                 "trusted": false,
                 "roots": [],
-                "error": "NeoY needs macOS Accessibility permission for semantic UI inspection/actions",
+                "error": "Neo needs macOS Accessibility permission for semantic UI inspection/actions",
             ])
         }
         let gate = AccessibilityCompletionGate()
@@ -316,7 +316,7 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
 
     func snapshot(appRef: String) async throws -> ComputerAppSnapshot {
         guard AXIsProcessTrusted() else {
-            throw DemoRecorderError.message("NeoY needs macOS Accessibility permission")
+            throw DemoRecorderError.message("Neo needs macOS Accessibility permission")
         }
         guard let app = runningApplication(appRef) else {
             throw DemoRecorderError.message("App not found: \(appRef)")
@@ -742,7 +742,7 @@ enum AccessibilityTools {
         ]
         return [CommandTool.facade(
             name: "computer",
-            description: "Inspect and control native macOS applications through NeoY Computer Use.",
+            description: "Inspect and control native macOS applications through Neo Computer Use.",
             commands: commands,
             commandName: CommandTool.stripPrefix("computer.")
         )]

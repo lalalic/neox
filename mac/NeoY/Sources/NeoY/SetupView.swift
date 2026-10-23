@@ -28,6 +28,10 @@ final class NeoYSetupModel: ObservableObject {
     @Published private(set) var oauthClientID = ""
     @Published private(set) var oauthToken = ""
     @Published var result = ""
+    @Published var coreVersionInput = "latest"
+    @Published var coreRuntimeStatus = NeoYManagedCoreRuntime.active()?.lastPathComponent ?? "bootstrap Core (not installed)"
+    @Published var neoCLIReport = NeoCLISetup.report()
+    @Published var globalSkills = NeoCLISetup.globalSkills()
     @Published var isBusy = false
     @Published private(set) var permissions: [NeoYPermissionStatus] = []
 
@@ -36,6 +40,52 @@ final class NeoYSetupModel: ObservableObject {
         Task {
             await refreshPermissions()
             await refreshFeatures()
+        }
+    }
+
+    func refreshCoreRuntime() {
+        coreRuntimeStatus = NeoYManagedCoreRuntime.active()?.lastPathComponent ?? "bootstrap Core (not installed)"
+    }
+
+    func changeCoreRuntime(rollback: Bool = false) {
+        guard !isBusy else { return }
+        let version = coreVersionInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        isBusy = true
+        Task.detached { [weak self] in
+            let message: String
+            do {
+                let selected = try rollback
+                    ? NeoYManagedCoreRuntime.rollbackPrevious()
+                    : NeoYManagedCoreRuntime.registryUpgrade(version: version)
+                message = "Core switched to \(selected); reconnecting Core provider"
+                await MainActor.run {
+                    NotificationCenter.default.post(name: Notification.Name("neoYCoreRuntimeChanged"), object: nil)
+                }
+            } catch {
+                message = "Core unchanged: \(error.localizedDescription)"
+            }
+            await MainActor.run {
+                self?.result = message
+                self?.refreshCoreRuntime()
+                self?.isBusy = false
+            }
+        }
+    }
+
+    func refreshNeoCLI() {
+        neoCLIReport = NeoCLISetup.report()
+        globalSkills = NeoCLISetup.globalSkills()
+    }
+
+    func setupNeoCLI() {
+        isBusy = true
+        Task.detached { [weak self] in
+            let message = NeoCLISetup.setup()
+            await MainActor.run {
+                self?.result = message
+                self?.refreshNeoCLI()
+                self?.isBusy = false
+            }
         }
     }
 
@@ -241,7 +291,7 @@ final class NeoYSetupModel: ObservableObject {
 
     func openPermission(_ kind: NeoYPermissionKind) {
         if NeoYPermissionService.open(kind) {
-            result = "Opened System Settings for \(kind.title). Return to NeoY and click Refresh after changing access."
+            result = "Opened System Settings for \(kind.title). Return to Neo and click Refresh after changing access."
         } else {
             result = "Could not open System Settings for \(kind.title)."
         }
@@ -404,7 +454,7 @@ struct NeoYSetupView: View {
                     .pickerStyle(.segmented)
 
                     if model.remoteMode == .temporary {
-                        Text("No domain is required. The public address can change after NeoY or the tunnel restarts, so the MCP app may need to be reconfigured.")
+                        Text("No domain is required. The public address can change after Neo or the tunnel restarts, so the MCP app may need to be reconfigured.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else {
@@ -465,9 +515,34 @@ struct NeoYSetupView: View {
         VStack(alignment: .leading, spacing: 20) {
             heading("Advanced", "Runtime details and operational settings.")
 
+            GroupBox("Neo CLI & Global Skills") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(model.neoCLIReport).font(.caption.monospaced()).textSelection(.enabled)
+                    HStack {
+                        Button("Check / Setup CLI") { model.setupNeoCLI() }
+                        Button("Refresh") { model.refreshNeoCLI() }
+                    }
+                    Text("Neo dependencies only (npx skills -g). Project-local Skills are untouched.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(model.globalSkills, id: \.self) { skill in
+                        Text(skill).font(.caption.monospaced())
+                    }
+                }.padding(8)
+            }
+
             GroupBox("Runtime") {
                 VStack(alignment: .leading, spacing: 12) {
-                    valueRow("NeoY version", value: NeoYCoreRuntime.version)
+                    valueRow("Neo version", value: NeoYCoreRuntime.version)
+                    valueRow("Active Core version", value: model.coreRuntimeStatus)
+                    HStack {
+                        TextField("Core version, latest, or /path/release.tgz", text: $model.coreVersionInput)
+                            .textFieldStyle(.roundedBorder)
+                        Button("Upgrade Core") { model.changeCoreRuntime() }.disabled(model.isBusy)
+                        Button("Rollback") { model.changeCoreRuntime(rollback: true) }.disabled(model.isBusy)
+                        Button("Refresh") { model.refreshCoreRuntime() }
+                    }
+                    Text("Core installs separately under Application Support/NeoY/runtimes/core. The signed App bundle remains unchanged.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 .padding(8)
             }
@@ -520,7 +595,7 @@ struct NeoYSetupView: View {
             GroupBox("Permissions") {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
-                        Text("NeoY native features share the permissions of this app. No helper authorization is required.")
+                        Text("Neo native features share the permissions of this app. No helper authorization is required.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Spacer()
@@ -536,7 +611,7 @@ struct NeoYSetupView: View {
 
             GroupBox("Runtime") {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("NeoY uses one MCP listener. Agent handoff, MCP and health routes share the configured port.")
+                    Text("Neo uses one MCP listener. Agent handoff, MCP and health routes share the configured port.")
                     Text("Remote transport is provided by Cloudflare when enabled.")
                     Text("Diagnostics and MCP federation remain available through neoy.setup.")
                 }

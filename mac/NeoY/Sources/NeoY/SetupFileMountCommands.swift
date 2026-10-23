@@ -45,7 +45,7 @@ enum NeoYSetupFiles {
             let origin: String
             let deployment = NeoYDeploymentSettingsStore.load()
             guard deployment.tunnelMode == .named, !deployment.publicHostname.isEmpty else {
-                throw NeoYSetupError.invalidValue("a named NeoY public HTTPS hostname is required")
+                throw NeoYSetupError.invalidValue("a named Neo public HTTPS hostname is required")
             }
             origin = "https://" + deployment.publicHostname
             for (name, rootPath) in mounts.sorted(by: { $0.key < $1.key }) {

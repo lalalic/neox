@@ -17,7 +17,7 @@ specific principle, reason, and evidence that the exception is necessary.
 
 ### Core ownership contract
 
-`@lalalic/neo` owns the Core runtime implementation for generic shell execution,
+`@lalalic/neoy-core` owns the Core runtime implementation for generic shell execution,
 background jobs, filesystem operations, PTY sessions, read-only Codex thread
 access, and `apply_patch`. The implementation was migrated from the predecessor
 MacBridge source, but MacBridge is no longer a runtime dependency or separate

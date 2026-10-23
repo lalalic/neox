@@ -198,3 +198,7 @@ node Resources/Scripts/neoy-files.mjs unmount vlog
 ```
 
 Mount definitions live in `~/Library/Application Support/NeoY/file-mounts.json` and are picked up on each request without restarting NeoY. `GET` and `HEAD /files/<mount>/<relative-path>` support Range requests and cross-origin media loading. Hidden paths and symlinks escaping the mounted root are forbidden. Mounts are **public**, so register only directories that are safe to expose; avoid mounting your home directory, credential stores, or private projects. Local files are never writable over HTTP. The reserved `/_neoy/` export namespace is for generated application assets.
+
+## Service identity
+
+NeoY publishes the logical service ID `neoy/app` under the shared `<skillname>/<service-name>` convention. Its native launchd label remains `com.neox.neoy.keepalive` for existing installations, watchdog rollback, and macOS service continuity. Do not rename the signed bundle identifier or launchd label as part of logical service naming.

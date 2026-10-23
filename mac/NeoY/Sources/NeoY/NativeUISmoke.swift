@@ -22,7 +22,7 @@ enum NativeUISmoke {
         ])
         let descriptor: JSONValue = .object([
             "name": .string(toolName),
-            "description": .string("Render a minimal native NeoY MCP App smoke-test widget."),
+            "description": .string("Render a minimal native Neo MCP App smoke-test widget."),
             "inputSchema": .object([
                 "type": .string("object"),
                 "properties": .object([:]),
@@ -36,7 +36,7 @@ enum NativeUISmoke {
         ])
         server.registerFederatedTool(descriptor: descriptor, name: toolName, protected: true) { _ in
             try encodeResult([
-                "content": [["type": "text", "text": "NeoY native UI smoke test"]],
+                "content": [["type": "text", "text": "Neo native UI smoke test"]],
                 "structuredContent": ["resourceUri": resourceURI, "status": "ok"],
                 "_meta": [
                     "ui": ["resourceUri": resourceURI],
@@ -45,8 +45,8 @@ enum NativeUISmoke {
                 ],
             ])
         }
-        registerResource(on: server, uri: resourceURI, name: "NeoY Native UI Smoke", resourceMeta: resourceMeta)
-        registerResource(on: server, uri: legacyResourceURI, name: "NeoY Native UI Smoke (compatibility alias)", resourceMeta: resourceMeta)
+        registerResource(on: server, uri: resourceURI, name: "Neo Native UI Smoke", resourceMeta: resourceMeta)
+        registerResource(on: server, uri: legacyResourceURI, name: "Neo Native UI Smoke (compatibility alias)", resourceMeta: resourceMeta)
     }
 
     @MainActor
@@ -88,7 +88,7 @@ enum NativeUISmoke {
     static let html = """
     <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     <style>body{font-family:system-ui,sans-serif;margin:0;padding:24px;background:#fff;color:#111}main{border:1px solid #ddd;border-radius:16px;padding:24px}h1{font-size:24px;margin:0 0 8px}p{margin:0;color:#555}</style></head>
-    <body><main><h1>NeoY UI Smoke</h1><p id="status">Native MCP App resource loaded. Connecting to host…</p></main>
+    <body><main><h1>Neo UI Smoke</h1><p id="status">Native MCP App resource loaded. Connecting to host…</p></main>
     <script>
       let nextId = 1;
       const pending = new Map();

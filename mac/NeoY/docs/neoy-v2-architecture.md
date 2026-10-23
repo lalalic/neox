@@ -114,7 +114,7 @@ Browser profiles, cookies, ChatGPT-specific UI automation, and one-off browser w
 
 The standalone Python handoff bridge and old Neox Tour app remain retired.
 MacBridge-specific browser/UI glue is not migrated into NeoY. Generic developer
-primitives are now owned directly by `@lalalic/neo` Core tools.
+primitives are now owned directly by `@lalalic/neoy-core` Core tools.
 
 ## Validation boundary
 
@@ -142,11 +142,11 @@ optional registry (default enabled)
     +-- public tunnel
 ```
 
-The `@lalalic/neo` Core runtime exposes the generic primitive contracts directly.
+The `@lalalic/neoy-core` Core runtime exposes the generic primitive contracts directly.
 The migrated typed tool names remain stable; NeoY's allowlists and remote feature
 policy track those names. Cluster routing remains NeoY-owned.
 
-Generic execution is implemented by `@lalalic/neo` Core tools and does not
+Generic execution is implemented by `@lalalic/neoy-core` Core tools and does not
 depend on PM2. macOS launchd supervises NeoY; NeoY directly launches, stops, and
 restarts its `cloudflared` child. PM2 is not part of the NeoY or public tunnel
 lifecycle.

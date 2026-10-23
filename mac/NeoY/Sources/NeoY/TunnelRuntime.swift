@@ -28,7 +28,7 @@ final class NeoYTunnelRuntime {
 
         guard enabled, settings.tunnelMode != .off else { return }
         guard let executable = Self.cloudflaredExecutable() else {
-            NSLog("NeoY tunnel unavailable: cloudflared not found")
+            NSLog("Neo tunnel unavailable: cloudflared not found")
             return
         }
 
@@ -51,7 +51,7 @@ final class NeoYTunnelRuntime {
                 }
             }
         } catch {
-            NSLog("NeoY tunnel start failed: %@", error.localizedDescription)
+            NSLog("Neo tunnel start failed: %@", error.localizedDescription)
             scheduleRestart()
         }
     }
@@ -87,7 +87,7 @@ final class NeoYTunnelRuntime {
         logHandle = log
         try String(child.processIdentifier).write(to: pidURL, atomically: true, encoding: .utf8)
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: pidURL.path)
-        NSLog("NeoY tunnel started: pid=%d", child.processIdentifier)
+        NSLog("Neo tunnel started: pid=%d", child.processIdentifier)
     }
 
     private func processExited(generation exitedGeneration: UUID, detail: String) {
@@ -97,7 +97,7 @@ final class NeoYTunnelRuntime {
         logHandle = nil
         try? FileManager.default.removeItem(at: pidURL)
         try? FileManager.default.removeItem(at: NeoYDeploymentSettingsStore.publicURLFile)
-        NSLog("NeoY tunnel exited: %@", detail)
+        NSLog("Neo tunnel exited: %@", detail)
         scheduleRestart()
     }
 
@@ -154,16 +154,16 @@ final class NeoYTunnelRuntime {
                let range = Range(match.range, in: text) {
                 do {
                     try writePublicURL(String(text[range]))
-                    NSLog("NeoY quick tunnel ready")
+                    NSLog("Neo quick tunnel ready")
                 } catch {
-                    NSLog("NeoY quick tunnel URL save failed: %@", error.localizedDescription)
+                    NSLog("Neo quick tunnel URL save failed: %@", error.localizedDescription)
                 }
                 return
             }
             try? await Task.sleep(for: .milliseconds(250))
         }
         guard expectedGeneration == generation else { return }
-        NSLog("NeoY quick tunnel URL was not discovered")
+        NSLog("Neo quick tunnel URL was not discovered")
         stopProcess(removePublicURL: true)
         scheduleRestart()
     }

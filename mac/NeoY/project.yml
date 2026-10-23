@@ -14,7 +14,15 @@ targets:
       - Sources/NeoY
       - path: Resources/Scripts/neo-node/neo-node.mjs
         buildPhase: resources
+      - path: Resources/Scripts/core-mcp-probe.mjs
+        buildPhase: resources
+      - path: Resources/Scripts/core-mcp-probe.mjs
+        buildPhase: resources
       - path: Resources/features.json
+        buildPhase: resources
+      - path: Resources/Assets.xcassets
+      - path: Runtime
+        type: folder
         buildPhase: resources
     resources:
       - Resources/Scripts
@@ -22,6 +30,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.neox.neoy
         PRODUCT_NAME: NeoY
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "6.0"
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Resources/Info.plist

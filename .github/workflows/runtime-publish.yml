@@ -1,10 +1,19 @@
-name: Publish Neo Runtime
+name: Publish NeoY Core Runtime
 
 on:
   push:
     tags:
       - 'runtime-v*'
   workflow_dispatch:
+    inputs:
+      package:
+        description: Package to publish
+        required: true
+        type: choice
+        default: core
+        options:
+          - core
+          - neo-cli
 
 permissions:
   contents: read
@@ -14,6 +23,7 @@ permissions:
 
 jobs:
   publish:
+    if: github.event_name != 'workflow_dispatch' || inputs.package == 'core'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -31,8 +41,16 @@ jobs:
         id: publication
         shell: bash
         run: |
-          echo "name=$(node -p \"require('./package.json').name\")" >> "$GITHUB_OUTPUT"
-          echo "version=$(node -p \"require('./package.json').version\")" >> "$GITHUB_OUTPUT"
+          echo "name=$(node -p 'require("./package.json").name')" >> "$GITHUB_OUTPUT"
+          echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+      - name: Verify release has not already been published
+        shell: bash
+        run: |
+          version="${{ steps.publication.outputs.version }}"
+          if npm view "@lalalic/neoy-core@$version" version --json 2>/dev/null | grep -Fq "\"$version\""; then
+            echo "Refusing to republish existing @lalalic/neoy-core@$version"
+            exit 1
+          fi
       - run: npm publish --provenance --access public
       - name: Report verified publication
         uses: lalalic/agents-relay/.github/actions/report-publication@publication-v1
@@ -48,3 +66,38 @@ jobs:
         with:
           token: ${{ github.token }}
           stage: runtime npm publish workflow
+
+  publish-neo-cli:
+    if: github.event_name == 'workflow_dispatch' && inputs.package == 'neo-cli'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: lalalic/neo
+          ref: main
+          path: cli-source
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm install --global npm@11.15.0
+      - name: Test portable CLI source contracts
+        working-directory: cli-source
+        run: node --test --test-skip-pattern='live non-mutating CLI project route' test/*.test.mjs
+      - name: Stage publishable CLI from source checkout
+        run: node cli-source/scripts/stage-neo-cli.mjs "$RUNNER_TEMP/neo-cli-dist"
+      - name: Validate distribution identity and npm metadata
+        working-directory: ${{ runner.temp }}/neo-cli-dist
+        run: |
+          node -e 'const p=require("./package.json"); if(p.name!=="@lalalic/neo" || p.version!=="1.0.2" || p.private) process.exit(1)'
+          node .bin/neo.mjs --help
+          npm pack --dry-run --ignore-scripts
+      - name: Set provenance repository to the authorized release workflow owner
+        working-directory: ${{ runner.temp }}/neo-cli-dist
+        run: |
+          # This artifact is built from lalalic/neo; npm validates provenance against
+          # the workflow repository (lalalic/neox), which currently owns OIDC access.
+          npm pkg set repository.type=git repository.url=git+https://github.com/lalalic/neox.git
+      - name: Publish Neo CLI through npm OIDC
+        working-directory: ${{ runner.temp }}/neo-cli-dist
+        run: npm publish --provenance --access public

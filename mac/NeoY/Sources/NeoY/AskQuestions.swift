@@ -66,7 +66,7 @@ enum AskQuestions {
         server.registerFederatedResource(
             descriptor: .object([
                 "uri": .string(resourceURI),
-                "name": .string("NeoY Ask Questions"),
+                "name": .string("Neo Ask Questions"),
                 "mimeType": .string(mimeType),
                 "_meta": resourceMeta,
             ]),
@@ -196,7 +196,7 @@ enum AskQuestions {
     const promptEl=document.getElementById('prompt'),answerEl=document.getElementById('answer'),submitEl=document.getElementById('submit'),cancelEl=document.getElementById('cancel'),statusEl=document.getElementById('status');let nextId=1;const pending=new Map();let sessionId=null,done=false;
     function send(message){window.parent.postMessage(message,'*')}function rpc(method,params){const id=nextId++;send({jsonrpc:'2.0',id,method,params});return new Promise((resolve,reject)=>pending.set(id,{resolve,reject}))}
     window.addEventListener('message',event=>{if(event.source!==window.parent)return;const m=event.data;if(!m||typeof m!=='object'||m.jsonrpc!=='2.0')return;if(m.id!==undefined&&pending.has(m.id)){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(new Error(m.error.message||'MCP request failed')):p.resolve(m.result);return}if(m.method==='ui/notifications/tool-result'){const r=m.params?.result||m.params||{},d=r.structuredContent||r.structured_content||{};if(typeof d.prompt_html==='string'){sessionId=d.session_id;promptEl.innerHTML=d.prompt_html}}});
-    async function init(){try{await rpc('ui/initialize',{protocolVersion:'2026-01-26',appInfo:{name:'NeoY Ask Questions',version:'1.0.0'},appCapabilities:{}});send({jsonrpc:'2.0',method:'ui/notifications/initialized'})}catch(e){statusEl.textContent='MCP App host unavailable.'}}
+    async function init(){try{await rpc('ui/initialize',{protocolVersion:'2026-01-26',appInfo:{name:'Neo Ask Questions',version:'1.0.0'},appCapabilities:{}});send({jsonrpc:'2.0',method:'ui/notifications/initialized'})}catch(e){statusEl.textContent='MCP App host unavailable.'}}
     async function notify(message){await rpc('ui/message',{role:'user',content:[{type:'text',text:message}]});statusEl.textContent='Conversation notified.'}
     async function finish(method,args,label){if(done||!sessionId)return;done=true;submitEl.disabled=true;cancelEl.disabled=true;statusEl.textContent=label+'…';try{const response=await rpc('tools/call',{name:method,arguments:args});if(response?.isError)throw new Error('Tool rejected submission');const message=JSON.stringify(args);statusEl.textContent=label+'. Notifying conversation…';try{await notify(message)}catch(e){statusEl.textContent=label+'. Notification failed; retry notification.';submitEl.textContent='Retry notification';submitEl.disabled=false;submitEl.onclick=()=>{submitEl.disabled=true;notify(message).catch(()=>{submitEl.disabled=false;statusEl.textContent='Notification failed; retry notification.'})}}}catch(e){done=false;submitEl.disabled=false;cancelEl.disabled=false;statusEl.textContent=e.message||'Unable to submit.'}}
     submitEl.onclick=()=>finish('ask_questions',{command:'submit',session_id:sessionId,answer:answerEl.value},'Submitted');cancelEl.onclick=()=>finish('ask_questions',{command:'cancel',session_id:sessionId},'Cancelled');init();

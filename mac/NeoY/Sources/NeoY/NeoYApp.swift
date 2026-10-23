@@ -7,14 +7,22 @@ struct NeoYApp: App {
     @NSApplicationDelegateAdaptor(NeoYAppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra("NeoY", systemImage: "video") {
+        MenuBarExtra {
+
             Button("Open Current Tour") { appDelegate.showTourWindow() }
             Button("Listen & Talk…") { appDelegate.showVoiceWindow() }
             Button("Setup…") { appDelegate.showSetupWindow() }
             Divider()
-            Text("NeoY \(NeoYCoreRuntime.version)")
+            Text("Neo \(NeoYCoreRuntime.version)")
                 .foregroundStyle(.secondary)
-            Button("Quit NeoY") { NSApp.terminate(nil) }
+            Button("Quit Neo") { NSApp.terminate(nil) }
+        } label: {
+            Image("NeoStatusBadge")
+                .renderingMode(.original)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 26, height: 16)
+                .accessibilityLabel("Neo")
         }
     }
 }
@@ -35,6 +43,11 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        // Initialize an independent Core install without touching a healthy active version.
+        try? NeoYManagedCoreRuntime.bootstrapIfMissing()
+        // Best-effort idempotent setup. Never overwrite an existing developer CLI
+        // or user-owned Global Skills. Missing release artifacts remain explicit.
+        Task.detached { _ = NeoCLISetup.setup() }
         startNativePhoneServices()
         startServer()
         observers.append(NotificationCenter.default.addObserver(
@@ -69,6 +82,22 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in self?.restartPrimaryMCPServer() }
         })
         observers.append(NotificationCenter.default.addObserver(
+            forName: Notification.Name("neoYCoreRuntimeChanged"), object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let runtimeControl = self.runtimeControl else { return }
+                await runtimeControl.reloadCore()
+            }
+        })
+        observers.append(NotificationCenter.default.addObserver(
+            forName: Notification.Name("neoYCoreRuntimeChanged"), object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let runtimeControl = self.runtimeControl else { return }
+                await runtimeControl.reloadCore()
+            }
+        })
+        observers.append(NotificationCenter.default.addObserver(
             forName: .neoYFeaturesChanged, object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.restartPrimaryMCPServer() }
@@ -87,7 +116,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
             let root = CaptureTourView(runner: runner).environmentObject(store)
             let controller = NSHostingController(rootView: root)
             let value = NSWindow(contentViewController: controller)
-            value.title = "NeoY Capture Tour"
+            value.title = "Neo Capture Tour"
             value.setContentSize(NSSize(width: 860, height: 700))
             value.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             value.isReleasedWhenClosed = false
@@ -103,7 +132,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
         if setupWindow == nil {
             let controller = NSHostingController(rootView: NeoYSetupView())
             let value = NSWindow(contentViewController: controller)
-            value.title = "NeoY Setup"
+            value.title = "Neo Setup"
             value.styleMask = [.titled, .closable, .miniaturizable]
             value.isReleasedWhenClosed = false
             value.center()
@@ -117,7 +146,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
         if voiceWindow == nil {
             let controller = NSHostingController(rootView: VoiceSessionView(controller: voiceController))
             let value = NSWindow(contentViewController: controller)
-            value.title = "NeoY Listen & Talk"
+            value.title = "Neo Listen & Talk"
             value.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             value.isReleasedWhenClosed = false
             value.center()
@@ -137,7 +166,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
 
     private func startServer() {
         let deployment = NeoYDeploymentSettingsStore.load()
-        let value = MCPServer(name: "NeoY", version: NeoYCoreRuntime.version, port: deployment.mcpPort,
+        let value = MCPServer(name: "Neo", version: NeoYCoreRuntime.version, port: deployment.mcpPort,
                               bonjourName: "NeoY")
         let coreToken = NeoYCoreAuth.token()
         value.setPrivilegedAccessToken(coreToken)
@@ -153,11 +182,11 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
         NativeUISmoke.register(on: value)
         AskQuestions.register(on: value)
         voiceController.setCommandExecutor { [weak value] sessionID, correlationID, text in
-            guard let value else { throw NeoYRuntimeControlError.event("NeoY MCP server is unavailable") }
+            guard let value else { throw NeoYRuntimeControlError.event("Neo MCP server is unavailable") }
             if VoiceCommandRouting.isGatewayStatus(text) {
                 // This is a completed, read-only NeoY command, not a chat submission.
                 let result = try await value.invokeRegisteredTool("status", arguments: .object([:]))
-                guard !result.isEmpty else { throw NeoYRuntimeControlError.event("NeoY status returned no result") }
+                guard !result.isEmpty else { throw NeoYRuntimeControlError.event("Neo status returned no result") }
                 return .completed(result)
             }
             // Fail closed until Browser Workspace has produced a durable binding.
@@ -282,7 +311,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
     private func startNativePhoneServices() {
         services.phone.startDiscovery()
         do { try services.handoff.start() }
-        catch { NSLog("NeoY handoff Bonjour registration failed: %@", error.localizedDescription) }
+        catch { NSLog("Neo handoff Bonjour registration failed: %@", error.localizedDescription) }
     }
 }
 
@@ -475,7 +504,7 @@ struct CaptureTourView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("NeoY Capture Tour").font(.largeTitle.bold())
+                Text("Neo Capture Tour").font(.largeTitle.bold())
                 Spacer()
                 Circle().fill(runner.isConfigured ? .green : .orange).frame(width: 10, height: 10)
                 Text(runner.isConfigured ? "Camera ready" : "Waiting for camera")
