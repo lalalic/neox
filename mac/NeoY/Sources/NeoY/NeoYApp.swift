@@ -19,9 +19,6 @@ struct NeoYApp: App {
         } label: {
             Image("NeoMenuBarIcon")
                 .renderingMode(.original)
-                .resizable()
-                .interpolation(.high)
-                .frame(width: 14, height: 14)
                 .accessibilityLabel("Neo")
         }
     }
