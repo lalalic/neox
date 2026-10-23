@@ -63,3 +63,12 @@ No successful Project configuration or binding is claimed by this result.
 The required LiveKit pipeline and full no-microphone ChatGPT→LiveKit E2E remain
 unimplemented/unverified; this follow-up must not be treated as acceptance of
 those reviewer findings.
+
+## 2026-10-22 Neo master LiveKit service
+
+- The deployment target is the Neo.app master (`chengli.local`), not the Worknode. Worknode's existing `neo-livekit-smoke` Docker container is unchanged.
+- The master uses Homebrew `livekit-server` 1.13.10, supervised by `npx pm2` as `neo/livekit` (`--dev --bind 127.0.0.1`). The old provisional PM2 name `neo-voice/livekit` was removed.
+- The live HTTP endpoint `http://127.0.0.1:7880/` responded `200 OK`; the PM2 process was online with no restarts. PM2 process state was saved.
+- No `neo-voice` Skill, separate CLI, or new MCP server is necessary: the existing Neo MCP voice facade is the agent-facing contract. PM2/LiveKit is transport infrastructure.
+- PM2 launchd startup registration is **not configured**: privileged registration needs local user authorization. Current process health does not prove restart persistence.
+- The LiveKit process runs in loopback-only development mode. There is no verified live room, captured microphone input, playback, or end-to-end ChatGPT voice round trip. Do not treat infrastructure health as acceptance of those features.
