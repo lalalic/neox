@@ -291,7 +291,7 @@ final class NeoYSetupModel: ObservableObject {
 
     func openPermission(_ kind: NeoYPermissionKind) {
         if NeoYPermissionService.open(kind) {
-            result = "Opened System Settings for \(kind.title). Return to NeoY and click Refresh after changing access."
+            result = "Opened System Settings for \(kind.title). Return to Neo and click Refresh after changing access."
         } else {
             result = "Could not open System Settings for \(kind.title)."
         }
@@ -454,7 +454,7 @@ struct NeoYSetupView: View {
                     .pickerStyle(.segmented)
 
                     if model.remoteMode == .temporary {
-                        Text("No domain is required. The public address can change after NeoY or the tunnel restarts, so the MCP app may need to be reconfigured.")
+                        Text("No domain is required. The public address can change after Neo or the tunnel restarts, so the MCP app may need to be reconfigured.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else {
@@ -522,7 +522,7 @@ struct NeoYSetupView: View {
                         Button("Check / Setup CLI") { model.setupNeoCLI() }
                         Button("Refresh") { model.refreshNeoCLI() }
                     }
-                    Text("NeoY dependencies only (npx skills -g). Project-local Skills are untouched.")
+                    Text("Neo dependencies only (npx skills -g). Project-local Skills are untouched.")
                         .font(.caption).foregroundStyle(.secondary)
                     ForEach(model.globalSkills, id: \.self) { skill in
                         Text(skill).font(.caption.monospaced())
@@ -532,7 +532,7 @@ struct NeoYSetupView: View {
 
             GroupBox("Runtime") {
                 VStack(alignment: .leading, spacing: 12) {
-                    valueRow("NeoY version", value: NeoYCoreRuntime.version)
+                    valueRow("Neo version", value: NeoYCoreRuntime.version)
                     valueRow("Active Core version", value: model.coreRuntimeStatus)
                     HStack {
                         TextField("Core version, latest, or /path/release.tgz", text: $model.coreVersionInput)
@@ -595,7 +595,7 @@ struct NeoYSetupView: View {
             GroupBox("Permissions") {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
-                        Text("NeoY native features share the permissions of this app. No helper authorization is required.")
+                        Text("Neo native features share the permissions of this app. No helper authorization is required.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Spacer()
@@ -611,7 +611,7 @@ struct NeoYSetupView: View {
 
             GroupBox("Runtime") {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("NeoY uses one MCP listener. Agent handoff, MCP and health routes share the configured port.")
+                    Text("Neo uses one MCP listener. Agent handoff, MCP and health routes share the configured port.")
                     Text("Remote transport is provided by Cloudflare when enabled.")
                     Text("Diagnostics and MCP federation remain available through neoy.setup.")
                 }

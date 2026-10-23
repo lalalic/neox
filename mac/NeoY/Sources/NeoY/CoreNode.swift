@@ -180,7 +180,7 @@ actor NeoYNodeService {
         } else if !names.isDisjoint(with: Self.allowedRemoteCoreTools) {
             kind = .neoyPeer
         } else {
-            throw NeoYCoreError.operationFailed("endpoint is not a supported NeoY peer or neo-node")
+            throw NeoYCoreError.operationFailed("endpoint is not a supported Neo peer or neo-node")
         }
         let node = NeoYNodeConfiguration(name: tokens[1], url: tokens[2], kind: kind, token: token)
         try await store.upsert(node)
@@ -226,7 +226,7 @@ actor NeoYNodeService {
         } else {
             let clientIP = probeValues["NEOY_CONN"]?.split(separator: " ").first.map(String.init) ?? ""
             guard !clientIP.isEmpty else {
-                throw NeoYCoreError.operationFailed("SSH bootstrap could not determine NeoY address from SSH_CONNECTION")
+                throw NeoYCoreError.operationFailed("SSH bootstrap could not determine Neo address from SSH_CONNECTION")
             }
             hub = .init(target: "\(NSUserName())@\(clientIP)", port: 22, identityFile: nil)
         }
@@ -315,7 +315,7 @@ actor NeoYNodeService {
 
     private func nodeRuntimeResource(_ name: String) throws -> URL {
         guard let resources = Bundle.main.resourceURL else {
-            throw NeoYCoreError.operationFailed("NeoY bundle resources are unavailable")
+            throw NeoYCoreError.operationFailed("Neo bundle resources are unavailable")
         }
         let candidates = [
             resources.appendingPathComponent("Scripts/neo-node/\(name)"),
@@ -575,7 +575,7 @@ actor NeoYNodeService {
       remove <name>
       status <name>
       invoke <name> <core-tool> -- <arguments>
-    NeoY peers use the direct Core tool name. setup/cluster accept command text;
+    Neo peers use the direct Core tool name. setup/cluster accept command text;
     Core tools and apply_patch accept a JSON argument object.
     Mini neo-node compatibility aliases remain exec and fs.
     SSH port defaults to 22. 'add' bootstraps the bundled mini neo-node runtime over SSH, starts its MCP tunnel, then pairs it. A loopback SSH target on a non-default port is treated as reverse-SSH bootstrap and uses session mode without LaunchAgent. Pairing remains available for already-running endpoints.
@@ -587,7 +587,7 @@ enum NeoYNodeTools {
         [
             ToolDefinition(
                 name: "cluster",
-                description: "Trusted cluster discovery/pairing/status and canonical invocation across NeoY peers or neo-nodes. Call with command='help' for grammar.",
+                description: "Trusted cluster discovery/pairing/status and canonical invocation across Neo peers or neo-nodes. Call with command='help' for grammar.",
                 parameters: NeoYCoreJSON.string("CLI-like remote-node command; use 'help' for grammar")
             ) { arguments in
                 try await service.execute(NeoYCoreJSON.command(from: arguments))

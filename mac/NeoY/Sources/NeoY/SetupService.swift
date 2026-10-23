@@ -600,7 +600,7 @@ actor NeoYSetupService {
     static func help(_ topic: NeoYSetupTopic?) -> String {
         return switch topic {
         case .overview:
-            "NeoY is Neo's signed menu-bar Mac runtime. One setup CLI configures native trust, supervised services, federated MCPs, diagnostics, and NeoX events."
+            "Neo is the signed macOS menu-bar runtime. One setup CLI configures native trust, supervised services, federated MCPs, diagnostics, and NeoX events."
         case .status:
             "'status' returns runtime, MCP, NeoX pairing/handoff, capability, and control-plane health."
         case .configuration:
@@ -661,7 +661,7 @@ actor NeoYSetupService {
             "v2 core is implemented around typed persistence, native permission guidance, HTTP/stdio MCP federation, and pairing-aware NeoX important-event delivery. Signed installed-app permission/login E2E still requires the actual installed identity and human TCC approvals."
         case nil:
             """
-            NeoY setup CLI
+            Neo setup CLI
               help [topic]
               status
               config show
@@ -675,7 +675,7 @@ actor NeoYSetupService {
               capability list|enable|disable ...
               auth show|rotate|revoke
 
-            Run 'help <topic>' for exact grammar. Runtime help is authoritative for the installed NeoY version.
+            Run 'help <topic>' for exact grammar. Runtime help is authoritative for the installed Neo version.
             """
         }
     }
@@ -693,13 +693,13 @@ enum NeoYSetupTools {
     static func tools(service: NeoYSetupService) -> [ToolDefinition] {
         [ToolDefinition(
             name: "setup",
-            description: "NeoY setup/control CLI. Run without command or run 'help' for authoritative runtime commands covering status, permissions, MCP federation, diagnostics, optional capabilities, Core auth, and important NeoX events.",
+            description: "Neo setup/control CLI. Run without command or run 'help' for authoritative runtime commands covering status, permissions, MCP federation, diagnostics, optional capabilities, Core auth, and important NeoX events.",
             parameters: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "command": .object([
                         "type": .string("string"),
-                        "description": .string("CLI-like NeoY setup command; omit for help"),
+                        "description": .string("CLI-like Neo setup command; omit for help"),
                     ]),
                 ]),
             ])

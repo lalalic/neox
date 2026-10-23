@@ -232,10 +232,10 @@ final class NeoYOAuthService: @unchecked Sendable {
         let safeRedirect = Self.htmlEscape(redirect)
         let page = """
         <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-        <title>Authorize NeoY</title><style>body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:34rem;margin:3rem auto;padding:0 1.25rem}code{background:#f2f2f2;padding:.1rem .3rem;border-radius:3px;word-break:break-all}input{width:100%;padding:.5rem;box-sizing:border-box}button{margin-top:1rem;padding:.6rem 1.2rem}</style></head><body>
-        <h1>Authorize NeoY</h1><p>This grants ChatGPT the NeoY MCP capabilities enabled for remote access.</p>
+        <title>Authorize Neo</title><style>body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:34rem;margin:3rem auto;padding:0 1.25rem}code{background:#f2f2f2;padding:.1rem .3rem;border-radius:3px;word-break:break-all}input{width:100%;padding:.5rem;box-sizing:border-box}button{margin-top:1rem;padding:.6rem 1.2rem}</style></head><body>
+        <h1>Authorize Neo</h1><p>This grants ChatGPT the Neo MCP capabilities enabled for remote access.</p>
         <p>Server: <code>\(safeIssuer)</code><br>Redirect: <code>\(safeRedirect)</code></p>
-        <form method="post" action="/authorize"><input type="hidden" name="rid" value="\(safeRID)"><label for="token">NeoY token</label><input id="token" type="password" name="token" autocomplete="off"><button type="submit">Approve</button></form>
+        <form method="post" action="/authorize"><input type="hidden" name="rid" value="\(safeRID)"><label for="token">Neo token</label><input id="token" type="password" name="token" autocomplete="off"><button type="submit">Approve</button></form>
         </body></html>
         """
         return NeoYOAuthHTTPResponse(status: 200, body: Data(page.utf8), contentType: "text/html; charset=utf-8", headers: [
@@ -255,7 +255,7 @@ final class NeoYOAuthService: @unchecked Sendable {
             return html(status: 400, title: "Authorization failed", body: "This approval link expired. Start again from ChatGPT.")
         }
         guard Self.constantTimeEqual(form["token"] ?? "", consentToken) else {
-            return html(status: 403, title: "Authorization failed", body: "The NeoY token did not match. Start again from ChatGPT.")
+            return html(status: 403, title: "Authorization failed", body: "The Neo token did not match. Start again from ChatGPT.")
         }
         let code = Self.randomToken(bytes: 32)
         let codeDigest = Self.sha256(code)

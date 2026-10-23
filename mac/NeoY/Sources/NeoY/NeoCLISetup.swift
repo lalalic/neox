@@ -96,6 +96,6 @@ enum NeoCLISetup {
     static func report() -> String {
         let location = cliPath().map { isDevelopmentLink($0) ? "developer link" : $0.path } ?? "missing"
         let installed = Set(installedGlobalSkills())
-        return "CLI: \(location) | NeoY Global Skills: \(installed.count)/\(requiredGlobalSkills.count)"
+        return "CLI: \(location) | Neo Global Skills: \(installed.count)/\(requiredGlobalSkills.count)"
     }
 }

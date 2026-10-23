@@ -208,10 +208,10 @@ actor NeoYFeatureManager {
 
         \(manual)
 
-        NeoY feature id: \(manifest.id)
+        Neo feature id: \(manifest.id)
         Installed instance: \(instanceRoot(id: id).path)
 
-        Use NeoY's setup tool for feature lifecycle checks and actions:
+        Use Neo's setup tool for feature lifecycle checks and actions:
           feature status \(manifest.id)
           feature configure \(manifest.id) '<json-object-patch>'
           feature doctor \(manifest.id)
@@ -271,7 +271,7 @@ actor NeoYFeatureManager {
 
         do {
             guard let npm = Self.executable("npm") else {
-                throw NSError(domain: "NeoYFeature", code: 1, userInfo: [NSLocalizedDescriptionKey: "npm is required to install NeoY features"])
+                throw NSError(domain: "NeoYFeature", code: 1, userInfo: [NSLocalizedDescriptionKey: "npm is required to install Neo features"])
             }
             let install = try Self.run(npm, ["install", "--omit=dev", "--no-fund", "--no-audit", "--prefix", runtimeRoot(id: item.id).path, "\(item.package)@latest"])
             guard install.status == 0 else { throw NSError(domain: "NeoYFeature", code: 2, userInfo: [NSLocalizedDescriptionKey: install.output]) }
@@ -351,7 +351,7 @@ actor NeoYFeatureManager {
     }
     private func runNodeScript(_ url: URL, args: [String]) throws -> (status: Int32, output: String) {
         guard let node = Self.executable("node") else {
-            throw NSError(domain: "NeoYFeature", code: 30, userInfo: [NSLocalizedDescriptionKey: "Node.js is required to run NeoY features"])
+            throw NSError(domain: "NeoYFeature", code: 30, userInfo: [NSLocalizedDescriptionKey: "Node.js is required to run Neo features"])
         }
         return try Self.run(node, [url.path] + args)
     }

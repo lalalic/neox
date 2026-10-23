@@ -65,31 +65,31 @@ enum NeoYPermissionService {
                 kind: .fullDiskAccess,
                 state: fullDiskAccessState(),
                 humanApprovalRequired: true,
-                guidance: "Grant Full Disk Access to NeoY only in System Settings > Privacy & Security > Full Disk Access. Do not grant Node, zsh, Codex, PM2, or individual folders separately."
+                guidance: "Grant Full Disk Access to Neo only in System Settings > Privacy & Security > Full Disk Access. Do not grant Node, zsh, Codex, PM2, or individual folders separately."
             ),
             .init(
                 kind: .accessibility,
                 state: AXIsProcessTrusted() ? .authorized : .denied,
                 humanApprovalRequired: true,
-                guidance: "Grant NeoY in System Settings > Privacy & Security > Accessibility."
+                guidance: "Grant Neo in System Settings > Privacy & Security > Accessibility."
             ),
             .init(
                 kind: .screenRecording,
                 state: CGPreflightScreenCaptureAccess() ? .authorized : .denied,
                 humanApprovalRequired: true,
-                guidance: "Grant NeoY in System Settings > Privacy & Security > Screen & System Audio Recording."
+                guidance: "Grant Neo in System Settings > Privacy & Security > Screen & System Audio Recording."
             ),
             .init(
                 kind: .camera,
                 state: state(AVCaptureDevice.authorizationStatus(for: .video)),
                 humanApprovalRequired: true,
-                guidance: "Camera permission is requested by macOS when NeoY first needs camera capture."
+                guidance: "Camera permission is requested by macOS when Neo first needs camera capture."
             ),
             .init(
                 kind: .microphone,
                 state: state(AVCaptureDevice.authorizationStatus(for: .audio)),
                 humanApprovalRequired: true,
-                guidance: "Microphone permission is requested by macOS when NeoY first needs audio capture."
+                guidance: "Microphone permission is requested by macOS when Neo first needs audio capture."
             ),
             .init(
                 kind: .notifications,
@@ -101,7 +101,7 @@ enum NeoYPermissionService {
                 kind: .localNetwork,
                 state: .runtimeProbe,
                 humanApprovalRequired: true,
-                guidance: "macOS has no reliable read-only Local Network permission API; NeoY reports connectivity through its Bonjour/runtime status."
+                guidance: "macOS has no reliable read-only Local Network permission API; Neo reports connectivity through its Bonjour/runtime status."
             ),
         ]
     }

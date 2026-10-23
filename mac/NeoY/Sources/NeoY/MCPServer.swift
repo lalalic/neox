@@ -642,7 +642,7 @@ public final class MCPServer {
                 "resultType": "complete",
                 "supportedVersions": Self.supportedProtocolVersions,
                 "capabilities": Self.jsonValueToAny(Self.advertisedCapabilities),
-                "instructions": "NeoY exposes the native and configured Core capabilities enabled for remote access.",
+                "instructions": "Neo exposes the native and configured Core capabilities enabled for remote access.",
                 "ttlMs": 3_600_000,
                 "cacheScope": "private",
                 "_meta": ["io.modelcontextprotocol/serverInfo": Self.serverInfo(name: _snapshotName, version: _snapshotVersion)],
@@ -682,7 +682,7 @@ public final class MCPServer {
             }
             if !isLocal {
                 guard authorized else {
-                    sendJSONRPCError(connection: connection, id: id, code: -32001, message: "Remote MCP requires a valid NeoY token")
+                    sendJSONRPCError(connection: connection, id: id, code: -32001, message: "Remote MCP requires a valid Neo token")
                     return
                 }
                 guard Self.remoteResourceAllowed(uri: uri,
@@ -757,7 +757,7 @@ public final class MCPServer {
                         errorCode: .authorizationDenied
                     )
                     sendJSONRPCError(connection: connection, id: id, code: -32001,
-                        message: "Remote MCP requires a valid NeoY token")
+                        message: "Remote MCP requires a valid Neo token")
                     return
                 }
                 let toolAllowed = _snapshotRemoteAllowedTools.contains(toolName)
@@ -927,7 +927,7 @@ public final class MCPServer {
 
     nonisolated private static func serverInfo(name: String, version: String) -> [String: Any] {
         ["name": name, "title": "neo", "version": version,
-         "description": "Privileged NeoY runtime for the host Mac."]
+         "description": "Privileged Neo runtime for the host Mac."]
     }
 
     nonisolated private static func completeModern(_ result: [String: Any], name: String,
