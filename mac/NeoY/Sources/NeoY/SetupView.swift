@@ -674,8 +674,10 @@ struct NeoYSetupView: View {
                     }
                     Text("Project data remains in its owning workspace.")
                         .font(.caption).foregroundStyle(.secondary)
-                    ForEach(model.projectNames, id: \.self) { name in
-                        Text(name).font(.system(.caption, design: .monospaced))
+                    DisclosureGroup("View projects") {
+                        ForEach(model.projectNames, id: \.self) { name in
+                            Text(name).font(.system(.caption, design: .monospaced))
+                        }
                     }
                     if model.projectNames.isEmpty {
                         Text("Install Neo Project Toolkit to discover projects.")
