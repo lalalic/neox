@@ -48,13 +48,21 @@ struct NeoYDeploymentSettings: Codable, Equatable {
 
     /// Change only the applied transport state. Pending picker edits are not inputs.
     func settingRemoteEnabled(_ enabled: Bool) throws -> Self {
+        // Older deployment.json files lack preferredTunnelMode. Preserve their
+        // active mode before turning the transport off.
+        let appliedPreference: NeoYTunnelMode
+        if let preferredTunnelMode, preferredTunnelMode != .off {
+            appliedPreference = preferredTunnelMode
+        } else {
+            appliedPreference = tunnelMode == .named ? .named : .quick
+        }
         if !enabled {
             var candidate = self
+            candidate.preferredTunnelMode = appliedPreference
             candidate.tunnelMode = .off
             return candidate
         }
-        let mode = preferredTunnelMode == .named ? NeoYTunnelMode.named : .quick
-        return try applyingRemoteAddress(mode, hostname: publicHostname, enabled: true)
+        return try applyingRemoteAddress(appliedPreference, hostname: publicHostname, enabled: true)
     }
 
     /// Remote exposure is independent of the connection's applied address.

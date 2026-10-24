@@ -84,4 +84,43 @@ final class DeploymentSettingsTests: XCTestCase {
         XCTAssertEqual(committed.publicHostname, pendingHostname)
         XCTAssertEqual(committed.enabledRemoteTools, exposed.enabledRemoteTools)
     }
+
+    func testLegacyNamedJSONOffOnKeepsOwnDomain() throws {
+        // pre-refactor file has no preferredTunnelMode key.
+        let json = #"""
+        {"mcpPort":6767,"tunnelMode":"named","tunnelName":"legacy",
+         "publicHostname":"mcp.example.com","remoteTools":["status"]}
+        """#
+        let legacy = try JSONDecoder().decode(
+            NeoYDeploymentSettings.self, from: Data(json.utf8))
+        XCTAssertNil(legacy.preferredTunnelMode)
+        XCTAssertEqual(legacy.tunnelMode, .named)
+
+        let off = try legacy.settingRemoteEnabled(false)
+        XCTAssertEqual(off.tunnelMode, .off)
+        XCTAssertEqual(off.preferredTunnelMode, .named)
+        let persisted = try JSONDecoder().decode(NeoYDeploymentSettings.self,
+            from: JSONEncoder().encode(off))
+        let on = try persisted.settingRemoteEnabled(true)
+        XCTAssertEqual(on.tunnelMode, .named)
+        XCTAssertEqual(on.preferredTunnelMode, .named)
+        XCTAssertEqual(on.publicHostname, "mcp.example.com")
+    }
+
+    func testLegacyQuickAndOffJSONKeepExpectedMode() throws {
+        for mode in ["quick", "off"] {
+            let json = """
+            {"mcpPort":6767,"tunnelMode":"\(mode)","tunnelName":"",
+             "publicHostname":"","preferredTunnelMode":null}
+            """
+            let legacy = try JSONDecoder().decode(
+                NeoYDeploymentSettings.self, from: Data(json.utf8))
+            let off = try legacy.settingRemoteEnabled(false)
+            XCTAssertEqual(off.tunnelMode, .off)
+            XCTAssertEqual(off.preferredTunnelMode, .quick)
+            let on = try off.settingRemoteEnabled(true)
+            XCTAssertEqual(on.tunnelMode, .quick)
+            XCTAssertEqual(on.preferredTunnelMode, .quick)
+        }
+    }
 }
