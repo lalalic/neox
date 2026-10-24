@@ -42,14 +42,48 @@ enum NeoCLISetup {
         return URL(fileURLWithPath: dest, relativeTo: path.deletingLastPathComponent()).standardizedFileURL.path.contains("/Workspace/neo/")
     }
     static let npmCLI = "@lalalic/neo@1.0.2"
+    static let npmPackage = "@lalalic/neo"
+    static let expectedVersion = "1.0.2"
+    static func packageDecision(installed: [String: String], executableExists: Bool) -> String {
+        if let legacy = installed["neo"] {
+            return "migration_required: legacy neo@\(legacy) owns the command; remove or migrate it explicitly before installing \(npmPackage)"
+        }
+        if let current = installed[npmPackage] {
+            return current == expectedVersion && executableExists
+                ? "ready"
+                : "upgrade_required: \(npmPackage) \(current) != \(expectedVersion)"
+        }
+        return executableExists
+            ? "ownership_unknown: an existing neo command is not owned by \(npmPackage); preserve it"
+            : "install"
+    }
+    static func installedNPMPackages(using npm: String) throws -> [String: String] {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: npm)
+        process.arguments = ["list", "--global", "--depth=0", "--json"]
+        process.environment = ProcessInfo.processInfo.environment.merging(["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]) { _, configured in configured }
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = Pipe()
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let dependencies = root["dependencies"] as? [String: [String: Any]] else { return [:] }
+        return dependencies.compactMapValues { $0["version"] as? String }
+    }
     /// CLI is an independently published npm release, never a build-machine checkout.
     static func installIfMissing() throws -> String {
-        if let path = cliPath() {
-            return isDevelopmentLink(path) ? "Developer CLI retained: \(path.path)" : "CLI already installed: \(path.path)"
-        }
         guard let npm = ["/opt/homebrew/bin/npm", "/usr/local/bin/npm"].first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
             return "CLI needs setup: npm unavailable"
         }
+        let existing = cliPath()
+        if let path = existing, isDevelopmentLink(path) {
+            return "Developer CLI retained: \(path.path)"
+        }
+        let decision = packageDecision(installed: try installedNPMPackages(using: npm), executableExists: existing != nil)
+        if decision == "ready" { return "CLI already installed: \(npmCLI)" }
+        if decision != "install" { return "CLI needs setup: \(decision)" }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: npm)
         task.arguments = ["install", "--global", npmCLI, "--ignore-scripts", "--no-audit", "--no-fund"]
