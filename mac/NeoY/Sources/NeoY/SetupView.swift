@@ -693,7 +693,7 @@ struct NeoYSetupView: View {
                     Divider()
                 }
 
-                featureRow("Neo Agent Toolkit", detail: "lalalic/neo · CLI and workflows") {
+                featureRow("Projects Toolkit", detail: "lalalic/neo · CLI and workflows") {
                     Button("Install / Update") { model.setupNeoCLI() }
                     if model.toolkitUninstallable {
                         Button("Uninstall", role: .destructive) { model.uninstallNeoToolkit() }

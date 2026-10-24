@@ -23,6 +23,18 @@ final class NeoCLISetupTests: XCTestCase {
         XCTAssertEqual(NeoCLISetup.packageDecision(installed: [:], executableExists: false), "install")
     }
 
+    func testNeoProjectsAreOnlyFirstLevelProducts() {
+        let projects = [
+            "neo/vlog", "neo/family-tutor", "neo/commerce",
+            "neo/commerce/runs/2026-10-23/product",
+            "neo/skills", "neo/skills/events-bus/evals",
+            "browser-workspace/platforms/chatgpt", "ai-trading-lab",
+            "neo/vlog"
+        ].map { ["xchat_project": $0] }
+        XCTAssertEqual(NeoCLISetup.neoProjectNames(from: projects),
+                       ["commerce", "family-tutor", "vlog"])
+    }
+
     func testGlobalSkillsReadOnlyInventory() {
         XCTAssertEqual(NeoCLISetup.globalSkills(), ["events-bus", "daemon-service-manage", "webhelm"])
     }

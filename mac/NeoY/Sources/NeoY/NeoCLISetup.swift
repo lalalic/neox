@@ -42,8 +42,18 @@ enum NeoCLISetup {
             process.waitUntilExit()
             guard process.terminationStatus == 0,
                   let projects = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
-            return projects.compactMap { $0["xchat_project"] as? String }.sorted()
+            return neoProjectNames(from: projects)
         } catch { return [] }
+    }
+
+    /// The CLI discovers every Workspace project and nested README directory.
+    /// Show first-level Neo products, not nested runs or infrastructure skills.
+    static func neoProjectNames(from records: [[String: Any]]) -> [String] {
+        let names = records.compactMap { $0["xchat_project"] as? String }
+        return Array(Set(names.filter { name in
+            let parts = name.split(separator: "/")
+            return parts.count == 2 && parts[0] == "neo" && parts[1] != "skills"
+        }.map { String($0.dropFirst("neo/".count)) })).sorted()
     }
 
     static func installedGlobalSkills() -> [String] {
