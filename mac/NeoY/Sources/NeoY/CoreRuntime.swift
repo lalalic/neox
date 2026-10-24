@@ -1,7 +1,17 @@
 import Foundation
 
 enum NeoYCoreRuntime {
-    static let version = "2.3.1"
+    static var version: String { version(in: .main) }
+
+    static func version(in bundle: Bundle) -> String {
+        version(in: bundle.infoDictionary ?? [:])
+    }
+
+    static func version(in infoDictionary: [String: Any]) -> String {
+        infoDictionary["CFBundleShortVersionString"] as? String
+            ?? infoDictionary["CFBundleVersion"] as? String
+            ?? "Unknown"
+    }
     static let toolNames: Set<String> = [
         "setup", "cluster", "status", "shell", "fs", "git_apply_patch",
         "codex", "terminal", "chatgpt"
