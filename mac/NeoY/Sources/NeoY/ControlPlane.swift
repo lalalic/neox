@@ -87,6 +87,17 @@ enum NeoYOptionalCapability: String, Codable, CaseIterable, Sendable {
 
 struct NeoYCapabilityConfiguration: Codable, Equatable, Sendable {
     var disabled: Set<NeoYOptionalCapability> = []
+    var disabledTools: Set<String> = []
+
+    init() {}
+
+    private enum CodingKeys: String, CodingKey { case disabled, disabledTools }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        disabled = try values.decodeIfPresent(Set<NeoYOptionalCapability>.self, forKey: .disabled) ?? []
+        disabledTools = try values.decodeIfPresent(Set<String>.self, forKey: .disabledTools) ?? []
+    }
 
     func isEnabled(_ capability: NeoYOptionalCapability) -> Bool {
         !disabled.contains(capability)
@@ -397,6 +408,18 @@ actor NeoYControlPlaneService {
 
     func setCapability(_ capability: NeoYOptionalCapability, enabled: Bool) throws -> NeoYControlPlaneConfiguration {
         try mutate { $0.capabilities.set(capability, enabled: enabled) }
+    }
+
+    func setToolEnabled(_ name: String, enabled: Bool) throws -> NeoYControlPlaneConfiguration {
+        guard !NeoYCoreRuntime.toolNames.contains(name),
+              !["events", "neoy.ui_smoke", "mcp.temp-files"].contains(name),
+              !name.isEmpty else {
+            throw NeoYControlPlaneError.invalidName(name)
+        }
+        return try mutate {
+            if enabled { $0.capabilities.disabledTools.remove(name) }
+            else { $0.capabilities.disabledTools.insert(name) }
+        }
     }
 
     private func mutate(_ transform: (inout NeoYControlPlaneConfiguration) throws -> Void) throws -> NeoYControlPlaneConfiguration {

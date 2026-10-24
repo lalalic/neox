@@ -27,6 +27,7 @@ final class NeoYSetupModel: ObservableObject {
     @Published var remoteProviders: Set<String> = []
     @Published private(set) var featureRecords: [NeoYFeatureRecord] = []
     @Published private(set) var nativeEnabledTools: Set<String> = []
+    @Published private(set) var disabledDiscoveredTools: Set<String> = []
     @Published private(set) var discoveredMCPTools: [String] = []
     @Published private(set) var remoteProviderOptions: [String] = []
     @Published private(set) var oauthClientID = ""
@@ -37,10 +38,14 @@ final class NeoYSetupModel: ObservableObject {
     @Published var neoCLIReport = "Checking Neo CLI…"
     @Published var toolkitUninstallable = false
     @Published var toolkitInstalled = false
+    @Published var toolkitEnabled = UserDefaults.standard.object(forKey: "NeoProjectsToolkitEnabled") as? Bool ?? true
     @Published var globalSkills = NeoCLISetup.globalSkills()
     @Published var optionalSkills: Set<String> = []
     @Published private(set) var projectNames: [String] = []
     @Published private(set) var clusterNodes: [NeoYNodeConfiguration] = []
+    @Published var newNodeName = ""
+    @Published var newNodeURL = ""
+    @Published var newNodeToken = ""
     @Published var isBusy = false
     @Published private(set) var permissions: [NeoYPermissionStatus] = []
 
@@ -115,6 +120,53 @@ final class NeoYSetupModel: ObservableObject {
         }
     }
 
+    func addClusterNode() {
+        guard !isBusy else { return }
+        let name = newNodeName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let url = newNodeURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.range(of: #"^[A-Za-z0-9._-]+$"#, options: .regularExpression) != nil,
+              let parsed = URLComponents(string: url),
+              ["http", "https"].contains(parsed.scheme?.lowercased() ?? ""),
+              let host = parsed.host, !host.isEmpty,
+              !clusterNodes.contains(where: { $0.name == name }),
+              url != NeoYDeploymentSettingsStore.load().localMCPURL else {
+            result = "Enter a unique node name and a valid remote MCP URL."
+            return
+        }
+        isBusy = true
+        let token = newNodeToken.isEmpty ? nil : newNodeToken
+        Task {
+            do {
+                try await NeoYNodeService().pairNode(name: name, url: url, token: token)
+                newNodeName = ""
+                newNodeURL = ""
+                newNodeToken = ""
+                refreshClusterNodes()
+                result = "Node \(name) added."
+            } catch { result = "Node not added: \(error.localizedDescription)" }
+            isBusy = false
+        }
+    }
+
+    func removeClusterNode(_ name: String) {
+        guard !isBusy, clusterNodes.contains(where: { $0.name == name }) else { return }
+        let alert = NSAlert()
+        alert.messageText = "Remove node \(name)?"
+        alert.informativeText = "Remove this node from Neo's trusted cluster list. The remote machine and its services are unchanged."
+        alert.addButton(withTitle: "Remove")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        isBusy = true
+        Task {
+            do {
+                try await NeoYNodeStore().remove(name)
+                refreshClusterNodes()
+                result = "Node \(name) removed."
+            } catch { result = "Node not removed: \(error.localizedDescription)" }
+            isBusy = false
+        }
+    }
+
     func refreshMCPTools() async {
         let urlString = NeoYDeploymentSettingsStore.load().localMCPURL
         guard let url = URL(string: urlString) else { return }
@@ -134,7 +186,9 @@ final class NeoYSetupModel: ObservableObject {
     }
 
     var visibleMCPFeatureTools: [String] {
-        let candidate = Set(discoveredMCPTools).union(NeoYRemoteToolCatalog.nativeOptionalTools.keys)
+        let candidate = Set(discoveredMCPTools)
+            .union(NeoYRemoteToolCatalog.nativeOptionalTools.keys)
+            .union(disabledDiscoveredTools)
         return candidate.filter { name in
             if NeoYCoreRuntime.toolNames.contains(name) { return false }
             if ["events", "neoy.ui_smoke", "mcp.temp-files"].contains(name) { return false }
@@ -148,6 +202,7 @@ final class NeoYSetupModel: ObservableObject {
     func refreshNativeTools() {
         let store = NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)
         guard let configuration = try? store.loadOrCreate().document.configuration else { return }
+        disabledDiscoveredTools = configuration.capabilities.disabledTools
         nativeEnabledTools = Set(NeoYRemoteToolCatalog.nativeOptionalTools.compactMap { tool, capability in
             configuration.capabilities.isEnabled(capability) ? tool : nil
         })
@@ -169,6 +224,30 @@ final class NeoYSetupModel: ObservableObject {
             await refreshMCPTools()
             isBusy = false
         }
+    }
+
+    func setDiscoveredTool(_ name: String, enabled: Bool) {
+        guard !isBusy else { return }
+        isBusy = true
+        Task {
+            do {
+                let control = NeoYControlPlaneService(
+                    store: NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory))
+                _ = try await control.setToolEnabled(name, enabled: enabled)
+                NotificationCenter.default.post(name: .neoYFeaturesChanged, object: nil)
+                result = "\(name) \(enabled ? "enabled" : "disabled")."
+            } catch { result = error.localizedDescription }
+            refreshNativeTools()
+            await refreshMCPTools()
+            isBusy = false
+        }
+    }
+
+    func setToolkitEnabled(_ enabled: Bool) {
+        guard !isBusy else { return }
+        toolkitEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "NeoProjectsToolkitEnabled")
+        if enabled && !toolkitInstalled { setupNeoCLI() }
     }
 
     func installOptionalSkill(_ name: String) {
@@ -677,10 +756,13 @@ struct NeoYSetupView: View {
                             .labelsHidden()
                             .toggleStyle(.checkbox)
                         } else {
-                            Toggle("", isOn: .constant(true))
-                                .labelsHidden()
-                                .toggleStyle(.checkbox)
-                                .disabled(true)
+                            Toggle("", isOn: Binding(
+                                get: { !model.disabledDiscoveredTools.contains(tool) },
+                                set: { model.setDiscoveredTool(tool, enabled: $0) }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(.checkbox)
+                            .disabled(model.isBusy)
                         }
                     }
                     Divider()
@@ -704,20 +786,17 @@ struct NeoYSetupView: View {
 
                 featureRow("Projects Toolkit", detail: "lalalic/neo · CLI and workflows") {
                     Toggle("", isOn: Binding(
-                        get: { model.toolkitInstalled },
-                        set: { enabled in
-                            if enabled { model.setupNeoCLI() }
-                            else { model.uninstallNeoToolkit() }
-                        }
+                        get: { model.toolkitEnabled && model.toolkitInstalled },
+                        set: { model.setToolkitEnabled($0) }
                     ))
                     .labelsHidden()
                     .toggleStyle(.checkbox)
-                    .disabled(model.isBusy || (model.toolkitInstalled && !model.toolkitUninstallable))
-                    if model.toolkitInstalled {
+                    .disabled(model.isBusy)
+                    if model.toolkitEnabled && model.toolkitInstalled {
                         Button("Update") { model.setupNeoCLI() }.disabled(model.isBusy)
                     }
                 }
-                if model.toolkitInstalled {
+                if model.toolkitEnabled && model.toolkitInstalled {
                     DisclosureGroup("Projects (\(model.projectNames.count))") {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
@@ -803,6 +882,20 @@ struct NeoYSetupView: View {
                 Button("Refresh") { model.refreshClusterNodes() }
             }
 
+            DisclosureGroup("Add node") {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("Node name", text: $model.newNodeName)
+                    TextField("MCP URL", text: $model.newNodeURL)
+                    SecureField("Token (if required)", text: $model.newNodeToken)
+                    HStack {
+                        Spacer()
+                        Button("Add") { model.addClusterNode() }
+                            .disabled(model.isBusy || model.newNodeName.isEmpty || model.newNodeURL.isEmpty)
+                    }
+                }
+                .padding(12)
+            }
+
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
@@ -825,6 +918,8 @@ struct NeoYSetupView: View {
                         Spacer()
                         Text(node.isEnabled ? "Configured" : "Disabled")
                             .font(.caption).foregroundStyle(.secondary)
+                        Button("Remove", role: .destructive) { model.removeClusterNode(node.name) }
+                            .disabled(model.isBusy)
                     }
                     .padding(12)
                 }

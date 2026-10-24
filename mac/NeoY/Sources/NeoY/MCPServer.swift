@@ -82,6 +82,7 @@ public final class MCPServer {
     private var privilegedAccessToken: String?
     private var oauthService: NeoYOAuthService?
     private var remoteAllowedTools: Set<String> = []
+    private var disabledFeatureTools: Set<String> = []
     private var remoteAllowedProviders: Set<String> = []
     private var remoteAllowedResourceURIs: Set<String> = []
     private var httpRoutes: [String: HTTPRouteHandler] = [:]
@@ -101,6 +102,7 @@ public final class MCPServer {
     nonisolated(unsafe) private var _snapshotPrivilegedAccessToken: String?
     nonisolated(unsafe) private var _snapshotOAuthService: NeoYOAuthService?
     nonisolated(unsafe) private var _snapshotRemoteAllowedTools: Set<String> = []
+    nonisolated(unsafe) private var _snapshotDisabledFeatureTools: Set<String> = []
     nonisolated(unsafe) private var _snapshotRemoteAllowedProviders: Set<String> = []
     nonisolated(unsafe) private var _snapshotRemoteAllowedResourceURIs: Set<String> = []
     nonisolated(unsafe) private var _snapshotHTTPRoutes: [String: HTTPRouteHandler] = [:]
@@ -224,6 +226,11 @@ public final class MCPServer {
         refreshSnapshots()
     }
 
+    func setDisabledFeatureTools(_ tools: Set<String>) {
+        disabledFeatureTools = tools.subtracting(NeoYCoreRuntime.toolNames)
+        refreshSnapshots()
+    }
+
     func setRemoteAllowedTools(_ tools: Set<String>) {
         remoteAllowedTools = tools
         refreshSnapshots()
@@ -252,6 +259,7 @@ public final class MCPServer {
         _snapshotPrivilegedAccessToken = privilegedAccessToken
         _snapshotOAuthService = oauthService
         _snapshotRemoteAllowedTools = remoteAllowedTools
+        _snapshotDisabledFeatureTools = disabledFeatureTools
         _snapshotRemoteAllowedProviders = remoteAllowedProviders
         _snapshotRemoteAllowedResourceURIs = remoteAllowedResourceURIs
         _snapshotHTTPRoutes = httpRoutes
@@ -308,6 +316,7 @@ public final class MCPServer {
         _snapshotPrivilegedAccessToken = privilegedAccessToken
         _snapshotOAuthService = oauthService
         _snapshotRemoteAllowedTools = remoteAllowedTools
+        _snapshotDisabledFeatureTools = disabledFeatureTools
         _snapshotRemoteAllowedProviders = remoteAllowedProviders
         _snapshotRemoteAllowedResourceURIs = remoteAllowedResourceURIs
         _snapshotHTTPRoutes = httpRoutes
@@ -713,10 +722,14 @@ public final class MCPServer {
         case "tools/list":
             let visibleTools: [[String: Any]]
             if isLocal {
-                visibleTools = _snapshotTools
+                visibleTools = _snapshotTools.filter { tool in
+                    guard let name = tool["name"] as? String else { return false }
+                    return !_snapshotDisabledFeatureTools.contains(name)
+                }
             } else if authorized {
                 visibleTools = _snapshotTools.filter {
                     guard let name = $0["name"] as? String else { return false }
+                    guard !_snapshotDisabledFeatureTools.contains(name) else { return false }
                     return _snapshotRemoteAllowedTools.contains(name)
                         || Self.remoteProvider(forToolName: name, ownership: _snapshotFederatedToolProviders).map { _snapshotRemoteAllowedProviders.contains($0) } == true
                 }.map(Self.normalizeRemoteTool)
@@ -747,6 +760,15 @@ public final class MCPServer {
                 origin: isLocal ? .local : .remote,
                 provider: provider
             )
+            if _snapshotDisabledFeatureTools.contains(toolName) {
+                toolCallAudit.record(
+                    callID: callID, toolName: toolName, provenance: provenance,
+                    status: .denied, errorCode: .authorizationDenied
+                )
+                sendJSONRPCError(connection: connection, id: id, code: -32003,
+                    message: "Feature '\(toolName)' is disabled")
+                return
+            }
             if !isLocal {
                 guard authorized else {
                     toolCallAudit.record(

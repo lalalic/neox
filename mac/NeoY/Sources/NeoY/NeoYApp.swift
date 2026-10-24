@@ -181,6 +181,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
         NativeUISmoke.register(on: value)
         let featureConfiguration = (try? NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory).loadOrCreate().document.configuration)
             ?? NeoYControlPlaneConfiguration()
+        value.setDisabledFeatureTools(featureConfiguration.capabilities.disabledTools)
         if featureConfiguration.capabilities.isEnabled(.askQuestions) {
             AskQuestions.register(on: value)
         }

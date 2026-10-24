@@ -35,6 +35,37 @@ final class NeoCLISetupTests: XCTestCase {
                        ["commerce", "family-tutor", "vlog"])
     }
 
+    func testLegacyCapabilityConfigurationDefaultsToolOverrides() throws {
+        let oldConfiguration = #"{ "disabled": ["ask-questions"] }"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(NeoYCapabilityConfiguration.self, from: oldConfiguration)
+        XCTAssertTrue(decoded.disabledTools.isEmpty)
+        XCTAssertFalse(decoded.isEnabled(.askQuestions))
+
+        var updated = decoded
+        updated.disabledTools.insert("voice.session")
+        let reloaded = try JSONDecoder().decode(NeoYCapabilityConfiguration.self,
+                                                from: JSONEncoder().encode(updated))
+        XCTAssertTrue(reloaded.disabledTools.contains("voice.session"))
+    }
+
+    func testNodeStoreCanAddRemoveWithoutChangingRemoteMachine() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("nodes.json")
+        let store = NeoYNodeStore(file: file)
+        let node = NeoYNodeConfiguration(name: "test-peer", url: "https://example.com/mcp",
+                                         kind: .neoyPeer, token: "redacted")
+        try await store.upsert(node)
+        let afterAdd = await store.list()
+        XCTAssertEqual(afterAdd.count, 1)
+        try await store.remove("test-peer")
+        let afterRemove = await store.list()
+        XCTAssertTrue(afterRemove.isEmpty)
+        XCTAssertTrue(try JSONDecoder().decode([NeoYNodeConfiguration].self,
+                                               from: Data(contentsOf: file)).isEmpty)
+    }
+
     func testGlobalSkillsReadOnlyInventory() {
         XCTAssertEqual(NeoCLISetup.globalSkills(), ["events-bus", "daemon-service-manage", "webhelm"])
     }

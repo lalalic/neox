@@ -15,10 +15,11 @@ struct NeoYNodeConfiguration: Codable, Equatable, Sendable {
 }
 
 actor NeoYNodeStore {
-    private let file = NeoYPaths.supportDirectory.appendingPathComponent("trusted-nodes.json")
+    private let file: URL
     private var nodes: [NeoYNodeConfiguration] = []
 
-    init() {
+    init(file: URL = NeoYPaths.supportDirectory.appendingPathComponent("trusted-nodes.json")) {
+        self.file = file
         if let data = try? Data(contentsOf: file),
            let values = try? JSONDecoder().decode([NeoYNodeConfiguration].self, from: data) {
             nodes = values
@@ -48,7 +49,7 @@ actor NeoYNodeStore {
     }
 
     private func persist() throws {
-        try FileManager.default.createDirectory(at: NeoYPaths.supportDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         try encoder.encode(nodes).write(to: file, options: .atomic)
@@ -160,6 +161,12 @@ actor NeoYNodeService {
         try? await Task.sleep(for: .seconds(seconds))
         browser.cancel()
         return NeoYCoreJSON.encode(accumulator.snapshot())
+    }
+
+    func pairNode(name: String, url: String, token: String?) async throws {
+        var arguments = ["pair", name, url]
+        if let token, !token.isEmpty { arguments.append(token) }
+        _ = try await pair(arguments)
     }
 
     private func pair(_ tokens: [String]) async throws -> String {
