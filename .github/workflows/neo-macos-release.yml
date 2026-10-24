@@ -1,0 +1,108 @@
+name: Release Neo for macOS
+
+on:
+  push:
+    tags:
+      - 'neo-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing neo-v* tag to build (dry-run without publishing)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-15
+    environment: macos-release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+      - name: Verify release identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ github.event_name == 'push' && github.ref_name || inputs.tag }}"
+          version="${tag#neo-v}"
+          test "$tag" != "$version"
+          actual=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' mac/NeoY/Resources/Info.plist)
+          test "$actual" = "$version"
+          echo "NEO_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Verify release credentials are configured
+        env:
+          CERTIFICATE: ${{ secrets.NEO_DEVELOPER_ID_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.NEO_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_KEY: ${{ secrets.ASC_API_KEY }}
+          APPLE_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          APPLE_ISSUER: ${{ secrets.ASC_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.NEO_APPLE_TEAM_ID }}
+          SIGN_IDENTITY: ${{ secrets.NEO_DEVELOPER_ID_IDENTITY }}
+        run: |
+          test -n "$CERTIFICATE"
+          test -n "$CERTIFICATE_PASSWORD"
+          test -n "$APPLE_KEY"
+          test -n "$APPLE_KEY_ID"
+          test -n "$APPLE_ISSUER"
+          test -n "$TEAM_ID"
+          test -n "$SIGN_IDENTITY"
+      - name: Build and test
+        working-directory: mac/NeoY
+        run: |
+          brew install xcodegen
+          xcodegen generate
+          xcodebuild -project NeoY.xcodeproj -scheme NeoY -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
+          xcodebuild -project NeoY.xcodeproj -scheme NeoY -configuration Release -destination 'generic/platform=macOS' -derivedDataPath "$RUNNER_TEMP/neo-build" CODE_SIGNING_ALLOWED=NO ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO build
+          test -f "$RUNNER_TEMP/neo-build/Build/Products/Release/NeoY.app/Contents/Resources/Runtime/package.json"
+          lipo -verify_arch arm64 x86_64 "$RUNNER_TEMP/neo-build/Build/Products/Release/NeoY.app/Contents/MacOS/NeoY"
+      - name: Import Developer ID and notarization credentials
+        env:
+          CERTIFICATE: ${{ secrets.NEO_DEVELOPER_ID_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.NEO_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_KEY: ${{ secrets.ASC_API_KEY }}
+          APPLE_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          APPLE_ISSUER: ${{ secrets.ASC_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.NEO_APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          security create-keychain -p "$RUNNER_TEMP" neo-release.keychain
+          security set-keychain-settings -lut 21600 neo-release.keychain
+          security unlock-keychain -p "$RUNNER_TEMP" neo-release.keychain
+          printf '%s' "$CERTIFICATE" | base64 -D > "$RUNNER_TEMP/developer-id.p12"
+          security import "$RUNNER_TEMP/developer-id.p12" -k neo-release.keychain -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$RUNNER_TEMP" neo-release.keychain
+          security list-keychains -d user -s neo-release.keychain
+          printf '%s' "$APPLE_KEY" > "$RUNNER_TEMP/AuthKey_${APPLE_KEY_ID}.p8"
+          echo "NEO_NOTARY_KEY=$RUNNER_TEMP/AuthKey_${APPLE_KEY_ID}.p8" >> "$GITHUB_ENV"
+      - name: Sign, notarize and package
+        env:
+          SIGN_IDENTITY: ${{ secrets.NEO_DEVELOPER_ID_IDENTITY }}
+          APPLE_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          APPLE_ISSUER: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/dist" "$RUNNER_TEMP/neo-stage"
+          ditto "$RUNNER_TEMP/neo-build/Build/Products/Release/NeoY.app" "$RUNNER_TEMP/neo-stage/Neo.app"
+          codesign --force --deep --options runtime --timestamp --sign "$SIGN_IDENTITY" "$RUNNER_TEMP/neo-stage/Neo.app"
+          codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP/neo-stage/Neo.app"
+          hdiutil create -volname Neo -srcfolder "$RUNNER_TEMP/neo-stage" -format UDZO -ov "$RUNNER_TEMP/dist/Neo-${NEO_VERSION}-macos.dmg"
+          xcrun notarytool submit "$RUNNER_TEMP/dist/Neo-${NEO_VERSION}-macos.dmg" --key "$NEO_NOTARY_KEY" --key-id "$APPLE_KEY_ID" --issuer "$APPLE_ISSUER" --wait
+          xcrun stapler staple "$RUNNER_TEMP/dist/Neo-${NEO_VERSION}-macos.dmg"
+          xcrun stapler validate "$RUNNER_TEMP/dist/Neo-${NEO_VERSION}-macos.dmg"
+          shasum -a 256 "$RUNNER_TEMP/dist/Neo-${NEO_VERSION}-macos.dmg" > "$RUNNER_TEMP/dist/SHA256SUMS"
+          DIGEST=$(shasum -a 256 "$RUNNER_TEMP/dist/Neo-${NEO_VERSION}-macos.dmg" | awk '{print $1}')
+          node -e 'const fs=require("fs"); const [version,sha]=process.argv.slice(1);fs.writeFileSync(process.env.RUNNER_TEMP+"/dist/release.json",JSON.stringify({product:"Neo",version,bundleId:"com.neox.neoy",platform:"macos",architectures:["arm64","x86_64"],file:`Neo-${version}-macos.dmg`,sha256:sha},null,2))' "$NEO_VERSION" "$DIGEST"
+      - name: Upload signed release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: neo-macos-${{ env.NEO_VERSION }}
+          path: ${{ runner.temp }}/dist/*
+      - name: Publish tagged GitHub release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP/dist/Neo-${NEO_VERSION}-macos.dmg" "$RUNNER_TEMP/dist/SHA256SUMS" "$RUNNER_TEMP/dist/release.json" --title "Neo ${NEO_VERSION}" --generate-notes --verify-tag

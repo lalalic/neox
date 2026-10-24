@@ -34,6 +34,12 @@ NeoY design principle.
 
 ### NeoY local deployment completion contract
 
+UI review lesson: Remote MCP address selection is only a draft until explicit
+Apply. Changing exposure permissions must never save a pending address or mode.
+Keep optional toolkit installation separate from mandatory bootstrap skills.
+Feature UI must preserve the published-package catalog; native MCP toggles use
+the existing control-plane capability owner, not the remote exposure allowlist.
+
 PR merge is **not** completion for a NeoY change that must be applied locally.
 Choose the deployment path by what changed; do not rebuild/reinstall the native app
 for a Runtime-only change.

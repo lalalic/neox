@@ -10,6 +10,15 @@ enum NeoYRemoteToolCatalog {
         "ask_questions",
     ]
 
+    // Native capabilities are the only MCP tools in this catalog with a
+    // supported global enable/disable contract. Core tools stay Core-owned.
+    static let nativeOptionalTools: [String: NeoYOptionalCapability] = [
+        "computer": .accessibilityComputer,
+        "demo": .demoRecording,
+        "tour": .captureTour,
+        "phone": .phoneIntegration,
+    ]
+
     static func availableToolNames(configuration: NeoYControlPlaneConfiguration) -> [String] {
         var names = coreToolNames.union(askQuestionsToolNames)
         if configuration.capabilities.isEnabled(.accessibilityComputer) { names.insert("computer") }

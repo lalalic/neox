@@ -11,6 +11,7 @@ struct NeoYDeploymentSettings: Codable, Equatable {
     var tunnelMode: NeoYTunnelMode = .off
     var tunnelName: String = ""
     var publicHostname: String = ""
+    var preferredTunnelMode: NeoYTunnelMode? = nil
     var remoteTools: Set<String>? = nil
     var remoteFeatures: Set<String>? = nil // legacy; migrated to remoteTools on load
     var remoteProviders: Set<String>? = nil
@@ -26,6 +27,51 @@ struct NeoYDeploymentSettings: Codable, Equatable {
             return "https://\(publicHostname)/mcp"
         }
         return NeoYDeploymentSettingsStore.quickTunnelURL().map { "\($0)/mcp" }
+    }
+
+    /// Build the candidate without writing it. A picker change must not alter
+    /// the live transport, even when another setting is saved meanwhile.
+    func applyingRemoteAddress(_ preferred: NeoYTunnelMode, hostname: String, enabled: Bool) throws -> Self {
+        guard preferred == .quick || preferred == .named else {
+            throw NSError(domain: "NeoY", code: 4, userInfo: [NSLocalizedDescriptionKey: "Choose Temporary or Own Domain"])
+        }
+        let trimmed = hostname.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard preferred != .named || !trimmed.isEmpty else {
+            throw NSError(domain: "NeoY", code: 5, userInfo: [NSLocalizedDescriptionKey: "Enter your own domain before applying"])
+        }
+        var candidate = self
+        candidate.tunnelMode = enabled ? preferred : .off
+        candidate.preferredTunnelMode = preferred
+        candidate.publicHostname = trimmed
+        return try candidate.validated()
+    }
+
+    /// Change only the applied transport state. Pending picker edits are not inputs.
+    func settingRemoteEnabled(_ enabled: Bool) throws -> Self {
+        // Older deployment.json files lack preferredTunnelMode. Preserve their
+        // active mode before turning the transport off.
+        let appliedPreference: NeoYTunnelMode
+        if let preferredTunnelMode, preferredTunnelMode != .off {
+            appliedPreference = preferredTunnelMode
+        } else {
+            appliedPreference = tunnelMode == .named ? .named : .quick
+        }
+        if !enabled {
+            var candidate = self
+            candidate.preferredTunnelMode = appliedPreference
+            candidate.tunnelMode = .off
+            return candidate
+        }
+        return try applyingRemoteAddress(appliedPreference, hostname: publicHostname, enabled: true)
+    }
+
+    /// Remote exposure is independent of the connection's applied address.
+    func settingRemoteExposure(tools: Set<String>, providers: Set<String>) -> Self {
+        var candidate = self
+        candidate.remoteTools = tools
+        candidate.remoteFeatures = nil
+        candidate.remoteProviders = providers
+        return candidate
     }
 
     func validated() throws -> NeoYDeploymentSettings {
