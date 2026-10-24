@@ -26,4 +26,17 @@ final class NeoCLISetupTests: XCTestCase {
     func testGlobalSkillsReadOnlyInventory() {
         XCTAssertEqual(NeoCLISetup.globalSkills(), ["events-bus", "daemon-service-manage", "webhelm"])
     }
+
+    func testOptionalSkillCatalogDoesNotIncludeCoreDependencies() {
+        XCTAssertEqual(Set(NeoCLISetup.optionalSkillSources.keys),
+                       Set(["wechat-bro", "markcut", "agents-relay"]))
+        XCTAssertTrue(Set(NeoCLISetup.optionalSkillSources.keys)
+            .isDisjoint(with: NeoCLISetup.requiredGlobalSkills))
+    }
+
+    func testFeatureToolListExcludesCoreTools() {
+        let names = ["shell", "chatgpt", "fs", "git_apply_patch", "computer", "phone", "tour"]
+        XCTAssertEqual(NeoYRemoteToolCatalog.optionalFeatureTools(from: names),
+                       ["computer", "phone", "tour"])
+    }
 }

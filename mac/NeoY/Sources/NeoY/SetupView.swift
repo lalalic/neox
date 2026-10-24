@@ -4,9 +4,9 @@ import SwiftUI
 @MainActor
 final class NeoYSetupModel: ObservableObject {
     enum Tab: String, CaseIterable, Identifiable {
-        case mcp = "MCP"
-        case remote = "Remote"
-        case advanced = "Advanced"
+        case connections = "Connections"
+        case features = "Features"
+        case deployment = "Deployment"
         var id: String { rawValue }
     }
 
@@ -15,10 +15,11 @@ final class NeoYSetupModel: ObservableObject {
         var id: String { rawValue }
     }
 
-    @Published var tab: Tab = .mcp
+    @Published var tab: Tab = .connections
     @Published var portText = String(NeoYDeploymentSettings.defaultPort)
     @Published var remoteEnabled = false
     @Published var remoteMode: RemoteMode = .temporary
+    @Published private(set) var appliedRemoteMode: RemoteMode = .temporary
     @Published var publicHostname = ""
     @Published var remoteTools: Set<String> = []
     @Published private(set) var remoteToolOptions: [String] = []
@@ -32,6 +33,8 @@ final class NeoYSetupModel: ObservableObject {
     @Published var coreRuntimeStatus = NeoYManagedCoreRuntime.active()?.lastPathComponent ?? "bootstrap Core (not installed)"
     @Published var neoCLIReport = NeoCLISetup.report()
     @Published var globalSkills = NeoCLISetup.globalSkills()
+    @Published var optionalSkills = NeoCLISetup.allInstalledGlobalSkills()
+    @Published private(set) var projectNames: [String] = []
     @Published var isBusy = false
     @Published private(set) var permissions: [NeoYPermissionStatus] = []
 
@@ -40,6 +43,7 @@ final class NeoYSetupModel: ObservableObject {
         Task {
             await refreshPermissions()
             await refreshFeatures()
+            refreshProjects()
         }
     }
 
@@ -75,6 +79,31 @@ final class NeoYSetupModel: ObservableObject {
     func refreshNeoCLI() {
         neoCLIReport = NeoCLISetup.report()
         globalSkills = NeoCLISetup.globalSkills()
+        optionalSkills = NeoCLISetup.allInstalledGlobalSkills()
+    }
+
+    func refreshProjects() {
+        Task.detached { [weak self] in
+            let names = NeoCLISetup.projectNames()
+            await MainActor.run { self?.projectNames = names }
+        }
+    }
+
+    func installOptionalSkill(_ name: String) {
+        guard !isBusy, let source = NeoCLISetup.optionalSkillSources[name] else { return }
+        isBusy = true
+        Task.detached { [weak self] in
+            let message: String
+            do {
+                _ = try NeoCLISetup.runSkills(["add", source, "-g", "-y", "-s", name])
+                message = "Installed \(name)."
+            } catch { message = "Installation failed: \(error.localizedDescription)" }
+            await MainActor.run {
+                self?.result = message
+                self?.refreshNeoCLI()
+                self?.isBusy = false
+            }
+        }
     }
 
     func setupNeoCLI() {
@@ -84,6 +113,7 @@ final class NeoYSetupModel: ObservableObject {
             await MainActor.run {
                 self?.result = message
                 self?.refreshNeoCLI()
+                self?.refreshProjects()
                 self?.isBusy = false
             }
         }
@@ -93,7 +123,9 @@ final class NeoYSetupModel: ObservableObject {
         let value = NeoYDeploymentSettingsStore.load()
         portText = String(value.mcpPort)
         remoteEnabled = value.tunnelMode != .off
-        remoteMode = value.tunnelMode == .named ? .ownDomain : .temporary
+        let preferred = value.preferredTunnelMode ?? value.tunnelMode
+        remoteMode = preferred == .named ? .ownDomain : .temporary
+        appliedRemoteMode = remoteMode
         publicHostname = value.publicHostname
         remoteTools = value.enabledRemoteTools
         refreshRemoteToolOptions()
@@ -139,12 +171,9 @@ final class NeoYSetupModel: ObservableObject {
         remoteEnabled = enabled
         do {
             var value = NeoYDeploymentSettingsStore.load()
-            value.tunnelMode = enabled ? (remoteMode == .ownDomain ? .named : .quick) : .off
+            value.tunnelMode = enabled ? (appliedRemoteMode == .ownDomain ? .named : .quick) : .off
+            value.preferredTunnelMode = appliedRemoteMode == .ownDomain ? .named : .quick
             try NeoYDeploymentSettingsStore.save(value)
-            if enabled && remoteMode == .ownDomain && publicHostname.isEmpty {
-                result = "Enter a hostname to enable your own domain."
-                return
-            }
             NotificationCenter.default.post(name: .neoYDeploymentSettingsChanged, object: nil)
             result = enabled ? "Remote access is starting." : "Remote access stopped."
         } catch {
@@ -154,31 +183,30 @@ final class NeoYSetupModel: ObservableObject {
 
     func setRemoteMode(_ mode: RemoteMode) {
         remoteMode = mode
-        guard remoteEnabled else {
-            persistRemoteSettings()
+        // A selected mode is a draft. Only Apply changes the live tunnel.
+    }
+
+    func applyRemoteMode() {
+        let hostname = publicHostname.trimmingCharacters(in: .whitespacesAndNewlines)
+        if remoteMode == .ownDomain && hostname.isEmpty {
+            result = "Enter a hostname before applying your own domain."
             return
         }
-        persistRemoteSettings()
-        if mode == .ownDomain && publicHostname.isEmpty {
-            result = "Enter a hostname to use your own domain."
-            return
-        }
-        NotificationCenter.default.post(name: .neoYDeploymentSettingsChanged, object: nil)
-        result = "Remote access is updating."
+        do {
+            var value = NeoYDeploymentSettingsStore.load()
+            value.tunnelMode = remoteEnabled ? (remoteMode == .ownDomain ? .named : .quick) : .off
+            value.preferredTunnelMode = remoteMode == .ownDomain ? .named : .quick
+            value.publicHostname = hostname
+            try NeoYDeploymentSettingsStore.save(value)
+            appliedRemoteMode = remoteMode
+            if remoteEnabled { NotificationCenter.default.post(name: .neoYDeploymentSettingsChanged, object: nil) }
+            result = remoteEnabled ? "Remote configuration applied; connection is updating." : "Remote mode saved; enable remote MCP to connect."
+        } catch { result = error.localizedDescription }
     }
 
     func applyHostname() {
-        let hostname = publicHostname.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !hostname.isEmpty else {
-            result = "Enter a hostname."
-            return
-        }
-        publicHostname = hostname
-        remoteEnabled = true
         remoteMode = .ownDomain
-        persistRemoteSettings()
-        NotificationCenter.default.post(name: .neoYDeploymentSettingsChanged, object: nil)
-        result = "Remote access is updating."
+        applyRemoteMode()
     }
 
     func setRemoteTool(_ tool: String, enabled: Bool) {
@@ -300,8 +328,6 @@ final class NeoYSetupModel: ObservableObject {
     private func persistRemoteSettings(restartServer: Bool = false) {
         do {
             var value = NeoYDeploymentSettingsStore.load()
-            value.tunnelMode = remoteEnabled ? (remoteMode == .ownDomain ? .named : .quick) : .off
-            value.publicHostname = publicHostname.trimmingCharacters(in: .whitespacesAndNewlines)
             value.remoteTools = remoteTools
             value.remoteFeatures = nil
             value.remoteProviders = remoteProviders
@@ -365,9 +391,9 @@ struct NeoYSetupView: View {
             ScrollView {
                 Group {
                     switch model.tab {
-                    case .mcp: mcpTab
-                    case .remote: remoteTab
-                    case .advanced: advancedTab
+                    case .connections: connectionsTab
+                    case .features: featuresTab
+                    case .deployment: deploymentTab
                     }
                 }
                 .padding(24)
@@ -388,9 +414,9 @@ struct NeoYSetupView: View {
         .disabled(model.isBusy)
     }
 
-    private var mcpTab: some View {
+    private var connectionsTab: some View {
         VStack(alignment: .leading, spacing: 20) {
-            heading("MCP", "Local service and the values needed to create an MCP app.")
+            heading("Connections", "Configure Neo MCP app identity and local or remote access.")
 
             GroupBox("Local service") {
                 VStack(alignment: .leading, spacing: 12) {
@@ -430,12 +456,13 @@ struct NeoYSetupView: View {
                 }
                 .padding(8)
             }
+            remoteConnectionSection
         }
     }
 
-    private var remoteTab: some View {
+    private var remoteConnectionSection: some View {
         VStack(alignment: .leading, spacing: 20) {
-            heading("Remote", "Expose only the features you choose.")
+            heading("Remote MCP", "Choose an address, then Apply.")
 
             Toggle("Enable remote MCP", isOn: Binding(
                 get: { model.remoteEnabled },
@@ -459,76 +486,101 @@ struct NeoYSetupView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         TextField("Hostname, e.g. neoy.qili2.com", text: $model.publicHostname)
-                            .onSubmit { model.applyHostname() }
                         Text("Use a hostname managed by your Cloudflare account. Once configured, this address remains stable across restarts.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Button("Apply hostname") { model.applyHostname() }
                     }
 
+                    HStack {
+                        Text(model.remoteMode == model.appliedRemoteMode ? "Current mode" : "Pending change")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Apply") { model.applyRemoteMode() }
+                        Button("Test") { model.testRemote() }
+                    }
                     if model.remoteEnabled {
                         Divider()
                         valueRow("Remote endpoint", value: model.remoteMCPURL)
-                        Button("Test remote") { model.testRemote() }
                     }
                 }
                 .padding(8)
             }
 
-            GroupBox("Remote tools") {
+        }
+    }
+
+    private var featuresTab: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            heading("Features", "Optional capabilities managed by Neo.")
+
+            GroupBox("MCP Tools") {
                 VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Local access is unchanged. Each switch is an exact public tool name exposed remotely.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button("All") { model.setAllRemoteTools(true) }
-                        Button("None") { model.setAllRemoteTools(false) }
-                    }
-                    Divider()
-                    ForEach(model.remoteToolOptions, id: \.self) { tool in
-                        Toggle(tool, isOn: Binding(
-                            get: { model.remoteTools.contains(tool) },
-                            set: { model.setRemoteTool(tool, enabled: $0) }
-                        ))
-                        .font(.system(.body, design: .monospaced))
-                    }
-                    if !model.remoteProviderOptions.isEmpty {
-                        Divider()
-                        Text("Connected MCP services")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        ForEach(model.remoteProviderOptions, id: \.self) { provider in
-                            Toggle(provider, isOn: Binding(
-                                get: { model.remoteProviders.contains(provider) },
-                                set: { model.setRemoteProvider(provider, enabled: $0) }
-                            ))
+                    Text("Core Shell, ChatGPT and Files are managed automatically.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(NeoYRemoteToolCatalog.optionalFeatureTools(from: model.remoteToolOptions), id: \.self) { tool in
+                        HStack {
+                            Text(tool).font(.system(.body, design: .monospaced))
+                            Spacer()
+                            Text("Available").font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                }
-                .padding(8)
+                }.padding(8)
+            }
+
+            GroupBox("Skills") {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(["wechat-bro", "markcut", "agents-relay"], id: \.self) { skill in
+                        HStack {
+                            Text(skill)
+                            Spacer()
+                            if model.optionalSkills.contains(skill) {
+                                Label("Installed", systemImage: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                            } else {
+                                Button("Install") { model.installOptionalSkill(skill) }
+                            }
+                        }
+                    }
+                    Button("Refresh Skills") { model.refreshNeoCLI() }
+                }.padding(8)
+            }
+
+            GroupBox("Neo Projects") {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("\(model.projectNames.count) discovered projects")
+                        Spacer()
+                        Button("Refresh") { model.refreshProjects() }
+                    }
+                    Text("Project data remains in its owning workspace.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(model.projectNames, id: \.self) { name in
+                        Text(name).font(.system(.caption, design: .monospaced))
+                    }
+                    if model.projectNames.isEmpty {
+                        Text("Install Neo Project Toolkit to discover projects.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }.padding(8)
+            }
+
+            GroupBox("Neo Project Toolkit") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Optional lalalic/neo package: Neo CLI, project skills and workflows.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text(model.neoCLIReport).font(.caption.monospaced()).textSelection(.enabled)
+                    HStack {
+                        Button("Install / Update") { model.setupNeoCLI() }
+                        Button("Refresh") { model.refreshNeoCLI() }
+                    }
+                }.padding(8)
             }
         }
     }
 
-    private var advancedTab: some View {
+    private var deploymentTab: some View {
         VStack(alignment: .leading, spacing: 20) {
-            heading("Advanced", "Runtime details and operational settings.")
-
-            GroupBox("Neo CLI & Global Skills") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(model.neoCLIReport).font(.caption.monospaced()).textSelection(.enabled)
-                    HStack {
-                        Button("Check / Setup CLI") { model.setupNeoCLI() }
-                        Button("Refresh") { model.refreshNeoCLI() }
-                    }
-                    Text("Neo dependencies only (npx skills -g). Project-local Skills are untouched.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    ForEach(model.globalSkills, id: \.self) { skill in
-                        Text(skill).font(.caption.monospaced())
-                    }
-                }.padding(8)
-            }
+            heading("Deployment", "Runtime, remote exposure and operational settings.")
 
             GroupBox("Runtime") {
                 VStack(alignment: .leading, spacing: 12) {
@@ -547,49 +599,28 @@ struct NeoYSetupView: View {
                 .padding(8)
             }
 
-            GroupBox("Features") {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Optional features install from their published package. Installing a feature also registers its local MCP. Remote access remains off until explicitly enabled on the Remote tab.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Divider()
-                    ForEach(NeoYFeatureCatalog.all) { item in
-                        let record = model.featureRecord(item.id)
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack {
-                                Toggle(item.name, isOn: Binding(
-                                    get: { record?.enabled == true },
-                                    set: { model.setFeature(item, enabled: $0) }
-                                ))
-                                Spacer()
-                                Text(record?.state.rawValue ?? "not installed")
-                                    .font(.caption.monospaced())
-                                    .foregroundStyle(.secondary)
-                            }
-                            Text(item.summary)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            if let record, record.enabled {
-                                HStack {
-                                    if record.state == .setupRequired || record.state == .configuring {
-                                        Button("Setup…") { model.startFeatureSetup(item) }
-                                    }
-                                    if let provider = record.provider {
-                                        Text("MCP: \(provider)")
-                                            .font(.caption.monospaced())
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Button("Uninstall", role: .destructive) { model.uninstallFeature(item) }
-                                }
-                            }
-                            if let error = record?.error, !error.isEmpty {
-                                Text(error).font(.caption).foregroundStyle(.red)
-                            }
-                        }
+            GroupBox("Remote MCP exposure") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Control which tools and providers are publicly reachable. Local access is unchanged.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        Spacer()
+                        Button("All") { model.setAllRemoteTools(true) }
+                        Button("None") { model.setAllRemoteTools(false) }
                     }
-                }
-                .padding(8)
+                    ForEach(model.remoteToolOptions, id: \.self) { tool in
+                        Toggle(tool, isOn: Binding(
+                            get: { model.remoteTools.contains(tool) },
+                            set: { model.setRemoteTool(tool, enabled: $0) }
+                        ))
+                    }
+                    ForEach(model.remoteProviderOptions, id: \.self) { provider in
+                        Toggle(provider, isOn: Binding(
+                            get: { model.remoteProviders.contains(provider) },
+                            set: { model.setRemoteProvider(provider, enabled: $0) }
+                        ))
+                    }
+                }.padding(8)
             }
 
             GroupBox("Permissions") {

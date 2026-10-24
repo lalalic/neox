@@ -45,9 +45,8 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         // Initialize an independent Core install without touching a healthy active version.
         try? NeoYManagedCoreRuntime.bootstrapIfMissing()
-        // Best-effort idempotent setup. Never overwrite an existing developer CLI
-        // or user-owned Global Skills. Missing release artifacts remain explicit.
-        Task.detached { _ = NeoCLISetup.setup() }
+        // Keep required skills, but install the optional Neo Project Toolkit only on request.
+        Task.detached { _ = try? NeoCLISetup.setupMissingGlobalSkills() }
         startNativePhoneServices()
         startServer()
         observers.append(NotificationCenter.default.addObserver(

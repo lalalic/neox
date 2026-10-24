@@ -11,6 +11,7 @@ struct NeoYDeploymentSettings: Codable, Equatable {
     var tunnelMode: NeoYTunnelMode = .off
     var tunnelName: String = ""
     var publicHostname: String = ""
+    var preferredTunnelMode: NeoYTunnelMode? = nil
     var remoteTools: Set<String>? = nil
     var remoteFeatures: Set<String>? = nil // legacy; migrated to remoteTools on load
     var remoteProviders: Set<String>? = nil

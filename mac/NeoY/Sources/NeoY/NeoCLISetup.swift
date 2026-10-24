@@ -6,6 +6,37 @@ enum NeoCLISetup {
     static let requiredGlobalSkills = ["events-bus", "daemon-service-manage", "webhelm"]
     static func globalSkills() -> [String] { requiredGlobalSkills }
 
+    static let optionalSkillSources = [
+        "wechat-bro": "lalalic/wechat-bro",
+        "markcut": "lalalic/markcut",
+        "agents-relay": "lalalic/agents-relay",
+    ]
+
+    static func allInstalledGlobalSkills() -> Set<String> {
+        let inventory = (try? runSkills(["list", "-g", "--json"])) ?? ""
+        guard let data = inventory.data(using: .utf8),
+              let records = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+        return Set(records.compactMap { $0["name"] as? String })
+    }
+
+    static func projectNames() -> [String] {
+        guard let executable = cliPath() else { return [] }
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = ["project", "list"]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0,
+                  let projects = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+            return projects.compactMap { $0["xchat_project"] as? String }.sorted()
+        } catch { return [] }
+    }
+
     static func installedGlobalSkills() -> [String] {
         let inventory = (try? runSkills(["list", "-g", "--json"])) ?? ""
         guard let data = inventory.data(using: .utf8),
