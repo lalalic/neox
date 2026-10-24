@@ -1,10 +1,11 @@
 import Foundation
+import AppKit
 import SwiftUI
 
 @MainActor
 final class NeoYSetupModel: ObservableObject {
     enum Tab: String, CaseIterable, Identifiable {
-        case connections = "Connections"
+        case connections = "Connection"
         case features = "Features"
         case deployment = "Deployment"
         var id: String { rawValue }
@@ -25,15 +26,17 @@ final class NeoYSetupModel: ObservableObject {
     @Published private(set) var remoteToolOptions: [String] = []
     @Published var remoteProviders: Set<String> = []
     @Published private(set) var featureRecords: [NeoYFeatureRecord] = []
+    @Published private(set) var nativeEnabledTools: Set<String> = []
     @Published private(set) var remoteProviderOptions: [String] = []
     @Published private(set) var oauthClientID = ""
     @Published private(set) var oauthToken = ""
     @Published var result = ""
     @Published var coreVersionInput = "latest"
     @Published var coreRuntimeStatus = NeoYManagedCoreRuntime.active()?.lastPathComponent ?? "bootstrap Core (not installed)"
-    @Published var neoCLIReport = NeoCLISetup.report()
+    @Published var neoCLIReport = "Checking Neo CLI…"
+    @Published var toolkitUninstallable = false
     @Published var globalSkills = NeoCLISetup.globalSkills()
-    @Published var optionalSkills = NeoCLISetup.allInstalledGlobalSkills()
+    @Published var optionalSkills: Set<String> = []
     @Published private(set) var projectNames: [String] = []
     @Published var isBusy = false
     @Published private(set) var permissions: [NeoYPermissionStatus] = []
@@ -43,7 +46,9 @@ final class NeoYSetupModel: ObservableObject {
         Task {
             await refreshPermissions()
             await refreshFeatures()
+            refreshNativeTools()
             refreshProjects()
+            refreshNeoCLI()
         }
     }
 
@@ -77,15 +82,47 @@ final class NeoYSetupModel: ObservableObject {
     }
 
     func refreshNeoCLI() {
-        neoCLIReport = NeoCLISetup.report()
-        globalSkills = NeoCLISetup.globalSkills()
-        optionalSkills = NeoCLISetup.allInstalledGlobalSkills()
+        Task.detached { [weak self] in
+            let report = NeoCLISetup.report()
+            let canUninstall = NeoCLISetup.managedToolkitInstalled()
+            let skills = NeoCLISetup.allInstalledGlobalSkills()
+            await MainActor.run {
+                self?.neoCLIReport = report
+                self?.toolkitUninstallable = canUninstall
+                self?.optionalSkills = skills
+            }
+        }
     }
 
     func refreshProjects() {
         Task.detached { [weak self] in
             let names = NeoCLISetup.projectNames()
             await MainActor.run { self?.projectNames = names }
+        }
+    }
+
+    func refreshNativeTools() {
+        let store = NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)
+        guard let configuration = try? store.loadOrCreate().document.configuration else { return }
+        nativeEnabledTools = Set(NeoYRemoteToolCatalog.nativeOptionalTools.compactMap { tool, capability in
+            configuration.capabilities.isEnabled(capability) ? tool : nil
+        })
+    }
+
+    func setNativeTool(_ tool: String, enabled: Bool) {
+        guard !isBusy, let capability = NeoYRemoteToolCatalog.nativeOptionalTools[tool] else { return }
+        isBusy = true
+        Task {
+            do {
+                let control = NeoYControlPlaneService(
+                    store: NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory))
+                _ = try await control.setCapability(capability, enabled: enabled)
+                NotificationCenter.default.post(name: .neoYFeaturesChanged, object: nil)
+                result = "\(tool) \(enabled ? "enabled" : "disabled")."
+            } catch { result = error.localizedDescription }
+            refreshNativeTools()
+            refreshRemoteToolOptions()
+            isBusy = false
         }
     }
 
@@ -106,10 +143,55 @@ final class NeoYSetupModel: ObservableObject {
         }
     }
 
+    func removeOptionalSkill(_ name: String) {
+        guard !isBusy, optionalSkills.contains(name) else { return }
+        let alert = NSAlert()
+        alert.messageText = "Uninstall \(name)?"
+        alert.informativeText = "This removes the global Skill from agent installations. Project files are unchanged."
+        alert.addButton(withTitle: "Uninstall")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        isBusy = true
+        Task.detached { [weak self] in
+            let message: String
+            do {
+                try NeoCLISetup.removeOptionalSkill(name)
+                message = "Uninstalled \(name)."
+            } catch { message = "Uninstall failed: \(error.localizedDescription)" }
+            await MainActor.run {
+                self?.result = message
+                self?.refreshNeoCLI()
+                self?.isBusy = false
+            }
+        }
+    }
+
     func setupNeoCLI() {
         isBusy = true
         Task.detached { [weak self] in
             let message = NeoCLISetup.setup()
+            await MainActor.run {
+                self?.result = message
+                self?.refreshNeoCLI()
+                self?.refreshProjects()
+                self?.isBusy = false
+            }
+        }
+    }
+
+    func uninstallNeoToolkit() {
+        guard !isBusy, toolkitUninstallable else { return }
+        let alert = NSAlert()
+        alert.messageText = "Uninstall Neo Project Toolkit?"
+        alert.informativeText = "Remove the global @lalalic/neo npm package. Developer links and mandatory Neo Skills are preserved."
+        alert.addButton(withTitle: "Uninstall")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        isBusy = true
+        Task.detached { [weak self] in
+            let message: String
+            do { message = try NeoCLISetup.uninstallManagedToolkit() }
+            catch { message = "Uninstall failed: \(error.localizedDescription)" }
             await MainActor.run {
                 self?.result = message
                 self?.refreshNeoCLI()
@@ -168,12 +250,19 @@ final class NeoYSetupModel: ObservableObject {
     }
 
     func setRemoteEnabled(_ enabled: Bool) {
-        remoteEnabled = enabled
         do {
-            var value = NeoYDeploymentSettingsStore.load()
-            value.tunnelMode = enabled ? (appliedRemoteMode == .ownDomain ? .named : .quick) : .off
-            value.preferredTunnelMode = appliedRemoteMode == .ownDomain ? .named : .quick
+            let current = NeoYDeploymentSettingsStore.load()
+            let mode: NeoYTunnelMode = appliedRemoteMode == .ownDomain ? .named : .quick
+            let value: NeoYDeploymentSettings
+            if enabled {
+                value = try current.applyingRemoteAddress(mode, hostname: current.publicHostname, enabled: true)
+            } else {
+                var disabled = current
+                disabled.tunnelMode = .off
+                value = disabled
+            }
             try NeoYDeploymentSettingsStore.save(value)
+            remoteEnabled = enabled
             NotificationCenter.default.post(name: .neoYDeploymentSettingsChanged, object: nil)
             result = enabled ? "Remote access is starting." : "Remote access stopped."
         } catch {
@@ -186,17 +275,18 @@ final class NeoYSetupModel: ObservableObject {
         // A selected mode is a draft. Only Apply changes the live tunnel.
     }
 
+    var hasPendingRemoteAddress: Bool {
+        if remoteMode != appliedRemoteMode { return true }
+        guard remoteMode == .ownDomain else { return false }
+        return publicHostname.trimmingCharacters(in: .whitespacesAndNewlines)
+            != NeoYDeploymentSettingsStore.load().publicHostname
+    }
+
     func applyRemoteMode() {
-        let hostname = publicHostname.trimmingCharacters(in: .whitespacesAndNewlines)
-        if remoteMode == .ownDomain && hostname.isEmpty {
-            result = "Enter a hostname before applying your own domain."
-            return
-        }
         do {
-            var value = NeoYDeploymentSettingsStore.load()
-            value.tunnelMode = remoteEnabled ? (remoteMode == .ownDomain ? .named : .quick) : .off
-            value.preferredTunnelMode = remoteMode == .ownDomain ? .named : .quick
-            value.publicHostname = hostname
+            let mode: NeoYTunnelMode = remoteMode == .ownDomain ? .named : .quick
+            let value = try NeoYDeploymentSettingsStore.load()
+                .applyingRemoteAddress(mode, hostname: publicHostname, enabled: remoteEnabled)
             try NeoYDeploymentSettingsStore.save(value)
             appliedRemoteMode = remoteMode
             if remoteEnabled { NotificationCenter.default.post(name: .neoYDeploymentSettingsChanged, object: nil) }
@@ -416,7 +506,7 @@ struct NeoYSetupView: View {
 
     private var connectionsTab: some View {
         VStack(alignment: .leading, spacing: 20) {
-            heading("Connections", "Configure Neo MCP app identity and local or remote access.")
+            heading("Connection", "Configure Neo MCP app identity and local or remote access.")
 
             GroupBox("Local service") {
                 VStack(alignment: .leading, spacing: 12) {
@@ -492,11 +582,11 @@ struct NeoYSetupView: View {
                     }
 
                     HStack {
-                        Text(model.remoteMode == model.appliedRemoteMode ? "Current mode" : "Pending change")
+                        Text(model.hasPendingRemoteAddress ? "Pending change" : "Applied")
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        Button("Apply") { model.applyRemoteMode() }
-                        Button("Test") { model.testRemote() }
+                        Button("Apply") { model.applyRemoteMode() }.disabled(!model.hasPendingRemoteAddress)
+                        Button("Test applied") { model.testRemote() }
                     }
                     if model.remoteEnabled {
                         Divider()
@@ -511,17 +601,31 @@ struct NeoYSetupView: View {
 
     private var featuresTab: some View {
         VStack(alignment: .leading, spacing: 20) {
-            heading("Features", "Optional capabilities managed by Neo.")
+            heading("Features", "Capabilities and optional extensions managed by Neo.")
 
             GroupBox("MCP Tools") {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Core Shell, ChatGPT and Files are managed automatically.")
+                    Text("Optional native capabilities. Core tools are managed automatically.")
                         .font(.caption).foregroundStyle(.secondary)
-                    ForEach(NeoYRemoteToolCatalog.optionalFeatureTools(from: model.remoteToolOptions), id: \.self) { tool in
+                    ForEach(NeoYRemoteToolCatalog.nativeOptionalTools.keys.sorted(), id: \.self) { tool in
                         HStack {
                             Text(tool).font(.system(.body, design: .monospaced))
                             Spacer()
-                            Text("Available").font(.caption).foregroundStyle(.secondary)
+                            Toggle("", isOn: Binding(
+                                get: { model.nativeEnabledTools.contains(tool) },
+                                set: { model.setNativeTool(tool, enabled: $0) }
+                            )).labelsHidden()
+                        }
+                    }
+                    Divider()
+                    ForEach(model.remoteToolOptions.filter {
+                        !["shell", "chatgpt", "fs", "git_apply_patch"].contains($0) &&
+                        NeoYRemoteToolCatalog.nativeOptionalTools[$0] == nil
+                    }, id: \.self) { tool in
+                        HStack {
+                            Text(tool).font(.system(.body, design: .monospaced))
+                            Spacer()
+                            Text("Built in").font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }.padding(8)
@@ -536,6 +640,7 @@ struct NeoYSetupView: View {
                             if model.optionalSkills.contains(skill) {
                                 Label("Installed", systemImage: "checkmark.circle.fill")
                                     .foregroundStyle(.green)
+                                Button("Uninstall", role: .destructive) { model.removeOptionalSkill(skill) }
                             } else {
                                 Button("Install") { model.installOptionalSkill(skill) }
                             }
@@ -572,6 +677,44 @@ struct NeoYSetupView: View {
                     HStack {
                         Button("Install / Update") { model.setupNeoCLI() }
                         Button("Refresh") { model.refreshNeoCLI() }
+                        if model.toolkitUninstallable {
+                            Button("Uninstall", role: .destructive) { model.uninstallNeoToolkit() }
+                        }
+                    }
+                }.padding(8)
+            }
+
+            GroupBox("Other optional features") {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(NeoYFeatureCatalog.all) { item in
+                        let record = model.featureRecord(item.id)
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Toggle(item.name, isOn: Binding(
+                                    get: { record?.enabled == true },
+                                    set: { model.setFeature(item, enabled: $0) }
+                                ))
+                                Spacer()
+                                Text(record?.state.rawValue ?? "not installed")
+                                    .font(.caption.monospaced()).foregroundStyle(.secondary)
+                            }
+                            Text(item.summary).font(.caption).foregroundStyle(.secondary)
+                            if let record, record.enabled {
+                                HStack {
+                                    if record.state == .setupRequired || record.state == .configuring {
+                                        Button("Setup…") { model.startFeatureSetup(item) }
+                                    }
+                                    if let provider = record.provider {
+                                        Text("MCP: \(provider)").font(.caption.monospaced()).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Button("Uninstall", role: .destructive) { model.uninstallFeature(item) }
+                                }
+                            }
+                            if let error = record?.error, !error.isEmpty {
+                                Text(error).font(.caption).foregroundStyle(.red)
+                            }
+                        }
                     }
                 }.padding(8)
             }

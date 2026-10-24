@@ -10,11 +10,14 @@ enum NeoYRemoteToolCatalog {
         "ask_questions",
     ]
 
-    /// Feature discovery is separate from the remote exposure policy.
-    /// Core shell, ChatGPT and file primitives do not appear as optional features.
-    static func optionalFeatureTools(from names: [String]) -> [String] {
-        names.filter { !["shell", "chatgpt", "fs", "git_apply_patch"].contains($0) }
-    }
+    // Native capabilities are the only MCP tools in this catalog with a
+    // supported global enable/disable contract. Core tools stay Core-owned.
+    static let nativeOptionalTools: [String: NeoYOptionalCapability] = [
+        "computer": .accessibilityComputer,
+        "demo": .demoRecording,
+        "tour": .captureTour,
+        "phone": .phoneIntegration,
+    ]
 
     static func availableToolNames(configuration: NeoYControlPlaneConfiguration) -> [String] {
         var names = coreToolNames.union(askQuestionsToolNames)

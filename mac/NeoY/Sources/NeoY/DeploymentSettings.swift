@@ -29,6 +29,23 @@ struct NeoYDeploymentSettings: Codable, Equatable {
         return NeoYDeploymentSettingsStore.quickTunnelURL().map { "\($0)/mcp" }
     }
 
+    /// Build the candidate without writing it. A picker change must not alter
+    /// the live transport, even when another setting is saved meanwhile.
+    func applyingRemoteAddress(_ preferred: NeoYTunnelMode, hostname: String, enabled: Bool) throws -> Self {
+        guard preferred == .quick || preferred == .named else {
+            throw NSError(domain: "NeoY", code: 4, userInfo: [NSLocalizedDescriptionKey: "Choose Temporary or Own Domain"])
+        }
+        let trimmed = hostname.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard preferred != .named || !trimmed.isEmpty else {
+            throw NSError(domain: "NeoY", code: 5, userInfo: [NSLocalizedDescriptionKey: "Enter your own domain before applying"])
+        }
+        var candidate = self
+        candidate.tunnelMode = enabled ? preferred : .off
+        candidate.preferredTunnelMode = preferred
+        candidate.publicHostname = trimmed
+        return try candidate.validated()
+    }
+
     func validated() throws -> NeoYDeploymentSettings {
         if tunnelMode == .named {
             if !publicHostname.isEmpty {

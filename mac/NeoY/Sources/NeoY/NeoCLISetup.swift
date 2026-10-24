@@ -12,6 +12,14 @@ enum NeoCLISetup {
         "agents-relay": "lalalic/agents-relay",
     ]
 
+    static func removeOptionalSkill(_ name: String) throws {
+        guard optionalSkillSources[name] != nil,
+              !requiredGlobalSkills.contains(name) else {
+            throw NSError(domain: "NeoCLISetup", code: 4, userInfo: [NSLocalizedDescriptionKey: "not an optional Neo Skill"])
+        }
+        _ = try runSkills(["remove", name, "-g", "-y"])
+    }
+
     static func allInstalledGlobalSkills() -> Set<String> {
         let inventory = (try? runSkills(["list", "-g", "--json"])) ?? ""
         guard let data = inventory.data(using: .utf8),
@@ -75,6 +83,38 @@ enum NeoCLISetup {
     static let npmCLI = "@lalalic/neo@1.0.2"
     static let npmPackage = "@lalalic/neo"
     static let expectedVersion = "1.0.2"
+
+    static func managedToolkitInstalled() -> Bool {
+        guard let npm = ["/opt/homebrew/bin/npm", "/usr/local/bin/npm"].first(where: { FileManager.default.isExecutableFile(atPath: $0) }),
+              let installed = try? installedNPMPackages(using: npm),
+              installed[npmPackage] != nil else { return false }
+        if let cli = cliPath(), isDevelopmentLink(cli) { return false }
+        return true
+    }
+
+    static func uninstallManagedToolkit() throws -> String {
+        guard managedToolkitInstalled() else {
+            return "No managed Neo Project Toolkit installation. Developer links are preserved."
+        }
+        guard let npm = ["/opt/homebrew/bin/npm", "/usr/local/bin/npm"].first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
+            throw NSError(domain: "NeoCLISetup", code: 5, userInfo: [NSLocalizedDescriptionKey: "npm unavailable"])
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: npm)
+        process.arguments = ["uninstall", "--global", npmPackage, "--no-audit", "--no-fund"]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw NSError(domain: "NeoCLISetup", code: Int(process.terminationStatus),
+                          userInfo: [NSLocalizedDescriptionKey: String(decoding: data, as: UTF8.self)])
+        }
+        return "Neo Project Toolkit removed; required global Skills retained."
+    }
+
     static func packageDecision(installed: [String: String], executableExists: Bool) -> String {
         if let legacy = installed["neo"] {
             return "migration_required: legacy neo@\(legacy) owns the command; remove or migrate it explicitly before installing \(npmPackage)"

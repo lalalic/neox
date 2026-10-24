@@ -34,9 +34,19 @@ final class NeoCLISetupTests: XCTestCase {
             .isDisjoint(with: NeoCLISetup.requiredGlobalSkills))
     }
 
-    func testFeatureToolListExcludesCoreTools() {
-        let names = ["shell", "chatgpt", "fs", "git_apply_patch", "computer", "phone", "tour"]
-        XCTAssertEqual(NeoYRemoteToolCatalog.optionalFeatureTools(from: names),
-                       ["computer", "phone", "tour"])
+    func testOptionalMCPToolsAreBackedByRealCapabilityState() throws {
+        XCTAssertEqual(Set(NeoYRemoteToolCatalog.nativeOptionalTools.keys),
+                       Set(["computer", "demo", "tour", "phone"]))
+        let capability = try XCTUnwrap(NeoYRemoteToolCatalog.nativeOptionalTools["computer"])
+        var config = NeoYCapabilityConfiguration()
+        XCTAssertTrue(config.isEnabled(capability))
+        config.set(capability, enabled: false)
+        XCTAssertFalse(config.isEnabled(capability))
+        config.set(capability, enabled: true)
+        XCTAssertTrue(config.isEnabled(capability))
+    }
+
+    func testCoreSkillsCannotBeRemovedAsOptional() {
+        XCTAssertThrowsError(try NeoCLISetup.removeOptionalSkill("webhelm"))
     }
 }
