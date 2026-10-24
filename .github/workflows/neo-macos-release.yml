@@ -92,7 +92,7 @@ jobs:
           xcrun notarytool submit "$RUNNER_TEMP/dist/Neo-${NEO_VERSION}-macos.dmg" --key "$NEO_NOTARY_KEY" --key-id "$APPLE_KEY_ID" --issuer "$APPLE_ISSUER" --wait
           xcrun stapler staple "$RUNNER_TEMP/dist/Neo-${NEO_VERSION}-macos.dmg"
           xcrun stapler validate "$RUNNER_TEMP/dist/Neo-${NEO_VERSION}-macos.dmg"
-          shasum -a 256 "$RUNNER_TEMP/dist/Neo-${NEO_VERSION}-macos.dmg" > "$RUNNER_TEMP/dist/SHA256SUMS"
+          (cd "$RUNNER_TEMP/dist" && shasum -a 256 "Neo-${NEO_VERSION}-macos.dmg" > SHA256SUMS)
           DIGEST=$(shasum -a 256 "$RUNNER_TEMP/dist/Neo-${NEO_VERSION}-macos.dmg" | awk '{print $1}')
           node -e 'const fs=require("fs"); const [version,sha]=process.argv.slice(1);fs.writeFileSync(process.env.RUNNER_TEMP+"/dist/release.json",JSON.stringify({product:"Neo",version,bundleId:"com.neox.neoy",platform:"macos",architectures:["arm64","x86_64"],file:`Neo-${version}-macos.dmg`,sha256:sha},null,2))' "$NEO_VERSION" "$DIGEST"
       - name: Upload signed release artifacts
