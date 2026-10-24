@@ -172,6 +172,15 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertFalse(NeoYCoreRuntime.toolNames.contains("pty_start"))
     }
 
+    func testNeoVersionComesFromBundleVersionMetadata() {
+        XCTAssertEqual(
+            NeoYCoreRuntime.version(in: ["CFBundleShortVersionString": "2.3.4", "CFBundleVersion": "234"]),
+            "2.3.4"
+        )
+        XCTAssertEqual(NeoYCoreRuntime.version(in: ["CFBundleVersion": "234"]), "234")
+        XCTAssertEqual(NeoYCoreRuntime.version(in: [:]), "Unknown")
+    }
+
     func testParserValidatesDiagnosticsSettings() {
         XCTAssertThrowsError(try NeoYSetupParser.parse("diagnostics set retention-days 0")) { error in
             XCTAssertEqual(error.localizedDescription, "retention-days must be an integer from 1 through 365; got 0")
