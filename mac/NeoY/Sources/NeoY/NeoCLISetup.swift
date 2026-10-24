@@ -32,6 +32,7 @@ enum NeoCLISetup {
         let process = Process()
         process.executableURL = executable
         process.arguments = ["project", "list"]
+        process.environment = ProcessInfo.processInfo.environment.merging(["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]) { _, configured in configured }
         let output = Pipe()
         process.standardOutput = output
         process.standardError = Pipe()
