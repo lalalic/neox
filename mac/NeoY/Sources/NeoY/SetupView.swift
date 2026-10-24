@@ -36,6 +36,7 @@ final class NeoYSetupModel: ObservableObject {
     @Published var coreRuntimeStatus = NeoYManagedCoreRuntime.active()?.lastPathComponent ?? "bootstrap Core (not installed)"
     @Published var neoCLIReport = "Checking Neo CLI…"
     @Published var toolkitUninstallable = false
+    @Published var toolkitInstalled = false
     @Published var globalSkills = NeoCLISetup.globalSkills()
     @Published var optionalSkills: Set<String> = []
     @Published private(set) var projectNames: [String] = []
@@ -89,10 +90,12 @@ final class NeoYSetupModel: ObservableObject {
         Task.detached { [weak self] in
             let report = NeoCLISetup.report()
             let canUninstall = NeoCLISetup.managedToolkitInstalled()
+            let installed = NeoCLISetup.cliPath() != nil
             let skills = NeoCLISetup.allInstalledGlobalSkills()
             await MainActor.run {
                 self?.neoCLIReport = report
                 self?.toolkitUninstallable = canUninstall
+                self?.toolkitInstalled = installed
                 self?.optionalSkills = skills
             }
         }
@@ -672,8 +675,12 @@ struct NeoYSetupView: View {
                                 set: { model.setNativeTool(tool, enabled: $0) }
                             ))
                             .labelsHidden()
+                            .toggleStyle(.checkbox)
                         } else {
-                            Text("Available").font(.caption).foregroundStyle(.secondary)
+                            Toggle("", isOn: .constant(true))
+                                .labelsHidden()
+                                .toggleStyle(.checkbox)
+                                .disabled(true)
                         }
                     }
                     Divider()
@@ -681,29 +688,54 @@ struct NeoYSetupView: View {
 
                 ForEach(["wechat-bro", "markcut", "agents-relay"], id: \.self) { skill in
                     featureRow(skill, detail: "Skill") {
-                        if model.optionalSkills.contains(skill) {
-                            Label("Installed", systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                                .font(.caption)
-                            Button("Uninstall", role: .destructive) { model.removeOptionalSkill(skill) }
-                        } else {
-                            Button("Install") { model.installOptionalSkill(skill) }
-                        }
+                        Toggle("", isOn: Binding(
+                            get: { model.optionalSkills.contains(skill) },
+                            set: { enabled in
+                                if enabled { model.installOptionalSkill(skill) }
+                                else { model.removeOptionalSkill(skill) }
+                            }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.checkbox)
+                        .disabled(model.isBusy)
                     }
                     Divider()
                 }
 
                 featureRow("Projects Toolkit", detail: "lalalic/neo · CLI and workflows") {
-                    Button("Install / Update") { model.setupNeoCLI() }
-                    if model.toolkitUninstallable {
-                        Button("Uninstall", role: .destructive) { model.uninstallNeoToolkit() }
+                    Toggle("", isOn: Binding(
+                        get: { model.toolkitInstalled },
+                        set: { enabled in
+                            if enabled { model.setupNeoCLI() }
+                            else { model.uninstallNeoToolkit() }
+                        }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.checkbox)
+                    .disabled(model.isBusy || (model.toolkitInstalled && !model.toolkitUninstallable))
+                    if model.toolkitInstalled {
+                        Button("Update") { model.setupNeoCLI() }.disabled(model.isBusy)
                     }
                 }
-                Text(model.neoCLIReport)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
+                if model.toolkitInstalled {
+                    DisclosureGroup("Projects (\(model.projectNames.count))") {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Spacer()
+                                Button("Refresh") { model.refreshProjects() }
+                            }
+                            ForEach(model.projectNames, id: \.self) { name in
+                                Text(name)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .padding(.top, 6)
+                    }
+                    .padding(.leading, 28)
+                    .padding(.trailing, 12)
                     .padding(.bottom, 10)
+                }
                 Divider()
 
                 ForEach(NeoYFeatureCatalog.all) { item in
@@ -714,6 +746,7 @@ struct NeoYSetupView: View {
                             set: { model.setFeature(item, enabled: $0) }
                         ))
                         .labelsHidden()
+                        .toggleStyle(.checkbox)
                         Text(record?.state.rawValue ?? "not installed")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -730,23 +763,6 @@ struct NeoYSetupView: View {
                     Divider()
                 }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    featureRow("Neo Projects", detail: "\(model.projectNames.count) projects") {
-                        Button("Refresh") { model.refreshProjects() }
-                    }
-                    DisclosureGroup("Project list") {
-                        VStack(alignment: .leading, spacing: 6) {
-                            ForEach(model.projectNames, id: \.self) { name in
-                                Text(name)
-                                    .font(.system(.caption, design: .monospaced))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                        .padding(.top, 6)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 10)
-                }
             }
             .background(Color(nsColor: .controlBackgroundColor))
             .clipShape(RoundedRectangle(cornerRadius: 12))
