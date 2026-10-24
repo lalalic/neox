@@ -36,7 +36,7 @@ final class NeoCLISetupTests: XCTestCase {
 
     func testOptionalMCPToolsAreBackedByRealCapabilityState() throws {
         XCTAssertEqual(Set(NeoYRemoteToolCatalog.nativeOptionalTools.keys),
-                       Set(["computer", "demo", "tour", "phone"]))
+                       Set(["computer", "demo", "tour", "phone", "ask_questions"]))
         let capability = try XCTUnwrap(NeoYRemoteToolCatalog.nativeOptionalTools["computer"])
         var config = NeoYCapabilityConfiguration()
         XCTAssertTrue(config.isEnabled(capability))

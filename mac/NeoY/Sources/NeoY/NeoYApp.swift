@@ -179,7 +179,11 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
         value.setRemoteAllowedTools(NeoYRemoteToolCatalog.remoteTools(for: deployment.enabledRemoteTools))
         value.setRemoteAllowedProviders(deployment.enabledRemoteProviders)
         NativeUISmoke.register(on: value)
-        AskQuestions.register(on: value)
+        let featureConfiguration = (try? NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory).loadOrCreate().document.configuration)
+            ?? NeoYControlPlaneConfiguration()
+        if featureConfiguration.capabilities.isEnabled(.askQuestions) {
+            AskQuestions.register(on: value)
+        }
         voiceController.setCommandExecutor { [weak value] sessionID, correlationID, text in
             guard let value else { throw NeoYRuntimeControlError.event("Neo MCP server is unavailable") }
             if VoiceCommandRouting.isGatewayStatus(text) {

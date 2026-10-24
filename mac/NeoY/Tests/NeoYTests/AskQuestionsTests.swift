@@ -58,6 +58,9 @@ final class AskQuestionsTests: XCTestCase {
     func testAskQuestionsIsRemoteCatalogableAndAppOnlyToolsFollowTheirIntent() {
         let catalog = Set(NeoYRemoteToolCatalog.availableToolNames(configuration: NeoYControlPlaneConfiguration()))
         XCTAssertTrue(catalog.isSuperset(of: NeoYRemoteToolCatalog.askQuestionsToolNames))
+        var disabledConfiguration = NeoYControlPlaneConfiguration()
+        disabledConfiguration.capabilities.set(.askQuestions, enabled: false)
+        XCTAssertFalse(NeoYRemoteToolCatalog.availableToolNames(configuration: disabledConfiguration).contains(AskQuestions.toolName))
         XCTAssertEqual(
             NeoYRemoteToolCatalog.remoteTools(for: [AskQuestions.toolName]),
             NeoYRemoteToolCatalog.askQuestionsToolNames

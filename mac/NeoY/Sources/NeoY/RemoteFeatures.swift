@@ -17,10 +17,12 @@ enum NeoYRemoteToolCatalog {
         "demo": .demoRecording,
         "tour": .captureTour,
         "phone": .phoneIntegration,
+        "ask_questions": .askQuestions,
     ]
 
     static func availableToolNames(configuration: NeoYControlPlaneConfiguration) -> [String] {
-        var names = coreToolNames.union(askQuestionsToolNames)
+        var names = coreToolNames
+        if configuration.capabilities.isEnabled(.askQuestions) { names.formUnion(askQuestionsToolNames) }
         if configuration.capabilities.isEnabled(.accessibilityComputer) { names.insert("computer") }
         if configuration.capabilities.isEnabled(.demoRecording) { names.insert("demo") }
         if configuration.capabilities.isEnabled(.captureTour) { names.insert("tour") }

@@ -82,6 +82,7 @@ enum NeoYOptionalCapability: String, Codable, CaseIterable, Sendable {
     case captureTour = "capture-tour"
     case phoneIntegration = "phone-integration"
     case publicTunnel = "public-tunnel"
+    case askQuestions = "ask-questions"
 }
 
 struct NeoYCapabilityConfiguration: Codable, Equatable, Sendable {

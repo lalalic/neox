@@ -38,6 +38,7 @@ final class NeoYSetupModel: ObservableObject {
     @Published var globalSkills = NeoCLISetup.globalSkills()
     @Published var optionalSkills: Set<String> = []
     @Published private(set) var projectNames: [String] = []
+    @Published private(set) var clusterNodes: [NeoYNodeConfiguration] = []
     @Published var isBusy = false
     @Published private(set) var permissions: [NeoYPermissionStatus] = []
 
@@ -48,6 +49,7 @@ final class NeoYSetupModel: ObservableObject {
             await refreshFeatures()
             refreshNativeTools()
             refreshProjects()
+            refreshClusterNodes()
             refreshNeoCLI()
         }
     }
@@ -98,6 +100,12 @@ final class NeoYSetupModel: ObservableObject {
         Task.detached { [weak self] in
             let names = NeoCLISetup.projectNames()
             await MainActor.run { self?.projectNames = names }
+        }
+    }
+
+    func refreshClusterNodes() {
+        Task {
+            clusterNodes = await NeoYNodeStore().list()
         }
     }
 
@@ -615,204 +623,159 @@ struct NeoYSetupView: View {
     }
 
     private var featuresTab: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            heading("Features", "Optional capabilities.")
+        VStack(alignment: .leading, spacing: 16) {
+            heading("Features", "Manage Neo capabilities.")
 
-            GroupBox("MCP Tools") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Optional native capabilities. Core tools are managed automatically.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    ForEach(NeoYRemoteToolCatalog.nativeOptionalTools.keys.sorted(), id: \.self) { tool in
-                        HStack {
-                            Text(tool).font(.system(.body, design: .monospaced))
-                            Spacer()
-                            Toggle("", isOn: Binding(
-                                get: { model.nativeEnabledTools.contains(tool) },
-                                set: { model.setNativeTool(tool, enabled: $0) }
-                            )).labelsHidden()
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(NeoYRemoteToolCatalog.nativeOptionalTools.keys.sorted(), id: \.self) { tool in
+                    featureRow(featureTitle(tool), detail: "MCP") {
+                        Toggle("", isOn: Binding(
+                            get: { model.nativeEnabledTools.contains(tool) },
+                            set: { model.setNativeTool(tool, enabled: $0) }
+                        ))
+                        .labelsHidden()
+                    }
+                    Divider()
+                }
+
+                ForEach(["wechat-bro", "markcut", "agents-relay"], id: \.self) { skill in
+                    featureRow(skill, detail: "Skill") {
+                        if model.optionalSkills.contains(skill) {
+                            Label("Installed", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .font(.caption)
+                            Button("Uninstall", role: .destructive) { model.removeOptionalSkill(skill) }
+                        } else {
+                            Button("Install") { model.installOptionalSkill(skill) }
                         }
                     }
                     Divider()
-                    ForEach(model.remoteToolOptions.filter {
-                        !["shell", "chatgpt", "fs", "git_apply_patch"].contains($0) &&
-                        NeoYRemoteToolCatalog.nativeOptionalTools[$0] == nil
-                    }, id: \.self) { tool in
-                        HStack {
-                            Text(tool).font(.system(.body, design: .monospaced))
-                            Spacer()
-                            Text("Built in").font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                }.padding(8)
-            }
+                }
 
-            GroupBox("Skills") {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(["wechat-bro", "markcut", "agents-relay"], id: \.self) { skill in
-                        HStack {
-                            Text(skill)
-                            Spacer()
-                            if model.optionalSkills.contains(skill) {
-                                Label("Installed", systemImage: "checkmark.circle.fill")
-                                    .foregroundStyle(.green)
-                                Button("Uninstall", role: .destructive) { model.removeOptionalSkill(skill) }
-                            } else {
-                                Button("Install") { model.installOptionalSkill(skill) }
+                featureRow("Neo Agent Toolkit", detail: "lalalic/neo · CLI and workflows") {
+                    Button("Install / Update") { model.setupNeoCLI() }
+                    if model.toolkitUninstallable {
+                        Button("Uninstall", role: .destructive) { model.uninstallNeoToolkit() }
+                    }
+                }
+                Text(model.neoCLIReport)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
+                Divider()
+
+                ForEach(NeoYFeatureCatalog.all) { item in
+                    let record = model.featureRecord(item.id)
+                    featureRow(item.name, detail: item.summary) {
+                        Toggle("", isOn: Binding(
+                            get: { record?.enabled == true },
+                            set: { model.setFeature(item, enabled: $0) }
+                        ))
+                        .labelsHidden()
+                        Text(record?.state.rawValue ?? "not installed")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let record, record.enabled {
+                            if record.state == .setupRequired || record.state == .configuring {
+                                Button("Setup") { model.startFeatureSetup(item) }
                             }
+                            Button("Uninstall", role: .destructive) { model.uninstallFeature(item) }
                         }
                     }
-                    Button("Refresh Skills") { model.refreshNeoCLI() }
-                }.padding(8)
-            }
+                    if let error = record?.error, !error.isEmpty {
+                        Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 12)
+                    }
+                    Divider()
+                }
 
-            GroupBox("Neo Projects") {
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("\(model.projectNames.count) discovered projects")
-                        Spacer()
+                    featureRow("Neo Projects", detail: "\(model.projectNames.count) projects") {
                         Button("Refresh") { model.refreshProjects() }
                     }
-                    Text("Project data remains in its owning workspace.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    DisclosureGroup("View projects") {
-                        ForEach(model.projectNames, id: \.self) { name in
-                            Text(name).font(.system(.caption, design: .monospaced))
-                        }
-                    }
-                    if model.projectNames.isEmpty {
-                        Text("Install Neo Project Toolkit to discover projects.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }.padding(8)
-            }
-
-            GroupBox("Neo Agent Toolkit · lalalic/neo") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Optional lalalic/neo package: Neo CLI, project skills and workflows.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Text(model.neoCLIReport).font(.caption.monospaced()).textSelection(.enabled)
-                    HStack {
-                        Button("Install / Update") { model.setupNeoCLI() }
-                        Button("Refresh") { model.refreshNeoCLI() }
-                        if model.toolkitUninstallable {
-                            Button("Uninstall", role: .destructive) { model.uninstallNeoToolkit() }
-                        }
-                    }
-                }.padding(8)
-            }
-
-            GroupBox("Additional optional features") {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(NeoYFeatureCatalog.all) { item in
-                        let record = model.featureRecord(item.id)
+                    DisclosureGroup("Project list") {
                         VStack(alignment: .leading, spacing: 6) {
-                            HStack {
-                                Toggle(item.name, isOn: Binding(
-                                    get: { record?.enabled == true },
-                                    set: { model.setFeature(item, enabled: $0) }
-                                ))
-                                Spacer()
-                                Text(record?.state.rawValue ?? "not installed")
-                                    .font(.caption.monospaced()).foregroundStyle(.secondary)
-                            }
-                            Text(item.summary).font(.caption).foregroundStyle(.secondary)
-                            if let record, record.enabled {
-                                HStack {
-                                    if record.state == .setupRequired || record.state == .configuring {
-                                        Button("Setup…") { model.startFeatureSetup(item) }
-                                    }
-                                    if let provider = record.provider {
-                                        Text("MCP: \(provider)").font(.caption.monospaced()).foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Button("Uninstall", role: .destructive) { model.uninstallFeature(item) }
-                                }
-                            }
-                            if let error = record?.error, !error.isEmpty {
-                                Text(error).font(.caption).foregroundStyle(.red)
+                            ForEach(model.projectNames, id: \.self) { name in
+                                Text(name)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
+                        .padding(.top, 6)
                     }
-                }.padding(8)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
+                }
             }
+            .background(Color(nsColor: .controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
+    }
+
+    private func featureTitle(_ tool: String) -> String {
+        switch tool {
+        case "ask_questions": "Ask Questions"
+        default: tool.capitalized
+        }
+    }
+
+    private func featureRow<Actions: View>(
+        _ name: String,
+        detail: String,
+        @ViewBuilder actions: () -> Actions
+    ) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(name).font(.body.weight(.medium))
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            actions()
+        }
+        .padding(12)
     }
 
     private var deploymentTab: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            heading("Deployment", "Runtime and remote access.")
+        VStack(alignment: .leading, spacing: 16) {
+            heading("Deployment", "Cluster nodes.")
 
-            GroupBox("Runtime") {
-                VStack(alignment: .leading, spacing: 12) {
-                    valueRow("Neo version", value: NeoYCoreRuntime.version)
-                    valueRow("Active Core version", value: model.coreRuntimeStatus)
-                    HStack {
-                        TextField("Core version, latest, or /path/release.tgz", text: $model.coreVersionInput)
-                            .textFieldStyle(.roundedBorder)
-                        Button("Upgrade Core") { model.changeCoreRuntime() }.disabled(model.isBusy)
-                        Button("Rollback") { model.changeCoreRuntime(rollback: true) }.disabled(model.isBusy)
-                        Button("Refresh") { model.refreshCoreRuntime() }
+            HStack {
+                Text("\(model.clusterNodes.count + 1) nodes")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Refresh") { model.refreshClusterNodes() }
+            }
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Neo Master").font(.body.weight(.medium))
+                        Text(NeoYDeploymentSettingsStore.load().localMCPURL)
+                            .font(.caption.monospaced()).foregroundStyle(.secondary)
                     }
-                    Text("Core installs separately under Application Support/NeoY/runtimes/core. The signed App bundle remains unchanged.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("Local").foregroundStyle(.secondary)
                 }
-                .padding(8)
-            }
+                .padding(12)
 
-            GroupBox("Remote MCP exposure") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Control which tools and providers are publicly reachable. Local access is unchanged.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    HStack {
-                        Spacer()
-                        Button("All") { model.setAllRemoteTools(true) }
-                        Button("None") { model.setAllRemoteTools(false) }
-                    }
-                    ForEach(model.remoteToolOptions, id: \.self) { tool in
-                        Toggle(tool, isOn: Binding(
-                            get: { model.remoteTools.contains(tool) },
-                            set: { model.setRemoteTool(tool, enabled: $0) }
-                        ))
-                    }
-                    ForEach(model.remoteProviderOptions, id: \.self) { provider in
-                        Toggle(provider, isOn: Binding(
-                            get: { model.remoteProviders.contains(provider) },
-                            set: { model.setRemoteProvider(provider, enabled: $0) }
-                        ))
-                    }
-                }.padding(8)
-            }
-
-            GroupBox("Permissions") {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Text("Neo native features share the permissions of this app. No helper authorization is required.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Refresh") { Task { await model.refreshPermissions() } }
-                    }
+                ForEach(model.clusterNodes, id: \.name) { node in
                     Divider()
-                    ForEach([NeoYPermissionKind.fullDiskAccess, .accessibility, .screenRecording, .camera, .microphone], id: \.rawValue) { kind in
-                        permissionRow(kind)
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(node.name).font(.body.weight(.medium))
+                            Text(node.url).font(.caption.monospaced()).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(node.isEnabled ? "Configured" : "Disabled")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
+                    .padding(12)
                 }
-                .padding(8)
             }
-
-            GroupBox("Runtime") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Neo uses one MCP listener. Agent handoff, MCP and health routes share the configured port.")
-                    Text("Remote transport is provided by Cloudflare when enabled.")
-                    Text("Diagnostics and MCP federation remain available through neoy.setup.")
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(8)
-            }
+            .background(Color(nsColor: .controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
     }
-
 
     private func permissionRow(_ kind: NeoYPermissionKind) -> some View {
         let status = model.permissions.first { $0.kind == kind }
