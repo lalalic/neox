@@ -5,7 +5,7 @@ import SwiftUI
 @MainActor
 final class NeoYSetupModel: ObservableObject {
     enum Tab: String, CaseIterable, Identifiable {
-        case connections = "Connection"
+        case connections = "Connections"
         case features = "Features"
         case deployment = "Deployment"
         var id: String { rawValue }
@@ -456,50 +456,94 @@ struct NeoYSetupView: View {
     @StateObject private var model = NeoYSetupModel()
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $model.tab) {
-                ForEach(NeoYSetupModel.Tab.allCases) { tab in
-                    Text(tab.rawValue).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 24)
-            .padding(.top, 20)
-
-            Divider().padding(.top, 16)
-
-            ScrollView {
-                Group {
-                    switch model.tab {
-                    case .connections: connectionsTab
-                    case .features: featuresTab
-                    case .deployment: deploymentTab
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 9) {
+                    Image(systemName: "n.square.fill").font(.system(size: 26))
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Neo").font(.headline)
+                        Text("Settings").font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                .padding(24)
-            }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 22)
 
-            if !model.result.isEmpty {
-                Divider()
-                Text(model.result)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
+                ForEach(NeoYSetupModel.Tab.allCases) { tab in
+                    Button { model.tab = tab } label: {
+                        Label(tab.rawValue, systemImage: tabIcon(tab))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 9)
+                            .padding(.horizontal, 10)
+                            .background(model.tab == tab ? Color.accentColor.opacity(0.16) : .clear)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
+            }
+            .padding(18)
+            .frame(width: 180)
+            .background(Color(nsColor: .controlBackgroundColor))
+
+            Divider()
+
+            VStack(spacing: 0) {
+                ScrollView {
+                    Group {
+                        switch model.tab {
+                        case .connections: connectionsTab
+                        case .features: featuresTab
+                        case .deployment: deploymentTab
+                        }
+                    }
+                    .padding(24)
+                }
+                if !model.result.isEmpty {
+                    Divider()
+                    Text(model.result)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                }
             }
         }
-        .frame(width: 660, height: 610)
+        .frame(width: 810, height: 650)
         .background(Color(nsColor: .windowBackgroundColor))
         .disabled(model.isBusy)
     }
 
-    private var connectionsTab: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            heading("Connection", "Configure Neo MCP app identity and local or remote access.")
+    private func tabIcon(_ tab: NeoYSetupModel.Tab) -> String {
+        switch tab {
+        case .connections: "point.3.connected.trianglepath.dotted"
+        case .features: "square.grid.2x2"
+        case .deployment: "server.rack"
+        }
+    }
 
-            GroupBox("Local service") {
-                VStack(alignment: .leading, spacing: 12) {
+    private var connectionsTab: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            heading("Connections", "Neo MCP connection settings.")
+
+            GroupBox("Neo MCP App") {
+                VStack(alignment: .leading, spacing: 10) {
+                    valueRow("App", value: "Neo")
+                    valueRow("Version", value: NeoYCoreRuntime.version)
+                    valueRow("Client ID", value: model.oauthClientID)
+                    valueRow("Token", value: model.oauthToken)
+                    HStack {
+                        Text("Keep the token private.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Revoke token", role: .destructive) { model.revokeToken() }
+                    }
+                }
+                .padding(8)
+            }
+
+            GroupBox("Local MCP Server") {
+                VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         Text("Port")
                         Spacer()
@@ -509,29 +553,10 @@ struct NeoYSetupView: View {
                             .onSubmit { model.applyPort() }
                         Button("Apply") { model.applyPort() }
                     }
-                    Divider()
-                    valueRow("Endpoint", value: model.localMCPURL)
+                    valueRow("Server URL", value: model.localMCPURL)
                     HStack {
-                        Button("Test local") { model.testLocal() }
                         Spacer()
-                        Text("All enabled features are available locally.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(8)
-            }
-
-            GroupBox("MCP app configuration") {
-                VStack(alignment: .leading, spacing: 12) {
-                    valueRow("Client ID", value: model.oauthClientID)
-                    valueRow("Token", value: model.oauthToken)
-                    HStack(alignment: .top) {
-                        Text("Use these values when creating the MCP app connection. The token is a secret.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Revoke token", role: .destructive) { model.revokeToken() }
+                        Button("Test") { model.testLocal() }
                     }
                 }
                 .padding(8)
@@ -542,14 +567,14 @@ struct NeoYSetupView: View {
 
     private var remoteConnectionSection: some View {
         VStack(alignment: .leading, spacing: 20) {
-            heading("Remote MCP", "Choose an address, then Apply.")
+            heading("Remote MCP", "Select a mode. Apply to activate.")
 
             Toggle("Enable remote MCP", isOn: Binding(
                 get: { model.remoteEnabled },
                 set: { model.setRemoteEnabled($0) }
             ))
 
-            GroupBox("Address") {
+            GroupBox("Remote address") {
                 VStack(alignment: .leading, spacing: 14) {
                     Picker("Address", selection: Binding(
                         get: { model.remoteMode },
@@ -572,11 +597,11 @@ struct NeoYSetupView: View {
                     }
 
                     HStack {
-                        Text(model.hasPendingRemoteAddress ? "Pending change" : "Applied")
+                        Text(model.hasPendingRemoteAddress ? "Pending change" : "Applied: \(model.appliedRemoteMode == .temporary ? "Temporary" : "Own Domain")")
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         Button("Apply") { model.applyRemoteMode() }.disabled(!model.hasPendingRemoteAddress)
-                        Button("Test applied") { model.testRemote() }
+                        Button("Test") { model.testRemote() }
                     }
                     if model.remoteEnabled {
                         Divider()
@@ -591,7 +616,7 @@ struct NeoYSetupView: View {
 
     private var featuresTab: some View {
         VStack(alignment: .leading, spacing: 20) {
-            heading("Features", "Capabilities and optional extensions managed by Neo.")
+            heading("Features", "Optional capabilities.")
 
             GroupBox("MCP Tools") {
                 VStack(alignment: .leading, spacing: 10) {
@@ -659,7 +684,7 @@ struct NeoYSetupView: View {
                 }.padding(8)
             }
 
-            GroupBox("Neo Project Toolkit") {
+            GroupBox("Neo Agent Toolkit · lalalic/neo") {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Optional lalalic/neo package: Neo CLI, project skills and workflows.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -674,7 +699,7 @@ struct NeoYSetupView: View {
                 }.padding(8)
             }
 
-            GroupBox("Other optional features") {
+            GroupBox("Additional optional features") {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(NeoYFeatureCatalog.all) { item in
                         let record = model.featureRecord(item.id)
@@ -713,7 +738,7 @@ struct NeoYSetupView: View {
 
     private var deploymentTab: some View {
         VStack(alignment: .leading, spacing: 20) {
-            heading("Deployment", "Runtime, remote exposure and operational settings.")
+            heading("Deployment", "Runtime and remote access.")
 
             GroupBox("Runtime") {
                 VStack(alignment: .leading, spacing: 12) {
