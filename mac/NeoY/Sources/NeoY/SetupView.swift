@@ -252,15 +252,7 @@ final class NeoYSetupModel: ObservableObject {
     func setRemoteEnabled(_ enabled: Bool) {
         do {
             let current = NeoYDeploymentSettingsStore.load()
-            let mode: NeoYTunnelMode = appliedRemoteMode == .ownDomain ? .named : .quick
-            let value: NeoYDeploymentSettings
-            if enabled {
-                value = try current.applyingRemoteAddress(mode, hostname: current.publicHostname, enabled: true)
-            } else {
-                var disabled = current
-                disabled.tunnelMode = .off
-                value = disabled
-            }
+            let value = try current.settingRemoteEnabled(enabled)
             try NeoYDeploymentSettingsStore.save(value)
             remoteEnabled = enabled
             NotificationCenter.default.post(name: .neoYDeploymentSettingsChanged, object: nil)
@@ -417,10 +409,8 @@ final class NeoYSetupModel: ObservableObject {
 
     private func persistRemoteSettings(restartServer: Bool = false) {
         do {
-            var value = NeoYDeploymentSettingsStore.load()
-            value.remoteTools = remoteTools
-            value.remoteFeatures = nil
-            value.remoteProviders = remoteProviders
+            let value = NeoYDeploymentSettingsStore.load()
+                .settingRemoteExposure(tools: remoteTools, providers: remoteProviders)
             try NeoYDeploymentSettingsStore.save(value)
             if restartServer {
                 NotificationCenter.default.post(name: .neoYDeploymentSettingsChanged, object: nil)

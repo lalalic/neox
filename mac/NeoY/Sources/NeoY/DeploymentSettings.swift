@@ -46,6 +46,26 @@ struct NeoYDeploymentSettings: Codable, Equatable {
         return try candidate.validated()
     }
 
+    /// Change only the applied transport state. Pending picker edits are not inputs.
+    func settingRemoteEnabled(_ enabled: Bool) throws -> Self {
+        if !enabled {
+            var candidate = self
+            candidate.tunnelMode = .off
+            return candidate
+        }
+        let mode = preferredTunnelMode == .named ? NeoYTunnelMode.named : .quick
+        return try applyingRemoteAddress(mode, hostname: publicHostname, enabled: true)
+    }
+
+    /// Remote exposure is independent of the connection's applied address.
+    func settingRemoteExposure(tools: Set<String>, providers: Set<String>) -> Self {
+        var candidate = self
+        candidate.remoteTools = tools
+        candidate.remoteFeatures = nil
+        candidate.remoteProviders = providers
+        return candidate
+    }
+
     func validated() throws -> NeoYDeploymentSettings {
         if tunnelMode == .named {
             if !publicHostname.isEmpty {

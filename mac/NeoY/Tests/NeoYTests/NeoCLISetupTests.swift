@@ -49,4 +49,21 @@ final class NeoCLISetupTests: XCTestCase {
     func testCoreSkillsCannotBeRemovedAsOptional() {
         XCTAssertThrowsError(try NeoCLISetup.removeOptionalSkill("webhelm"))
     }
+
+    func testDeveloperNeoSymlinkIsNeverTreatedAsManagedPackage() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let executable = directory.appendingPathComponent("neo")
+        try FileManager.default.createSymbolicLink(
+            at: executable, withDestinationURL: directory.appendingPathComponent("Workspace/neo/bin/neo"))
+        XCTAssertTrue(NeoCLISetup.isDevelopmentLink(executable))
+
+        let unrelated = directory.appendingPathComponent("other-neo")
+        try FileManager.default.createSymbolicLink(
+            at: unrelated, withDestinationURL: directory.appendingPathComponent("external/bin/neo"))
+        XCTAssertFalse(NeoCLISetup.isDevelopmentLink(unrelated))
+    }
 }

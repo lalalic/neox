@@ -41,4 +41,47 @@ final class DeploymentSettingsTests: XCTestCase {
         XCTAssertEqual(decoded.preferredTunnelMode, .named)
         XCTAssertEqual(decoded.tunnelMode, .off)
     }
+
+    func testPendingDomainSurvivesRemoteOffOnWithoutBeingApplied() throws {
+        let applied = try NeoYDeploymentSettings().applyingRemoteAddress(
+            .quick, hostname: "", enabled: true)
+        let pendingMode = NeoYTunnelMode.named
+        let pendingHostname = "draft.example.com"
+
+        let off = try applied.settingRemoteEnabled(false)
+        let backOn = try off.settingRemoteEnabled(true)
+        XCTAssertEqual(off.tunnelMode, .off)
+        XCTAssertEqual(off.preferredTunnelMode, .quick)
+        XCTAssertEqual(backOn.tunnelMode, .quick)
+        XCTAssertEqual(backOn.preferredTunnelMode, .quick)
+        XCTAssertEqual(backOn.publicHostname, "")
+        XCTAssertEqual(pendingMode, .named)
+        XCTAssertEqual(pendingHostname, "draft.example.com")
+
+        let committed = try backOn.applyingRemoteAddress(
+            pendingMode, hostname: pendingHostname, enabled: true)
+        XCTAssertEqual(committed.tunnelMode, .named)
+        XCTAssertEqual(committed.publicHostname, pendingHostname)
+    }
+
+    func testExposureEditDoesNotApplyPendingDomainOrMode() throws {
+        let applied = try NeoYDeploymentSettings().applyingRemoteAddress(
+            .quick, hostname: "", enabled: true)
+        let pendingMode = NeoYTunnelMode.named
+        let pendingHostname = "draft.example.com"
+
+        let exposed = applied.settingRemoteExposure(
+            tools: ["status", "computer"], providers: ["family-tutor"])
+        XCTAssertEqual(exposed.tunnelMode, .quick)
+        XCTAssertEqual(exposed.preferredTunnelMode, .quick)
+        XCTAssertEqual(exposed.publicHostname, "")
+        XCTAssertEqual(exposed.enabledRemoteTools, ["status", "computer"])
+        XCTAssertEqual(exposed.enabledRemoteProviders, ["family-tutor"])
+
+        let committed = try exposed.applyingRemoteAddress(
+            pendingMode, hostname: pendingHostname, enabled: true)
+        XCTAssertEqual(committed.tunnelMode, .named)
+        XCTAssertEqual(committed.publicHostname, pendingHostname)
+        XCTAssertEqual(committed.enabledRemoteTools, exposed.enabledRemoteTools)
+    }
 }
