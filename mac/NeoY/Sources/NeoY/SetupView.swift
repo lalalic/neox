@@ -27,6 +27,7 @@ final class NeoYSetupModel: ObservableObject {
     @Published var remoteProviders: Set<String> = []
     @Published private(set) var featureRecords: [NeoYFeatureRecord] = []
     @Published private(set) var nativeEnabledTools: Set<String> = []
+    @Published private(set) var discoveredMCPTools: [String] = []
     @Published private(set) var remoteProviderOptions: [String] = []
     @Published private(set) var oauthClientID = ""
     @Published private(set) var oauthToken = ""
@@ -48,6 +49,7 @@ final class NeoYSetupModel: ObservableObject {
             await refreshPermissions()
             await refreshFeatures()
             refreshNativeTools()
+            await refreshMCPTools()
             refreshProjects()
             refreshClusterNodes()
             refreshNeoCLI()
@@ -105,8 +107,39 @@ final class NeoYSetupModel: ObservableObject {
 
     func refreshClusterNodes() {
         Task {
-            clusterNodes = await NeoYNodeStore().list()
+            let localURL = NeoYDeploymentSettingsStore.load().localMCPURL
+            clusterNodes = await NeoYNodeStore().list().filter { !$0.url.hasPrefix(localURL) }
         }
+    }
+
+    func refreshMCPTools() async {
+        let urlString = NeoYDeploymentSettingsStore.load().localMCPURL
+        guard let url = URL(string: urlString) else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = #"{"jsonrpc":"2.0","id":"feature-tools","method":"tools/list","params":{}}"#.data(using: .utf8)
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            guard let rpc = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let result = rpc["result"] as? [String: Any],
+                  let tools = result["tools"] as? [[String: Any]] else { return }
+            discoveredMCPTools = tools.compactMap { $0["name"] as? String }.sorted()
+        } catch {
+            result = "Tool discovery failed: \(error.localizedDescription)"
+        }
+    }
+
+    var visibleMCPFeatureTools: [String] {
+        let candidate = Set(discoveredMCPTools).union(NeoYRemoteToolCatalog.nativeOptionalTools.keys)
+        return candidate.filter { name in
+            if NeoYCoreRuntime.toolNames.contains(name) { return false }
+            if ["events", "neoy.ui_smoke", "mcp.temp-files"].contains(name) { return false }
+            if name.hasPrefix("markcut.") || name.hasPrefix("family-tutor.") || name == "mcp.family-tutor" {
+                return false // Shown as their owning Feature, not repeated as individual tools.
+            }
+            return true
+        }.sorted()
     }
 
     func refreshNativeTools() {
@@ -130,6 +163,7 @@ final class NeoYSetupModel: ObservableObject {
             } catch { result = error.localizedDescription }
             refreshNativeTools()
             refreshRemoteToolOptions()
+            await refreshMCPTools()
             isBusy = false
         }
     }
@@ -624,16 +658,23 @@ struct NeoYSetupView: View {
 
     private var featuresTab: some View {
         VStack(alignment: .leading, spacing: 16) {
-            heading("Features", "Manage Neo capabilities.")
+            HStack {
+                heading("Features", "Manage Neo capabilities.")
+                Button("Refresh") { Task { await model.refreshMCPTools() } }
+            }
 
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(NeoYRemoteToolCatalog.nativeOptionalTools.keys.sorted(), id: \.self) { tool in
+                ForEach(model.visibleMCPFeatureTools, id: \.self) { tool in
                     featureRow(featureTitle(tool), detail: "MCP") {
-                        Toggle("", isOn: Binding(
-                            get: { model.nativeEnabledTools.contains(tool) },
-                            set: { model.setNativeTool(tool, enabled: $0) }
-                        ))
-                        .labelsHidden()
+                        if NeoYRemoteToolCatalog.nativeOptionalTools[tool] != nil {
+                            Toggle("", isOn: Binding(
+                                get: { model.nativeEnabledTools.contains(tool) },
+                                set: { model.setNativeTool(tool, enabled: $0) }
+                            ))
+                            .labelsHidden()
+                        } else {
+                            Text("Available").font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                     Divider()
                 }
@@ -763,7 +804,7 @@ struct NeoYSetupView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(node.name).font(.body.weight(.medium))
-                            Text(node.url).font(.caption.monospaced()).foregroundStyle(.secondary)
+                            Text(nodeDisplayURL(node.url)).font(.caption.monospaced()).foregroundStyle(.secondary)
                         }
                         Spacer()
                         Text(node.isEnabled ? "Configured" : "Disabled")
@@ -775,6 +816,17 @@ struct NeoYSetupView: View {
             .background(Color(nsColor: .controlBackgroundColor))
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
+    }
+
+    private func nodeDisplayURL(_ raw: String) -> String {
+        guard var components = URLComponents(string: raw) else {
+            return String(raw.split(separator: "?", maxSplits: 1)[0])
+        }
+        components.user = nil
+        components.password = nil
+        components.query = nil
+        components.fragment = nil
+        return components.string ?? "Invalid node URL"
     }
 
     private func permissionRow(_ kind: NeoYPermissionKind) -> some View {
