@@ -57,7 +57,8 @@ jobs:
           xcodebuild -project NeoY.xcodeproj -scheme NeoY -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test
           xcodebuild -project NeoY.xcodeproj -scheme NeoY -configuration Release -destination 'generic/platform=macOS' -derivedDataPath "$RUNNER_TEMP/neo-build" CODE_SIGNING_ALLOWED=NO ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO build
           test -f "$RUNNER_TEMP/neo-build/Build/Products/Release/NeoY.app/Contents/Resources/Runtime/package.json"
-          lipo -verify_arch arm64 x86_64 "$RUNNER_TEMP/neo-build/Build/Products/Release/NeoY.app/Contents/MacOS/NeoY"
+          lipo -verify_arch arm64 "$RUNNER_TEMP/neo-build/Build/Products/Release/NeoY.app/Contents/MacOS/NeoY"
+          lipo -verify_arch x86_64 "$RUNNER_TEMP/neo-build/Build/Products/Release/NeoY.app/Contents/MacOS/NeoY"
       - name: Import Developer ID and notarization credentials
         env:
           CERTIFICATE: ${{ secrets.NEO_DEVELOPER_ID_P12_BASE64 }}
