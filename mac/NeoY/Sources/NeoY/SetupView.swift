@@ -672,6 +672,19 @@ struct NeoYSetupView: View {
                 .padding(8)
             }
 
+            GroupBox("Core Updates") {
+                VStack(alignment: .leading, spacing: 10) {
+                    valueRow("Installed", value: model.coreRuntimeStatus)
+                    HStack {
+                        TextField("Version or latest", text: $model.coreVersionInput)
+                            .textFieldStyle(.roundedBorder)
+                        Button("Update") { model.changeCoreRuntime() }
+                        Button("Roll Back") { model.changeCoreRuntime(rollback: true) }
+                    }
+                }
+                .padding(8)
+            }
+
             GroupBox("Local MCP Server") {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
