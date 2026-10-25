@@ -4,6 +4,23 @@ import XCTest
 @testable import NeoY
 
 final class NativeUISmokeTests: XCTestCase {
+    func testMenuVisibilityRespectsTourAndVoiceFeatureSwitches() {
+        var capabilities = NeoYCapabilityConfiguration()
+        XCTAssertTrue(NeoYMenuVisibility(capabilities: capabilities).showsTour)
+        XCTAssertTrue(NeoYMenuVisibility(capabilities: capabilities).showsVoice)
+
+        capabilities.set(.captureTour, enabled: false)
+        XCTAssertFalse(NeoYMenuVisibility(capabilities: capabilities).showsTour)
+        XCTAssertTrue(NeoYMenuVisibility(capabilities: capabilities).showsVoice)
+
+        capabilities.disabledTools.insert("voice.session")
+        XCTAssertFalse(NeoYMenuVisibility(capabilities: capabilities).showsVoice)
+
+        capabilities.set(.captureTour, enabled: true)
+        XCTAssertTrue(NeoYMenuVisibility(capabilities: capabilities).showsTour)
+        XCTAssertFalse(NeoYMenuVisibility(capabilities: capabilities).showsVoice)
+    }
+
     @MainActor
     func testNativeSmokeDescriptorResourceAndResultShareOneURI() async throws {
         let server = MCPServer(name: "test", port: 0)

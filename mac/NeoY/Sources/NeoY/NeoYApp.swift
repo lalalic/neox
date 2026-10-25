@@ -8,14 +8,7 @@ struct NeoYApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-
-            Button("Open Current Tour") { appDelegate.showTourWindow() }
-            Button("Listen & Talk…") { appDelegate.showVoiceWindow() }
-            Button("Setup…") { appDelegate.showSetupWindow() }
-            Divider()
-            Text("Neo \(NeoYCoreRuntime.version)")
-                .foregroundStyle(.secondary)
-            Button("Quit Neo") { NSApp.terminate(nil) }
+            NeoYMenuCommands(appDelegate: appDelegate)
         } label: {
             Image("NeoStatusBadge")
                 .renderingMode(.original)
@@ -27,8 +20,48 @@ struct NeoYApp: App {
     }
 }
 
+struct NeoYMenuVisibility {
+    let showsTour: Bool
+    let showsVoice: Bool
+
+    init(capabilities: NeoYCapabilityConfiguration) {
+        showsTour = capabilities.isEnabled(.captureTour)
+        showsVoice = !capabilities.disabledTools.contains("voice.session")
+    }
+}
+
+private struct NeoYMenuCommands: View {
+    let appDelegate: NeoYAppDelegate
+    @State private var capabilities = Self.loadCapabilities()
+
+    var body: some View {
+        let visibility = NeoYMenuVisibility(capabilities: capabilities)
+        Group {
+            if visibility.showsTour {
+                Button("Open Current Tour") { appDelegate.showTourWindow() }
+            }
+            if visibility.showsVoice {
+                Button("Listen & Talk…") { appDelegate.showVoiceWindow() }
+            }
+            Button("Setup…") { appDelegate.showSetupWindow() }
+            Divider()
+            Text("Neo \(NeoYCoreRuntime.version)")
+                .foregroundStyle(.secondary)
+            Button("Quit Neo") { NSApp.terminate(nil) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .neoYFeaturesChanged)) { _ in
+            capabilities = Self.loadCapabilities()
+        }
+    }
+
+    private static func loadCapabilities() -> NeoYCapabilityConfiguration {
+        (try? NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)
+            .loadOrCreate().document.configuration.capabilities) ?? NeoYCapabilityConfiguration()
+    }
+}
+
 @MainActor
-final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
+final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let services = NeoYServiceRegistry.shared
     private let store = CaptureTourStore.shared
     private let runner = CaptureRunner()
@@ -119,12 +152,19 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate {
             value.setContentSize(NSSize(width: 860, height: 700))
             value.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             value.isReleasedWhenClosed = false
+            value.delegate = self
             value.center()
             window = value
         }
         runner.configure()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard let closingWindow = notification.object as? NSWindow,
+              closingWindow === window else { return }
+        runner.releaseCapture()
     }
 
     func showSetupWindow() {
@@ -329,6 +369,8 @@ extension Notification.Name {
 final class CaptureRunner: NSObject, ObservableObject, AVCaptureFileOutputRecordingDelegate {
     let session = AVCaptureSession()
     let movieOutput = AVCaptureMovieFileOutput()
+    private let sessionQueue = DispatchQueue(label: "com.neox.capture.session")
+    private var captureRequested = false
     @Published private(set) var isConfigured = false
     @Published private(set) var isRecording = false
     @Published private(set) var hasTake = false
@@ -343,13 +385,15 @@ final class CaptureRunner: NSObject, ObservableObject, AVCaptureFileOutputRecord
     }
 
     func configure() {
+        captureRequested = true
         guard !isConfigured else { return }
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized: configureSession()
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
                 Task { @MainActor in
-                    if granted { self?.configureSession() } else { self?.previewError = "Camera access was denied." }
+                    guard let self, self.captureRequested else { return }
+                    if granted { self.configureSession() } else { self.previewError = "Camera access was denied." }
                 }
             }
         default: previewError = "Camera access is unavailable. Enable it in System Settings."
@@ -357,9 +401,13 @@ final class CaptureRunner: NSObject, ObservableObject, AVCaptureFileOutputRecord
     }
 
     private func configureSession() {
+        guard captureRequested else { return }
         if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] _ in
-                Task { @MainActor in self?.configureSession() }
+                Task { @MainActor in
+                    guard let self, self.captureRequested else { return }
+                    self.configureSession()
+                }
             }
             return
         }
@@ -381,12 +429,15 @@ final class CaptureRunner: NSObject, ObservableObject, AVCaptureFileOutputRecord
         }
         session.addOutput(movieOutput)
         isConfigured = true
-        DispatchQueue.global(qos: .userInitiated).async { [session] in session.startRunning() }
+        sessionQueue.async { [session] in session.startRunning() }
     }
 
     func releaseCapture() {
+        captureRequested = false
         if isRecording { movieOutput.stopRecording() }
-        if session.isRunning { session.stopRunning() }
+        sessionQueue.sync { [session] in
+            if session.isRunning { session.stopRunning() }
+        }
         for input in session.inputs { session.removeInput(input) }
         for output in session.outputs { session.removeOutput(output) }
         isConfigured = false
