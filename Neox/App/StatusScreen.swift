@@ -10,6 +10,7 @@ struct StatusView: View {
     @State private var siriExpanded = false
     @State private var showingTourRunner = false
     @State private var showingVlogSubmission = false
+    @State private var showingRemote = false
     @StateObject private var tours = CaptureTourStore.shared
 
     var body: some View {
@@ -65,6 +66,13 @@ struct StatusView: View {
 
             Divider()
 
+            Button { showingRemote = true } label: {
+                Label("Remote Mac", systemImage: "desktopcomputer")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .padding(.horizontal, 12)
+
             Button { showingVlogSubmission = true } label: {
                 Label("Create Vlog", systemImage: "film.stack")
                     .frame(maxWidth: .infinity)
@@ -92,6 +100,7 @@ struct StatusView: View {
         .background(Color(.systemBackground))
         .sheet(isPresented: $showingTourRunner) { CaptureTourRunnerView(tours: tours) }
         .sheet(isPresented: $showingVlogSubmission) { VlogSubmissionView() }
+        .sheet(isPresented: $showingRemote) { RemoteControlView() }
         // No .onAppear ensureRunning() here — NeoxApp's scenePhase(.active)
         // handler already restarts on every foreground. Keeping both would
         // restart twice at launch and log two 'listening' lines.
