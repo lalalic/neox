@@ -11,7 +11,7 @@ const THREAD_ID = /^[A-Za-z0-9_-]{8,160}$/;
 const XCHAT_COMMAND_TOOLS = [
   {
     name: "xchat.turn.new",
-    description: "Synchronously submit the next user turn in the specified ChatGPT thread via Browser Workspace Platform CLI, returning its verified submission receipt.",
+    description: "Submit a ChatGPT turn. Default async queues durable FIFO and returns status=submitted; sync submits immediately in a caller-owned WebHelm Session and returns a verified receipt.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -19,6 +19,8 @@ const XCHAT_COMMAND_TOOLS = [
         project_id: { type: "string", description: "Optional stable ChatGPT Project ID. Omit for a standalone thread." },
         thread_id: { type: "string", description: "Stable current ChatGPT thread ID." },
         message: { type: "string", description: "Continuation/handoff message for the next turn." },
+        mode: { type: "string", enum: ["async", "sync"], description: "async is the default durable queue; sync waits for submission and requires caller-owned session_id." },
+        session_id: { type: "string", description: "Required for sync only. Caller creates and closes this WebHelm Session." },
         reason: { type: "string", description: "Optional diagnostic reason for the control transfer." },
       },
       required: ["thread_id", "message"],
@@ -49,7 +51,7 @@ const XCHAT_COMMAND_MAP = new Map([
 
 export const XCHAT_LIFECYCLE_TOOLS = [{
   name: "chatgpt",
-  description: "Submit a ChatGPT turn or create a thread synchronously using Browser Workspace Platform CLI. Use command='help' for schemas.",
+  description: "Submit ChatGPT turns (async FIFO by default, sync opt-in) or create a thread synchronously. Use command='help' for mode and session requirements.",
   inputSchema: {
     type: "object",
     properties: {
@@ -87,8 +89,17 @@ function validate(args, name) {
     threadId = requireText(args, "thread_id");
     if (!THREAD_ID.test(threadId)) throw new Error("thread_id is invalid");
   }
+  const mode = name === "xchat.turn.new" ? (args.mode === undefined ? "async" : args.mode) : null;
+  if (name === "xchat.turn.new" && !["async", "sync"].includes(mode)) throw new Error("mode must be async or sync");
+  const sessionId = args.session_id;
+  if (name === "xchat.turn.new") {
+    if (mode === "sync" && (typeof sessionId !== "string" || !sessionId.trim())) {
+      throw new Error("mode sync requires caller-owned session_id");
+    }
+    if (mode === "async" && sessionId !== undefined) throw new Error("mode async does not accept session_id");
+  }
   const reason = typeof args.reason === "string" && args.reason.trim() ? args.reason.trim().slice(0, 2000) : null;
-  return { projectId, threadId, sourceThreadId, temporary, message, reason };
+  return { projectId, threadId, sourceThreadId, temporary, message, reason, mode, sessionId };
 }
 
 function resultText(payload) {
@@ -136,6 +147,7 @@ export function scheduleXChatLifecycle(name, input, options = {}) {
     message: parsed.message,
     reason: parsed.reason,
     ...(parsed.threadId ? { thread_id: parsed.threadId } : {}),
+    ...(action === "new-turn" ? { mode: parsed.mode } : {}),
     ...(parsed.sourceThreadId ? { source_thread_id: parsed.sourceThreadId } : {}),
   };
   const dir = fs.mkdtempSync(path.join(options.tmpDir || process.env.TMPDIR || "/tmp", "neoy-chatgpt-"));
@@ -145,7 +157,9 @@ export function scheduleXChatLifecycle(name, input, options = {}) {
     fs.writeFileSync(configPath, JSON.stringify(config), { mode: 0o600 });
     const cli = options.cli || process.env.BROWSER_WORKSPACE_CLI || "uvx";
     const prefix = options.cli || process.env.BROWSER_WORKSPACE_CLI ? [] : ["browser-workspace"];
-    const result = (options.spawnSyncImpl || spawnSync)(cli, [...prefix, "platform", "run", "chatgpt", action, "--auto-session", "--config", configPath], {
+    const sessionArgs = action === "new-thread" ? ["--auto-session"] :
+      parsed.mode === "sync" ? ["--mode", "sync", "--session-id", parsed.sessionId.trim()] : ["--mode", "async"];
+    const result = (options.spawnSyncImpl || spawnSync)(cli, [...prefix, "platform", "run", "chatgpt", action, ...sessionArgs, "--config", configPath], {
       encoding: "utf8",
       timeout: Number(process.env.XCHAT_LIFECYCLE_TIMEOUT_MS || 600_000),
       maxBuffer: 4 * 1024 * 1024,
