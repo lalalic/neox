@@ -40,6 +40,9 @@ Keep optional toolkit installation separate from mandatory bootstrap skills.
 Feature UI must preserve the published-package catalog; native MCP toggles use
 the existing control-plane capability owner, not the remote exposure allowlist.
 
+Native Accessibility presses that trigger SwiftUI button actions must execute on
+the main actor; off-main AXPress can crash Neo.app.
+
 PR merge is **not** completion for a NeoY change that must be applied locally.
 Choose the deployment path by what changed; do not rebuild/reinstall the native app
 for a Runtime-only change.
