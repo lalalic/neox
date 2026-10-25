@@ -21,11 +21,9 @@ struct NeoYApp: App {
 }
 
 struct NeoYMenuVisibility {
-    let showsTour: Bool
     let showsVoice: Bool
 
     init(capabilities: NeoYCapabilityConfiguration) {
-        showsTour = capabilities.isEnabled(.captureTour)
         showsVoice = !capabilities.disabledTools.contains("voice.reply")
             && !capabilities.disabledTools.contains("voice.session")
     }
@@ -38,9 +36,6 @@ private struct NeoYMenuCommands: View {
     var body: some View {
         let visibility = NeoYMenuVisibility(capabilities: capabilities)
         Group {
-            if visibility.showsTour {
-                Button("Open Current Tour") { appDelegate.showTourWindow() }
-            }
             if visibility.showsVoice {
                 Button("Listen & Talk…") { appDelegate.showVoiceWindow() }
             }

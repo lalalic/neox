@@ -24,7 +24,7 @@ final class NeoYRuntimeControl {
 
     func reconcile(_ configuration: NeoYControlPlaneConfiguration) async {
         let featureServers = await NeoYFeatureManager.shared.enabledMCPServers()
-        let providers = Set(featureServers.map(\.name))
+        let providers = await NeoYFeatureManager.shared.ownedProviderNames()
         let userServers = configuration.mcpServers.filter { !providers.contains($0.name) } + featureServers
         await federation.reconcile(NeoYBundledRuntime.resolvedMCPServers(userServers: userServers))
         await tunnel.reconcile(
@@ -48,7 +48,7 @@ final class NeoYRuntimeControl {
 
     func federationStatus(_ configuration: NeoYControlPlaneConfiguration) async -> [NeoYFederatedServerStatus] {
         let featureServers = await NeoYFeatureManager.shared.enabledMCPServers()
-        let providers = Set(featureServers.map(\.name))
+        let providers = await NeoYFeatureManager.shared.ownedProviderNames()
         let userServers = configuration.mcpServers.filter { !providers.contains($0.name) } + featureServers
         return federation.statuses(configurations: NeoYBundledRuntime.resolvedMCPServers(userServers: userServers))
     }

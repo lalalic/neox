@@ -89,6 +89,9 @@ actor NeoYFeatureManager {
 
     func records() -> [NeoYFeatureRecord] { loadRecords() }
     func record(id: String) -> NeoYFeatureRecord? { loadRecords().first { $0.id == id } }
+    func ownedProviderNames() -> Set<String> {
+        Set(loadRecords().compactMap(\.provider))
+    }
     func enabledMCPServers() -> [NeoYMCPServerConfiguration] {
         loadRecords().compactMap { record in
             guard record.enabled, let provider = record.provider, let url = record.mcpURL else { return nil }
@@ -225,6 +228,7 @@ actor NeoYFeatureManager {
         }
         records[index].enabled = false
         records[index].state = .disabled
+        records[index].error = nil
         try save(records)
         NotificationCenter.default.post(name: .neoYFeaturesChanged, object: nil)
         return records[index]

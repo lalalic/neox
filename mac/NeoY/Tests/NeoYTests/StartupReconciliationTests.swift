@@ -23,4 +23,21 @@ final class StartupReconciliationTests: XCTestCase {
     func testEmptyInstallationNeverInstallsAnOptionalFeature() {
         XCTAssertTrue(NeoYFeatureManager.startupCandidates([]).isEmpty)
     }
+
+    func testDisabledFeatureStillOwnsItsProvider() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let stateURL = directory.appendingPathComponent("features.json")
+        let records = [
+            record("family-tutor", enabled: false, state: .disabled),
+            record("enabled-feature", enabled: true, state: .ready),
+        ]
+        try JSONEncoder().encode(records).write(to: stateURL)
+        let manager = NeoYFeatureManager(root: directory, stateURL: stateURL)
+        let owned = await manager.ownedProviderNames()
+        let enabled = await manager.enabledMCPServers()
+        XCTAssertEqual(owned, Set(["family-tutor", "enabled-feature"]))
+        XCTAssertEqual(enabled.map(\.name), ["enabled-feature"])
+    }
 }

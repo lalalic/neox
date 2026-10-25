@@ -103,14 +103,15 @@ final class NeoCLISetupTests: XCTestCase {
     }
 
     func testGlobalSkillsReadOnlyInventory() {
-        XCTAssertEqual(NeoCLISetup.globalSkills(), ["events-bus", "daemon-service-manage", "webhelm"])
+        XCTAssertEqual(NeoCLISetup.globalSkills(), ["events-bus", "daemon-service-manage", "webhelm", "agents-relay"])
     }
 
     func testOptionalSkillCatalogDoesNotIncludeCoreDependencies() {
         XCTAssertEqual(Set(NeoCLISetup.optionalSkillSources.keys),
-                       Set(["wechat-bro", "markcut", "agents-relay"]))
+                       Set(["wechat-bro", "markcut"]))
         XCTAssertTrue(Set(NeoCLISetup.optionalSkillSources.keys)
             .isDisjoint(with: NeoCLISetup.requiredGlobalSkills))
+        XCTAssertThrowsError(try NeoCLISetup.removeOptionalSkill("agents-relay"))
     }
 
     func testOptionalMCPToolsAreBackedByRealCapabilityState() throws {

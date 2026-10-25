@@ -774,7 +774,7 @@ struct NeoYSetupView: View {
                     Divider()
                 }
 
-                ForEach(["wechat-bro", "markcut", "agents-relay"], id: \.self) { skill in
+                ForEach(["wechat-bro", "markcut"], id: \.self) { skill in
                     featureRow(skill, detail: "Skill") {
                         Toggle("", isOn: Binding(
                             get: { model.optionalSkills.contains(skill) },
@@ -842,7 +842,7 @@ struct NeoYSetupView: View {
                             Button("Uninstall", role: .destructive) { model.uninstallFeature(item) }
                         }
                     }
-                    if let error = record?.error, !error.isEmpty {
+                    if record?.enabled == true, let error = record?.error, !error.isEmpty {
                         Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 12)
                     }
                     Divider()

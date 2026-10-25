@@ -3,13 +3,12 @@ import Foundation
 /// NeoY manages installation; lalalic/neo remains the CLI implementation owner.
 enum NeoCLISetup {
     static var skillsDirectory: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".agents/skills", isDirectory: true) }
-    static let requiredGlobalSkills = ["events-bus", "daemon-service-manage", "webhelm"]
+    static let requiredGlobalSkills = ["events-bus", "daemon-service-manage", "webhelm", "agents-relay"]
     static func globalSkills() -> [String] { requiredGlobalSkills }
 
     static let optionalSkillSources = [
         "wechat-bro": "lalalic/wechat-bro",
         "markcut": "lalalic/markcut",
-        "agents-relay": "lalalic/agents-relay",
     ]
 
     static let toolkitPreferenceKey = "NeoProjectsToolkitEnabled"
@@ -245,6 +244,9 @@ enum NeoCLISetup {
         }
         if missing.contains("webhelm") {
             _ = try runSkills(["add", "lalalic/browser-workspace", "-g", "-y", "-s", "webhelm"])
+        }
+        if missing.contains("agents-relay") {
+            _ = try runSkills(["add", "lalalic/agents-relay", "-g", "-y", "-s", "agents-relay"])
         }
         let installed = installedGlobalSkills()
         let remaining = requiredGlobalSkills.filter { !installed.contains($0) }

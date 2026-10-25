@@ -4,13 +4,11 @@ import XCTest
 @testable import NeoY
 
 final class NativeUISmokeTests: XCTestCase {
-    func testMenuVisibilityRespectsTourAndVoiceFeatureSwitches() {
+    func testMenuVisibilityRespectsVoiceFeatureSwitch() {
         var capabilities = NeoYCapabilityConfiguration()
-        XCTAssertTrue(NeoYMenuVisibility(capabilities: capabilities).showsTour)
         XCTAssertTrue(NeoYMenuVisibility(capabilities: capabilities).showsVoice)
 
         capabilities.set(.captureTour, enabled: false)
-        XCTAssertFalse(NeoYMenuVisibility(capabilities: capabilities).showsTour)
         XCTAssertTrue(NeoYMenuVisibility(capabilities: capabilities).showsVoice)
 
         capabilities.disabledTools.insert("voice.reply")
@@ -21,7 +19,6 @@ final class NativeUISmokeTests: XCTestCase {
         XCTAssertFalse(NeoYMenuVisibility(capabilities: capabilities).showsVoice)
 
         capabilities.set(.captureTour, enabled: true)
-        XCTAssertTrue(NeoYMenuVisibility(capabilities: capabilities).showsTour)
         XCTAssertFalse(NeoYMenuVisibility(capabilities: capabilities).showsVoice)
     }
 
