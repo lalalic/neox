@@ -1,13 +1,15 @@
 import Foundation
 
 enum NeoYSetupTopic: String, CaseIterable, Sendable {
-    case overview, status, configuration, deployment, diagnostics, permissions, federation, features, events, capabilities, auth, files, roadmap
+    case overview, status, configuration, core, deployment, diagnostics, permissions, federation, features, events, capabilities, auth, files, roadmap
 }
 
 enum NeoYSetupCommand: Equatable, Sendable {
     case help(topic: NeoYSetupTopic?)
     case status
     case configuration
+    case coreStatus
+    case coreUpgrade(String)
     case deploymentShow
     case deploymentSetPort(UInt16)
     case deploymentSetTunnel(NeoYTunnelMode)
@@ -79,6 +81,10 @@ enum NeoYSetupParser {
         case "config":
             guard tokens == ["config", "show"] else { throw NeoYSetupError.unknownCommand(tokens.joined(separator: " ")) }
             return .configuration
+        case "core":
+            if tokens == ["core", "status"] { return .coreStatus }
+            if tokens.count == 3, tokens[1] == "upgrade" { return .coreUpgrade(tokens[2]) }
+            throw NeoYSetupError.unknownCommand(tokens.joined(separator: " "))
         case "deployment": return try deployment(tokens)
         case "diagnostics": return try diagnostics(tokens)
         case "permissions": return try permissions(tokens)
@@ -396,6 +402,20 @@ actor NeoYSetupService {
             return Self.json(status)
         case .configuration:
             return Self.json(await snapshot())
+        case .coreStatus:
+            return Self.json(["version": NeoYManagedCoreRuntime.active()?.lastPathComponent ?? "not installed"])
+        case .coreUpgrade(let version):
+            do {
+                let selected = try await Task.detached(priority: .userInitiated) {
+                    try NeoYManagedCoreRuntime.registryUpgrade(version: version)
+                }.value
+                await MainActor.run {
+                    NotificationCenter.default.post(name: Notification.Name("neoYCoreRuntimeChanged"), object: nil)
+                }
+                return Self.json(["version": selected, "status": "upgraded"])
+            } catch {
+                return Self.json(["status": "failed", "error": error.localizedDescription])
+            }
         case .deploymentShow:
             return Self.json(NeoYDeploymentSettingsStore.load())
         case .deploymentSetPort(let port):
@@ -605,6 +625,8 @@ actor NeoYSetupService {
             "'status' returns runtime, MCP, NeoX pairing/handoff, capability, and control-plane health."
         case .configuration:
             "'config show' returns versioned validated configuration without making storage paths part of the normal UX."
+        case .core:
+            "core status | core upgrade <latest|version|absolute-tgz-path> — verify and activate managed Core, then reconnect its provider."
         case .deployment:
             """
             deployment show
@@ -665,6 +687,7 @@ actor NeoYSetupService {
               help [topic]
               status
               config show
+              core status|upgrade ...
               deployment show|set ...
               diagnostics ...
               permissions status|open ...

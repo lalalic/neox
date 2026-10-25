@@ -3,6 +3,14 @@ import XCTest
 @testable import NeoY
 
 final class SetupServiceTests: XCTestCase {
+    func testCoreUpgradeCommands() throws {
+        XCTAssertEqual(try NeoYSetupParser.parse("core status"), .coreStatus)
+        XCTAssertEqual(try NeoYSetupParser.parse("core upgrade latest"), .coreUpgrade("latest"))
+        XCTAssertEqual(try NeoYSetupParser.parse("core upgrade 0.1.10"), .coreUpgrade("0.1.10"))
+        XCTAssertEqual(try NeoYSetupParser.parse("help core"), .help(topic: .core))
+        XCTAssertThrowsError(try NeoYSetupParser.parse("core upgrade"))
+    }
+
     func testFilesSetupParsing() throws {
         XCTAssertEqual(try NeoYSetupParser.parse("files list"), .filesList)
         XCTAssertEqual(try NeoYSetupParser.parse("files mount vlog /tmp/vlog"), .filesMount(name: "vlog", path: "/tmp/vlog"))
