@@ -114,6 +114,7 @@ final class RemoteMCPClient: ObservableObject {
     }
 
     func forgetCredential() {
+        MacScreenCredentials.delete(for: endpoint)
         Self.deleteSecret(account: Self.credentialAccount(for: endpoint))
         savedMacs.removeAll { $0.url == endpoint }
         UserDefaults.standard.set(savedMacs.map(\.url), forKey: savedMacsKey)

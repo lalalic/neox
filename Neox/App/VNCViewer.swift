@@ -15,6 +15,7 @@ final class VNCViewerController: NSObject, ObservableObject, VNCConnectionDelega
 
     func connect(host: String, port: UInt16, username: String, password: String) {
         disconnect()
+        error = nil
         credentialLock.withLock { credentials = (username, password) }
         let settings = VNCConnection.Settings(
             isDebugLoggingEnabled: false,
@@ -132,6 +133,7 @@ struct VNCViewerView: View {
     @State private var password = ""
     @State private var input = ""
     @State private var dragging = false
+    @State private var connectionGeneration = 0
 
     var body: some View {
         VStack(spacing: 10) {
@@ -142,17 +144,9 @@ struct VNCViewerView: View {
                         TextField("Mac account name", text: $username)
                             .textInputAutocapitalization(.never)
                         SecureField("Mac login password", text: $password)
-                        Button("Connect") {
-                            Task {
-                                do {
-                                    relay = try await remote.openVNCTunnel()
-                                    guard let relay else { return }
-                                    viewer.connect(host: "127.0.0.1", port: relay.port,
-                                                   username: username, password: password)
-                                    password = ""
-                                } catch { viewer.error = error.localizedDescription }
-                            }
-                        }
+                        Text("Your Mac login is remembered securely on this iPhone.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("Connect") { connectDesktop() }
                     }
                     Section {
                         Text(viewer.status)
@@ -208,19 +202,55 @@ struct VNCViewerView: View {
                     Button("Return") { viewer.sendReturn() }
                 }.textFieldStyle(.roundedBorder)
             }
-            Button("Finish", role: .destructive) {
-                viewer.disconnect()
-                relay?.close()
-                relay = nil
-            }
+            Button("Finish", role: .destructive) { closeDesktop() }
                 .disabled(viewer.status == "Not connected")
+        }
+        .onAppear {
+            if let saved = MacScreenCredentials.load(for: remote.endpoint) {
+                username = saved.username
+                password = saved.password
+                connectDesktop()
+            }
         }
         .onDisappear { closeDesktop() }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { closeDesktop() }
         }
     }
+    private func connectDesktop() {
+        let name = username
+        let secret = password
+        guard !name.isEmpty, !secret.isEmpty else {
+            viewer.error = "Enter your Mac account and password."
+            return
+        }
+        do {
+            try MacScreenCredentials.save(username: name, password: secret, for: remote.endpoint)
+        } catch {
+            viewer.error = error.localizedDescription
+            return
+        }
+        closeDesktop()
+        let generation = connectionGeneration
+        Task {
+            do {
+                let created = try await remote.openVNCTunnel()
+                guard generation == connectionGeneration else {
+                    created.close()
+                    return
+                }
+                relay = created
+                viewer.connect(host: "127.0.0.1", port: created.port,
+                               username: name, password: secret)
+                password = ""
+            } catch {
+                if generation == connectionGeneration { viewer.error = error.localizedDescription }
+            }
+        }
+    }
+
     private func closeDesktop() {
+        connectionGeneration += 1
         viewer.disconnect()
         relay?.close()
         relay = nil
