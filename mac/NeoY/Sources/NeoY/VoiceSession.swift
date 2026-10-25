@@ -3,11 +3,15 @@ import AppKit
 import Speech
 import SwiftUI
 
-struct VoiceThreadBinding: Equatable {
+struct VoiceThreadBinding: Codable, Equatable {
     let threadID: String
     let projectID: String?
 
     static let storageKey = "neo.voice.threadBinding"
+    var displayValue: String {
+        guard let projectID else { return threadID }
+        return "https://chatgpt.com/g/\(projectID)/c/\(threadID)"
+    }
 
     static func parse(_ input: String) -> Self? {
         let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -28,13 +32,16 @@ struct VoiceThreadBinding: Equatable {
     }
 
     static func load(defaults: UserDefaults = .standard) -> Self? {
-        guard let value = defaults.string(forKey: storageKey) else { return nil }
-        return parse(value)
+        if let data = defaults.data(forKey: storageKey) {
+            return try? JSONDecoder().decode(Self.self, from: data)
+        }
+        guard let previous = defaults.string(forKey: storageKey) else { return nil }
+        return parse(previous)
     }
 
     static func save(_ input: String, defaults: UserDefaults = .standard) -> Bool {
-        guard parse(input) != nil else { return false }
-        defaults.set(input.trimmingCharacters(in: .whitespacesAndNewlines), forKey: storageKey)
+        guard let binding = parse(input), let data = try? JSONEncoder().encode(binding) else { return false }
+        defaults.set(data, forKey: storageKey)
         return true
     }
 }
@@ -606,7 +613,7 @@ private enum VoiceToolError: LocalizedError {
 struct VoiceSessionView: View {
     @ObservedObject var controller: VoiceSessionController
     @State private var injectedText = ""
-    @State private var threadInput = UserDefaults.standard.string(forKey: VoiceThreadBinding.storageKey) ?? ""
+    @State private var threadInput = VoiceThreadBinding.load()?.displayValue ?? ""
     @State private var bindingMessage = ""
 
     var body: some View {

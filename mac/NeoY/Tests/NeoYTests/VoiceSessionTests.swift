@@ -73,6 +73,11 @@ final class VoiceSessionTests: XCTestCase {
         let id = "6adb5143-bdf0-83e9-9c16-966c11d5f618"
         XCTAssertTrue(VoiceThreadBinding.save(id, defaults: defaults))
         XCTAssertEqual(VoiceThreadBinding.load(defaults: defaults)?.threadID, id)
+        XCTAssertNotNil(defaults.data(forKey: VoiceThreadBinding.storageKey))
+        let project = "g-p-6ac92adf1a988191b37ed5526c72caac-orchestrators"
+        XCTAssertTrue(VoiceThreadBinding.save("https://chatgpt.com/g/\(project)/c/\(id)", defaults: defaults))
+        XCTAssertEqual(VoiceThreadBinding.load(defaults: defaults)?.projectID, project)
+        XCTAssertEqual(VoiceThreadBinding.load(defaults: defaults)?.displayValue, "https://chatgpt.com/g/\(project)/c/\(id)")
         XCTAssertFalse(VoiceThreadBinding.save("invalid", defaults: defaults))
         XCTAssertEqual(VoiceThreadBinding.load(defaults: defaults)?.threadID, id)
     }
