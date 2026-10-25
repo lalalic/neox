@@ -192,7 +192,9 @@ struct VlogSubmissionView: View {
                 if let errorText {
                     Text(errorText).foregroundStyle(.red)
                 }
-
+            }
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
                 Button {
                     isSubmitting = true
                     errorText = nil
@@ -210,18 +212,29 @@ struct VlogSubmissionView: View {
                 } label: {
                     HStack {
                         if isSubmitting { ProgressView() }
-                        Text("Create Vlog Submission")
+                        Text("Submit")
                     }
+                    .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .disabled(isSubmitting || items.isEmpty)
+                .buttonStyle(.borderedProminent)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color(.systemBackground))
             }
-            .navigationTitle("Create Vlog")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button { dismiss() } label: { Image(systemName: "xmark") }
-                        .accessibilityLabel("Close")
-                        .buttonStyle(.plain)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                HStack {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("Close")
+                    Spacer()
                 }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 8)
+                .background(Color(.systemBackground))
             }
         }
     }
