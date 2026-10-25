@@ -177,6 +177,7 @@ struct VNCViewerView: View {
     @State private var username = ""
     @State private var password = ""
     @State private var input = ""
+    @State private var passwordInInput = false
     @FocusState private var keyboardActive: Bool
     @State private var connectionGeneration = 0
     @State private var automaticRetries = 0
@@ -218,7 +219,8 @@ struct VNCViewerView: View {
                     .accessibilityLabel("Open keyboard")
                     Button {
                         if let saved = MacScreenCredentials.load(for: remote.endpoint) {
-                            viewer.sendText(saved.password)
+                            input = saved.password
+                            passwordInInput = true
                         }
                     } label: {
                         Image(systemName: "key.fill")
@@ -233,18 +235,19 @@ struct VNCViewerView: View {
                 .buttonStyle(.plain)
                 .padding(.horizontal, 12)
                 HStack(spacing: 12) {
-                    TextField("Type on your Mac", text: $input)
-                        .focused($keyboardActive)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .onChange(of: input) { previous, current in
-                            if current.hasPrefix(previous) {
-                                viewer.sendText(String(current.dropFirst(previous.count)))
-                            } else if previous.hasPrefix(current) {
-                                for _ in 0..<(previous.count - current.count) { viewer.backspace() }
-                            }
+                    Group {
+                        if passwordInInput {
+                            SecureField("Password ready", text: $input)
+                                .onSubmit(sendInputAndReturn)
+                        } else {
+                            TextField("Type on your Mac", text: $input)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .onSubmit(sendInputAndReturn)
                         }
-                    Button { viewer.sendReturn() } label: {
+                    }
+                    .focused($keyboardActive)
+                    Button { sendInputAndReturn() } label: {
                         Image(systemName: "return")
                     }
                     .accessibilityLabel("Return")
@@ -318,9 +321,19 @@ struct VNCViewerView: View {
         viewer.disconnect()
         keyboardActive = false
         input = ""
+        passwordInInput = false
         relay?.close()
         relay = nil
         password = ""
+    }
+
+    private func sendInputAndReturn() {
+        if !input.isEmpty {
+            viewer.sendText(input)
+        }
+        viewer.sendReturn()
+        input = ""
+        passwordInInput = false
     }
 
 }
