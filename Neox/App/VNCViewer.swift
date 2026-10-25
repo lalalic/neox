@@ -43,6 +43,7 @@ final class VNCViewerController: NSObject, ObservableObject, VNCConnectionDelega
         credentialLock.withLock { credentials.password = "" }
         status = "Not connected"
         frame = nil
+        framebufferSize = .zero
     }
 
     func tap(relativeX: CGFloat, relativeY: CGFloat) {
@@ -51,6 +52,33 @@ final class VNCViewerController: NSObject, ObservableObject, VNCConnectionDelega
         let y = UInt16(clamping: Int(relativeY * framebufferSize.height))
         connection.mouseButtonDown(.left, x: x, y: y)
         connection.mouseButtonUp(.left, x: x, y: y)
+    }
+
+    func rightClick(relativeX: CGFloat, relativeY: CGFloat) {
+        guard let connection, framebufferSize.width > 0, framebufferSize.height > 0 else { return }
+        let x = UInt16(clamping: Int(relativeX * framebufferSize.width))
+        let y = UInt16(clamping: Int(relativeY * framebufferSize.height))
+        connection.mouseButtonDown(.right, x: x, y: y)
+        connection.mouseButtonUp(.right, x: x, y: y)
+    }
+
+    func scroll(relativeX: CGFloat, relativeY: CGFloat, horizontal: Int, vertical: Int) {
+        guard let connection, framebufferSize.width > 0, framebufferSize.height > 0 else { return }
+        let x = UInt16(clamping: Int(relativeX * framebufferSize.width))
+        let y = UInt16(clamping: Int(relativeY * framebufferSize.height))
+        if vertical != 0 {
+            connection.mouseWheel(vertical > 0 ? .down : .up, x: x, y: y,
+                                  steps: UInt32(min(30, abs(vertical))))
+        }
+        if horizontal != 0 {
+            connection.mouseWheel(horizontal > 0 ? .left : .right, x: x, y: y,
+                                  steps: UInt32(min(30, abs(horizontal))))
+        }
+    }
+
+    func backspace() {
+        connection?.keyDown(.delete)
+        connection?.keyUp(.delete)
     }
 
     func drag(relativeX: CGFloat, relativeY: CGFloat, starting: Bool, ending: Bool) {
@@ -81,8 +109,14 @@ final class VNCViewerController: NSObject, ObservableObject, VNCConnectionDelega
 
     func connection(_ connection: VNCConnection, stateDidChange state: VNCConnection.ConnectionState) {
         DispatchQueue.main.async { [weak self] in
-            self?.status = String(describing: state.status)
-            if let error = state.error { self?.error = error.localizedDescription }
+            guard let self, self.connection === connection else { return }
+            switch state.status {
+            case .disconnected: self.status = "Not connected"
+            case .connecting: self.status = "Connecting…"
+            case .connected: self.status = "Connected"
+            case .disconnecting: self.status = "Closing…"
+            }
+            if let error = state.error { self.error = error.localizedDescription }
         }
     }
 
@@ -101,25 +135,26 @@ final class VNCViewerController: NSObject, ObservableObject, VNCConnectionDelega
     }
 
     func connection(_ connection: VNCConnection, didCreateFramebuffer buffer: VNCFramebuffer) {
-        publish(buffer)
+        publish(buffer, from: connection)
     }
 
     func connection(_ connection: VNCConnection, didResizeFramebuffer buffer: VNCFramebuffer) {
-        publish(buffer)
+        publish(buffer, from: connection)
     }
 
     func connection(_ connection: VNCConnection, didUpdateFramebuffer buffer: VNCFramebuffer,
                     x: UInt16, y: UInt16, width: UInt16, height: UInt16) {
-        publish(buffer)
+        publish(buffer, from: connection)
     }
 
     func connection(_ connection: VNCConnection, didUpdateCursor cursor: VNCCursor) {}
 
-    private func publish(_ buffer: VNCFramebuffer) {
+    private func publish(_ buffer: VNCFramebuffer, from connection: VNCConnection) {
         let image = buffer.cgImage
         DispatchQueue.main.async { [weak self] in
-            self?.frame = image
-            if let image { self?.framebufferSize = CGSize(width: image.width, height: image.height) }
+            guard let self, self.connection === connection else { return }
+            self.frame = image
+            if let image { self.framebufferSize = CGSize(width: image.width, height: image.height) }
         }
     }
 }
@@ -132,8 +167,9 @@ struct VNCViewerView: View {
     @State private var username = ""
     @State private var password = ""
     @State private var input = ""
-    @State private var dragging = false
+    @FocusState private var keyboardActive: Bool
     @State private var connectionGeneration = 0
+    @State private var automaticRetries = 0
 
     var body: some View {
         VStack(spacing: 10) {
@@ -149,58 +185,40 @@ struct VNCViewerView: View {
                         Button("Connect") { connectDesktop() }
                     }
                     Section {
-                        Text(viewer.status)
+                        Text(viewer.status == "Not connected" ? "Ready to connect" : viewer.status)
                         if let error = viewer.error { Text(error).foregroundStyle(.red) }
                     }
                 }
             } else if let image = viewer.frame {
-                GeometryReader { geometry in
-                    Image(decorative: image, scale: 1)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                        .contentShape(Rectangle())
-                        .onTapGesture { point in
-                            let imageRatio = CGFloat(image.width) / CGFloat(image.height)
-                            let boundsRatio = geometry.size.width / max(geometry.size.height, 1)
-                            let width = imageRatio > boundsRatio ? geometry.size.width : geometry.size.height * imageRatio
-                            let height = imageRatio > boundsRatio ? geometry.size.width / imageRatio : geometry.size.height
-                            let x = (point.x - (geometry.size.width - width) / 2) / width
-                            let y = (point.y - (geometry.size.height - height) / 2) / height
-                            guard (0...1).contains(x), (0...1).contains(y) else { return }
-                            viewer.tap(relativeX: x, relativeY: y)
-                        }
-                        .simultaneousGesture(DragGesture(minimumDistance: 8)
-                            .onChanged { value in
-                                let ratio = CGFloat(image.width) / CGFloat(image.height)
-                                let bounds = geometry.size.width / max(geometry.size.height, 1)
-                                let width = ratio > bounds ? geometry.size.width : geometry.size.height * ratio
-                                let height = ratio > bounds ? geometry.size.width / ratio : geometry.size.height
-                                let x = (value.location.x - (geometry.size.width - width) / 2) / width
-                                let y = (value.location.y - (geometry.size.height - height) / 2) / height
-                                viewer.drag(relativeX: x, relativeY: y, starting: !dragging, ending: false)
-                                dragging = true
-                            }
-                            .onEnded { value in
-                                guard dragging else { return }
-                                let ratio = CGFloat(image.width) / CGFloat(image.height)
-                                let bounds = geometry.size.width / max(geometry.size.height, 1)
-                                let width = ratio > bounds ? geometry.size.width : geometry.size.height * ratio
-                                let height = ratio > bounds ? geometry.size.width / ratio : geometry.size.height
-                                viewer.drag(relativeX: (value.location.x - (geometry.size.width - width) / 2) / width,
-                                            relativeY: (value.location.y - (geometry.size.height - height) / 2) / height,
-                                            starting: false, ending: true)
-                                dragging = false
-                            })
-                }
+                RemoteDesktopCanvas(image: image,
+                                    onClick: { viewer.tap(relativeX: $0, relativeY: $1) },
+                                    onRightClick: { viewer.rightClick(relativeX: $0, relativeY: $1) },
+                                    onDrag: { viewer.drag(relativeX: $0, relativeY: $1,
+                                                          starting: $2, ending: $3) },
+                                    onScroll: { viewer.scroll(relativeX: $0, relativeY: $1,
+                                                              horizontal: $2, vertical: $3) })
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Mac desktop")
+                    .accessibilityIdentifier("remoteDesktopCanvas")
                 HStack {
                     TextField("Type on your Mac", text: $input)
-                    Button("Type") {
-                        viewer.sendText(input)
-                        input = ""
-                    }
+                        .focused($keyboardActive)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onChange(of: input) { previous, current in
+                            if current.hasPrefix(previous) {
+                                viewer.sendText(String(current.dropFirst(previous.count)))
+                            } else if previous.hasPrefix(current) {
+                                for _ in 0..<(previous.count - current.count) { viewer.backspace() }
+                            }
+                        }
+                    Button("Keyboard") { keyboardActive = true }
                     Button("Return") { viewer.sendReturn() }
-                }.textFieldStyle(.roundedBorder)
+                }
+                .textFieldStyle(.roundedBorder)
+                Text("Tap to click · Double-tap to zoom · Pinch to resize · Two fingers to move or scroll · Hold for right-click")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
             Button("Finish", role: .destructive) { closeDesktop() }
                 .disabled(viewer.status == "Not connected")
@@ -212,14 +230,27 @@ struct VNCViewerView: View {
                 connectDesktop()
             }
         }
+        .onChange(of: viewer.error) { _, message in
+            guard let message, message.contains("Receive Server Init"),
+                  automaticRetries < 1 else { return }
+            automaticRetries += 1
+            let generation = connectionGeneration
+            Task {
+                try? await Task.sleep(for: .milliseconds(700))
+                guard generation == connectionGeneration else { return }
+                connectDesktop(retrying: true)
+            }
+        }
         .onDisappear { closeDesktop() }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { closeDesktop() }
         }
     }
-    private func connectDesktop() {
-        let name = username
-        let secret = password
+    private func connectDesktop(retrying: Bool = false) {
+        if !retrying { automaticRetries = 0 }
+        let saved = MacScreenCredentials.load(for: remote.endpoint)
+        let name = username.isEmpty ? (saved?.username ?? "") : username
+        let secret = password.isEmpty ? (saved?.password ?? "") : password
         guard !name.isEmpty, !secret.isEmpty else {
             viewer.error = "Enter your Mac account and password."
             return
@@ -252,6 +283,8 @@ struct VNCViewerView: View {
     private func closeDesktop() {
         connectionGeneration += 1
         viewer.disconnect()
+        keyboardActive = false
+        input = ""
         relay?.close()
         relay = nil
         password = ""
