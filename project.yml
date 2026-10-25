@@ -7,12 +7,20 @@ options:
   createIntermediateGroups: true
   defaultConfig: Debug
 
+packages:
+  RoyalVNCKit:
+    url: https://github.com/royalapplications/royalvnc.git
+    revision: 92d4427c73817d8f849bb289ff190aa4b40c44ea
+
 targets:
   NeoxApp:
     type: application
     platform: iOS
     sources:
       - Neox
+    dependencies:
+      - package: RoyalVNCKit
+        product: RoyalVNCKit
     entitlements:
       path: Neox/Neox.entitlements
       properties:

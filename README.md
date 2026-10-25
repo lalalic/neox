@@ -1,5 +1,22 @@
 # Neox
 
+## Neo Remote: desktop and terminal
+
+NeoX's **Remote Mac** screen connects to the existing Neo HTTPS MCP endpoint
+from any network. Enter the endpoint and Neo token once; the token stays in
+the iPhone Keychain. The Terminal tab uses Neo's existing terminal tool.
+
+The Desktop tab embeds a VNC viewer. Enable macOS **Screen Sharing** on the
+Neo Master, then enter that Mac user's screen-sharing username and password
+when connecting. The password is not stored. Tap to click, drag to move
+windows, and use the keyboard field to type.
+
+VNC passes through authenticated WSS on the same Neo gateway and then to
+macOS's loopback Screen Sharing server. No public port 5900 or legacy VNC
+password mode is needed. The iOS viewer pins RoyalVNCKit because macOS
+uses Apple Remote Desktop authentication; this is a deliberate exception
+to the repository's original zero-SPM-dependency constraint.
+
 A headless iPhone app whose only consumer is a **desktop coding agent**. It runs
 an MCP (Model Context Protocol) server on the local network so an agent can
 search, analyze, and pull photos/videos off the phone over WiFi.

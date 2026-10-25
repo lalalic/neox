@@ -5,7 +5,6 @@ struct RemoteControlView: View {
     @State private var token = ""
     @State private var address = ""
     @State private var command = ""
-    @State private var typing = ""
     @State private var tab = 0
     @State private var showSettings = true
 
@@ -20,7 +19,7 @@ struct RemoteControlView: View {
                         Text("Desktop").tag(1)
                     }
                     .pickerStyle(.segmented).padding()
-                    if tab == 0 { terminal } else { desktop }
+                    if tab == 0 { terminal } else { VNCViewerView(remote: remote) }
                 }
             }
             .navigationTitle("Neo Remote")
@@ -103,6 +102,7 @@ struct RemoteControlView: View {
                 Button("Start Terminal") {
                     Task { await remote.startTerminal() }
                 }.buttonStyle(.borderedProminent)
+                    .disabled(!remote.hasTerminalTool)
             }
         }.padding(8)
     }
@@ -111,36 +111,5 @@ struct RemoteControlView: View {
         let value = command
         command = ""
         Task { await remote.sendTerminal(value + "\r") }
-    }
-
-    private var desktop: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Picker("Mac App", selection: $remote.selectedApp) {
-                    ForEach(remote.apps, id: \.self) { Text($0).tag($0) }
-                }
-                Button("Apps") { Task { await remote.listApps() } }
-            }
-            if let picture = remote.screenshot {
-                Image(uiImage: picture)
-                    .resizable().scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ContentUnavailableView("No screenshot", systemImage: "desktopcomputer")
-            }
-            HStack {
-                Button("Refresh") { Task { await remote.refreshDesktop() } }
-                Button("Esc") { Task { await remote.desktopKey("Escape") } }
-                Button("Return") { Task { await remote.desktopKey("Return") } }
-            }.buttonStyle(.bordered)
-            HStack {
-                TextField("Type on Mac", text: $typing)
-                Button("Type") {
-                    let value = typing
-                    typing = ""
-                    Task { await remote.desktopType(value) }
-                }
-            }.textFieldStyle(.roundedBorder)
-        }.padding().task { await remote.listApps() }
     }
 }

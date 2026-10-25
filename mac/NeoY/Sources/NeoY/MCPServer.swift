@@ -409,7 +409,9 @@ public final class MCPServer {
         // Every response path cancels its connection after sending, so this only
         // sweeps connections that never complete a request.
         queue.asyncAfter(deadline: .now() + 900) { [weak connection] in
-            connection?.cancel()
+            if let connection, !VNCWebSocketProxy.shared.isActive(connection) {
+                connection.cancel()
+            }
         }
         connection.start(queue: queue)
     }
@@ -502,7 +504,21 @@ public final class MCPServer {
             guard parts.count == 2, parts[0].caseInsensitiveCompare("Bearer") == .orderedSame else { return nil }
             return parts[1]
         }()
-        let presentedToken = bearerToken ?? queryToken
+        // A WebSocket cannot set a Bearer header from JavaScript. Accept the
+        // existing Neo credential as a base64url subprotocol offer, but never
+        // echo that offer in the upgrade response.
+        let wsToken: String? = headers["sec-websocket-protocol"]?
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first(where: { $0.hasPrefix("neo-auth.") })
+            .flatMap { offered in
+                let value = String(offered.dropFirst("neo-auth.".count))
+                    .replacingOccurrences(of: "-", with: "+")
+                    .replacingOccurrences(of: "_", with: "/")
+                let padded = value.padding(toLength: ((value.count + 3) / 4) * 4, withPad: "=", startingAt: 0)
+                return Data(base64Encoded: padded).flatMap { String(data: $0, encoding: .utf8) }
+            }
+        let presentedToken = bearerToken ?? queryToken ?? wsToken
         let isCloudflareProxy = headers["cf-connecting-ip"] != nil || headers["cf-ray"] != nil
         let isDirectLoopback = Self.isLoopback(connection.endpoint) && !isCloudflareProxy
         let isPrivileged = isDirectLoopback ||
@@ -534,6 +550,21 @@ public final class MCPServer {
                          extraHeaders: oauth.challengeHeaders(origin: "\(scheme)://\(host)"))
                 return
             }
+        }
+
+        if method == "GET", path == "/vnc" {
+            let wsAuthorized = (_snapshotPrivilegedAccessToken != nil && wsToken == _snapshotPrivilegedAccessToken) ||
+                (_snapshotOAuthService?.isAuthorizedBearer(wsToken) == true)
+            guard wsAuthorized,
+                  headers["upgrade"]?.lowercased() == "websocket",
+                  headers["sec-websocket-protocol"]?.split(separator: ",")
+                    .contains(where: { $0.trimmingCharacters(in: .whitespaces) == "binary" }) == true,
+                  let key = headers["sec-websocket-key"] else {
+                sendHTTP(connection: connection, status: 403, body: nil)
+                return
+            }
+            VNCWebSocketProxy.shared.accept(connection, key: key)
+            return
         }
 
         if let route = _snapshotHTTPRoutes["\(method) \(path)"] {

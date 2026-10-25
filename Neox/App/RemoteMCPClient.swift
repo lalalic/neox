@@ -11,13 +11,8 @@ final class RemoteMCPClient: ObservableObject {
     @Published var busy = false
     @Published var error: String?
     @Published var terminalOutput = ""
-    @Published var terminalInput = ""
-    @Published var screenshot: UIImage?
-    @Published var apps: [String] = []
-    @Published var selectedApp = ""
 
     private var terminalTool = ""
-    private var computerTool = ""
     private var sessionID: String?
     private var cursor = 0
     private var requestID = 0
@@ -29,9 +24,20 @@ final class RemoteMCPClient: ObservableObject {
     }
 
     var hasCredential: Bool { !bearer.isEmpty }
-    var hasTerminal: Bool { !terminalTool.isEmpty }
-    var hasComputer: Bool { !computerTool.isEmpty }
     var isTerminalActive: Bool { sessionID != nil }
+    var hasTerminalTool: Bool { !terminalTool.isEmpty }
+
+    func openVNCTunnel() async throws -> VNCLoopbackRelay {
+        guard connected, !bearer.isEmpty,
+              let source = URL(string: endpoint),
+              var components = URLComponents(url: source, resolvingAgainstBaseURL: false)
+        else { throw RemoteError.missingCredential }
+        components.scheme = "wss"
+        components.path = "/vnc"
+        components.query = nil
+        guard let destination = components.url else { throw RemoteError.invalidEndpoint }
+        return try await VNCLoopbackRelay.start(url: destination, token: bearer)
+    }
 
     func saveConfiguration(url: String, token: String) throws {
         let value = url.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -55,9 +61,6 @@ final class RemoteMCPClient: ObservableObject {
     func disconnect() {
         connected = false
         terminalTool = ""
-        computerTool = ""
-        screenshot = nil
-        apps = []
     }
 
     func forgetCredential() {
@@ -79,10 +82,6 @@ final class RemoteMCPClient: ObservableObject {
             let names = tools.compactMap { $0["name"] as? String }
             // Federated Core tools keep their provider-defined names.
             terminalTool = names.first { $0 == "terminal" || $0.hasSuffix(".terminal") || $0 == "neo_terminal" } ?? ""
-            computerTool = names.first { $0 == "computer" || $0.hasSuffix(".computer") || $0 == "neo_computer" } ?? ""
-            guard !terminalTool.isEmpty || !computerTool.isEmpty else {
-                throw RemoteError.toolsUnavailable
-            }
             connected = true
         } catch {
             connected = false
@@ -151,75 +150,21 @@ final class RemoteMCPClient: ObservableObject {
         }
     }
 
-    func listApps() async {
-        guard hasComputer else { return }
-        do {
-            let result = try await call(computerTool, ["command": "list_apps"])
-            let entries = result["apps"] as? [[String: Any]] ?? []
-            apps = entries.compactMap { $0["name"] as? String }
-            if selectedApp.isEmpty { selectedApp = apps.first ?? "" }
-        } catch { self.error = error.localizedDescription }
-    }
-
-    func refreshDesktop() async {
-        guard hasComputer, !selectedApp.isEmpty else { return }
-        do {
-            let (result, image) = try await callWithImage(computerTool, [
-                "command": "get_app_state", "args": ["app": selectedApp]
-            ])
-            if let image { screenshot = image }
-            // Some providers return the image as a nested screenshot field.
-            if screenshot == nil,
-               let encoded = result["screenshot"] as? String,
-               let data = Data(base64Encoded: encoded) {
-                screenshot = UIImage(data: data)
-            }
-            if screenshot == nil,
-               let artifacts = result["artifacts"] as? [String: Any],
-               let encoded = artifacts["screenshotBase64"] as? String,
-               let data = Data(base64Encoded: encoded) {
-                screenshot = UIImage(data: data)
-            }
-        } catch { self.error = error.localizedDescription }
-    }
-
-    func desktopKey(_ key: String) async {
-        do {
-            _ = try await call(computerTool, ["command": "key", "args": ["key": key]])
-            await refreshDesktop()
-        } catch { self.error = error.localizedDescription }
-    }
-
-    func desktopType(_ value: String) async {
-        do {
-            _ = try await call(computerTool, ["command": "type", "args": ["text": value]])
-            await refreshDesktop()
-        } catch { self.error = error.localizedDescription }
-    }
-
     private func call(_ name: String, _ args: [String: Any]) async throws -> [String: Any] {
-        try await callWithImage(name, args).0
-    }
-
-    private func callWithImage(_ name: String, _ args: [String: Any]) async throws -> ([String: Any], UIImage?) {
         let response = try await rpc(method: "tools/call", params: ["name": name, "arguments": args])
         let blocks = response["content"] as? [[String: Any]] ?? []
         if response["isError"] as? Bool == true {
             throw RemoteError.toolFailure(blocks.compactMap { $0["text"] as? String }.joined(separator: "\n"))
         }
-        let image = blocks.first(where: { $0["type"] as? String == "image" })
-            .flatMap { $0["data"] as? String }
-            .flatMap { Data(base64Encoded: $0) }
-            .flatMap(UIImage.init(data:))
         if let structured = response["structuredContent"] as? [String: Any] {
-            return (structured, image)
+            return structured
         }
         if let text = blocks.compactMap({ $0["text"] as? String }).first,
            let data = text.data(using: .utf8),
            let dictionary = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            return (dictionary, image)
+            return dictionary
         }
-        return (response, image)
+        return response
     }
 
     private func rpc(method: String, params: [String: Any]) async throws -> [String: Any] {
@@ -288,7 +233,7 @@ private enum RemoteError: LocalizedError {
         case .invalidEndpoint: "Enter a valid HTTPS Neo MCP endpoint."
         case .missingCredential: "Enter the Neo access token."
         case .invalidResponse: "Unexpected Remote MCP response."
-        case .toolsUnavailable: "Terminal and Computer tools are not enabled for remote access."
+        case .toolsUnavailable: "Terminal is not enabled for remote access."
         case .credentialSave: "Could not store the credential securely."
         case .http(let status): "Remote MCP HTTP \(status)."
         case .toolFailure(let reason): reason
