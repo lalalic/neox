@@ -27,6 +27,17 @@ test('new-turn defaults to async and preserves submitted receipt',()=>{
  assert.equal(observed.args.includes('--auto-session'),false);
  assert.equal(observed.config.mode,'async');
 });
+test('mergeable is opt-in and reaches WebHelm',()=>{
+ let config;
+ const receipt={status:'submitted',mode:'new-turn',thread_id:'thread_12345678',queue_id:'q123',verified_by:'durable-queue'};
+ const options={cli:'browser-workspace',spawnSyncImpl:(_cli,args)=>{config=JSON.parse(fs.readFileSync(args.at(-1),'utf8'));return {status:0,stdout:JSON.stringify({result:{ok:true,stdout:JSON.stringify(receipt)}})};}};
+ call('turn',{thread_id:'thread_12345678',message:'one'},options);
+ assert.equal(config.mergeable,false);
+ call('turn',{thread_id:'thread_12345678',message:'two',mergeable:true},options);
+ assert.equal(config.mergeable,true);
+ assert.throws(()=>call('turn',{thread_id:'thread_12345678',message:'x',mergeable:'true'}),/mergeable must be a boolean/);
+ assert.throws(()=>call('turn',{thread_id:'thread_12345678',message:'x',mergeable:true,mode:'sync',session_id:'s'}),/requires async/);
+});
 test('new-turn sync uses caller-owned session',()=>{
  const receipt={status:'submitted',mode:'new-turn',thread_id:'thread_12345678',verified_by:'composer-cleared'};
  let observed;

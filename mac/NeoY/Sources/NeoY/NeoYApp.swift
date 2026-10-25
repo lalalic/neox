@@ -271,11 +271,15 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 return .completed(result)
             }
             guard let binding = VoiceThreadBinding.load() else {
-                throw NSError(domain: "NeoVoice", code: 1, userInfo: [NSLocalizedDescriptionKey: "Save a ChatGPT Thread URL or ID in Listen & Talk before starting."])
+                throw NSError(domain: "NeoVoice", code: 1, userInfo: [NSLocalizedDescriptionKey: "Open ChatGPT in Chrome and select Refresh in Listen & Talk."])
             }
+            let replyEnabled = (UserDefaults.standard.object(forKey: "neo.voice.replyEnabled") as? Bool) ?? true
             var turnArguments: [String: JSONValue] = [
                 "thread_id": .string(binding.threadID),
-                "message": .string("Voice request: \(text)\n\nReply using the Neo MCP voice.reply tool. Use session_id=\(sessionID), correlation_id=\(correlationID), sequence starting at 0, and final=true only on the last segment. Wait for the playback receipt."),
+                "message": .string(replyEnabled
+                    ? "Voice request: \(text)\n\nReply using the Neo MCP voice.reply(text) tool to speak your answer."
+                    : text),
+                "mergeable": .bool(true),
                 "reason": .string("Neo voice session \(sessionID), correlation \(correlationID)")
             ]
             if let projectID = binding.projectID { turnArguments["project_id"] = .string(projectID) }

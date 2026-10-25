@@ -20,6 +20,7 @@ const XCHAT_COMMAND_TOOLS = [
         thread_id: { type: "string", description: "Stable current ChatGPT thread ID." },
         message: { type: "string", description: "Continuation/handoff message for the next turn." },
         mode: { type: "string", enum: ["async", "sync"], description: "async is the default durable queue; sync waits for submission and requires caller-owned session_id." },
+        mergeable: { type: "boolean", description: "Default false. Append to the same thread's pending mergeable turn." },
         session_id: { type: "string", description: "Required for sync only. Caller creates and closes this WebHelm Session." },
         reason: { type: "string", description: "Optional diagnostic reason for the control transfer." },
       },
@@ -91,6 +92,9 @@ function validate(args, name) {
   }
   const mode = name === "xchat.turn.new" ? (args.mode === undefined ? "async" : args.mode) : null;
   if (name === "xchat.turn.new" && !["async", "sync"].includes(mode)) throw new Error("mode must be async or sync");
+  const mergeable = name === "xchat.turn.new" ? (args.mergeable ?? false) : false;
+  if (typeof mergeable !== "boolean") throw new Error("mergeable must be a boolean");
+  if (mergeable && mode !== "async") throw new Error("mergeable requires async mode");
   const sessionId = args.session_id;
   if (name === "xchat.turn.new") {
     if (mode === "sync" && (typeof sessionId !== "string" || !sessionId.trim())) {
@@ -99,7 +103,7 @@ function validate(args, name) {
     if (mode === "async" && sessionId !== undefined) throw new Error("mode async does not accept session_id");
   }
   const reason = typeof args.reason === "string" && args.reason.trim() ? args.reason.trim().slice(0, 2000) : null;
-  return { projectId, threadId, sourceThreadId, temporary, message, reason, mode, sessionId };
+  return { projectId, threadId, sourceThreadId, temporary, message, reason, mode, sessionId, mergeable };
 }
 
 function resultText(payload) {
@@ -148,6 +152,7 @@ export function scheduleXChatLifecycle(name, input, options = {}) {
     reason: parsed.reason,
     ...(parsed.threadId ? { thread_id: parsed.threadId } : {}),
     ...(action === "new-turn" ? { mode: parsed.mode } : {}),
+    ...(action === "new-turn" ? { mergeable: parsed.mergeable } : {}),
     ...(parsed.sourceThreadId ? { source_thread_id: parsed.sourceThreadId } : {}),
   };
   const dir = fs.mkdtempSync(path.join(options.tmpDir || process.env.TMPDIR || "/tmp", "neoy-chatgpt-"));

@@ -584,20 +584,15 @@ enum VoiceSessionTools {
             })
 
         result.append(
-            ToolDefinition(name: "voice.reply", description: "Deliver an ordered segment for the active voice turn. The final segment returns a receipt after playback completes.", parameters: schema([
-                "session_id": .object(["type": .string("string")]),
-                "correlation_id": .object(["type": .string("string")]),
-                "sequence": .object(["type": .string("integer"), "minimum": .int(0), "maximum": .int(255)]),
+            ToolDefinition(name: "voice.reply", description: "Queue text for speech on the Neo Mac. Available without an active microphone session.", parameters: schema([
                 "text": .object(["type": .string("string"), "minLength": .int(1), "maxLength": .int(12_000)]),
-                "final": .object(["type": .string("boolean")]),
-            ], required: ["session_id", "correlation_id", "sequence", "text", "final"])) { args in
-                guard let session = string(args, "session_id"), let correlation = string(args, "correlation_id"),
-                      let text = string(args, "text"), let final = bool(args, "final"),
-                      let sequence = integer(args, "sequence") else {
-                    throw VoiceToolError.invalid("session_id, correlation_id, sequence (0...255), text and final are required")
+            ], required: ["text"])) { args in
+                guard let text = string(args, "text"), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      text.utf8.count <= 12_000 else {
+                    throw VoiceToolError.invalid("text must contain 1...12000 UTF-8 bytes")
                 }
-                return encode(try await controller.reply(sessionID: session, correlationID: correlation,
-                                                         sequence: sequence, text: text, final: final))
+                await MainActor.run { controller.speak(text) }
+                return encodeObject(["status": "queued"])
             })
 
         result.append(
@@ -673,6 +668,7 @@ struct VoiceSessionView: View {
     @ObservedObject var controller: VoiceSessionController
     @ObservedObject var selection: VoiceThreadSelection
     @State private var injectedText = ""
+    @AppStorage("neo.voice.replyEnabled") private var voiceReplyEnabled = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -695,6 +691,7 @@ struct VoiceSessionView: View {
                 Text(selection.message).font(.caption).foregroundStyle(.secondary)
             }
             Text(VoiceThreadBinding.load() == nil ? "Open a ChatGPT tab in Chrome, then Refresh." : "Speech is sent to the selected thread.").font(.caption).foregroundStyle(.secondary)
+            Toggle("Voice Reply", isOn: $voiceReplyEnabled)
             Label(controller.state.rawValue.capitalized, systemImage: controller.state == .listening ? "mic.fill" : "mic.slash")
                 .foregroundStyle(controller.state == .error ? .red : .primary)
             if let error = controller.errorMessage { Text(error).foregroundStyle(.red) }

@@ -201,24 +201,33 @@ final class VoiceSessionTests: XCTestCase {
         XCTAssertEqual(server.toolNames.filter { $0.hasPrefix("voice.") }, ["voice.reply"])
         let pending = await controller.inject(text: "你好，今天天气怎么样？")
         XCTAssertEqual(pending.status, "submitted")
-        let sessionID = pending.sessionID
-        let correlationID = pending.correlationID
         XCTAssertTrue(synth.spoken.isEmpty)
 
         let first = try await server.invokeRegisteredTool("voice.reply", arguments: .object([
-            "session_id": .string(sessionID), "correlation_id": .string(correlationID), "sequence": .int(0),
-            "text": .string("你好，"), "final": .bool(false),
+            "text": .string("你好，"),
         ]))
-        XCTAssertEqual(try receiptObject(first)["status"] as? String, "delivered")
-        let final = try await server.invokeRegisteredTool("voice.reply", arguments: .object([
-            "session_id": .string(sessionID), "correlation_id": .string(correlationID), "sequence": .int(1),
-            "text": .string("今天晴转多云。"), "final": .bool(true),
+        XCTAssertEqual(try receiptObject(first)["status"] as? String, "queued")
+        let second = try await server.invokeRegisteredTool("voice.reply", arguments: .object([
+            "text": .string("今天晴转多云。"),
         ]))
-        let delivered = try receiptObject(final)
-        XCTAssertEqual(delivered["status"] as? String, "completed")
-        XCTAssertEqual(delivered["deliveryStatus"] as? String, "delivered")
-        XCTAssertEqual(delivered["result"] as? String, "你好，今天晴转多云。")
+        XCTAssertEqual(try receiptObject(second)["status"] as? String, "queued")
         XCTAssertEqual(synth.spoken, ["你好，", "今天晴转多云。"])
+        do {
+            _ = try await server.invokeRegisteredTool("voice.reply", arguments: .object(["text": .string(" ")]))
+            XCTFail("empty speech accepted")
+        } catch {}
+    }
+
+    func testVoiceReplyWorksWithoutAnSTTSession() async throws {
+        let synth = FakeSynthesizer()
+        let server = MCPServer(name: "standalone-voice", port: 0)
+        let controller = VoiceSessionController(synthesizer: synth)
+        VoiceSessionTools.register(on: server, controller: controller)
+        let result = try await server.invokeRegisteredTool("voice.reply", arguments: .object([
+            "text": .string("Ordinary ChatGPT reply")
+        ]))
+        XCTAssertEqual(try receiptObject(result)["status"] as? String, "queued")
+        XCTAssertEqual(synth.spoken, ["Ordinary ChatGPT reply"])
     }
 
     func testReplyMustMatchAuthenticatedActiveSessionAndCorrelation() async throws {
