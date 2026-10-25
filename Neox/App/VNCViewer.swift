@@ -213,6 +213,12 @@ struct VNCViewerView: View {
                     }
                     .accessibilityLabel("Type saved password")
                     .disabled(MacScreenCredentials.load(for: remote.endpoint) == nil)
+                    Spacer()
+                }
+                .font(.caption)
+                .buttonStyle(.bordered)
+                .padding(.horizontal, 12)
+                HStack(spacing: 12) {
                     TextField("Type on your Mac", text: $input)
                         .focused($keyboardActive)
                         .textInputAutocapitalization(.never)

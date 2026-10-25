@@ -45,10 +45,16 @@ struct RemoteControlView: View {
             .navigationTitle(remote.selectedMasterName)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Close") { dismiss() }
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel("Close")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(showSettings ? "Done" : "Settings") { showSettings.toggle() }
+                    Button { showSettings.toggle() } label: {
+                        Image(systemName: showSettings ? "checkmark" : "gearshape")
+                    }
+                    .accessibilityLabel(showSettings ? "Done" : "Settings")
                 }
             }
             .task {
@@ -199,8 +205,11 @@ struct RemoteControlView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .onSubmit(sendCommand)
-                Button("Send", action: sendCommand)
-                    .disabled(!remote.isTerminalActive)
+                Button(action: sendCommand) {
+                    Image(systemName: "return")
+                }
+                .accessibilityLabel("Send command")
+                .disabled(!remote.isTerminalActive)
             }
             .textFieldStyle(.roundedBorder)
             .padding(.horizontal, 12)
