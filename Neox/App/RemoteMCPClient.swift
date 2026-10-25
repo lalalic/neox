@@ -28,15 +28,23 @@ final class RemoteMCPClient: ObservableObject {
     var hasTerminalTool: Bool { !terminalTool.isEmpty }
 
     func openVNCTunnel() async throws -> VNCLoopbackRelay {
-        guard connected, !bearer.isEmpty,
-              let source = URL(string: endpoint),
+        guard connected, !bearer.isEmpty else { throw RemoteError.missingCredential }
+        return try await VNCLoopbackRelay.start(url: remoteURL(path: "/vnc", scheme: "wss"), token: bearer)
+    }
+
+    /// Feature routes share the configured Neo Remote host and HTTPS gateway.
+    /// Use WSS only for streaming endpoints such as VNC.
+    func remoteURL(path: String, scheme: String = "https") throws -> URL {
+        guard path.hasPrefix("/"), !path.hasPrefix("//"),
+              !path.contains("?"), !path.contains("#"),
+              let source = URL(string: endpoint), source.scheme == "https",
               var components = URLComponents(url: source, resolvingAgainstBaseURL: false)
-        else { throw RemoteError.missingCredential }
-        components.scheme = "wss"
-        components.path = "/vnc"
+        else { throw RemoteError.invalidEndpoint }
+        components.scheme = scheme
+        components.path = path
         components.query = nil
-        guard let destination = components.url else { throw RemoteError.invalidEndpoint }
-        return try await VNCLoopbackRelay.start(url: destination, token: bearer)
+        guard let result = components.url else { throw RemoteError.invalidEndpoint }
+        return result
     }
 
     func saveConfiguration(url: String, token: String) throws {

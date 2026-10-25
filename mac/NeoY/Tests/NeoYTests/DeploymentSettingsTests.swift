@@ -2,6 +2,18 @@ import XCTest
 @testable import NeoY
 
 final class DeploymentSettingsTests: XCTestCase {
+    func testNamedRemoteFeatureURLsUseOneAppliedOrigin() throws {
+        let named = try NeoYDeploymentSettings().applyingRemoteAddress(
+            .named, hostname: "neoy.example.com", enabled: true)
+        XCTAssertEqual(named.publicMCPURL, "https://neoy.example.com/mcp")
+        XCTAssertEqual(named.publicVNCURL, "https://neoy.example.com/vnc")
+        XCTAssertEqual(named.publicURL(path: "/family-tutor"), "https://neoy.example.com/family-tutor")
+        XCTAssertNil(named.publicURL(path: "//untrusted.example.com"))
+        XCTAssertNil(named.publicURL(path: "/../secrets"))
+        XCTAssertNil(named.publicURL(path: "/mcp?token=unsafe"))
+        XCTAssertNil(try named.settingRemoteEnabled(false).publicVNCURL)
+    }
+
     func testAddressDraftHasNoEffectUntilApplied() throws {
         var live = NeoYDeploymentSettings()
         live.tunnelMode = .quick

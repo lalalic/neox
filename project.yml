@@ -21,6 +21,7 @@ targets:
     dependencies:
       - package: RoyalVNCKit
         product: RoyalVNCKit
+        embed: true
     entitlements:
       path: Neox/Neox.entitlements
       properties:

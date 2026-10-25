@@ -21,13 +21,25 @@ struct NeoYDeploymentSettings: Codable, Equatable {
 
     var localMCPURL: String { "http://127.0.0.1:\(mcpPort)/mcp" }
 
-    var publicMCPURL: String? {
+    /// The applied Neo Remote origin is shared by MCP and feature URLs.
+    var publicOrigin: String? {
         guard tunnelMode != .off else { return nil }
         if tunnelMode == .named, !publicHostname.isEmpty {
-            return "https://\(publicHostname)/mcp"
+            return "https://\(publicHostname)"
         }
-        return NeoYDeploymentSettingsStore.quickTunnelURL().map { "\($0)/mcp" }
+        return NeoYDeploymentSettingsStore.quickTunnelURL()
     }
+
+    func publicURL(path: String) -> String? {
+        guard let publicOrigin, path.hasPrefix("/"), !path.hasPrefix("//"),
+              !path.contains("?"), !path.contains("#"),
+              !path.split(separator: "/").contains(where: { $0 == "." || $0 == ".." })
+        else { return nil }
+        return publicOrigin + path
+    }
+
+    var publicMCPURL: String? { publicURL(path: "/mcp") }
+    var publicVNCURL: String? { publicURL(path: "/vnc") }
 
     /// Build the candidate without writing it. A picker change must not alter
     /// the live transport, even when another setting is saved meanwhile.

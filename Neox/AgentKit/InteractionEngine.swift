@@ -52,6 +52,9 @@ public final class InteractionEngine {
         // Method 4: Hit-test based approach as fallback
         if let window = view.window,
            let hitView = window.hitTest(center, with: nil) {
+            if let segmented = hitView as? UISegmentedControl {
+                return selectSegment(segmented, at: center, in: window)
+            }
             if let switchControl = hitView as? UISwitch {
                 switchControl.setOn(!switchControl.isOn, animated: true)
                 switchControl.sendActions(for: .valueChanged)
@@ -92,6 +95,9 @@ public final class InteractionEngine {
         }
 
         // Method 1: UIControl (UIButton, etc.)
+        if let segmented = hitView as? UISegmentedControl {
+            return selectSegment(segmented, at: point, in: window)
+        }
         if let control = hitView as? UIControl {
             control.sendActions(for: .touchUpInside)
             return "Tapped (\(Int(x)), \(Int(y))) → UIControl [\(Swift.type(of: control))]"
@@ -115,6 +121,19 @@ public final class InteractionEngine {
         // Method 4: Synthesize full touch event sequence on the window
         synthesizeTouch(at: point, in: window)
         return "Tapped (\(Int(x)), \(Int(y))) → synthesized touch on [\(Swift.type(of: hitView))]"
+    }
+
+    private func selectSegment(_ control: UISegmentedControl, at point: CGPoint, in window: UIWindow) -> String {
+        guard control.numberOfSegments > 0, control.bounds.width > 0 else {
+            return "Error: segmented control is empty"
+        }
+        let position = control.convert(point, from: window)
+        let fraction = max(0, min(0.9999, position.x / control.bounds.width))
+        let index = Int(fraction * CGFloat(control.numberOfSegments))
+        guard control.isEnabledForSegment(at: index) else { return "Error: segment is disabled" }
+        control.selectedSegmentIndex = index
+        control.sendActions(for: .valueChanged)
+        return "Selected segment \(index)"
     }
 
     // MARK: - Accessibility Element Activation

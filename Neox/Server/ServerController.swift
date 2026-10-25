@@ -141,9 +141,11 @@ final class ServerController: ObservableObject {
             guard line.contains("/files/") else { return }
             Task { @MainActor [weak self] in self?.appendLog(line) }
         }
-        server.onToolCall = { [weak self] _, name, arguments in
+        server.onToolCall = { [weak self] _, name, _ in
             Task { @MainActor [weak self] in
-                self?.appendLog("▸ \(name)(\(arguments))")
+                // Tool arguments can contain credentials and personal data.
+                // Keep the activity indicator, never the payload.
+                self?.appendLog("▸ \(name)")
             }
         }
         server.onLog = { [weak self] message in

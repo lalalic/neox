@@ -42,12 +42,10 @@ enum NeoYSetupFiles {
             return try json(["name": name, "status": "unmounted"])
         case .filesURL(let path):
             let file = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
-            let origin: String
             let deployment = NeoYDeploymentSettingsStore.load()
             guard deployment.tunnelMode == .named, !deployment.publicHostname.isEmpty else {
                 throw NeoYSetupError.invalidValue("a named Neo public HTTPS hostname is required")
             }
-            origin = "https://" + deployment.publicHostname
             for (name, rootPath) in mounts.sorted(by: { $0.key < $1.key }) {
                 try validateName(name)
                 let root = URL(fileURLWithPath: rootPath).resolvingSymlinksInPath().path
@@ -55,7 +53,10 @@ enum NeoYSetupFiles {
                 let relative = String(file.dropFirst(root.count + 1)).split(separator: "/").map(String.init)
                 guard !relative.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." || $0.hasPrefix(".") }) else { continue }
                 let encoded = relative.map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? $0 }.joined(separator: "/")
-                return try json(["url": origin + "/files/" + name + "/" + encoded, "path": file])
+                guard let url = deployment.publicURL(path: "/files/" + name + "/" + encoded) else {
+                    throw NeoYSetupError.invalidValue("Neo public URL is unavailable")
+                }
+                return try json(["url": url, "path": file])
             }
             throw NeoYSetupError.invalidValue("file is not inside a public mounted root")
         default: throw NeoYSetupError.unknownCommand("files")
