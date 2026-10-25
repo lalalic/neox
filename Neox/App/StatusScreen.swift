@@ -70,19 +70,21 @@ struct StatusView: View {
                 Button { showingRemote = true } label: {
                     actionLabel("Control", icon: "desktopcomputer")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
 
                 Button { showingVlogSubmission = true } label: {
                     actionLabel("Create Vlog", icon: "film.stack")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.plain)
 
                 Button(role: .destructive) { bridge.clearExports() } label: {
                     actionLabel("Clear Files", icon: "trash")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
             }
-            .padding(12)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 16)
+            .padding(.top, 8)
         }
         .background(Color(.systemBackground))
         .sheet(isPresented: $showingTourRunner) { CaptureTourRunnerView(tours: tours) }
@@ -99,29 +101,11 @@ struct StatusView: View {
             Text(name).font(.system(size: 11, weight: .medium)).lineLimit(1)
         }
         .frame(maxWidth: .infinity, minHeight: 54)
+        .contentShape(Rectangle())
     }
 
     private var ListView: some View {
         List {
-            // Most-live information first.
-            Section {
-                DisclosureGroup("Requests (\(bridge.logLines.count))", isExpanded: $requestsExpanded) {
-                    if bridge.logLines.isEmpty {
-                        Text("No activity yet.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(Array(bridge.logLines.enumerated().reversed()), id: \.offset) { _, line in
-                            Text(line)
-                                .font(.system(size: 11, weight: .regular, design: .monospaced))
-                                .textSelection(.enabled)
-                        }
-                    }
-                }
-            }
-
-            CaptureTourCard(tours: tours, showingRunner: $showingTourRunner)
-
             Section("Neo Master") {
                 if bridge.discoveredBridges.isEmpty {
                     Label(bridge.preferredBridge ?? "Looking for your Mac…",
@@ -144,6 +128,26 @@ struct StatusView: View {
                     }
                 }
             }
+
+
+            // Most-live information first.
+            Section {
+                DisclosureGroup("Requests (\(bridge.logLines.count))", isExpanded: $requestsExpanded) {
+                    if bridge.logLines.isEmpty {
+                        Text("No activity yet.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(Array(bridge.logLines.enumerated().reversed()), id: \.offset) { _, line in
+                            Text(line)
+                                .font(.system(size: 11, weight: .regular, design: .monospaced))
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+            }
+
+            CaptureTourCard(tours: tours, showingRunner: $showingTourRunner)
 
             // Collapsible reference sections, folded by default.
             Section {

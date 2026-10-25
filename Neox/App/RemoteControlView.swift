@@ -14,13 +14,12 @@ struct RemoteControlView: View {
     @State private var tab = 0
     @State private var showSettings = false
     @State private var showAdvanced = false
+    @State private var commandsOpened = false
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                if showSettings {
-                    configuration
-                } else if !remote.connected {
+            ZStack {
+                if !remote.connected && !showSettings {
                     VStack(spacing: 14) {
                         if remote.busy || remote.error == nil {
                             ProgressView("Connecting to your Mac…")
@@ -33,14 +32,29 @@ struct RemoteControlView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    Picker("Choose view", selection: $tab) {
+                }
+                if remote.connected {
+                    VStack(spacing: 0) {
+                        Picker("Choose view", selection: $tab) {
                         Text("Desktop").tag(0)
                         Text("Commands").tag(1)
                     }
                     .pickerStyle(.segmented).padding()
-                    if tab == 0 { VNCViewerView(remote: remote) } else { terminal }
+                        ZStack {
+                            VNCViewerView(remote: remote)
+                            .id(remote.endpoint)
+                            .opacity(tab == 0 ? 1 : 0)
+                            .allowsHitTesting(tab == 0 && !showSettings)
+                        if commandsOpened {
+                            terminal
+                                .opacity(tab == 1 ? 1 : 0)
+                                .allowsHitTesting(tab == 1 && !showSettings)
+                        }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
+                if showSettings { configuration }
             }
             .navigationTitle(remote.selectedMasterName)
             .toolbar {
@@ -68,23 +82,26 @@ struct RemoteControlView: View {
             }
             .onChange(of: bridge.preferredBridge) { _, _ in
                 Task { await remote.closeTerminal() }
+                remote.disconnect()
+                commandsOpened = false
                 syncSelectedMaster()
                 if !remote.hasCredential || MacScreenCredentials.load(for: remote.endpoint) == nil {
                     showSettings = true
                 }
             }
             .onChange(of: bridge.discoveredBridges) { _, _ in
+                // Keep an established remote session stable through Bonjour refreshes.
+                guard !remote.connected else { return }
                 syncSelectedMaster()
                 if !remote.hasCredential { showSettings = true }
             }
             .onChange(of: showSettings) { _, showing in
-                if showing { Task { await remote.closeTerminal() } }
-                else if remote.hasCredential && !remote.connected {
+                if !showing && remote.hasCredential && !remote.connected {
                     Task { await remote.connect() }
                 }
             }
             .onChange(of: tab) { _, newValue in
-                if newValue == 0 { Task { await remote.closeTerminal() } }
+                if newValue == 1 { commandsOpened = true }
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active { Task { await remote.closeTerminal() } }
