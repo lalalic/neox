@@ -139,8 +139,10 @@ struct RemoteControlView: View {
             ?? (bridge.preferredBridge == nil ? bridge.discoveredBridges.first : nil)
         if let selected {
             remote.selectMaster(name: selected.name, advertisedURL: selected.remoteURL)
+            remote.useLocalEndpoint(ip: selected.ip, port: selected.port)
         } else if let preferred = bridge.preferredBridge {
             remote.selectMaster(name: preferred, advertisedURL: nil)
+            remote.useLocalEndpoint(ip: nil, port: nil)
         }
         address = remote.endpoint
         if let saved = MacScreenCredentials.load(for: remote.endpoint) {

@@ -2,6 +2,7 @@ import Foundation
 import Security
 import SwiftUI
 import CryptoKit
+import Network
 
 /// Phone-side client of the existing authenticated Neo Remote MCP gateway.
 /// No second SSH listener or public control server is created.
@@ -31,6 +32,8 @@ final class RemoteMCPClient: ObservableObject {
     private let savedMacsKey = "remoteMCPHistoryV1"
     private let namedMastersKey = "neox.knownMastersV1"
     private var bearer = ""
+    private var localEndpoint: String?
+    private var activeEndpoint: String?
 
     init() {
         let urls = UserDefaults.standard.stringArray(forKey: savedMacsKey) ?? []
@@ -54,6 +57,21 @@ final class RemoteMCPClient: ObservableObject {
 
     var hasCredential: Bool { !bearer.isEmpty }
     var hasConfiguredAddress: Bool { !endpoint.isEmpty }
+    var usingLAN: Bool { activeEndpoint?.hasPrefix("http://") == true }
+
+    func preferPublicForDesktop() {
+        activeEndpoint = endpoint
+    }
+
+    /// Keep the saved HTTPS identity; a local address is only a transport hint.
+    func useLocalEndpoint(ip: String?, port: UInt16?) {
+        guard let ip, let port, IPv4Address(ip) != nil,
+              ip != "127.0.0.1" else {
+            localEndpoint = nil
+            return
+        }
+        localEndpoint = "http://\(ip):\(port)/mcp"
+    }
 
     /// The Bonjour-selected Mac is the only authority for Remote Mac selection.
     /// Never send an existing access code to a newly advertised URL: Bonjour
@@ -75,6 +93,7 @@ final class RemoteMCPClient: ObservableObject {
         }
         if target != endpoint {
             endpoint = target
+            activeEndpoint = nil
             bearer = Self.readSecret(account: Self.credentialAccount(for: target)) ?? ""
             connected = false
         }
@@ -95,7 +114,8 @@ final class RemoteMCPClient: ObservableObject {
 
     func openVNCTunnel() async throws -> VNCLoopbackRelay {
         guard connected, !bearer.isEmpty else { throw RemoteError.missingCredential }
-        return try await VNCLoopbackRelay.start(url: remoteURL(path: "/vnc", scheme: "wss"), token: bearer)
+        let isLAN = activeEndpoint?.hasPrefix("http://") == true
+        return try await VNCLoopbackRelay.start(url: remoteURL(path: "/vnc", scheme: isLAN ? "ws" : "wss"), token: bearer)
     }
 
     /// Feature routes share the configured Neo Remote host and HTTPS gateway.
@@ -103,7 +123,7 @@ final class RemoteMCPClient: ObservableObject {
     func remoteURL(path: String, scheme: String = "https") throws -> URL {
         guard path.hasPrefix("/"), !path.hasPrefix("//"),
               !path.contains("?"), !path.contains("#"),
-              let source = URL(string: endpoint), source.scheme == "https",
+              let source = URL(string: activeEndpoint ?? endpoint),
               var components = URLComponents(url: source, resolvingAgainstBaseURL: false)
         else { throw RemoteError.invalidEndpoint }
         components.scheme = scheme
@@ -125,6 +145,7 @@ final class RemoteMCPClient: ObservableObject {
         }
         guard !bearer.isEmpty else { throw RemoteError.missingCredential }
         endpoint = normalized
+        activeEndpoint = nil
         UserDefaults.standard.set(normalized, forKey: "remoteMCPURL")
         var known = UserDefaults.standard.dictionary(forKey: namedMastersKey) as? [String: String] ?? [:]
         known[selectedMasterName] = normalized
@@ -134,6 +155,7 @@ final class RemoteMCPClient: ObservableObject {
 
     func useSavedMac(_ mac: SavedMac) {
         endpoint = mac.url
+        activeEndpoint = nil
         bearer = Self.readSecret(account: Self.credentialAccount(for: mac.url)) ?? ""
         connected = false
         error = nil
@@ -272,7 +294,32 @@ final class RemoteMCPClient: ObservableObject {
     }
 
     private func rpc(method: String, params: [String: Any]) async throws -> [String: Any] {
-        guard let url = URL(string: endpoint), url.scheme == "https", !bearer.isEmpty else {
+        if let activeEndpoint {
+            do {
+                return try await requestRPC(method: method, params: params, address: activeEndpoint)
+            } catch {
+                guard activeEndpoint != endpoint else { throw error }
+                self.activeEndpoint = endpoint
+                return try await requestRPC(method: method, params: params, address: endpoint)
+            }
+        }
+        if let localEndpoint {
+            do {
+                let response = try await requestRPC(method: method, params: params, address: localEndpoint)
+                activeEndpoint = localEndpoint
+                return response
+            } catch {
+                // LAN unavailable or rejects this credential: use the existing gateway.
+            }
+        }
+        let response = try await requestRPC(method: method, params: params, address: endpoint)
+        activeEndpoint = endpoint
+        return response
+    }
+
+    private func requestRPC(method: String, params: [String: Any], address: String) async throws -> [String: Any] {
+        guard let url = URL(string: address), ["http", "https"].contains(url.scheme ?? ""),
+              !bearer.isEmpty else {
             throw RemoteError.invalidEndpoint
         }
         requestID += 1
@@ -281,7 +328,7 @@ final class RemoteMCPClient: ObservableObject {
         request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
-        request.timeoutInterval = 20
+        request.timeoutInterval = address == localEndpoint && activeEndpoint == nil ? 2 : 20
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "jsonrpc": "2.0", "id": requestID, "method": method, "params": params
         ])

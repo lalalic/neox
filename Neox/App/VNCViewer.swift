@@ -276,9 +276,11 @@ struct VNCViewerView: View {
             }
         }
         .onChange(of: viewer.error) { _, message in
-            guard let message, message.contains("Receive Server Init"),
+            guard let message,
+                  (message.contains("Receive Server Init") || remote.usingLAN),
                   automaticRetries < 1 else { return }
             automaticRetries += 1
+            if remote.usingLAN { remote.preferPublicForDesktop() }
             let generation = connectionGeneration
             Task {
                 try? await Task.sleep(for: .milliseconds(700))

@@ -20,7 +20,7 @@ final class VNCLoopbackRelay: @unchecked Sendable {
     }
 
     static func start(url: URL, token: String) async throws -> VNCLoopbackRelay {
-        guard url.scheme == "wss", url.host != nil, !token.isEmpty else {
+        guard ["ws", "wss"].contains(url.scheme ?? ""), url.host != nil, !token.isEmpty else {
             throw RelayError.invalidURL
         }
         let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
