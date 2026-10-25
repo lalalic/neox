@@ -36,13 +36,11 @@ private struct NeoYMenuCommands: View {
     var body: some View {
         let visibility = NeoYMenuVisibility(capabilities: capabilities)
         Group {
+            Button("Setup…") { appDelegate.showSetupWindow() }
             if visibility.showsVoice {
                 Button("Listen & Talk…") { appDelegate.showVoiceWindow() }
             }
-            Button("Setup…") { appDelegate.showSetupWindow() }
             Divider()
-            Text("Neo \(NeoYCoreRuntime.version)")
-                .foregroundStyle(.secondary)
             Button("Quit Neo") { NSApp.terminate(nil) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .neoYFeaturesChanged)) { _ in

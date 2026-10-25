@@ -5,7 +5,7 @@ import SwiftUI
 @MainActor
 final class NeoYSetupModel: ObservableObject {
     enum Tab: String, CaseIterable, Identifiable {
-        case connections = "Connections"
+        case connections = "MCP"
         case features = "Features"
         case deployment = "Deployment"
         var id: String { rawValue }
@@ -591,7 +591,7 @@ struct NeoYSetupView: View {
                     Image(systemName: "n.square.fill").font(.system(size: 26))
                     VStack(alignment: .leading, spacing: 0) {
                         Text("Neo").font(.headline)
-                        Text("Settings").font(.caption).foregroundStyle(.secondary)
+                        Text("v\(NeoYCoreRuntime.version)").font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 .padding(.horizontal, 10)
@@ -656,23 +656,7 @@ struct NeoYSetupView: View {
 
     private var connectionsTab: some View {
         VStack(alignment: .leading, spacing: 16) {
-            heading("Connections", "Neo MCP connection settings.")
-
-            GroupBox("Neo MCP App") {
-                VStack(alignment: .leading, spacing: 10) {
-                    valueRow("App", value: "Neo")
-                    valueRow("Version", value: NeoYCoreRuntime.version)
-                    valueRow("Client ID", value: model.oauthClientID)
-                    valueRow("Token", value: model.oauthToken)
-                    HStack {
-                        Text("Keep the token private.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Revoke token", role: .destructive) { model.revokeToken() }
-                    }
-                }
-                .padding(8)
-            }
+            heading("MCP", "Neo MCP connection settings.")
 
             GroupBox("Local MCP Server") {
                 VStack(alignment: .leading, spacing: 10) {
@@ -689,6 +673,15 @@ struct NeoYSetupView: View {
                     HStack {
                         Spacer()
                         Button("Test") { model.testLocal() }
+                    }
+                    Divider()
+                    valueRow("Client ID", value: model.oauthClientID)
+                    valueRow("Token", value: model.oauthToken)
+                    HStack {
+                        Text("Keep the token private.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Revoke token", role: .destructive) { model.revokeToken() }
                     }
                 }
                 .padding(8)
