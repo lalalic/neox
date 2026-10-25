@@ -77,9 +77,13 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         // Initialize an independent Core install without touching a healthy active version.
-        try? NeoYManagedCoreRuntime.bootstrapIfMissing()
+        do { try NeoYManagedCoreRuntime.bootstrapIfMissing() }
+        catch { NSLog("Neo Core bootstrap failed: %@", error.localizedDescription) }
         // Keep required skills, but install the optional Neo Project Toolkit only on request.
-        Task.detached { _ = try? NeoCLISetup.setupMissingGlobalSkills() }
+        Task.detached {
+            do { _ = try NeoCLISetup.setupMissingGlobalSkills() }
+            catch { NSLog("Neo global Skills reconciliation failed: %@", error.localizedDescription) }
+        }
         startNativePhoneServices()
         startServer()
         observers.append(NotificationCenter.default.addObserver(
@@ -274,6 +278,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         )
         self.runtimeControl = runtimeControl
         Task {
+            await NeoYFeatureManager.shared.reconcileEnabledOnStartup()
             await runtimeControl.reconcile(await setup.currentConfiguration())
         }
 

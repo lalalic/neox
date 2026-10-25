@@ -90,6 +90,42 @@ actor NeoYFeatureManager {
         }
     }
 
+    /// Restore only previously configured, enabled features on every launch.
+    static func startupCandidates(_ records: [NeoYFeatureRecord]) -> [String] {
+        records.filter { $0.enabled && ($0.state == .ready || $0.state == .failed) }
+            .map(\.id).sorted()
+    }
+
+    func reconcileEnabledOnStartup() async {
+        for id in Self.startupCandidates(loadRecords()) {
+            do {
+                let manifest = try loadManifest(id: id)
+                let doctor = try runNodeScript(packageRoot(id: id).appendingPathComponent(manifest.runtime.doctorScript),
+                                               args: [instanceRoot(id: id).path])
+                guard doctor.status == 0 else {
+                    throw NSError(domain: "NeoYFeature", code: 40, userInfo: [NSLocalizedDescriptionKey: doctor.output])
+                }
+                let service = try runNodeScript(packageRoot(id: id).appendingPathComponent(manifest.runtime.serviceScript),
+                                                args: ["start", instanceRoot(id: id).path])
+                guard service.status == 0 else {
+                    throw NSError(domain: "NeoYFeature", code: 41, userInfo: [NSLocalizedDescriptionKey: service.output])
+                }
+                try updateStartupState(id: id, state: .ready, error: nil)
+            } catch {
+                try? updateStartupState(id: id, state: .failed, error: error.localizedDescription)
+                NSLog("Neo feature %@ startup recovery failed: %@", id, error.localizedDescription)
+            }
+        }
+    }
+
+    private func updateStartupState(id: String, state: NeoYFeatureState, error: String?) throws {
+        var records = loadRecords()
+        guard let index = records.firstIndex(where: { $0.id == id }) else { return }
+        records[index].state = state
+        records[index].error = error
+        try save(records)
+    }
+
     func action(id: String, action: String) async throws -> NeoYFeatureActionResult {
         guard let record = record(id: id) else {
             throw NSError(domain: "NeoYFeature", code: 20, userInfo: [NSLocalizedDescriptionKey: "feature '\(id)' is not installed"])
