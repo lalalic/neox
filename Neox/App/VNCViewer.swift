@@ -4,7 +4,7 @@ import SwiftUI
 /// Native RFB client. The socket endpoint is supplied by the remote transport;
 /// production must route it through Neo's authenticated tunnel.
 final class VNCViewerController: NSObject, ObservableObject, VNCConnectionDelegate, @unchecked Sendable {
-    @Published var status = "Disconnected"
+    @Published var status = "Not connected"
     @Published var frame: CGImage?
     @Published var framebufferSize = CGSize.zero
     @Published var error: String?
@@ -31,7 +31,7 @@ final class VNCViewerController: NSObject, ObservableObject, VNCConnectionDelega
         let client = VNCConnection(settings: settings)
         connection = client
         client.delegate = self
-        status = "Connecting"
+        status = "Connecting…"
         client.connect()
     }
 
@@ -40,7 +40,7 @@ final class VNCViewerController: NSObject, ObservableObject, VNCConnectionDelega
         connection?.delegate = nil
         connection = nil
         credentialLock.withLock { credentials.password = "" }
-        status = "Disconnected"
+        status = "Not connected"
         frame = nil
     }
 
@@ -124,6 +124,7 @@ final class VNCViewerController: NSObject, ObservableObject, VNCConnectionDelega
 }
 
 struct VNCViewerView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var remote: RemoteMCPClient
     @StateObject private var viewer = VNCViewerController()
     @State private var relay: VNCLoopbackRelay?
@@ -136,11 +137,11 @@ struct VNCViewerView: View {
         VStack(spacing: 10) {
             if viewer.frame == nil {
                 Form {
-                    Section("VNC Connection") {
-                        Text("Neo authenticated tunnel").foregroundStyle(.secondary)
-                        TextField("Mac username", text: $username)
+                    Section("Your Mac screen") {
+                        Text("See and control your Mac from your iPhone.").foregroundStyle(.secondary)
+                        TextField("Mac account name", text: $username)
                             .textInputAutocapitalization(.never)
-                        SecureField("Mac password", text: $password)
+                        SecureField("Mac login password", text: $password)
                         Button("Connect") {
                             Task {
                                 do {
@@ -199,7 +200,7 @@ struct VNCViewerView: View {
                             })
                 }
                 HStack {
-                    TextField("Remote keyboard", text: $input)
+                    TextField("Type on your Mac", text: $input)
                     Button("Type") {
                         viewer.sendText(input)
                         input = ""
@@ -207,17 +208,23 @@ struct VNCViewerView: View {
                     Button("Return") { viewer.sendReturn() }
                 }.textFieldStyle(.roundedBorder)
             }
-            Button("Disconnect", role: .destructive) {
+            Button("Finish", role: .destructive) {
                 viewer.disconnect()
                 relay?.close()
                 relay = nil
             }
-                .disabled(viewer.status == "Disconnected")
+                .disabled(viewer.status == "Not connected")
         }
-        .onDisappear {
-            viewer.disconnect()
-            relay?.close()
-            relay = nil
+        .onDisappear { closeDesktop() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { closeDesktop() }
         }
     }
+    private func closeDesktop() {
+        viewer.disconnect()
+        relay?.close()
+        relay = nil
+        password = ""
+    }
+
 }

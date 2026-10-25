@@ -1,11 +1,19 @@
 import Foundation
 import Security
 import SwiftUI
+import CryptoKit
 
 /// Phone-side client of the existing authenticated Neo Remote MCP gateway.
 /// No second SSH listener or public control server is created.
 @MainActor
 final class RemoteMCPClient: ObservableObject {
+    struct SavedMac: Codable, Identifiable, Equatable {
+        let url: String
+        var name: String { URL(string: url)?.host ?? url }
+        var id: String { url }
+    }
+
+    @Published private(set) var savedMacs: [SavedMac] = []
     @Published var endpoint = UserDefaults.standard.string(forKey: "remoteMCPURL") ?? ""
     @Published var connected = false
     @Published var busy = false
@@ -14,13 +22,31 @@ final class RemoteMCPClient: ObservableObject {
 
     private var terminalTool = ""
     private var sessionID: String?
+    private var sessionGeneration = 0
     private var cursor = 0
     private var requestID = 0
-    private let credentialKey = "com.neox.app.remote-mcp-token"
+    private let legacyCredentialKey = "com.neox.app.remote-mcp-token"
+    private let savedMacsKey = "remoteMCPHistoryV1"
     private var bearer = ""
 
     init() {
-        bearer = Self.readSecret(account: credentialKey) ?? ""
+        let urls = UserDefaults.standard.stringArray(forKey: savedMacsKey) ?? []
+        savedMacs = urls.map { SavedMac(url: $0) }
+        if !endpoint.isEmpty {
+            let account = Self.credentialAccount(for: endpoint)
+            if Self.readSecret(account: account) == nil,
+               let old = Self.readSecret(account: legacyCredentialKey) {
+                if (try? Self.saveSecret(old, account: account)) != nil {
+                    Self.deleteSecret(account: legacyCredentialKey)
+                }
+            }
+            if !savedMacs.contains(where: { $0.url == endpoint }) {
+                savedMacs.insert(SavedMac(url: endpoint), at: 0)
+            }
+        } else if let first = savedMacs.first {
+            endpoint = first.url
+        }
+        bearer = Self.readSecret(account: Self.credentialAccount(for: endpoint)) ?? ""
     }
 
     var hasCredential: Bool { !bearer.isEmpty }
@@ -57,13 +83,29 @@ final class RemoteMCPClient: ObservableObject {
         }
         let normalized = value.hasSuffix("/mcp") ? value : value.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/mcp"
         if !token.isEmpty {
-            try Self.saveSecret(token, account: credentialKey)
+            try Self.saveSecret(token, account: Self.credentialAccount(for: normalized))
             bearer = token
+        } else if normalized != endpoint {
+            bearer = Self.readSecret(account: Self.credentialAccount(for: normalized)) ?? ""
         }
         guard !bearer.isEmpty else { throw RemoteError.missingCredential }
         endpoint = normalized
         UserDefaults.standard.set(normalized, forKey: "remoteMCPURL")
         connected = false
+    }
+
+    func useSavedMac(_ mac: SavedMac) {
+        endpoint = mac.url
+        bearer = Self.readSecret(account: Self.credentialAccount(for: mac.url)) ?? ""
+        connected = false
+        error = nil
+    }
+
+    private func rememberCurrentMac() {
+        savedMacs.removeAll { $0.url == endpoint }
+        savedMacs.insert(SavedMac(url: endpoint), at: 0)
+        UserDefaults.standard.set(savedMacs.map(\.url), forKey: savedMacsKey)
+        UserDefaults.standard.set(endpoint, forKey: "remoteMCPURL")
     }
 
     func disconnect() {
@@ -72,11 +114,12 @@ final class RemoteMCPClient: ObservableObject {
     }
 
     func forgetCredential() {
-        SecItemDelete([
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrAccount: credentialKey
-        ] as CFDictionary)
-        bearer = ""
+        Self.deleteSecret(account: Self.credentialAccount(for: endpoint))
+        savedMacs.removeAll { $0.url == endpoint }
+        UserDefaults.standard.set(savedMacs.map(\.url), forKey: savedMacsKey)
+        endpoint = savedMacs.first?.url ?? ""
+        bearer = Self.readSecret(account: Self.credentialAccount(for: endpoint)) ?? ""
+        UserDefaults.standard.set(endpoint, forKey: "remoteMCPURL")
         disconnect()
     }
 
@@ -91,6 +134,7 @@ final class RemoteMCPClient: ObservableObject {
             // Federated Core tools keep their provider-defined names.
             terminalTool = names.first { $0 == "terminal" || $0.hasSuffix(".terminal") || $0 == "neo_terminal" } ?? ""
             connected = true
+            rememberCurrentMac()
         } catch {
             connected = false
             self.error = error.localizedDescription
@@ -99,6 +143,7 @@ final class RemoteMCPClient: ObservableObject {
 
     func startTerminal() async {
         guard !terminalTool.isEmpty else { return }
+        let generation = sessionGeneration
         busy = true
         defer { busy = false }
         do {
@@ -108,6 +153,12 @@ final class RemoteMCPClient: ObservableObject {
             ]])
             guard let id = result["session_id"] as? String ?? result["sessionId"] as? String else {
                 throw RemoteError.invalidResponse
+            }
+            if generation != sessionGeneration {
+                _ = try? await call(terminalTool, [
+                    "command": "close", "args": ["session_id": id]
+                ])
+                return
             }
             sessionID = id
             cursor = 0
@@ -147,12 +198,13 @@ final class RemoteMCPClient: ObservableObject {
     }
 
     func closeTerminal() async {
+        sessionGeneration += 1
         guard let sessionID else { return }
+        self.sessionID = nil
         do {
             _ = try await call(terminalTool, [
                 "command": "close", "args": ["session_id": sessionID]
             ])
-            self.sessionID = nil
         } catch {
             self.error = error.localizedDescription
         }
@@ -205,8 +257,21 @@ final class RemoteMCPClient: ObservableObject {
         return result
     }
 
+    private static func credentialAccount(for url: String) -> String {
+        let digest = SHA256.hash(data: Data(url.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        return "com.neox.app.remote-mcp-token." + digest
+    }
+
+    private static func deleteSecret(account: String) {
+        SecItemDelete([
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrAccount: account
+        ] as CFDictionary)
+    }
+
     private static func readSecret(account: String) -> String? {
-        var query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                      kSecAttrAccount as String: account,
                                      kSecReturnData as String: true,
                                      kSecMatchLimit as String: kSecMatchLimitOne]
@@ -238,12 +303,12 @@ private enum RemoteError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidEndpoint: "Enter a valid HTTPS Neo MCP endpoint."
-        case .missingCredential: "Enter the Neo access token."
-        case .invalidResponse: "Unexpected Remote MCP response."
-        case .toolsUnavailable: "Terminal is not enabled for remote access."
-        case .credentialSave: "Could not store the credential securely."
-        case .http(let status): "Remote MCP HTTP \(status)."
+        case .invalidEndpoint: "Enter your Mac's secure address."
+        case .missingCredential: "Enter your Mac's access code."
+        case .invalidResponse: "Your Mac sent an unexpected reply."
+        case .toolsUnavailable: "Commands are not available on this Mac."
+        case .credentialSave: "Could not save the access code."
+        case .http(let status): "Could not connect to your Mac (\(status))."
         case .toolFailure(let reason): reason
         }
     }

@@ -2,11 +2,13 @@ import SwiftUI
 
 struct RemoteControlView: View {
     @StateObject private var remote = RemoteMCPClient()
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dismiss) private var dismiss
     @State private var token = ""
     @State private var address = ""
     @State private var command = ""
     @State private var tab = 0
-    @State private var showSettings = true
+    @State private var showSettings = false
 
     var body: some View {
         NavigationStack {
@@ -14,34 +16,75 @@ struct RemoteControlView: View {
                 if showSettings || !remote.connected {
                     configuration
                 } else {
-                    Picker("Mode", selection: $tab) {
-                        Text("Terminal").tag(0)
-                        Text("Desktop").tag(1)
+                    Picker("Choose view", selection: $tab) {
+                        Text("Desktop").tag(0)
+                        Text("Commands").tag(1)
                     }
                     .pickerStyle(.segmented).padding()
-                    if tab == 0 { terminal } else { VNCViewerView(remote: remote) }
+                    if tab == 0 { VNCViewerView(remote: remote) } else { terminal }
                 }
             }
-            .navigationTitle("Neo Remote")
+             .navigationTitle("My Mac")
             .toolbar {
-                Button(showSettings ? "Done" : "Settings") { showSettings.toggle() }
-                    .disabled(!remote.connected)
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Close") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(showSettings ? "Done" : "Macs") { showSettings.toggle() }
+                        .disabled(!remote.connected)
+                }
             }
-            .task { address = remote.endpoint }
+            .task {
+                address = remote.endpoint
+                if remote.hasCredential && !remote.endpoint.isEmpty {
+                    await remote.connect()
+                } else {
+                    showSettings = true
+                }
+            }
+            .onChange(of: showSettings) { _, showing in
+                if showing { Task { await remote.closeTerminal() } }
+            }
+            .onChange(of: tab) { _, newValue in
+                if newValue == 0 { Task { await remote.closeTerminal() } }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active { Task { await remote.closeTerminal() } }
+            }
+            .onDisappear {
+                Task { await remote.closeTerminal() }
+            }
         }
     }
 
     private var configuration: some View {
         Form {
-            Section("Remote MCP") {
-                TextField("https://your-domain/mcp", text: $address)
+            if !remote.savedMacs.isEmpty {
+                Section("Your Macs") {
+                    ForEach(remote.savedMacs) { mac in
+                        Button {
+                            remote.useSavedMac(mac)
+                            address = mac.url
+                            token = ""
+                            Task {
+                                await remote.connect()
+                                if remote.connected { showSettings = false }
+                            }
+                        } label: {
+                            Label(mac.name, systemImage: "desktopcomputer")
+                        }
+                    }
+                }
+            }
+            Section("Add a Mac") {
+                TextField("Mac address", text: $address)
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                SecureField(remote.hasCredential ? "Saved token (blank to reuse)" : "Neo token", text: $token)
+                SecureField(remote.hasCredential ? "Saved passcode" : "Access code", text: $token)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                Text("Connect through the existing Neo HTTPS tunnel. The token is stored in the iPhone Keychain.")
+                Text("Enter the address and access code once. Your iPhone will remember this Mac.")
                     .font(.caption).foregroundStyle(.secondary)
                 Button(remote.busy ? "Connecting…" : "Connect") {
                     do {
@@ -56,7 +99,7 @@ struct RemoteControlView: View {
                 .disabled(remote.busy)
             }
             if remote.hasCredential {
-                Button("Forget token", role: .destructive) {
+                Button("Remove saved Mac", role: .destructive) {
                     remote.forgetCredential()
                 }
             }
@@ -69,7 +112,7 @@ struct RemoteControlView: View {
     private var terminal: some View {
         VStack(spacing: 8) {
             ScrollView {
-                Text(remote.terminalOutput.isEmpty ? "Terminal ready" : remote.terminalOutput)
+                Text(remote.terminalOutput.isEmpty ? "Ready" : remote.terminalOutput)
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(.green)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -81,11 +124,11 @@ struct RemoteControlView: View {
                 Button("Tab") { Task { await remote.sendTerminal("\t") } }
                 Button("Ctrl-C") { Task { await remote.sendTerminal("\u{0003}") } }
                 Spacer()
-                Button("Refresh") { Task { await remote.pollTerminal() } }
+                Button("Update") { Task { await remote.pollTerminal() } }
             }
             .font(.caption).buttonStyle(.bordered)
             HStack {
-                TextField("Command", text: $command)
+                TextField("Type a command", text: $command)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .onSubmit(sendCommand)
@@ -95,11 +138,11 @@ struct RemoteControlView: View {
             .textFieldStyle(.roundedBorder)
             .padding(.horizontal)
             if remote.isTerminalActive {
-                Button("Close session", role: .destructive) {
+                Button("Finish", role: .destructive) {
                     Task { await remote.closeTerminal() }
                 }
             } else {
-                Button("Start Terminal") {
+                Button("Start commands") {
                     Task { await remote.startTerminal() }
                 }.buttonStyle(.borderedProminent)
                     .disabled(!remote.hasTerminalTool)
