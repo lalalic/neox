@@ -6,6 +6,7 @@ import SwiftUI
 struct NeoxApp: App {
     @StateObject private var bridge = ServerController.shared
     @Environment(\.scenePhase) private var scenePhase
+    @State private var enteredBackground = false
 
     var body: some Scene {
         WindowGroup {
@@ -16,10 +17,19 @@ struct NeoxApp: App {
                 // and crashes DemoOverlayView's @EnvironmentObject lookup.
                 .overlay { DemoOverlayView().environmentObject(bridge.agentKit.demoRuntime) }
                 .onChange(of: scenePhase, initial: true) { _, phase in
-                    // iOS may tear the listener down while backgrounded —
-                    // restart on first launch and every foreground activation.
-                    if phase == .active {
+                    switch phase {
+                    case .background:
+                        enteredBackground = true
+                    case .active:
                         bridge.ensureRunning()
+                        if enteredBackground {
+                            enteredBackground = false
+                            Task { await bridge.recoverAfterBackgroundIfNeeded() }
+                        }
+                    case .inactive:
+                        break
+                    @unknown default:
+                        break
                     }
                 }
         }

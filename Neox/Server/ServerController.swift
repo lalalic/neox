@@ -50,34 +50,40 @@ final class ServerController: ObservableObject {
         preferredBridge = UserDefaults.standard.string(forKey: AgentBridge.preferredKey)
     }
 
-    /// Idempotent — safe to call on every foreground activation.
-    ///
-    /// iOS kills sockets while the app is backgrounded, sometimes without the
-    /// NWListener ever reporting `.failed` (log shows "defunct connection").
-    /// The old `guard server == nil` left a dead listener bound forever, so
-    /// foregrounding now always tears down and re-binds. Rebinding is cheap
-    /// and the app has no long-lived client connections to preserve.
-    ///
-    /// The Bonjour browser gets the same treatment: iOS suspends mDNS while
-    /// backgrounded and NWBrowser doesn't always recover, so we tear it down
-    /// and restart on every foreground. This is also what lets late-joining
-    /// bridges appear — a fresh browse immediately sees everything on the LAN.
+    /// Preserve active MCP clients and discovered masters on brief inactive
+    /// transitions (Control Center, app switching gesture, system overlays).
     func ensureRunning() {
-        if let server {
-            server.stop()
-            self.server = nil
-        }
-        start()
-        restartBridgeDiscovery()
+        if server == nil { start() }
+        if bridgeBrowser == nil { startBridgeDiscovery() }
     }
 
-    /// Tear down and re-create the Bonjour browser. Called on every
-    /// foreground so stale backgrounded browsers don't linger, and newly
-    /// started bridges are discovered promptly.
+    /// iOS can invalidate a listener after real background suspension without
+    /// notifying Network.framework. Probe twice before replacing it.
+    func recoverAfterBackgroundIfNeeded() async {
+        guard let observedServer = server else {
+            ensureRunning()
+            return
+        }
+        for attempt in 0..<2 {
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/")!)
+            request.timeoutInterval = 2
+            if let (_, response) = try? await URLSession.shared.data(for: request),
+               (response as? HTTPURLResponse)?.statusCode == 200 {
+                return
+            }
+            if attempt == 0 { try? await Task.sleep(for: .milliseconds(500)) }
+        }
+        guard server === observedServer else { return }
+        observedServer.stop()
+        server = nil
+        start()
+        if bridgeBrowser == nil { startBridgeDiscovery() }
+    }
+
+    /// Refresh discovery when explicitly requested; keep last-known masters.
     private func restartBridgeDiscovery() {
         bridgeBrowser?.stop()
         bridgeBrowser = nil
-        discoveredBridges = []
         startBridgeDiscovery()
     }
 

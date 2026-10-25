@@ -169,11 +169,21 @@ final class VNCViewerController: NSObject, ObservableObject, VNCConnectionDelega
     }
 }
 
+@MainActor
+final class RemoteDesktopResources: ObservableObject {
+    var relay: VNCLoopbackRelay?
+
+    func close() {
+        relay?.close()
+        relay = nil
+    }
+}
+
 struct VNCViewerView: View {
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var remote: RemoteMCPClient
-    @StateObject private var viewer = VNCViewerController()
-    @State private var relay: VNCLoopbackRelay?
+    @ObservedObject var viewer: VNCViewerController
+    @ObservedObject var resources: RemoteDesktopResources
     @State private var username = ""
     @State private var password = ""
     @State private var input = ""
@@ -258,7 +268,8 @@ struct VNCViewerView: View {
             }
         }
         .onAppear {
-            if let saved = MacScreenCredentials.load(for: remote.endpoint) {
+            if resources.relay == nil && viewer.status == "Not connected",
+               let saved = MacScreenCredentials.load(for: remote.endpoint) {
                 username = saved.username
                 password = saved.password
                 connectDesktop()
@@ -275,9 +286,10 @@ struct VNCViewerView: View {
                 connectDesktop(retrying: true)
             }
         }
-        .onDisappear { closeDesktop() }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { closeDesktop() }
+            // A brief inactive transition is not a request to disconnect.
+            // iOS may suspend the socket in the background; reconnect only if it died.
+            if phase == .active && viewer.status == "Not connected" { connectDesktop() }
         }
     }
     private func connectDesktop(retrying: Bool = false) {
@@ -306,7 +318,7 @@ struct VNCViewerView: View {
                     created.close()
                     return
                 }
-                relay = created
+                resources.relay = created
                 viewer.connect(host: "127.0.0.1", port: created.port,
                                username: name, password: secret)
                 password = ""
@@ -322,8 +334,7 @@ struct VNCViewerView: View {
         keyboardActive = false
         input = ""
         passwordInInput = false
-        relay?.close()
-        relay = nil
+        resources.close()
         password = ""
     }
 

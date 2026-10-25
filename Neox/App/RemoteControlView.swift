@@ -4,7 +4,8 @@ import SwiftUI
 struct RemoteControlView: View {
     @EnvironmentObject private var bridge: ServerController
     @StateObject private var remote = RemoteMCPClient()
-    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var desktopViewer = VNCViewerController()
+    @StateObject private var desktopResources = RemoteDesktopResources()
     @Environment(\.dismiss) private var dismiss
     @State private var token = ""
     @State private var address = ""
@@ -41,7 +42,8 @@ struct RemoteControlView: View {
                     }
                     .pickerStyle(.segmented).padding()
                         ZStack {
-                            VNCViewerView(remote: remote)
+                            VNCViewerView(remote: remote, viewer: desktopViewer,
+                                          resources: desktopResources)
                             .id(remote.endpoint)
                             .opacity(tab == 0 ? 1 : 0)
                             .allowsHitTesting(tab == 0 && !showSettings)
@@ -101,6 +103,8 @@ struct RemoteControlView: View {
             }
             .onChange(of: bridge.preferredBridge) { _, _ in
                 Task { await remote.closeTerminal() }
+                desktopViewer.disconnect()
+                desktopResources.close()
                 remote.disconnect()
                 commandsOpened = false
                 syncSelectedMaster()
@@ -122,10 +126,11 @@ struct RemoteControlView: View {
             .onChange(of: tab) { _, newValue in
                 if newValue == 1 { commandsOpened = true }
             }
-            .onChange(of: scenePhase) { _, phase in
-                if phase != .active { Task { await remote.closeTerminal() } }
+            .onDisappear {
+                desktopViewer.disconnect()
+                desktopResources.close()
+                Task { await remote.closeTerminal() }
             }
-            .onDisappear { Task { await remote.closeTerminal() } }
         }
     }
 
