@@ -38,6 +38,8 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
     entitlements:
       path: Resources/NeoY.entitlements
+      properties:
+        com.apple.security.automation.apple-events: true
 
   NeoYTests:
     type: bundle.unit-test
