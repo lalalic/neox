@@ -10,10 +10,12 @@ struct StatusView: View {
     @State private var requestsExpanded = false
     @State private var showingTourRunner = false
     @State private var showingVlogSubmission = false
+    @State private var showingAutoVlog = false
     @State private var showingRemote = false
     @State private var hasTemp = false
     @State private var clearingTemp = false
     @StateObject private var tours = CaptureTourStore.shared
+    @StateObject private var autoVlog = AutoVlogConsentStore.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -96,6 +98,7 @@ struct StatusView: View {
         .background(Color(.systemBackground))
         .sheet(isPresented: $showingTourRunner) { CaptureTourRunnerView(tours: tours) }
         .sheet(isPresented: $showingVlogSubmission) { VlogSubmissionView() }
+        .sheet(isPresented: $showingAutoVlog) { AutoVlogSettingsView(selectedMaster: bridge.preferredBridge, settings: autoVlog) }
         .sheet(isPresented: $showingRemote) { RemoteControlView() }
         .task {
             while !Task.isCancelled {
@@ -148,6 +151,12 @@ struct StatusView: View {
                 }
             }
 
+            Section("Vlog") {
+                Button { showingAutoVlog = true } label: {
+                    Label("Auto Vlog settings", systemImage: "film")
+                }
+                .buttonStyle(.plain)
+            }
 
             // Most-live information first.
             Section {

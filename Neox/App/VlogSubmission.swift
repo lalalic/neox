@@ -168,6 +168,7 @@ struct VlogSubmissionView: View {
     @State private var items: [PhotosPickerItem] = []
     @State private var instruction = ""
     @State private var isSubmitting = false
+    @State private var showingQueuedNotice = false
     @State private var errorText: String?
 
     var body: some View {
@@ -203,7 +204,7 @@ struct VlogSubmissionView: View {
                             _ = try await store.submit(items: items, instruction: instruction)
                             items = []
                             instruction = ""
-                            dismiss()
+                            showingQueuedNotice = true
                         } catch {
                             errorText = error.localizedDescription
                         }
@@ -236,6 +237,11 @@ struct VlogSubmissionView: View {
                 .padding(.horizontal, 8)
                 .background(Color(.systemBackground))
             }
+        }
+        .alert("Saved to Vlog Inbox", isPresented: $showingQueuedNotice) {
+            Button("Close") { dismiss() }
+        } message: {
+            Text("Your selected media is waiting for iCloud transfer and Neo Master pickup. Vlog production is not complete.")
         }
     }
 }
