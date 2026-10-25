@@ -67,11 +67,6 @@ struct StatusView: View {
             Divider()
 
             HStack(spacing: 8) {
-                Button { showingRemote = true } label: {
-                    actionLabel("Control", icon: "desktopcomputer")
-                }
-                .buttonStyle(.plain)
-
                 Button { showingVlogSubmission = true } label: {
                     actionLabel("Create Vlog", icon: "film.stack")
                 }
@@ -114,6 +109,7 @@ struct StatusView: View {
                     ForEach(bridge.discoveredBridges) { entry in
                         Button {
                             bridge.preferredBridge = entry.name
+                            showingRemote = true
                         } label: {
                             HStack {
                                 Image(systemName: bridge.preferredBridge == entry.name
@@ -121,6 +117,7 @@ struct StatusView: View {
                                 Label(entry.displayName, systemImage: "desktopcomputer")
                                 Spacer()
                                 Text("Nearby").font(.caption).foregroundStyle(.secondary)
+                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
                             }
                         }
                         .buttonStyle(.plain)

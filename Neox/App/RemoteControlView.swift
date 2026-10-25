@@ -56,8 +56,31 @@ struct RemoteControlView: View {
                 }
                 if showSettings { configuration }
             }
-            .navigationTitle(remote.selectedMasterName)
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                HStack(spacing: 12) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("Close")
+                    Spacer(minLength: 4)
+                    Text(remote.selectedMasterName)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Button { showSettings.toggle() } label: {
+                        Image(systemName: showSettings ? "checkmark" : "gearshape")
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel(showSettings ? "Done" : "Settings")
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 8)
+                .background(Color(.systemBackground))
+            }
             .task(id: tab) {
                 guard tab == 1 else { return }
                 while !Task.isCancelled && tab == 1 {
@@ -65,22 +88,6 @@ struct RemoteControlView: View {
                         await remote.pollTerminal()
                     }
                     try? await Task.sleep(for: .seconds(1))
-                }
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .accessibilityLabel("Close")
-                    .buttonStyle(.plain)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showSettings.toggle() } label: {
-                        Image(systemName: showSettings ? "checkmark" : "gearshape")
-                    }
-                    .accessibilityLabel(showSettings ? "Done" : "Settings")
-                    .buttonStyle(.plain)
                 }
             }
             .task {
