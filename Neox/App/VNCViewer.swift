@@ -200,18 +200,11 @@ struct VNCViewerView: View {
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("Mac desktop")
                     .accessibilityIdentifier("remoteDesktopCanvas")
-                HStack {
-                    TextField("Type on your Mac", text: $input)
-                        .focused($keyboardActive)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .onChange(of: input) { previous, current in
-                            if current.hasPrefix(previous) {
-                                viewer.sendText(String(current.dropFirst(previous.count)))
-                            } else if previous.hasPrefix(current) {
-                                for _ in 0..<(previous.count - current.count) { viewer.backspace() }
-                            }
-                        }
+                Text("Tap to click · Double-tap to zoom · Pinch to resize · Two fingers to move or scroll · Hold for right-click")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                HStack(spacing: 12) {
                     Button { keyboardActive = true } label: {
                         Image(systemName: "keyboard")
                     }
@@ -225,18 +218,26 @@ struct VNCViewerView: View {
                     }
                     .accessibilityLabel("Type saved password")
                     .disabled(MacScreenCredentials.load(for: remote.endpoint) == nil)
+                    TextField("Type on your Mac", text: $input)
+                        .focused($keyboardActive)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onChange(of: input) { previous, current in
+                            if current.hasPrefix(previous) {
+                                viewer.sendText(String(current.dropFirst(previous.count)))
+                            } else if previous.hasPrefix(current) {
+                                for _ in 0..<(previous.count - current.count) { viewer.backspace() }
+                            }
+                        }
                     Button { viewer.sendReturn() } label: {
                         Image(systemName: "return")
                     }
                     .accessibilityLabel("Return")
                 }
                 .textFieldStyle(.roundedBorder)
-                Text("Tap to click · Double-tap to zoom · Pinch to resize · Two fingers to move or scroll · Hold for right-click")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 10)
             }
-            Button("Finish", role: .destructive) { closeDesktop() }
-                .disabled(viewer.status == "Not connected")
         }
         .onAppear {
             if let saved = MacScreenCredentials.load(for: remote.endpoint) {
