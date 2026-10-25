@@ -1,8 +1,10 @@
 # NeoY Listen & Talk
 
-NeoY provides a first single-speaker voice path through the protected
-`voice.session` intent facade. The menu-bar item **Listen & Talk…** opens the
-same controls exposed to trusted MCP callers.
+NeoY provides a single-speaker voice path controlled by the native
+**Listen & Talk…** window. The only public voice MCP tool is `voice.reply`,
+which delivers correlated text-to-speech segments. The Voice checkbox
+controls the tool and menu-bar item together; disabling Voice stops capture
+and playback. Session controls remain in the native UI.
 
 ## Lifecycle
 
@@ -63,6 +65,14 @@ alone is not evidence of test discovery. The test suite checks submitted-vs-
 completed TTS behavior, explicit mute, stop, failure and safe intent routing.
 
 ## Persistent ChatGPT Project binding (Job 482 reviewer correction)
+
+Current implementation: the Talk window accepts a full ChatGPT thread URL
+or a thread UUID, validates the syntax, and stores the binding locally.
+Project URLs provide both the project and thread IDs. A standalone thread UUID
+has no inferred project ID. The command adapter uses the saved binding, not
+process environment variables. The save action does not verify remote thread
+accessibility. The following environment-variable description records the
+previous implementation and is no longer the setup procedure.
 
 The ChatGPT submission path now invokes `chatgpt turn` with a verified
 `project_id` and `thread_id` instead of creating a Temporary Chat on

@@ -26,7 +26,8 @@ struct NeoYMenuVisibility {
 
     init(capabilities: NeoYCapabilityConfiguration) {
         showsTour = capabilities.isEnabled(.captureTour)
-        showsVoice = !capabilities.disabledTools.contains("voice.session")
+        showsVoice = !capabilities.disabledTools.contains("voice.reply")
+            && !capabilities.disabledTools.contains("voice.session")
     }
 }
 
@@ -154,7 +155,17 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         observers.append(NotificationCenter.default.addObserver(
             forName: .neoYFeaturesChanged, object: nil, queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.restartPrimaryMCPServer() }
+            Task { @MainActor in
+                guard let self else { return }
+                let capabilities = (try? NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)
+                    .loadOrCreate().document.configuration.capabilities) ?? NeoYCapabilityConfiguration()
+                if !NeoYMenuVisibility(capabilities: capabilities).showsVoice {
+                    await self.voiceController.stop()
+                    self.voiceController.cancelAudio()
+                    self.voiceWindow?.orderOut(nil)
+                }
+                self.restartPrimaryMCPServer()
+            }
         })
     }
 
@@ -243,7 +254,11 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NativeUISmoke.register(on: value)
         let featureConfiguration = (try? NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory).loadOrCreate().document.configuration)
             ?? NeoYControlPlaneConfiguration()
-        value.setDisabledFeatureTools(featureConfiguration.capabilities.disabledTools)
+        var disabledTools = featureConfiguration.capabilities.disabledTools
+        if disabledTools.contains("voice.session") {
+            disabledTools.insert("voice.reply")
+        }
+        value.setDisabledFeatureTools(disabledTools)
         if featureConfiguration.capabilities.isEnabled(.askQuestions) {
             AskQuestions.register(on: value)
         }
@@ -255,21 +270,18 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 guard !result.isEmpty else { throw NeoYRuntimeControlError.event("Neo status returned no result") }
                 return .completed(result)
             }
-            // Fail closed until Browser Workspace has produced a durable binding.
-            // A new temporary thread per utterance loses the entire conversation.
-            let binding = ProcessInfo.processInfo.environment
-            guard let threadID = binding["NEOY_VOICE_CHATGPT_THREAD_ID"], !threadID.isEmpty,
-                  let projectID = binding["NEOY_VOICE_CHATGPT_PROJECT_ID"], !projectID.isEmpty else {
-                throw NSError(domain: "NeoVoice", code: 1, userInfo: [NSLocalizedDescriptionKey: "Neo Voice needs NEOY_VOICE_CHATGPT_PROJECT_ID and NEOY_VOICE_CHATGPT_THREAD_ID from verified Browser Workspace project setup"])
+            guard let binding = VoiceThreadBinding.load() else {
+                throw NSError(domain: "NeoVoice", code: 1, userInfo: [NSLocalizedDescriptionKey: "Save a ChatGPT Thread URL or ID in Listen & Talk before starting."])
             }
+            var turnArguments: [String: JSONValue] = [
+                "thread_id": .string(binding.threadID),
+                "message": .string("Voice request: \(text)\n\nReply using the Neo MCP voice.reply tool. Use session_id=\(sessionID), correlation_id=\(correlationID), sequence starting at 0, and final=true only on the last segment. Wait for the playback receipt."),
+                "reason": .string("Neo voice session \(sessionID), correlation \(correlationID)")
+            ]
+            if let projectID = binding.projectID { turnArguments["project_id"] = .string(projectID) }
             let response = try await value.invokeRegisteredTool("chatgpt", arguments: .object([
                 "command": .string("turn"),
-                "args": .object([
-                    "project_id": .string(projectID),
-                    "thread_id": .string(threadID),
-                    "message": .string("Voice request: \(text)\n\nDeliver the actual response through the connected authenticated NeoY voice.session command reply, using session_id=\(sessionID), correlation_id=\(correlationID), sequence starting at 0, text for each segment, and final=true only on the last segment. Wait for the final delivery receipt; never treat submission acknowledgement as completion. Never send an acknowledgement or guessed result as the answer. If the NeoY tool is unavailable or delivery fails, state that limitation in chat; do not claim audible completion."),
-                    "reason": .string("NeoY voice session \(sessionID), correlation \(correlationID)"),
-                ]),
+                "args": .object(turnArguments),
             ]))
             // ChatGPT thread returns a submission acknowledgement, not a Neo command answer.
             // A submitted turn must never trigger completion TTS.

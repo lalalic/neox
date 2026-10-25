@@ -27,6 +27,7 @@ enum NeoYRemoteToolCatalog {
         if configuration.capabilities.isEnabled(.demoRecording) { names.insert("demo") }
         if configuration.capabilities.isEnabled(.captureTour) { names.insert("tour") }
         if configuration.capabilities.isEnabled(.phoneIntegration) { names.insert("phone") }
+        if !configuration.capabilities.disabledTools.contains("voice.reply") && !configuration.capabilities.disabledTools.contains("voice.session") { names.insert("voice.reply") }
         return names.sorted()
     }
 

@@ -3,6 +3,42 @@ import AppKit
 import Speech
 import SwiftUI
 
+struct VoiceThreadBinding: Equatable {
+    let threadID: String
+    let projectID: String?
+
+    static let storageKey = "neo.voice.threadBinding"
+
+    static func parse(_ input: String) -> Self? {
+        let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return nil }
+        if let url = URLComponents(string: value), let host = url.host {
+            guard url.scheme?.lowercased() == "https",
+                  ["chatgpt.com", "www.chatgpt.com"].contains(host.lowercased()) else { return nil }
+            let parts = url.path.split(separator: "/").map(String.init)
+            guard let index = parts.firstIndex(of: "c"), index + 1 < parts.count,
+                  UUID(uuidString: parts[index + 1]) != nil else { return nil }
+            let project = parts.firstIndex(of: "g").flatMap { i in
+                i + 1 < parts.count && parts[i + 1].hasPrefix("g-p-") ? parts[i + 1] : nil
+            }
+            return Self(threadID: parts[index + 1], projectID: project)
+        }
+        guard UUID(uuidString: value) != nil else { return nil }
+        return Self(threadID: value, projectID: nil)
+    }
+
+    static func load(defaults: UserDefaults = .standard) -> Self? {
+        guard let value = defaults.string(forKey: storageKey) else { return nil }
+        return parse(value)
+    }
+
+    static func save(_ input: String, defaults: UserDefaults = .standard) -> Bool {
+        guard parse(input) != nil else { return false }
+        defaults.set(input.trimmingCharacters(in: .whitespacesAndNewlines), forKey: storageKey)
+        return true
+    }
+}
+
 enum VoiceSessionState: String, Codable, Sendable {
     case idle, starting, listening, muted, stopping, completed, error
 }
@@ -438,12 +474,11 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
 enum VoiceSessionTools {
     @MainActor
     static func register(on server: MCPServer, controller: VoiceSessionController) {
-        server.register(tools: [CommandTool.facade(
-            name: "voice.session",
-            description: "Start, stop, mute, inject text, inspect, or speak for the explicit single-speaker Neo Listen/Talk session.",
-            commands: commands(controller: controller),
-            commandName: CommandTool.stripPrefix("voice.")
-        )], protected: true)
+        // Listening and session controls belong to the native UI.
+        // Agents can only deliver correlated replies.
+        if let reply = commands(controller: controller).first(where: { $0.name == "voice.reply" }) {
+            server.register(tools: [reply], protected: true)
+        }
     }
 
     @MainActor
@@ -571,17 +606,32 @@ private enum VoiceToolError: LocalizedError {
 struct VoiceSessionView: View {
     @ObservedObject var controller: VoiceSessionController
     @State private var injectedText = ""
+    @State private var threadInput = UserDefaults.standard.string(forKey: VoiceThreadBinding.storageKey) ?? ""
+    @State private var bindingMessage = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Listen & Talk").font(.title2)
+            HStack {
+                TextField("ChatGPT Thread URL or ID", text: $threadInput)
+                    .textFieldStyle(.roundedBorder)
+                Button("Save") {
+                    bindingMessage = VoiceThreadBinding.save(threadInput)
+                        ? "Thread binding saved." : "Enter a valid ChatGPT thread URL or UUID."
+                }
+                .disabled(VoiceThreadBinding.parse(threadInput) == nil)
+            }
+            if !bindingMessage.isEmpty {
+                Text(bindingMessage).font(.caption).foregroundStyle(.secondary)
+            }
+            Text(VoiceThreadBinding.load() == nil ? "Save a thread before listening." : "Speech is sent to the saved thread.").font(.caption).foregroundStyle(.secondary)
             Label(controller.state.rawValue.capitalized, systemImage: controller.state == .listening ? "mic.fill" : "mic.slash")
                 .foregroundStyle(controller.state == .error ? .red : .primary)
             if let error = controller.errorMessage { Text(error).foregroundStyle(.red) }
             Text(controller.transcript.isEmpty ? "No speech recognized yet." : controller.transcript)
                 .frame(maxWidth: .infinity, alignment: .leading).padding(8).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             HStack {
-                Button("Start") { Task { await controller.start() } }.disabled(controller.state == .listening || controller.state == .muted)
+                Button("Start") { Task { await controller.start() } }.disabled(VoiceThreadBinding.load() == nil || controller.state == .listening || controller.state == .muted)
                 Button("Stop") { Task { await controller.stop() } }.disabled(controller.state == .idle || controller.state == .completed)
                 Button(controller.muted ? "Unmute" : "Mute") { controller.setMuted(!controller.muted) }.disabled(controller.state != .listening && controller.state != .muted)
             }

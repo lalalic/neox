@@ -13,6 +13,10 @@ final class NativeUISmokeTests: XCTestCase {
         XCTAssertFalse(NeoYMenuVisibility(capabilities: capabilities).showsTour)
         XCTAssertTrue(NeoYMenuVisibility(capabilities: capabilities).showsVoice)
 
+        capabilities.disabledTools.insert("voice.reply")
+        XCTAssertFalse(NeoYMenuVisibility(capabilities: capabilities).showsVoice)
+        capabilities.disabledTools.remove("voice.reply")
+        XCTAssertTrue(NeoYMenuVisibility(capabilities: capabilities).showsVoice)
         capabilities.disabledTools.insert("voice.session")
         XCTAssertFalse(NeoYMenuVisibility(capabilities: capabilities).showsVoice)
 

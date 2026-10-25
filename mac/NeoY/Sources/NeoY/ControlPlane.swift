@@ -417,6 +417,7 @@ actor NeoYControlPlaneService {
             throw NeoYControlPlaneError.invalidName(name)
         }
         return try mutate {
+            if name == "voice.reply" { $0.capabilities.disabledTools.remove("voice.session") }
             if enabled { $0.capabilities.disabledTools.remove(name) }
             else { $0.capabilities.disabledTools.insert(name) }
         }

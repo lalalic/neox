@@ -53,6 +53,30 @@ final class VoiceSessionTests: XCTestCase {
         XCTAssertFalse(VoiceCommandRouting.isGatewayStatus("delete a file"))
     }
 
+    func testThreadBindingParsesProjectAndStandaloneURLsAndIDs() {
+        let id = "6adb5143-bdf0-83e9-9c16-966c11d5f618"
+        let project = "g-p-6ac92adf1a988191b37ed5526c72caac-orchestrators"
+        let bound = VoiceThreadBinding.parse("https://chatgpt.com/g/\(project)/c/\(id)")
+        XCTAssertEqual(bound?.threadID, id)
+        XCTAssertEqual(bound?.projectID, project)
+        XCTAssertNil(VoiceThreadBinding.parse("https://chatgpt.com/c/\(id)")?.projectID)
+        XCTAssertEqual(VoiceThreadBinding.parse(id)?.threadID, id)
+        XCTAssertNil(VoiceThreadBinding.parse("https://evil.example/c/\(id)"))
+        XCTAssertNil(VoiceThreadBinding.parse("https://chatgpt.com/c/not-a-thread"))
+        XCTAssertNil(VoiceThreadBinding.parse(" "))
+    }
+
+    func testThreadBindingPersistsWithoutProcessEnvironment() throws {
+        let suite = "NeoYVoiceBindingTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let id = "6adb5143-bdf0-83e9-9c16-966c11d5f618"
+        XCTAssertTrue(VoiceThreadBinding.save(id, defaults: defaults))
+        XCTAssertEqual(VoiceThreadBinding.load(defaults: defaults)?.threadID, id)
+        XCTAssertFalse(VoiceThreadBinding.save("invalid", defaults: defaults))
+        XCTAssertEqual(VoiceThreadBinding.load(defaults: defaults)?.threadID, id)
+    }
+
     func testMuteLifecycleIsExplicitAndReversible() {
         let controller = VoiceSessionController()
         controller.beginTestingSession(id: "lifecycle")
@@ -158,28 +182,21 @@ final class VoiceSessionTests: XCTestCase {
         controller.beginTestingSession(id: "mcp-session")
         VoiceSessionTools.register(on: server, controller: controller)
 
-        let submitted = try await server.invokeRegisteredTool("voice.session", arguments: .object([
-            "command": .string("inject"),
-            "args": .object(["text": .string("你好，今天天气怎么样？")]),
-        ]))
-        let pending = try receiptObject(submitted)
-        XCTAssertEqual(pending["status"] as? String, "submitted")
-        let sessionID = try XCTUnwrap(pending["sessionID"] as? String)
-        let correlationID = try XCTUnwrap(pending["correlationID"] as? String)
+        XCTAssertEqual(server.toolNames.filter { $0.hasPrefix("voice.") }, ["voice.reply"])
+        let pending = await controller.inject(text: "你好，今天天气怎么样？")
+        XCTAssertEqual(pending.status, "submitted")
+        let sessionID = pending.sessionID
+        let correlationID = pending.correlationID
         XCTAssertTrue(synth.spoken.isEmpty)
 
-        let first = try await server.invokeRegisteredTool("voice.session", arguments: .object([
-            "command": .string("reply"), "args": .object([
-                "session_id": .string(sessionID), "correlation_id": .string(correlationID), "sequence": .int(0),
-                "text": .string("你好，"), "final": .bool(false),
-            ]),
+        let first = try await server.invokeRegisteredTool("voice.reply", arguments: .object([
+            "session_id": .string(sessionID), "correlation_id": .string(correlationID), "sequence": .int(0),
+            "text": .string("你好，"), "final": .bool(false),
         ]))
         XCTAssertEqual(try receiptObject(first)["status"] as? String, "delivered")
-        let final = try await server.invokeRegisteredTool("voice.session", arguments: .object([
-            "command": .string("reply"), "args": .object([
-                "session_id": .string(sessionID), "correlation_id": .string(correlationID), "sequence": .int(1),
-                "text": .string("今天晴转多云。"), "final": .bool(true),
-            ]),
+        let final = try await server.invokeRegisteredTool("voice.reply", arguments: .object([
+            "session_id": .string(sessionID), "correlation_id": .string(correlationID), "sequence": .int(1),
+            "text": .string("今天晴转多云。"), "final": .bool(true),
         ]))
         let delivered = try receiptObject(final)
         XCTAssertEqual(delivered["status"] as? String, "completed")

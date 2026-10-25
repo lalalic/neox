@@ -186,9 +186,10 @@ final class NeoYSetupModel: ObservableObject {
     }
 
     var visibleMCPFeatureTools: [String] {
+        var disabled = disabledDiscoveredTools
+        if disabled.remove("voice.session") != nil { disabled.insert("voice.reply") }
         let candidate = Set(discoveredMCPTools)
-            .union(NeoYRemoteToolCatalog.nativeOptionalTools.keys)
-            .union(disabledDiscoveredTools)
+            .union(disabled)
         return candidate.filter { name in
             if NeoYCoreRuntime.toolNames.contains(name) { return false }
             if ["events", "neoy.ui_smoke", "mcp.temp-files"].contains(name) { return false }
@@ -203,6 +204,9 @@ final class NeoYSetupModel: ObservableObject {
         let store = NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)
         guard let configuration = try? store.loadOrCreate().document.configuration else { return }
         disabledDiscoveredTools = configuration.capabilities.disabledTools
+        if disabledDiscoveredTools.remove("voice.session") != nil {
+            disabledDiscoveredTools.insert("voice.reply")
+        }
         nativeEnabledTools = Set(NeoYRemoteToolCatalog.nativeOptionalTools.compactMap { tool, capability in
             configuration.capabilities.isEnabled(capability) ? tool : nil
         })
@@ -853,6 +857,7 @@ struct NeoYSetupView: View {
     private func featureTitle(_ tool: String) -> String {
         switch tool {
         case "ask_questions": "Ask Questions"
+        case "voice.reply": "Voice"
         default: tool.capitalized
         }
     }
