@@ -83,8 +83,7 @@ struct StatusView: View {
                 .buttonStyle(.plain)
             }
             .padding(.horizontal, 12)
-            .padding(.bottom, 16)
-            .padding(.top, 8)
+            .padding(.top, 2)
         }
         .background(Color(.systemBackground))
         .sheet(isPresented: $showingTourRunner) { CaptureTourRunnerView(tours: tours) }

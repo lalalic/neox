@@ -202,6 +202,8 @@ struct VNCViewerView: View {
                 HStack(spacing: 12) {
                     Button { keyboardActive = true } label: {
                         Image(systemName: "keyboard")
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     .accessibilityLabel("Open keyboard")
                     Button {
@@ -210,13 +212,15 @@ struct VNCViewerView: View {
                         }
                     } label: {
                         Image(systemName: "key.fill")
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     .accessibilityLabel("Type saved password")
                     .disabled(MacScreenCredentials.load(for: remote.endpoint) == nil)
                     Spacer()
                 }
                 .font(.caption)
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
                 .padding(.horizontal, 12)
                 HStack(spacing: 12) {
                     TextField("Type on your Mac", text: $input)

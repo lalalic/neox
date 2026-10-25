@@ -57,6 +57,16 @@ struct RemoteControlView: View {
                 if showSettings { configuration }
             }
             .navigationTitle(remote.selectedMasterName)
+            .navigationBarTitleDisplayMode(.inline)
+            .task(id: tab) {
+                guard tab == 1 else { return }
+                while !Task.isCancelled && tab == 1 {
+                    if remote.isTerminalActive && remote.error == nil {
+                        await remote.pollTerminal()
+                    }
+                    try? await Task.sleep(for: .seconds(1))
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { dismiss() } label: {
@@ -210,12 +220,14 @@ struct RemoteControlView: View {
             }
             HStack {
                 Button("Esc") { Task { await remote.sendTerminal("\u{001b}") } }
+                    .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
                 Button("Tab") { Task { await remote.sendTerminal("\t") } }
+                    .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
                 Button("Ctrl-C") { Task { await remote.sendTerminal("\u{0003}") } }
+                    .frame(minWidth: 52, minHeight: 44).contentShape(Rectangle())
                 Spacer()
-                Button("Update") { Task { await remote.pollTerminal() } }
             }
-            .font(.caption).buttonStyle(.bordered)
+            .font(.caption).buttonStyle(.plain)
             .padding(.horizontal, 12)
             HStack {
                 TextField("Type a command", text: $command)

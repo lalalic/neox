@@ -25,6 +25,7 @@ final class RemoteMCPClient: ObservableObject {
     private var sessionID: String?
     private var sessionGeneration = 0
     private var cursor = 0
+    private var terminalPollInFlight = false
     private var requestID = 0
     private let legacyCredentialKey = "com.neox.app.remote-mcp-token"
     private let savedMacsKey = "remoteMCPHistoryV1"
@@ -223,7 +224,9 @@ final class RemoteMCPClient: ObservableObject {
     }
 
     func pollTerminal() async {
-        guard let sessionID else { return }
+        guard let sessionID, !terminalPollInFlight else { return }
+        terminalPollInFlight = true
+        defer { terminalPollInFlight = false }
         do {
             let result = try await call(terminalTool, [
                 "command": "read",
