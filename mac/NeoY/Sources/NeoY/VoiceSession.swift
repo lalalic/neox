@@ -802,11 +802,17 @@ struct VoiceAvatarView: View {
         let (title, symbol, tint) = status
         Button(action: openWindow) {
             VStack(spacing: 4) {
-                Image(systemName: symbol)
-                    .font(.system(size: 25, weight: .medium))
-                    .foregroundStyle(.white)
+                Image(systemName: "person.crop.circle.fill")
+                    .font(.system(size: 49))
+                    .foregroundStyle(tint)
                     .frame(width: 53, height: 53)
-                    .background(tint.gradient, in: Circle())
+                    .overlay(alignment: .bottomTrailing) {
+                        Image(systemName: symbol)
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 21, height: 21)
+                            .background(tint.gradient, in: Circle())
+                    }
                 Text(title).font(.system(size: 10, weight: .medium)).foregroundStyle(.primary)
             }
             .frame(width: 84, height: 86)
