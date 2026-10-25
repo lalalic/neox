@@ -2,6 +2,42 @@ import XCTest
 @testable import NeoY
 
 final class NeoCLISetupTests: XCTestCase {
+    func testStartupPreferencesPreserveExplicitToolkitChoice() {
+        let suite = "NeoCLISetupTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: NeoCLISetup.toolkitPreferenceKey)
+        XCTAssertFalse(NeoCLISetup.wantsProjectsToolkit(defaults: defaults))
+        defaults.set(true, forKey: NeoCLISetup.toolkitPreferenceKey)
+        XCTAssertTrue(NeoCLISetup.wantsProjectsToolkit(defaults: defaults))
+    }
+
+    func testOnlyExplicitlySelectedOptionalSkillsAreRestored() {
+        let suite = "NeoCLISetupTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertTrue(NeoCLISetup.desiredOptionalSkills(defaults: defaults).isEmpty)
+        NeoCLISetup.setOptionalSkillDesired("markcut", enabled: true, defaults: defaults)
+        NeoCLISetup.setOptionalSkillDesired("unknown", enabled: true, defaults: defaults)
+        XCTAssertEqual(NeoCLISetup.desiredOptionalSkills(defaults: defaults), ["markcut"])
+        NeoCLISetup.setOptionalSkillDesired("markcut", enabled: false, defaults: defaults)
+        XCTAssertTrue(NeoCLISetup.desiredOptionalSkills(defaults: defaults).isEmpty)
+    }
+
+    func testExistingOptionalSkillsMigrateOnlyOnce() {
+        let suite = "NeoCLISetupTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        NeoCLISetup.migrateOptionalSkillPreferencesIfNeeded(
+            installed: ["markcut", "webhelm", "wechat-bro"], defaults: defaults)
+        XCTAssertEqual(NeoCLISetup.desiredOptionalSkills(defaults: defaults),
+                       ["markcut", "wechat-bro"])
+        NeoCLISetup.setOptionalSkillDesired("markcut", enabled: false, defaults: defaults)
+        NeoCLISetup.migrateOptionalSkillPreferencesIfNeeded(
+            installed: ["markcut", "wechat-bro"], defaults: defaults)
+        XCTAssertEqual(NeoCLISetup.desiredOptionalSkills(defaults: defaults), ["wechat-bro"])
+    }
+
     func testPublishedNeoCLIDistributionIdentity() {
         XCTAssertEqual(NeoCLISetup.npmCLI, "@lalalic/neo@1.0.2")
     }

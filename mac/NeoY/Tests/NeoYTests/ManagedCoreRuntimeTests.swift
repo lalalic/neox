@@ -25,6 +25,69 @@ final class ManagedCoreRuntimeTests: XCTestCase {
         XCTAssertEqual(NeoYManagedCoreRuntime.active(in: root)?.lastPathComponent, "1.0.0")
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("versions/1.0.1/package.json").path))
     }
+    func testStartupRecoversMissingActiveFilesAndPreservesDamagedCopy() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let root = base.appendingPathComponent("managed")
+        let seed = try fixture("1.0.0", under: base)
+        try NeoYManagedCoreRuntime.bootstrapIfMissing(bundle: seed, root: root)
+        let active = try XCTUnwrap(NeoYManagedCoreRuntime.active(in: root))
+        try FileManager.default.removeItem(at: active.appendingPathComponent("src/core/tools/index.mjs"))
+        XCTAssertNil(NeoYManagedCoreRuntime.active(in: root))
+        try NeoYManagedCoreRuntime.bootstrapIfMissing(bundle: seed, root: root)
+        XCTAssertEqual(NeoYManagedCoreRuntime.active(in: root)?.lastPathComponent, "1.0.0")
+        let versions = try FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("versions"),
+                                                                      includingPropertiesForKeys: nil)
+        XCTAssertTrue(versions.contains { $0.lastPathComponent.hasPrefix(".damaged-1.0.0-") })
+    }
+
+    func testHealthyManagedRuntimeIsNotDowngradedOnStartup() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let root = base.appendingPathComponent("managed")
+        let seed = try fixture("1.0.0", under: base)
+        let newer = try fixture("1.0.1", under: base)
+        try NeoYManagedCoreRuntime.install(source: newer, version: "1.0.1", root: root)
+        try NeoYManagedCoreRuntime.bootstrapIfMissing(bundle: seed, root: root)
+        XCTAssertEqual(NeoYManagedCoreRuntime.active(in: root)?.lastPathComponent, "1.0.1")
+    }
+
+    func testStartupReturnsToHealthyPreviousCoreOnProbeFailure() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let root = base.appendingPathComponent("managed")
+        let seed = try fixture("1.0.0", under: base)
+        let newer = try fixture("1.0.1", under: base)
+        try NeoYManagedCoreRuntime.install(source: seed, version: "1.0.0", root: root)
+        try NeoYManagedCoreRuntime.install(source: newer, version: "1.0.1", root: root)
+        try "1.0.0".write(to: root.appendingPathComponent("previous-version"), atomically: true, encoding: .utf8)
+        let selected = try NeoYManagedCoreRuntime.reconcileStartup(bundle: seed, root: root) {
+            $0.lastPathComponent == "1.0.0"
+        }
+        XCTAssertEqual(selected, "1.0.0")
+        XCTAssertEqual(NeoYManagedCoreRuntime.active(in: root)?.lastPathComponent, "1.0.0")
+        XCTAssertTrue(NeoYManagedCoreRuntime.valid(root.appendingPathComponent("versions/1.0.1")))
+    }
+
+    func testStartupQuarantinesCoreThatFailsActualProbe() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let root = base.appendingPathComponent("managed")
+        let seed = try fixture("1.0.0", under: base)
+        try NeoYManagedCoreRuntime.bootstrapIfMissing(bundle: seed, root: root)
+        let current = try XCTUnwrap(NeoYManagedCoreRuntime.active(in: root))
+        try Data("broken JavaScript".utf8).write(to: current.appendingPathComponent("src/core/tools/index.mjs"))
+        let healthy: (URL) -> Bool = {
+            (try? String(contentsOf: $0.appendingPathComponent("src/core/tools/index.mjs"),
+                         encoding: .utf8))?.contains("healthy = true") == true
+        }
+        XCTAssertEqual(try NeoYManagedCoreRuntime.reconcileStartup(bundle: seed, root: root, probe: healthy), "1.0.0")
+        XCTAssertTrue(healthy(try XCTUnwrap(NeoYManagedCoreRuntime.active(in: root))))
+        let entries = try FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("versions"),
+                                                                    includingPropertiesForKeys: nil)
+        XCTAssertTrue(entries.contains { $0.lastPathComponent.hasPrefix(".damaged-1.0.0-") })
+    }
+
     func testOlderRegistryReleaseIsDetected() {
         XCTAssertTrue(NeoYManagedCoreRuntime.isOlder("0.1.1", than: "0.1.7"))
         XCTAssertFalse(NeoYManagedCoreRuntime.isOlder("0.1.8", than: "0.1.7"))

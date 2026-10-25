@@ -76,10 +76,40 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        // Initialize an independent Core install without touching a healthy active version.
-        try? NeoYManagedCoreRuntime.bootstrapIfMissing()
+        // Seed Core synchronously, then validate it without blocking the UI.
+        do { try NeoYManagedCoreRuntime.bootstrapIfMissing() }
+        catch { NSLog("Neo Core bootstrap failed: %@", error.localizedDescription) }
+        Task.detached {
+            let previous = NeoYManagedCoreRuntime.active()?.path
+            do {
+                _ = try NeoYManagedCoreRuntime.reconcileStartup()
+                if NeoYManagedCoreRuntime.active()?.path != previous {
+                    NotificationCenter.default.post(name: Notification.Name("neoYCoreRuntimeChanged"), object: nil)
+                }
+            } catch {
+                NSLog("Neo Core startup reconciliation failed: %@", error.localizedDescription)
+            }
+        }
         // Keep required skills, but install the optional Neo Project Toolkit only on request.
-        Task.detached { _ = try? NeoCLISetup.setupMissingGlobalSkills() }
+        Task.detached {
+            do {
+                let inventory = try NeoCLISetup.installedGlobalSkillNames()
+                NeoCLISetup.migrateOptionalSkillPreferencesIfNeeded(installed: inventory)
+            } catch { NSLog("Neo optional Skills inventory unavailable: %@", error.localizedDescription) }
+            do { _ = try NeoCLISetup.setupMissingGlobalSkills() }
+            catch { NSLog("Neo required Skills startup recovery failed: %@", error.localizedDescription) }
+            if NeoCLISetup.wantsProjectsToolkit() {
+                do {
+                    let outcome = try NeoCLISetup.installIfMissing()
+                    if outcome.contains("needs setup") || outcome.contains("failed") {
+                        NSLog("Neo Projects Toolkit startup: %@", outcome)
+                    }
+                }
+                catch { NSLog("Neo Projects Toolkit startup recovery failed: %@", error.localizedDescription) }
+            }
+            do { try NeoCLISetup.reconcileDesiredOptionalSkills() }
+            catch { NSLog("Neo optional Skills startup recovery failed: %@", error.localizedDescription) }
+        }
         startNativePhoneServices()
         startServer()
         observers.append(NotificationCenter.default.addObserver(
@@ -112,14 +142,6 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             forName: .neoYDeploymentSettingsChanged, object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.restartPrimaryMCPServer() }
-        })
-        observers.append(NotificationCenter.default.addObserver(
-            forName: Notification.Name("neoYCoreRuntimeChanged"), object: nil, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, let runtimeControl = self.runtimeControl else { return }
-                await runtimeControl.reloadCore()
-            }
         })
         observers.append(NotificationCenter.default.addObserver(
             forName: Notification.Name("neoYCoreRuntimeChanged"), object: nil, queue: .main
@@ -274,6 +296,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         )
         self.runtimeControl = runtimeControl
         Task {
+            await NeoYFeatureManager.shared.reconcileEnabledOnStartup()
             await runtimeControl.reconcile(await setup.currentConfiguration())
         }
 

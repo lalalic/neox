@@ -12,6 +12,46 @@ enum NeoCLISetup {
         "agents-relay": "lalalic/agents-relay",
     ]
 
+    static let toolkitPreferenceKey = "NeoProjectsToolkitEnabled"
+    static let optionalSkillsPreferenceKey = "NeoOptionalSkillsEnabled"
+
+    /// On existing installations preserve the observed CLI choice. New users
+    /// must explicitly enable the optional Projects Toolkit.
+    static func wantsProjectsToolkit(defaults: UserDefaults = .standard) -> Bool {
+        if let value = defaults.object(forKey: toolkitPreferenceKey) as? Bool { return value }
+        return cliPath() != nil
+    }
+
+    static func desiredOptionalSkills(defaults: UserDefaults = .standard) -> Set<String> {
+        guard let names = defaults.stringArray(forKey: optionalSkillsPreferenceKey) else { return [] }
+        return Set(names).intersection(optionalSkillSources.keys)
+    }
+
+    static func setOptionalSkillDesired(_ name: String, enabled: Bool, defaults: UserDefaults = .standard) {
+        guard optionalSkillSources[name] != nil else { return }
+        var names = desiredOptionalSkills(defaults: defaults)
+        if enabled { names.insert(name) } else { names.remove(name) }
+        defaults.set(names.sorted(), forKey: optionalSkillsPreferenceKey)
+    }
+
+    /// First upgrade from inventory-only checkboxes: inherit installed options
+    /// once, so an external deletion can later be repaired without changing intent.
+    static func migrateOptionalSkillPreferencesIfNeeded(installed: Set<String>,
+                                                         defaults: UserDefaults = .standard) {
+        guard defaults.object(forKey: optionalSkillsPreferenceKey) == nil else { return }
+        let selected = installed.intersection(optionalSkillSources.keys)
+        defaults.set(selected.sorted(), forKey: optionalSkillsPreferenceKey)
+    }
+
+    /// Reinstall only user-selected optional Skills that have gone missing.
+    static func reconcileDesiredOptionalSkills(defaults: UserDefaults = .standard) throws {
+        let missing = desiredOptionalSkills(defaults: defaults).subtracting(try installedGlobalSkillNames())
+        for name in missing.sorted() {
+            guard let source = optionalSkillSources[name] else { continue }
+            _ = try runSkills(["add", source, "-g", "-y", "-s", name])
+        }
+    }
+
     static func removeOptionalSkill(_ name: String) throws {
         guard optionalSkillSources[name] != nil,
               !requiredGlobalSkills.contains(name) else {
@@ -21,9 +61,18 @@ enum NeoCLISetup {
     }
 
     static func allInstalledGlobalSkills() -> Set<String> {
-        let inventory = (try? runSkills(["list", "-g", "--json"])) ?? ""
+        (try? installedGlobalSkillNames()) ?? []
+    }
+
+    /// Unlike the display inventory, startup reconciliation must distinguish
+    /// an empty installation from an unavailable or invalid inventory.
+    static func installedGlobalSkillNames() throws -> Set<String> {
+        let inventory = try runSkills(["list", "-g", "--json"])
         guard let data = inventory.data(using: .utf8),
-              let records = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+              let records = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            throw NSError(domain: "NeoCLISetup", code: 6,
+                          userInfo: [NSLocalizedDescriptionKey: "Invalid global Skills inventory"])
+        }
         return Set(records.compactMap { $0["name"] as? String })
     }
 
@@ -165,7 +214,11 @@ enum NeoCLISetup {
         }
         let decision = packageDecision(installed: try installedNPMPackages(using: npm), executableExists: existing != nil)
         if decision == "ready" { return "CLI already installed: \(npmCLI)" }
-        if decision != "install" { return "CLI needs setup: \(decision)" }
+        // Only the known managed npm package may be updated without user action.
+        // Never replace unknown commands, legacy packages, or developer links.
+        if decision != "install" && !decision.hasPrefix("upgrade_required:") {
+            return "CLI needs setup: \(decision)"
+        }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: npm)
         task.arguments = ["install", "--global", npmCLI, "--ignore-scripts", "--no-audit", "--no-fund"]

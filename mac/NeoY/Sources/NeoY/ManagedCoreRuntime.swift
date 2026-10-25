@@ -175,6 +175,77 @@ enum NeoYManagedCoreRuntime {
         let data = try Data(contentsOf: bundle.appendingPathComponent("package.json"))
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         guard let version = json?["version"] as? String else { return }
+        let destination = root.appendingPathComponent("versions/\(version)", isDirectory: true)
+        if FileManager.default.fileExists(atPath: destination.path), !valid(destination) {
+            // Preserve a damaged copy for diagnosis rather than deleting user data.
+            // A valid bundled seed may now replace that version safely.
+            let quarantine = root.appendingPathComponent("versions/.damaged-\(version)-\(UUID().uuidString)")
+            try FileManager.default.moveItem(at: destination, to: quarantine)
+        }
         try install(source: bundle, version: version, root: root)
+    }
+
+    /// Every launch validates the actual MCP contract, not only file presence.
+    /// A failed version is never erased. Recovery prefers the previous healthy
+    /// managed release, then the signed application's seed.
+    @discardableResult
+    static func reconcileStartup(bundle: URL = NeoYBundledRuntime.packagedRuntimeURL,
+                                 root: URL = root,
+                                 probe: (URL) -> Bool = probeMCP) throws -> String {
+        if let current = active(in: root), probe(current) { return current.lastPathComponent }
+
+        let previousFile = root.appendingPathComponent("previous-version")
+        if let previous = try? String(contentsOf: previousFile, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           previous.range(of: "^[A-Za-z0-9][A-Za-z0-9._-]*$", options: .regularExpression) != nil,
+           !previous.contains("..") {
+            let candidate = root.appendingPathComponent("versions/\(previous)")
+            if valid(candidate), probe(candidate) {
+                try install(source: candidate, version: previous, root: root)
+                return previous
+            }
+        }
+
+        guard valid(bundle), probe(bundle) else {
+            throw NSError(domain: "NeoYCore", code: 17,
+                          userInfo: [NSLocalizedDescriptionKey: "No healthy managed Core or bundled recovery seed"])
+        }
+        let data = try Data(contentsOf: bundle.appendingPathComponent("package.json"))
+        let info = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let version = info?["version"] as? String else {
+            throw NSError(domain: "NeoYCore", code: 18,
+                          userInfo: [NSLocalizedDescriptionKey: "Bundled Core version missing"])
+        }
+        let destination = root.appendingPathComponent("versions/\(version)")
+        if FileManager.default.fileExists(atPath: destination.path), !probe(destination) {
+            let quarantine = root.appendingPathComponent("versions/.damaged-\(version)-\(UUID().uuidString)")
+            try FileManager.default.moveItem(at: destination, to: quarantine)
+        }
+        try install(source: bundle, version: version, root: root)
+        guard let recovered = active(in: root), probe(recovered) else {
+            throw NSError(domain: "NeoYCore", code: 19,
+                          userInfo: [NSLocalizedDescriptionKey: "Bundled Core activation failed MCP verification"])
+        }
+        return version
+    }
+
+    static func probeMCP(_ runtime: URL) -> Bool {
+        guard valid(runtime), let node = nodeExecutable else { return false }
+        let probe = (Bundle.main.resourceURL ?? Bundle.main.bundleURL)
+            .appendingPathComponent("core-mcp-probe.mjs")
+        guard FileManager.default.isReadableFile(atPath: probe.path) else { return false }
+        let process = Process()
+        process.executableURL = node
+        process.arguments = [probe.path, runtime.appendingPathComponent("src/core/tools/index.mjs").path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
+        do { try process.run() } catch { return false }
+        if finished.wait(timeout: .now() + 8) == .timedOut {
+            if process.isRunning { process.terminate() }
+            return false
+        }
+        return process.terminationStatus == 0
     }
 }
