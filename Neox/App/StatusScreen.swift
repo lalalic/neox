@@ -11,6 +11,8 @@ struct StatusView: View {
     @State private var showingTourRunner = false
     @State private var showingVlogSubmission = false
     @State private var showingRemote = false
+    @State private var hasTemp = false
+    @State private var clearingTemp = false
     @StateObject private var tours = CaptureTourStore.shared
 
     var body: some View {
@@ -72,10 +74,21 @@ struct StatusView: View {
                 }
                 .buttonStyle(.plain)
 
-                Button(role: .destructive) { bridge.clearExports() } label: {
-                    actionLabel("Clear Files", icon: "trash")
+                Button {
+                    guard hasTemp && !clearingTemp else { return }
+                    clearingTemp = true
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(100))
+                        bridge.clearExports()
+                        hasTemp = bridge.hasTemporaryFiles
+                        clearingTemp = false
+                    }
+                } label: {
+                    actionLabel("Clear Temp", icon: clearingTemp ? "arrow.triangle.2.circlepath" : "trash")
+                        .foregroundStyle(clearingTemp ? Color.orange : (hasTemp ? Color.primary : Color.secondary))
                 }
                 .buttonStyle(.plain)
+                .disabled(!hasTemp || clearingTemp)
             }
             .padding(.horizontal, 12)
             .padding(.top, 2)
@@ -84,6 +97,16 @@ struct StatusView: View {
         .sheet(isPresented: $showingTourRunner) { CaptureTourRunnerView(tours: tours) }
         .sheet(isPresented: $showingVlogSubmission) { VlogSubmissionView() }
         .sheet(isPresented: $showingRemote) { RemoteControlView() }
+        .task {
+            while !Task.isCancelled {
+                if !clearingTemp { hasTemp = bridge.hasTemporaryFiles }
+                do {
+                    try await Task.sleep(for: .seconds(2))
+                } catch {
+                    return
+                }
+            }
+        }
         // No .onAppear ensureRunning() here — NeoxApp's scenePhase(.active)
         // handler already restarts on every foreground. Keeping both would
         // restart twice at launch and log two 'listening' lines.

@@ -258,6 +258,13 @@ final class ServerController: ObservableObject {
         transactionCoordinator.dismissReleased()
     }
 
+    var hasTemporaryFiles: Bool {
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: exportsDir, includingPropertiesForKeys: nil
+        ) else { return false }
+        return !entries.isEmpty
+    }
+
     /// Delete all exported media from the /files/ serving directory.
     @discardableResult
     func clearExports() -> String {
