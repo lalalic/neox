@@ -158,7 +158,8 @@ final class NativeNeoYPhoneHandoffReceiver: NeoYPhoneHandoffReceiver, @unchecked
             "host=\(Self.hostName)",
             "port=\(NeoYDeploymentSettingsStore.load().mcpPort)",
             "ip=\(Self.lanIPv4 ?? "127.0.0.1")"
-        ] {
+        ] + (NeoYDeploymentSettingsStore.load().publicMCPURL.map { ["remote=\($0)"] } ?? []) {
+
             let data = Data(item.utf8)
             guard data.count <= 255 else { continue }
             txt.append(UInt8(data.count))

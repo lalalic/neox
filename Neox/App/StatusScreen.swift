@@ -6,8 +6,8 @@ import SwiftUI
 struct StatusView: View {
     @EnvironmentObject private var bridge: ServerController
     // Reference sections start collapsed; tap a header to expand.
-    @State private var neoyExpanded = false
     @State private var siriExpanded = false
+    @State private var requestsExpanded = false
     @State private var showingTourRunner = false
     @State private var showingVlogSubmission = false
     @State private var showingRemote = false
@@ -20,11 +20,11 @@ struct StatusView: View {
                 Circle()
                     .fill(stateColor)
                     .frame(width: 14, height: 14)
-                Text(bridge.mcpURL)
-                    .font(.system(size: 17, weight: .semibold, design: .monospaced))
-                    .textSelection(.enabled)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Neo").font(.headline)
+                    Text(bridge.state == .running ? "iPhone ready" : "Starting…")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 18)
@@ -66,32 +66,19 @@ struct StatusView: View {
 
             Divider()
 
-            Button { showingRemote = true } label: {
-                Label("Remote Mac", systemImage: "desktopcomputer")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .padding(.horizontal, 12)
-
-            Button { showingVlogSubmission = true } label: {
-                Label("Create Vlog", systemImage: "film.stack")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .padding([.horizontal, .top], 12)
-
-            // Foot buttons
-            HStack(spacing: 12) {
-                if bridge.photosStatus != .authorized && bridge.photosStatus != .limited {
-                    Button { Task { await bridge.requestPhotosAccess() } } label: {
-                        Label("Access Photos", systemImage: "photo.on.rectangle")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
+            HStack(spacing: 8) {
+                Button { showingRemote = true } label: {
+                    actionLabel("Control", icon: "desktopcomputer")
                 }
+                .buttonStyle(.bordered)
+
+                Button { showingVlogSubmission = true } label: {
+                    actionLabel("Create Vlog", icon: "film.stack")
+                }
+                .buttonStyle(.borderedProminent)
+
                 Button(role: .destructive) { bridge.clearExports() } label: {
-                    Label("Clear Exports", systemImage: "trash")
-                        .frame(maxWidth: .infinity)
+                    actionLabel("Clear Files", icon: "trash")
                 }
                 .buttonStyle(.bordered)
             }
@@ -106,63 +93,54 @@ struct StatusView: View {
         // restart twice at launch and log two 'listening' lines.
     }
 
+    private func actionLabel(_ name: String, icon: String) -> some View {
+        VStack(spacing: 5) {
+            Image(systemName: icon).font(.title3)
+            Text(name).font(.system(size: 11, weight: .medium)).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, minHeight: 54)
+    }
+
     private var ListView: some View {
         List {
             // Most-live information first.
-            Section("Requests") {
-                if bridge.logLines.isEmpty {
-                    Text("No requests yet.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(Array(bridge.logLines.enumerated().reversed()), id: \.offset) { _, line in
-                        Text(line)
-                            .font(.system(size: 11, weight: .regular, design: .monospaced))
-                            .textSelection(.enabled)
+            Section {
+                DisclosureGroup("Requests (\(bridge.logLines.count))", isExpanded: $requestsExpanded) {
+                    if bridge.logLines.isEmpty {
+                        Text("No activity yet.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(Array(bridge.logLines.enumerated().reversed()), id: \.offset) { _, line in
+                            Text(line)
+                                .font(.system(size: 11, weight: .regular, design: .monospaced))
+                                .textSelection(.enabled)
+                        }
                     }
                 }
             }
 
             CaptureTourCard(tours: tours, showingRunner: $showingTourRunner)
 
-            // Discovered desktop bridges — the desktop half of the handoff
-            // pair, codename "Neoy". Tap to select the preferred one; the
-            // intent hands off there.
-            Section {
-                DisclosureGroup("Neoy (\(bridge.discoveredBridges.count))", isExpanded: $neoyExpanded) {
+            Section("Neo Master") {
+                if bridge.discoveredBridges.isEmpty {
+                    Label(bridge.preferredBridge ?? "Looking for your Mac…",
+                          systemImage: "desktopcomputer")
+                        .foregroundStyle(.secondary)
+                } else {
                     ForEach(bridge.discoveredBridges) { entry in
-                        HStack(spacing: 6) {
-                            Image(systemName: bridge.preferredBridge == entry.name
-                                ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(Color.accentColor)
-                                .opacity(bridge.preferredBridge == entry.name ? 1 : 0.35)
-                            // Single line: name (semibold) + smaller address,
-                            // never wraps — scale/truncate together instead.
-                            (Text(entry.displayName)
-                                .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(.primary)
-                             + Text("  " + entry.endpointText)
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.secondary))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.7)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            // Select button kept OUTSIDE the row-tap target:
-                            // a full-row Button inside DisclosureGroup content
-                            // swallows taps, breaking fold/unfold.
-                            Button {
-                                bridge.preferredBridge = entry.name
-                            } label: {
-                                Image(systemName: "hand.tap")
-                                    .font(.system(size: 13))
+                        Button {
+                            bridge.preferredBridge = entry.name
+                        } label: {
+                            HStack {
+                                Image(systemName: bridge.preferredBridge == entry.name
+                                      ? "checkmark.circle.fill" : "circle")
+                                Label(entry.displayName, systemImage: "desktopcomputer")
+                                Spacer()
+                                Text("Nearby").font(.caption).foregroundStyle(.secondary)
                             }
-                            .buttonStyle(.borderless)
                         }
-                    }
-                    if bridge.discoveredBridges.isEmpty {
-                        Text("No Neoy on the LAN. Start one on the desktop (see neox-phone-mcp skill).")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        .buttonStyle(.plain)
                     }
                 }
             }

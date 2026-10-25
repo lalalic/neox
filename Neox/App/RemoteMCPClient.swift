@@ -14,6 +14,7 @@ final class RemoteMCPClient: ObservableObject {
     }
 
     @Published private(set) var savedMacs: [SavedMac] = []
+    @Published private(set) var selectedMasterName = UserDefaults.standard.string(forKey: "neox.selectedMasterName") ?? "Neo Master"
     @Published var endpoint = UserDefaults.standard.string(forKey: "remoteMCPURL") ?? ""
     @Published var connected = false
     @Published var busy = false
@@ -27,6 +28,7 @@ final class RemoteMCPClient: ObservableObject {
     private var requestID = 0
     private let legacyCredentialKey = "com.neox.app.remote-mcp-token"
     private let savedMacsKey = "remoteMCPHistoryV1"
+    private let namedMastersKey = "neox.knownMastersV1"
     private var bearer = ""
 
     init() {
@@ -50,6 +52,43 @@ final class RemoteMCPClient: ObservableObject {
     }
 
     var hasCredential: Bool { !bearer.isEmpty }
+    var hasConfiguredAddress: Bool { !endpoint.isEmpty }
+
+    /// The Bonjour-selected Mac is the only authority for Remote Mac selection.
+    /// Never send an existing access code to a newly advertised URL: Bonjour
+    /// announcements are unauthenticated and must not authorize secret transfer.
+    func selectMaster(name: String, advertisedURL: String?) {
+        guard !name.isEmpty else { return }
+        var known = UserDefaults.standard.dictionary(forKey: namedMastersKey) as? [String: String] ?? [:]
+        let firstBinding = selectedMasterName == "Neo Master" && known.isEmpty
+        if firstBinding, !endpoint.isEmpty { known[name] = endpoint }
+        selectedMasterName = name
+        UserDefaults.standard.set(name, forKey: "neox.selectedMasterName")
+        let advertised = advertisedURL.flatMap(Self.validEndpoint)
+        let target = advertised ?? known[name] ?? (firstBinding ? endpoint : "")
+        guard !target.isEmpty else {
+            endpoint = ""
+            bearer = ""
+            connected = false
+            return
+        }
+        if target != endpoint {
+            endpoint = target
+            bearer = Self.readSecret(account: Self.credentialAccount(for: target)) ?? ""
+            connected = false
+        }
+        known[name] = target
+        UserDefaults.standard.set(known, forKey: namedMastersKey)
+        UserDefaults.standard.set(target, forKey: "remoteMCPURL")
+    }
+
+    private static func validEndpoint(_ raw: String) -> String? {
+        guard let url = URL(string: raw), url.scheme == "https",
+              url.host != nil, url.user == nil, url.password == nil,
+              url.query == nil, url.fragment == nil else { return nil }
+        let value = raw.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return value.hasSuffix("/mcp") ? value : value + "/mcp"
+    }
     var isTerminalActive: Bool { sessionID != nil }
     var hasTerminalTool: Bool { !terminalTool.isEmpty }
 
@@ -74,14 +113,9 @@ final class RemoteMCPClient: ObservableObject {
     }
 
     func saveConfiguration(url: String, token: String) throws {
-        let value = url.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let parsed = URL(string: value),
-              parsed.scheme == "https", parsed.host != nil,
-              parsed.user == nil, parsed.password == nil, parsed.query == nil,
-              parsed.fragment == nil else {
+        guard let normalized = Self.validEndpoint(url.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw RemoteError.invalidEndpoint
         }
-        let normalized = value.hasSuffix("/mcp") ? value : value.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/mcp"
         if !token.isEmpty {
             try Self.saveSecret(token, account: Self.credentialAccount(for: normalized))
             bearer = token
@@ -91,6 +125,9 @@ final class RemoteMCPClient: ObservableObject {
         guard !bearer.isEmpty else { throw RemoteError.missingCredential }
         endpoint = normalized
         UserDefaults.standard.set(normalized, forKey: "remoteMCPURL")
+        var known = UserDefaults.standard.dictionary(forKey: namedMastersKey) as? [String: String] ?? [:]
+        known[selectedMasterName] = normalized
+        UserDefaults.standard.set(known, forKey: namedMastersKey)
         connected = false
     }
 
@@ -118,7 +155,10 @@ final class RemoteMCPClient: ObservableObject {
         Self.deleteSecret(account: Self.credentialAccount(for: endpoint))
         savedMacs.removeAll { $0.url == endpoint }
         UserDefaults.standard.set(savedMacs.map(\.url), forKey: savedMacsKey)
-        endpoint = savedMacs.first?.url ?? ""
+        var known = UserDefaults.standard.dictionary(forKey: namedMastersKey) as? [String: String] ?? [:]
+        known.removeValue(forKey: selectedMasterName)
+        UserDefaults.standard.set(known, forKey: namedMastersKey)
+        endpoint = ""
         bearer = Self.readSecret(account: Self.credentialAccount(for: endpoint)) ?? ""
         UserDefaults.standard.set(endpoint, forKey: "remoteMCPURL")
         disconnect()

@@ -1,21 +1,24 @@
 # Neox
 
-## Neo Remote: desktop and terminal
+## Neo Master: one Mac for everything
 
-NeoX's **Remote Mac** screen connects to the existing Neo HTTPS MCP endpoint
-from any network. Enter the endpoint and Neo token once; the token stays in
-the iPhone Keychain. The Terminal tab uses Neo's existing terminal tool.
+The Neo iPhone home screen discovers nearby Neo Master Macs. Select one
+machine there; Desktop, Commands, and agent handoff use that same selection.
+The Mac advertises its name and HTTPS MCP URL through Bonjour, **never any
+credential**. Previously saved Macs remain usable away from home Wi-Fi.
 
-The Desktop tab embeds a VNC viewer. Enable macOS **Screen Sharing** on the
-Neo Master, then enter that Mac user's screen-sharing username and password
-when connecting. The password is not stored. Tap to click, drag to move
-windows, and use the keyboard field to type.
+Only the selected Mac's access code and screen-sharing account/password are
+stored in the iPhone Keychain. If the Mac announces a different public domain,
+the iPhone requires its access code again; it never forwards an existing secret
+to an unverified Bonjour address. Connection details remain in Advanced setup.
 
-VNC passes through authenticated WSS on the same Neo gateway and then to
-macOS's loopback Screen Sharing server. No public port 5900 or legacy VNC
-password mode is needed. The iOS viewer pins RoyalVNCKit because macOS
-uses Apple Remote Desktop authentication; this is a deliberate exception
-to the repository's original zero-SPM-dependency constraint.
+Desktop uses the authenticated `/vnc` WebSocket route on that Mac's existing
+HTTPS gateway. macOS Screen Sharing is enabled only on loopback; public port
+5900 and a separate legacy VNC password are not required. Tap/click,
+pinch/zoom, pan, scroll, and long-press/right-click operate the real desktop.
+A dedicated password key enters the saved Mac password into the focused Mac
+input when the owner explicitly taps it. Closing or leaving the view ends
+the session.
 
 A headless iPhone app whose only consumer is a **desktop coding agent**. It runs
 an MCP (Model Context Protocol) server on the local network so an agent can

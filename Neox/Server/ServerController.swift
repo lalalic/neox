@@ -107,6 +107,9 @@ final class ServerController: ObservableObject {
             for await entries in browser.entries() {
                 guard let self else { return }
                 self.discoveredBridges = entries
+                if self.preferredBridge == nil, let first = entries.first {
+                    self.preferredBridge = first.name
+                }
             }
         }
     }

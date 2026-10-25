@@ -1,14 +1,19 @@
 import SwiftUI
 
+/// The master selected on the home screen owns both Desktop and Commands.
 struct RemoteControlView: View {
+    @EnvironmentObject private var bridge: ServerController
     @StateObject private var remote = RemoteMCPClient()
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
     @State private var token = ""
     @State private var address = ""
+    @State private var account = ""
+    @State private var password = ""
     @State private var command = ""
     @State private var tab = 0
     @State private var showSettings = false
+    @State private var showAdvanced = false
 
     var body: some View {
         NavigationStack {
@@ -24,23 +29,33 @@ struct RemoteControlView: View {
                     if tab == 0 { VNCViewerView(remote: remote) } else { terminal }
                 }
             }
-             .navigationTitle("My Mac")
+            .navigationTitle(remote.selectedMasterName)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close") { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(showSettings ? "Done" : "Macs") { showSettings.toggle() }
-                        .disabled(!remote.connected)
+                    if remote.connected {
+                        Button(showSettings ? "Done" : "Settings") { showSettings.toggle() }
+                    }
                 }
             }
             .task {
-                address = remote.endpoint
-                if remote.hasCredential && !remote.endpoint.isEmpty {
+                syncSelectedMaster()
+                if remote.hasCredential && remote.hasConfiguredAddress {
                     await remote.connect()
                 } else {
                     showSettings = true
                 }
+            }
+            .onChange(of: bridge.preferredBridge) { _, _ in
+                Task { await remote.closeTerminal() }
+                syncSelectedMaster()
+                if !remote.hasCredential { showSettings = true }
+            }
+            .onChange(of: bridge.discoveredBridges) { _, _ in
+                syncSelectedMaster()
+                if !remote.hasCredential { showSettings = true }
             }
             .onChange(of: showSettings) { _, showing in
                 if showing { Task { await remote.closeTerminal() } }
@@ -51,56 +66,82 @@ struct RemoteControlView: View {
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active { Task { await remote.closeTerminal() } }
             }
-            .onDisappear {
-                Task { await remote.closeTerminal() }
-            }
+            .onDisappear { Task { await remote.closeTerminal() } }
+        }
+    }
+
+    private func syncSelectedMaster() {
+        let selected = bridge.discoveredBridges.first { $0.name == bridge.preferredBridge }
+            ?? (bridge.preferredBridge == nil ? bridge.discoveredBridges.first : nil)
+        if let selected {
+            remote.selectMaster(name: selected.name, advertisedURL: selected.remoteURL)
+        } else if let preferred = bridge.preferredBridge {
+            remote.selectMaster(name: preferred, advertisedURL: nil)
+        }
+        address = remote.endpoint
+        if let saved = MacScreenCredentials.load(for: remote.endpoint) {
+            account = saved.username
+            password = ""
+        } else {
+            account = ""
+            password = ""
         }
     }
 
     private var configuration: some View {
         Form {
-            if !remote.savedMacs.isEmpty {
-                Section("Your Macs") {
-                    ForEach(remote.savedMacs) { mac in
-                        Button {
-                            remote.useSavedMac(mac)
-                            address = mac.url
-                            token = ""
-                            Task {
-                                await remote.connect()
-                                if remote.connected { showSettings = false }
-                            }
-                        } label: {
-                            Label(mac.name, systemImage: "desktopcomputer")
-                        }
-                    }
-                }
-            }
-            Section("Add a Mac") {
-                TextField("Mac address", text: $address)
-                    .keyboardType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                SecureField(remote.hasCredential ? "Saved passcode" : "Access code", text: $token)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                Text("Enter the address and access code once. Your iPhone will remember this Mac.")
+            Section("Neo Master") {
+                Label(remote.selectedMasterName, systemImage: "desktopcomputer")
+                Text("Desktop and Commands use this Mac.")
                     .font(.caption).foregroundStyle(.secondary)
-                Button(remote.busy ? "Connecting…" : "Connect") {
+            }
+            Section("Connect") {
+                SecureField(remote.hasCredential ? "Access code saved" : "Access code", text: $token)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Text("The access code is stored on this iPhone.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Mac sign-in") {
+                TextField("Mac account", text: $account)
+                    .textInputAutocapitalization(.never)
+                SecureField("Mac password", text: $password)
+                Text("Leave the password blank to keep the saved one.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Button(remote.busy ? "Connecting…" : "Save and connect") {
                     do {
                         try remote.saveConfiguration(url: address, token: token)
+                        if !account.isEmpty && !password.isEmpty {
+                            try MacScreenCredentials.save(username: account, password: password,
+                                                          for: remote.endpoint)
+                        }
                         token = ""
+                        password = ""
                         Task {
                             await remote.connect()
                             if remote.connected { showSettings = false }
                         }
-                    } catch { remote.error = error.localizedDescription }
+                    } catch {
+                        remote.error = error.localizedDescription
+                    }
                 }
                 .disabled(remote.busy)
             }
-            if remote.hasCredential {
-                Button("Remove saved Mac", role: .destructive) {
-                    remote.forgetCredential()
+            Section {
+                DisclosureGroup("Connection details", isExpanded: $showAdvanced) {
+                    TextField("Secure address", text: $address)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Text("Only needed when your Mac cannot be found automatically.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if remote.hasCredential {
+                    Button("Forget this Mac", role: .destructive) {
+                        remote.forgetCredential()
+                    }
                 }
             }
             if let error = remote.error {
@@ -142,9 +183,8 @@ struct RemoteControlView: View {
                     Task { await remote.closeTerminal() }
                 }
             } else {
-                Button("Start commands") {
-                    Task { await remote.startTerminal() }
-                }.buttonStyle(.borderedProminent)
+                Button("Start commands") { Task { await remote.startTerminal() } }
+                    .buttonStyle(.borderedProminent)
                     .disabled(!remote.hasTerminalTool)
             }
         }.padding(8)

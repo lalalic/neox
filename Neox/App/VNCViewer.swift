@@ -212,8 +212,23 @@ struct VNCViewerView: View {
                                 for _ in 0..<(previous.count - current.count) { viewer.backspace() }
                             }
                         }
-                    Button("Keyboard") { keyboardActive = true }
-                    Button("Return") { viewer.sendReturn() }
+                    Button { keyboardActive = true } label: {
+                        Image(systemName: "keyboard")
+                    }
+                    .accessibilityLabel("Open keyboard")
+                    Button {
+                        if let saved = MacScreenCredentials.load(for: remote.endpoint) {
+                            viewer.sendText(saved.password)
+                        }
+                    } label: {
+                        Image(systemName: "key.fill")
+                    }
+                    .accessibilityLabel("Type saved password")
+                    .disabled(MacScreenCredentials.load(for: remote.endpoint) == nil)
+                    Button { viewer.sendReturn() } label: {
+                        Image(systemName: "return")
+                    }
+                    .accessibilityLabel("Return")
                 }
                 .textFieldStyle(.roundedBorder)
                 Text("Tap to click · Double-tap to zoom · Pinch to resize · Two fingers to move or scroll · Hold for right-click")

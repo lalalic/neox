@@ -95,6 +95,8 @@ final class AgentBridgeDiscovery: ObservableObject {
         /// IPv4 address from the TXT `ip=` record — lets the phone skip
         /// all hostname resolution and connect directly.
         let ip: String?
+        /// Public HTTPS endpoint; never contains a credential.
+        let remoteURL: String?
         /// The NWEndpoint captured at browse time; it resolves lazily when a
         /// connection is opened against it (browse alone doesn't give the
         /// host/port — that's why the old row showed a bogus ":0").
@@ -134,12 +136,14 @@ final class AgentBridgeDiscovery: ObservableObject {
                 var host: String?
                 var port: UInt16?
                 var ip: String?
+                var remoteURL: String?
                 if case .bonjour(let txt) = result.metadata {
                     if case .string(let h)? = txt.getEntry(for: "host") { host = h }
                     if case .string(let p)? = txt.getEntry(for: "port") { port = UInt16(p) }
                     if case .string(let a)? = txt.getEntry(for: "ip") { ip = a }
+                    if case .string(let value)? = txt.getEntry(for: "remote") { remoteURL = value }
                 }
-                return Entry(id: n, name: n, host: host, port: port, ip: ip,
+                return Entry(id: n, name: n, host: host, port: port, ip: ip, remoteURL: remoteURL,
                              endpoint: result.endpoint)
             }
             Task { @MainActor [weak self] in
