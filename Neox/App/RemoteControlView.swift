@@ -18,8 +18,21 @@ struct RemoteControlView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                if showSettings || !remote.connected {
+                if showSettings {
                     configuration
+                } else if !remote.connected {
+                    VStack(spacing: 14) {
+                        if remote.busy || remote.error == nil {
+                            ProgressView("Connecting to your Mac…")
+                        } else {
+                            Text("Could not connect to your Mac.")
+                            Button("Try again") { Task { await remote.connect() } }
+                            if let error = remote.error {
+                                Text(error).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     Picker("Choose view", selection: $tab) {
                         Text("Desktop").tag(0)
@@ -35,23 +48,24 @@ struct RemoteControlView: View {
                     Button("Close") { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    if remote.connected {
-                        Button(showSettings ? "Done" : "Settings") { showSettings.toggle() }
-                    }
+                    Button(showSettings ? "Done" : "Settings") { showSettings.toggle() }
                 }
             }
             .task {
                 syncSelectedMaster()
-                if remote.hasCredential && remote.hasConfiguredAddress {
-                    await remote.connect()
-                } else {
+                if !remote.hasCredential || !remote.hasConfiguredAddress ||
+                   MacScreenCredentials.load(for: remote.endpoint) == nil {
                     showSettings = true
+                } else {
+                    await remote.connect()
                 }
             }
             .onChange(of: bridge.preferredBridge) { _, _ in
                 Task { await remote.closeTerminal() }
                 syncSelectedMaster()
-                if !remote.hasCredential { showSettings = true }
+                if !remote.hasCredential || MacScreenCredentials.load(for: remote.endpoint) == nil {
+                    showSettings = true
+                }
             }
             .onChange(of: bridge.discoveredBridges) { _, _ in
                 syncSelectedMaster()
@@ -59,6 +73,9 @@ struct RemoteControlView: View {
             }
             .onChange(of: showSettings) { _, showing in
                 if showing { Task { await remote.closeTerminal() } }
+                else if remote.hasCredential && !remote.connected {
+                    Task { await remote.connect() }
+                }
             }
             .onChange(of: tab) { _, newValue in
                 if newValue == 0 { Task { await remote.closeTerminal() } }
@@ -153,13 +170,21 @@ struct RemoteControlView: View {
     private var terminal: some View {
         VStack(spacing: 8) {
             ScrollView {
-                Text(remote.terminalOutput.isEmpty ? "Ready" : remote.terminalOutput)
+                Text(!remote.hasTerminalTool ? "Commands are not available on this Mac." :
+                     remote.terminalOutput.isEmpty ?
+                     (remote.busy ? "Connecting to your Mac…" : "Ready for commands") :
+                     remote.terminalOutput)
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(.green)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .textSelection(.enabled).padding(12)
             }
             .background(.black)
+            .task {
+                if !remote.isTerminalActive && remote.hasTerminalTool {
+                    await remote.startTerminal()
+                }
+            }
             HStack {
                 Button("Esc") { Task { await remote.sendTerminal("\u{001b}") } }
                 Button("Tab") { Task { await remote.sendTerminal("\t") } }
@@ -168,6 +193,7 @@ struct RemoteControlView: View {
                 Button("Update") { Task { await remote.pollTerminal() } }
             }
             .font(.caption).buttonStyle(.bordered)
+            .padding(.horizontal, 12)
             HStack {
                 TextField("Type a command", text: $command)
                     .textInputAutocapitalization(.never)
@@ -177,17 +203,14 @@ struct RemoteControlView: View {
                     .disabled(!remote.isTerminalActive)
             }
             .textFieldStyle(.roundedBorder)
-            .padding(.horizontal)
-            if remote.isTerminalActive {
-                Button("Finish", role: .destructive) {
-                    Task { await remote.closeTerminal() }
-                }
-            } else {
-                Button("Start commands") { Task { await remote.startTerminal() } }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!remote.hasTerminalTool)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 10)
+            if let error = remote.error {
+                Text(error).font(.caption).foregroundStyle(.red)
+                Button("Try again") { Task { await remote.startTerminal() } }
+                    .disabled(remote.busy)
             }
-        }.padding(8)
+        }
     }
 
     private func sendCommand() {

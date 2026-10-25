@@ -174,21 +174,16 @@ struct VNCViewerView: View {
     var body: some View {
         VStack(spacing: 10) {
             if viewer.frame == nil {
-                Form {
-                    Section("Your Mac screen") {
-                        Text("See and control your Mac from your iPhone.").foregroundStyle(.secondary)
-                        TextField("Mac account name", text: $username)
-                            .textInputAutocapitalization(.never)
-                        SecureField("Mac login password", text: $password)
-                        Text("Your Mac login is remembered securely on this iPhone.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Button("Connect") { connectDesktop() }
-                    }
-                    Section {
-                        Text(viewer.status == "Not connected" ? "Ready to connect" : viewer.status)
-                        if let error = viewer.error { Text(error).foregroundStyle(.red) }
+                VStack(spacing: 14) {
+                    if viewer.error == nil {
+                        ProgressView("Loading your desktop…")
+                    } else {
+                        Text("Could not show your desktop.")
+                        Text(viewer.error ?? "").font(.caption).foregroundStyle(.secondary)
+                        Button("Try again") { connectDesktop() }
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let image = viewer.frame {
                 RemoteDesktopCanvas(image: image,
                                     onClick: { viewer.tap(relativeX: $0, relativeY: $1) },
