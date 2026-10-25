@@ -78,19 +78,10 @@ struct VoiceChatGPTTab: Sendable {
 
 @MainActor
 final class VoiceThreadSelection: ObservableObject {
-    @Published var input = VoiceThreadBinding.load()?.displayValue ?? ""
+    @Published private(set) var input = VoiceThreadBinding.load()?.displayValue ?? ""
     @Published private(set) var title = ""
     @Published private(set) var message = ""
     private var revision = 0
-
-    func save() {
-        if VoiceThreadBinding.save(input) {
-            title = ""
-            message = "Thread binding saved."
-        } else {
-            message = "Enter a valid ChatGPT thread URL or UUID."
-        }
-    }
 
     func refreshFromChrome() {
         revision += 1
@@ -692,17 +683,18 @@ struct VoiceSessionView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             HStack {
-                TextField("ChatGPT Thread URL or ID", text: $selection.input)
-                    .textFieldStyle(.roundedBorder)
-                Button("Save") { selection.save() }
-                    .disabled(VoiceThreadBinding.parse(selection.input) == nil)
+                Text(selection.input.isEmpty ? "No ChatGPT thread selected" : selection.input)
+                    .font(.system(.caption, design: .monospaced))
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 Button("Refresh") { selection.refreshFromChrome() }
                     .disabled(![VoiceSessionState.idle, .completed, .error].contains(controller.state))
             }
             if !selection.message.isEmpty {
                 Text(selection.message).font(.caption).foregroundStyle(.secondary)
             }
-            Text(VoiceThreadBinding.load() == nil ? "Save a thread before listening." : "Speech is sent to the saved thread.").font(.caption).foregroundStyle(.secondary)
+            Text(VoiceThreadBinding.load() == nil ? "Open a ChatGPT tab in Chrome, then Refresh." : "Speech is sent to the selected thread.").font(.caption).foregroundStyle(.secondary)
             Label(controller.state.rawValue.capitalized, systemImage: controller.state == .listening ? "mic.fill" : "mic.slash")
                 .foregroundStyle(controller.state == .error ? .red : .primary)
             if let error = controller.errorMessage { Text(error).foregroundStyle(.red) }
