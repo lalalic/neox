@@ -78,8 +78,14 @@ enum NeoYFeatureCatalog {
 actor NeoYFeatureManager {
     static let shared = NeoYFeatureManager()
 
-    private let root = NeoYPaths.supportDirectory.appendingPathComponent("products", isDirectory: true)
-    private let stateURL = NeoYPaths.supportDirectory.appendingPathComponent("features.json")
+    private let root: URL
+    private let stateURL: URL
+
+    init(root: URL = NeoYPaths.supportDirectory.appendingPathComponent("products", isDirectory: true),
+         stateURL: URL = NeoYPaths.supportDirectory.appendingPathComponent("features.json")) {
+        self.root = root
+        self.stateURL = stateURL
+    }
 
     func records() -> [NeoYFeatureRecord] { loadRecords() }
     func record(id: String) -> NeoYFeatureRecord? { loadRecords().first { $0.id == id } }

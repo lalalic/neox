@@ -38,7 +38,7 @@ final class NeoYSetupModel: ObservableObject {
     @Published var neoCLIReport = "Checking Neo CLI…"
     @Published var toolkitUninstallable = false
     @Published var toolkitInstalled = false
-    @Published var toolkitEnabled = UserDefaults.standard.object(forKey: "NeoProjectsToolkitEnabled") as? Bool ?? true
+    @Published var toolkitEnabled = NeoCLISetup.wantsProjectsToolkit()
     @Published var globalSkills = NeoCLISetup.globalSkills()
     @Published var optionalSkills: Set<String> = []
     @Published private(set) var projectNames: [String] = []
@@ -246,7 +246,7 @@ final class NeoYSetupModel: ObservableObject {
     func setToolkitEnabled(_ enabled: Bool) {
         guard !isBusy else { return }
         toolkitEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: "NeoProjectsToolkitEnabled")
+        UserDefaults.standard.set(enabled, forKey: NeoCLISetup.toolkitPreferenceKey)
         if enabled && !toolkitInstalled { setupNeoCLI() }
     }
 
@@ -257,6 +257,7 @@ final class NeoYSetupModel: ObservableObject {
             let message: String
             do {
                 _ = try NeoCLISetup.runSkills(["add", source, "-g", "-y", "-s", name])
+                NeoCLISetup.setOptionalSkillDesired(name, enabled: true)
                 message = "Installed \(name)."
             } catch { message = "Installation failed: \(error.localizedDescription)" }
             await MainActor.run {
@@ -280,6 +281,7 @@ final class NeoYSetupModel: ObservableObject {
             let message: String
             do {
                 try NeoCLISetup.removeOptionalSkill(name)
+                NeoCLISetup.setOptionalSkillDesired(name, enabled: false)
                 message = "Uninstalled \(name)."
             } catch { message = "Uninstall failed: \(error.localizedDescription)" }
             await MainActor.run {
