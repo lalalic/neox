@@ -82,6 +82,17 @@ final class VoiceSessionTests: XCTestCase {
         XCTAssertEqual(VoiceThreadBinding.load(defaults: defaults)?.threadID, id)
     }
 
+    func testActiveChromeTabParsesTitleAndRejectsUnrelatedPages() {
+        let id = "6adb5143-bdf0-83e9-9c16-966c11d5f618"
+        let project = "g-p-6ac92adf1a988191b37ed5526c72caac-orchestrators"
+        let tab = VoiceChatGPTTab.parse("https://chatgpt.com/g/\(project)/c/\(id)\nNeo App Issues and Changes\n")
+        XCTAssertEqual(tab?.binding.threadID, id)
+        XCTAssertEqual(tab?.binding.projectID, project)
+        XCTAssertEqual(tab?.title, "Neo App Issues and Changes")
+        XCTAssertNil(VoiceChatGPTTab.parse("https://example.com/c/\(id)\nOther"))
+        XCTAssertNil(VoiceChatGPTTab.parse("https://chatgpt.com/\nChatGPT"))
+    }
+
     func testMuteLifecycleIsExplicitAndReversible() {
         let controller = VoiceSessionController()
         controller.beginTestingSession(id: "lifecycle")

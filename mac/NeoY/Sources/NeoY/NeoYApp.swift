@@ -66,6 +66,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var setupWindow: NSWindow?
     private var voiceWindow: NSWindow?
     private let voiceController = VoiceSessionController()
+    private let voiceThreadSelection = VoiceThreadSelection()
     private var runtimeControl: NeoYRuntimeControl?
     private let coreNodes = NeoYNodeService()
     private var observers: [NSObjectProtocol] = []
@@ -210,8 +211,12 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func showVoiceWindow() {
+        if [.idle, .completed, .error].contains(voiceController.state) {
+            voiceThreadSelection.refreshFromChrome()
+        }
         if voiceWindow == nil {
-            let controller = NSHostingController(rootView: VoiceSessionView(controller: voiceController))
+            let controller = NSHostingController(rootView: VoiceSessionView(
+                controller: voiceController, selection: voiceThreadSelection))
             let value = NSWindow(contentViewController: controller)
             value.title = "Neo Listen & Talk"
             value.styleMask = [.titled, .closable, .miniaturizable, .resizable]

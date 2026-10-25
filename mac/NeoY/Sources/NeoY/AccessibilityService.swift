@@ -167,6 +167,7 @@ final class NeoYAccessibilityController: NeoYAccessibilityService, @unchecked Se
         return (frame, element)
     }
 
+    @MainActor
     func click(_ target: DemoTarget) async throws -> String {
         let resolved = try resolve(target)
         if let element = resolved.element, canPerformPress(element) {

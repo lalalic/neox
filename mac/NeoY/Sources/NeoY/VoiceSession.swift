@@ -3,7 +3,7 @@ import AppKit
 import Speech
 import SwiftUI
 
-struct VoiceThreadBinding: Codable, Equatable {
+struct VoiceThreadBinding: Codable, Equatable, Sendable {
     let threadID: String
     let projectID: String?
 
@@ -43,6 +43,74 @@ struct VoiceThreadBinding: Codable, Equatable {
         guard let binding = parse(input), let data = try? JSONEncoder().encode(binding) else { return false }
         defaults.set(data, forKey: storageKey)
         return true
+    }
+}
+
+struct VoiceChatGPTTab: Sendable {
+    let binding: VoiceThreadBinding
+    let title: String
+
+    static func parse(_ output: String) -> Self? {
+        let lines = output.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let url = lines.first, let binding = VoiceThreadBinding.parse(String(url)) else { return nil }
+        let title = lines.count > 1 ? String(lines[1]).trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        return Self(binding: binding, title: title.isEmpty ? "ChatGPT Thread" : title)
+    }
+
+    static func readActive() -> Self? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", "tell application \"Google Chrome\" to get (URL of active tab of front window) & linefeed & (title of active tab of front window)"]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = Pipe()
+        let done = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in done.signal() }
+        do { try process.run() } catch { return nil }
+        guard done.wait(timeout: .now() + 4) == .success else {
+            process.terminate()
+            return nil
+        }
+        guard process.terminationStatus == 0 else { return nil }
+        return parse(String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
+    }
+}
+
+@MainActor
+final class VoiceThreadSelection: ObservableObject {
+    @Published var input = VoiceThreadBinding.load()?.displayValue ?? ""
+    @Published private(set) var title = ""
+    @Published private(set) var message = ""
+    private var revision = 0
+
+    func save() {
+        if VoiceThreadBinding.save(input) {
+            title = ""
+            message = "Thread binding saved."
+        } else {
+            message = "Enter a valid ChatGPT thread URL or UUID."
+        }
+    }
+
+    func refreshFromChrome() {
+        revision += 1
+        let request = revision
+        message = "Looking for the active ChatGPT tab…"
+        Task.detached(priority: .userInitiated) {
+            let tab = VoiceChatGPTTab.readActive()
+            await MainActor.run {
+                guard self.revision == request else { return }
+                guard let tab else {
+                    self.message = "No active ChatGPT tab in Chrome. The saved binding is unchanged."
+                    return
+                }
+                let value = tab.binding.displayValue
+                guard VoiceThreadBinding.save(value) else { return }
+                self.input = value
+                self.title = tab.title
+                self.message = "Bound to Chrome's active ChatGPT tab."
+            }
+        }
     }
 }
 
@@ -612,24 +680,27 @@ private enum VoiceToolError: LocalizedError {
 @MainActor
 struct VoiceSessionView: View {
     @ObservedObject var controller: VoiceSessionController
+    @ObservedObject var selection: VoiceThreadSelection
     @State private var injectedText = ""
-    @State private var threadInput = VoiceThreadBinding.load()?.displayValue ?? ""
-    @State private var bindingMessage = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Listen & Talk").font(.title2)
-            HStack {
-                TextField("ChatGPT Thread URL or ID", text: $threadInput)
-                    .textFieldStyle(.roundedBorder)
-                Button("Save") {
-                    bindingMessage = VoiceThreadBinding.save(threadInput)
-                        ? "Thread binding saved." : "Enter a valid ChatGPT thread URL or UUID."
-                }
-                .disabled(VoiceThreadBinding.parse(threadInput) == nil)
+            if !selection.title.isEmpty {
+                Text(selection.title).font(.headline).lineLimit(2)
+                Text("ChatGPT · \(VoiceThreadBinding.load()?.threadID ?? "")")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-            if !bindingMessage.isEmpty {
-                Text(bindingMessage).font(.caption).foregroundStyle(.secondary)
+            HStack {
+                TextField("ChatGPT Thread URL or ID", text: $selection.input)
+                    .textFieldStyle(.roundedBorder)
+                Button("Save") { selection.save() }
+                    .disabled(VoiceThreadBinding.parse(selection.input) == nil)
+                Button("Refresh") { selection.refreshFromChrome() }
+                    .disabled(![VoiceSessionState.idle, .completed, .error].contains(controller.state))
+            }
+            if !selection.message.isEmpty {
+                Text(selection.message).font(.caption).foregroundStyle(.secondary)
             }
             Text(VoiceThreadBinding.load() == nil ? "Save a thread before listening." : "Speech is sent to the saved thread.").font(.caption).foregroundStyle(.secondary)
             Label(controller.state.rawValue.capitalized, systemImage: controller.state == .listening ? "mic.fill" : "mic.slash")
