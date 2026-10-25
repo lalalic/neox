@@ -105,6 +105,35 @@ final class VoiceSessionTests: XCTestCase {
         XCTAssertFalse(controller.muted)
     }
 
+    func testHandsFreeFinalRecognitionSubmitsOnceAndCanBeStopped() async {
+        let controller = VoiceSessionController(synthesizer: FakeSynthesizer()) { _, _, _ in .submitted }
+        controller.beginTestingSession()
+        await controller.setHandsFree(true)
+        XCTAssertTrue(controller.handsFreeEnabled)
+        await controller.acceptRecognition(text: "hello", isFinal: true)
+        XCTAssertEqual(controller.lastReceipt?.status, "submitted")
+        XCTAssertEqual(controller.lastReceipt?.text, "hello")
+        await controller.acceptRecognition(text: "hello", isFinal: true)
+        XCTAssertEqual(controller.lastReceipt?.text, "hello")
+        await controller.setHandsFree(false)
+        XCTAssertFalse(controller.handsFreeEnabled)
+    }
+
+    func testHandsFreePlaybackMutesMicrophoneUntilSpeechEnds() async {
+        let synth = FakeSynthesizer()
+        synth.deferPlayback = true
+        let controller = VoiceSessionController(synthesizer: synth)
+        controller.beginTestingSession()
+        await controller.setHandsFree(true)
+        controller.speak("reply")
+        XCTAssertTrue(controller.isSpeaking)
+        XCTAssertTrue(controller.muted)
+        synth.pending?(true)
+        XCTAssertFalse(controller.isSpeaking)
+        XCTAssertFalse(controller.muted)
+        await controller.setHandsFree(false)
+    }
+
     func testTextInjectionUsesCommandCompletionAndTTS() async {
         let synthesizer = FakeSynthesizer()
         let controller = VoiceSessionController(synthesizer: synthesizer) { session, correlation, text in

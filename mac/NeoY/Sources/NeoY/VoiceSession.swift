@@ -185,6 +185,8 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
     @Published private(set) var transcript = ""
     @Published private(set) var lastReceipt: VoiceCommandReceipt?
     @Published private(set) var errorMessage: String?
+    @Published private(set) var handsFreeEnabled = false
+    @Published private(set) var isSpeaking = false
     private(set) var sessionID: String?
 
     private let synthesizer: VoiceSynthesizer
@@ -193,6 +195,9 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var stopTask: Task<Void, Never>?
+    private var silenceTask: Task<Void, Never>?
+    private var restartTask: Task<Void, Never>?
+    private var speakingCount = 0
     private var recognizer: SFSpeechRecognizer?
     private var didSubmitTurn = false
     private var finalResultReceived = false
@@ -227,6 +232,40 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
         commandExecutor = executor
     }
 
+    func setHandsFree(_ enabled: Bool) async {
+        handsFreeEnabled = enabled
+        if enabled {
+            if [.idle, .completed, .error].contains(state) { await start() }
+        } else {
+            silenceTask?.cancel()
+            restartTask?.cancel()
+            if [.starting, .listening, .muted].contains(state) {
+                // End capture without sending a partial utterance.
+                recognitionGeneration += 1
+                stopGeneration += 1
+                stopTask?.cancel()
+                removeInputTap()
+                engine?.stop()
+                recognitionTask?.cancel()
+                recognitionTask = nil
+                request = nil
+                engine = nil
+                muted = false
+                state = .idle
+            }
+        }
+    }
+
+    private func restartListening() {
+        guard handsFreeEnabled else { return }
+        restartTask?.cancel()
+        restartTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+            guard let self, self.handsFreeEnabled else { return }
+            await self.start()
+        }
+    }
+
     func start(language: String = "en-US") async {
         guard state == .idle || state == .completed || state == .error else { return }
         state = .starting
@@ -237,6 +276,7 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
         muted = false
         didSubmitTurn = false
         finalResultReceived = false
+        silenceTask?.cancel()
         stopGeneration += 1
         recognitionGeneration += 1
         let recognitionID = recognitionGeneration
@@ -288,6 +328,7 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
         self.request = speechRequest
         self.sessionID = UUID().uuidString
         self.state = .listening
+        if handsFreeEnabled && isSpeaking { setMuted(true) }
         recognitionTask = recognizer.recognitionTask(with: speechRequest) { [weak self] result, error in
             Task { @MainActor in
                 guard let self, recognitionID == self.recognitionGeneration else { return }
@@ -311,6 +352,7 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
         state = .stopping
         stopGeneration += 1
         stopTask?.cancel()
+        silenceTask?.cancel()
         removeInputTap()
         engine?.stop()
         request?.endAudio()
@@ -351,7 +393,20 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
     }
 
     func speak(_ text: String) {
-        synthesizer.speak(text) { _ in }
+        beginPlayback()
+        synthesizer.speak(text) { [weak self] _ in self?.endPlayback() }
+    }
+
+    private func beginPlayback() {
+        speakingCount += 1
+        isSpeaking = true
+        if handsFreeEnabled { silenceTask?.cancel(); setMuted(true) }
+    }
+
+    private func endPlayback() {
+        speakingCount = max(0, speakingCount - 1)
+        isSpeaking = speakingCount > 0
+        if !isSpeaking, handsFreeEnabled { setMuted(false) }
     }
 
     // Bind delivery to the active session and its pending turn. The caller
@@ -438,8 +493,12 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
     }
 
     private func speakAndWait(_ text: String) async -> Bool {
-        await withCheckedContinuation { continuation in
-            synthesizer.speak(text) { delivered in continuation.resume(returning: delivered) }
+        beginPlayback()
+        return await withCheckedContinuation { continuation in
+            synthesizer.speak(text) { [weak self] delivered in
+                self?.endPlayback()
+                continuation.resume(returning: delivered)
+            }
         }
     }
 
@@ -447,7 +506,16 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
     func acceptRecognition(text: String, isFinal: Bool, generation: Int? = nil) async {
         guard generation == nil || generation == recognitionGeneration else { return }
         guard !didSubmitTurn, state == .listening || state == .muted || state == .stopping else { return }
+        let changed = transcript != text
         transcript = text
+        if handsFreeEnabled, changed, !muted, !isFinal, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            silenceTask?.cancel()
+            silenceTask = Task { [weak self] in
+                do { try await Task.sleep(for: .milliseconds(1800)) } catch { return }
+                guard let self, self.handsFreeEnabled, self.state == .listening else { return }
+                await self.stop()
+            }
+        }
         if isFinal {
             finalResultReceived = true
             await finishTurn()
@@ -459,6 +527,7 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
         guard !didSubmitTurn else { return }
         didSubmitTurn = true
         stopTask?.cancel()
+        silenceTask?.cancel()
         let finalText = transcript
         removeInputTap()
         engine?.stop()
@@ -468,6 +537,7 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
         engine = nil
         state = .completed
         await submit(text: finalText)
+        restartListening()
     }
 
     private func submit(text: String) async {
@@ -521,6 +591,8 @@ final class VoiceSessionController: NSObject, ObservableObject, SFSpeechRecogniz
 
     private func fail(_ message: String) {
         recognitionGeneration += 1
+        handsFreeEnabled = false
+        silenceTask?.cancel()
         errorMessage = message
         state = .error
         removeInputTap()
@@ -667,7 +739,7 @@ private enum VoiceToolError: LocalizedError {
 struct VoiceSessionView: View {
     @ObservedObject var controller: VoiceSessionController
     @ObservedObject var selection: VoiceThreadSelection
-    @State private var injectedText = ""
+    let onHandsFreeChanged: () -> Void
     @AppStorage("neo.voice.replyEnabled") private var voiceReplyEnabled = true
 
     var body: some View {
@@ -692,18 +764,55 @@ struct VoiceSessionView: View {
             }
             Text(VoiceThreadBinding.load() == nil ? "Open a ChatGPT tab in Chrome, then Refresh." : "Speech is sent to the selected thread.").font(.caption).foregroundStyle(.secondary)
             Toggle("Voice Reply", isOn: $voiceReplyEnabled)
+            Toggle("Hands-free", isOn: Binding(
+                get: { controller.handsFreeEnabled },
+                set: { enabled in Task { await controller.setHandsFree(enabled); onHandsFreeChanged() } }
+            ))
+            .disabled(VoiceThreadBinding.load() == nil && !controller.handsFreeEnabled)
             Label(controller.state.rawValue.capitalized, systemImage: controller.state == .listening ? "mic.fill" : "mic.slash")
                 .foregroundStyle(controller.state == .error ? .red : .primary)
             if let error = controller.errorMessage { Text(error).foregroundStyle(.red) }
             Text(controller.transcript.isEmpty ? "No speech recognized yet." : controller.transcript)
                 .frame(maxWidth: .infinity, alignment: .leading).padding(8).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             HStack {
-                Button("Start") { Task { await controller.start() } }.disabled(VoiceThreadBinding.load() == nil || controller.state == .listening || controller.state == .muted)
-                Button("Stop") { Task { await controller.stop() } }.disabled(controller.state == .idle || controller.state == .completed)
+                Button("Start once") { Task { await controller.start() } }.disabled(controller.handsFreeEnabled || VoiceThreadBinding.load() == nil || controller.state == .listening || controller.state == .muted)
+                Button("Stop") { Task { await controller.stop() } }.disabled(controller.handsFreeEnabled || controller.state == .idle || controller.state == .completed)
                 Button(controller.muted ? "Unmute" : "Mute") { controller.setMuted(!controller.muted) }.disabled(controller.state != .listening && controller.state != .muted)
             }
-            HStack { TextField("Inject text without microphone", text: $injectedText); Button("Send") { let text = injectedText; injectedText = ""; Task { _ = await controller.inject(text: text) } }.disabled(injectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
             if let receipt = controller.lastReceipt { Text("Command \(receipt.status) · \(receipt.correlationID)").font(.caption).foregroundStyle(.secondary) }
         }.padding(22).frame(width: 520)
+    }
+}
+
+@MainActor
+struct VoiceAvatarView: View {
+    @ObservedObject var controller: VoiceSessionController
+    let openWindow: () -> Void
+
+    private var status: (String, String, Color) {
+        if controller.isSpeaking { return ("Speaking", "waveform", .blue) }
+        if controller.state == .muted { return ("Muted", "mic.slash.fill", .orange) }
+        if controller.state == .listening { return ("Listening", "mic.fill", .green) }
+        if controller.state == .error { return ("Error", "exclamationmark.triangle.fill", .red) }
+        if controller.lastReceipt?.status == "submitted" { return ("Thinking", "ellipsis.bubble.fill", .purple) }
+        return ("Ready", "person.crop.circle.fill", .gray)
+    }
+
+    var body: some View {
+        let (title, symbol, tint) = status
+        Button(action: openWindow) {
+            VStack(spacing: 4) {
+                Image(systemName: symbol)
+                    .font(.system(size: 25, weight: .medium))
+                    .foregroundStyle(.white)
+                    .frame(width: 53, height: 53)
+                    .background(tint.gradient, in: Circle())
+                Text(title).font(.system(size: 10, weight: .medium)).foregroundStyle(.primary)
+            }
+            .frame(width: 84, height: 86)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Neo voice: \(title). Open Listen & Talk")
     }
 }

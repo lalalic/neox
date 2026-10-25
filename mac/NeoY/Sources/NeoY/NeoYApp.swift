@@ -63,6 +63,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: NSWindow?
     private var setupWindow: NSWindow?
     private var voiceWindow: NSWindow?
+    private var voiceAvatarWindow: NSPanel?
     private let voiceController = VoiceSessionController()
     private let voiceThreadSelection = VoiceThreadSelection()
     private var runtimeControl: NeoYRuntimeControl?
@@ -226,7 +227,8 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         if voiceWindow == nil {
             let controller = NSHostingController(rootView: VoiceSessionView(
-                controller: voiceController, selection: voiceThreadSelection))
+                controller: voiceController, selection: voiceThreadSelection,
+                onHandsFreeChanged: { [weak self] in self?.updateVoiceAvatar() }))
             let value = NSWindow(contentViewController: controller)
             value.title = "Neo Listen & Talk"
             value.styleMask = [.titled, .closable, .miniaturizable, .resizable]
@@ -236,6 +238,32 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         voiceWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func updateVoiceAvatar() {
+        guard voiceController.handsFreeEnabled else {
+            voiceAvatarWindow?.orderOut(nil)
+            return
+        }
+        if voiceAvatarWindow == nil {
+            let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 84, height: 86),
+                                styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            panel.contentView = NSHostingView(rootView: VoiceAvatarView(
+                controller: voiceController, openWindow: { [weak self] in self?.showVoiceWindow() }))
+            panel.level = .floating
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            panel.backgroundColor = .clear
+            panel.isOpaque = false
+            panel.hasShadow = true
+            panel.isReleasedWhenClosed = false
+            panel.isMovableByWindowBackground = true
+            if let screen = NSScreen.main {
+                panel.setFrameOrigin(NSPoint(x: screen.visibleFrame.maxX - 108,
+                                             y: screen.visibleFrame.maxY - 110))
+            }
+            voiceAvatarWindow = panel
+        }
+        voiceAvatarWindow?.orderFrontRegardless()
     }
 
     private func restartPrimaryMCPServer() {
