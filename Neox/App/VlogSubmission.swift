@@ -218,7 +218,9 @@ struct VlogSubmissionView: View {
             .navigationTitle("Create Vlog")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                    Button { dismiss() } label: { Image(systemName: "xmark") }
+                        .accessibilityLabel("Close")
+                        .buttonStyle(.plain)
                 }
             }
         }

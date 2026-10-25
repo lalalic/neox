@@ -73,12 +73,14 @@ struct RemoteControlView: View {
                         Image(systemName: "xmark")
                     }
                     .accessibilityLabel("Close")
+                    .buttonStyle(.plain)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showSettings.toggle() } label: {
                         Image(systemName: showSettings ? "checkmark" : "gearshape")
                     }
                     .accessibilityLabel(showSettings ? "Done" : "Settings")
+                    .buttonStyle(.plain)
                 }
             }
             .task {
