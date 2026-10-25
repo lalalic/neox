@@ -33,7 +33,6 @@ final class NeoYSetupModel: ObservableObject {
     @Published private(set) var oauthClientID = ""
     @Published private(set) var oauthToken = ""
     @Published var result = ""
-    @Published var coreVersionInput = "latest"
     @Published var coreRuntimeStatus = NeoYManagedCoreRuntime.active()?.lastPathComponent ?? "bootstrap Core (not installed)"
     @Published var neoCLIReport = "Checking Neo CLI…"
     @Published var toolkitUninstallable = false
@@ -66,22 +65,22 @@ final class NeoYSetupModel: ObservableObject {
         coreRuntimeStatus = NeoYManagedCoreRuntime.active()?.lastPathComponent ?? "bootstrap Core (not installed)"
     }
 
-    func changeCoreRuntime(rollback: Bool = false) {
+    func checkCoreUpdates() {
         guard !isBusy else { return }
-        let version = coreVersionInput.trimmingCharacters(in: .whitespacesAndNewlines)
         isBusy = true
         Task.detached { [weak self] in
             let message: String
             do {
-                let selected = try rollback
-                    ? NeoYManagedCoreRuntime.rollbackPrevious()
-                    : NeoYManagedCoreRuntime.registryUpgrade(version: version)
-                message = "Core switched to \(selected); reconnecting Core provider"
-                await MainActor.run {
-                    NotificationCenter.default.post(name: Notification.Name("neoYCoreRuntimeChanged"), object: nil)
+                if let selected = try NeoYManagedCoreRuntime.upgradeIfAvailable() {
+                    message = "Core updated to \(selected)."
+                    await MainActor.run {
+                        NotificationCenter.default.post(name: Notification.Name("neoYCoreRuntimeChanged"), object: nil)
+                    }
+                } else {
+                    message = "Core is up to date."
                 }
             } catch {
-                message = "Core unchanged: \(error.localizedDescription)"
+                message = "Update check failed: \(error.localizedDescription)"
             }
             await MainActor.run {
                 self?.result = message
@@ -641,6 +640,9 @@ struct NeoYSetupView: View {
         }
         .frame(width: 810, height: 650)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("neoYCoreRuntimeChanged"))) { _ in
+            model.refreshCoreRuntime()
+        }
         .disabled(model.isBusy)
     }
 
@@ -667,19 +669,6 @@ struct NeoYSetupView: View {
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         Button("Revoke token", role: .destructive) { model.revokeToken() }
-                    }
-                }
-                .padding(8)
-            }
-
-            GroupBox("Core Updates") {
-                VStack(alignment: .leading, spacing: 10) {
-                    valueRow("Installed", value: model.coreRuntimeStatus)
-                    HStack {
-                        TextField("Version or latest", text: $model.coreVersionInput)
-                            .textFieldStyle(.roundedBorder)
-                        Button("Update") { model.changeCoreRuntime() }
-                        Button("Roll Back") { model.changeCoreRuntime(rollback: true) }
                     }
                 }
                 .padding(8)
@@ -762,6 +751,19 @@ struct NeoYSetupView: View {
             HStack {
                 heading("Features", "Manage Neo capabilities.")
                 Button("Refresh") { Task { await model.refreshMCPTools() } }
+            }
+            GroupBox("Neo Core") {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Updates automatically").font(.subheadline)
+                        Text("Installed: \(model.coreRuntimeStatus)")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Check now") { model.checkCoreUpdates() }
+                        .disabled(model.isBusy)
+                }
+                .padding(8)
             }
 
             VStack(alignment: .leading, spacing: 0) {

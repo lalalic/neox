@@ -84,6 +84,40 @@ enum NeoYManagedCoreRuntime {
         }
         return false
     }
+    static func needsUpdate(installed: String?, latest: String) -> Bool {
+        guard latest.range(of: #"^[0-9]+\.[0-9]+\.[0-9]+$"#, options: .regularExpression) != nil else { return false }
+        guard let installed else { return true }
+        return isOlder(installed, than: latest)
+    }
+    /// Checks the stable npm release before downloading; unchanged installations stay untouched.
+    @discardableResult
+    static func upgradeIfAvailable(root: URL = root) throws -> String? {
+        guard let npm = ["/opt/homebrew/bin/npm", "/usr/local/bin/npm"]
+            .first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
+            throw NSError(domain: "NeoYCore", code: 8, userInfo: [NSLocalizedDescriptionKey: "npm is required"])
+        }
+        let check = Process()
+        check.executableURL = URL(fileURLWithPath: npm)
+        check.arguments = ["view", "@lalalic/neoy-core", "version", "--json", "--prefer-online"]
+        check.environment = ProcessInfo.processInfo.environment.merging([
+            "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+            "npm_config_fetch_retries": "0",
+            "npm_config_fetch_timeout": "10000"
+        ]) { _, configured in configured }
+        let output = Pipe()
+        check.standardOutput = output
+        check.standardError = Pipe()
+        try check.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        check.waitUntilExit()
+        guard check.terminationStatus == 0,
+              let latest = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) as? String,
+              latest.range(of: #"^[0-9]+\.[0-9]+\.[0-9]+$"#, options: .regularExpression) != nil else {
+            throw NSError(domain: "NeoYCore", code: 17, userInfo: [NSLocalizedDescriptionKey: "Latest Core version unavailable"])
+        }
+        guard needsUpdate(installed: active(in: root)?.lastPathComponent, latest: latest) else { return nil }
+        return try registryUpgrade(version: latest, root: root)
+    }
     /// Accept an npm version/tag or a local verified .tgz release artifact.
     static func registryUpgrade(version requested: String, root: URL = root) throws -> String {
         let local = requested.hasPrefix("/") && requested.hasSuffix(".tgz")

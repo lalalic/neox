@@ -86,6 +86,18 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             } catch {
                 NSLog("Neo Core startup reconciliation failed: %@", error.localizedDescription)
             }
+            // Keep the Core current even if the menu-bar app runs for days.
+            while !Task.isCancelled {
+                do {
+                    if let installed = try NeoYManagedCoreRuntime.upgradeIfAvailable() {
+                        NSLog("Neo Core automatically updated to %@", installed)
+                        await MainActor.run {
+                            NotificationCenter.default.post(name: Notification.Name("neoYCoreRuntimeChanged"), object: nil)
+                        }
+                    }
+                } catch { NSLog("Neo Core automatic update unavailable: %@", error.localizedDescription) }
+                do { try await Task.sleep(for: .seconds(6 * 60 * 60)) } catch { break }
+            }
         }
         // Keep required skills, but install the optional Neo Project Toolkit only on request.
         Task.detached {

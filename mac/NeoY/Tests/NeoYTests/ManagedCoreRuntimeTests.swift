@@ -93,6 +93,13 @@ final class ManagedCoreRuntimeTests: XCTestCase {
         XCTAssertFalse(NeoYManagedCoreRuntime.isOlder("0.1.8", than: "0.1.7"))
         XCTAssertFalse(NeoYManagedCoreRuntime.isOlder("0.1.7", than: "0.1.7"))
     }
+    func testAutomaticCoreUpdateOnlyAcceptsNewerStableVersions() {
+        XCTAssertTrue(NeoYManagedCoreRuntime.needsUpdate(installed: "0.1.9", latest: "0.1.10"))
+        XCTAssertTrue(NeoYManagedCoreRuntime.needsUpdate(installed: nil, latest: "0.1.10"))
+        XCTAssertFalse(NeoYManagedCoreRuntime.needsUpdate(installed: "0.1.10", latest: "0.1.10"))
+        XCTAssertFalse(NeoYManagedCoreRuntime.needsUpdate(installed: "0.2.0", latest: "0.1.10"))
+        XCTAssertFalse(NeoYManagedCoreRuntime.needsUpdate(installed: "0.1.9", latest: "latest"))
+    }
     func testRollbackPreviousIsReversible() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: base) }
