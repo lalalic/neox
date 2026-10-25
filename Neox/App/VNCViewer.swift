@@ -12,9 +12,13 @@ final class VNCViewerController: NSObject, ObservableObject, VNCConnectionDelega
     private var connection: VNCConnection?
     private let credentialLock = NSLock()
     private var credentials = (username: "", password: "")
+    private var connectStartedAt: Date?
+    private var firstFrameReported = false
 
     func connect(host: String, port: UInt16, username: String, password: String) {
         disconnect()
+        connectStartedAt = Date()
+        firstFrameReported = false
         error = nil
         credentialLock.withLock { credentials = (username, password) }
         let settings = VNCConnection.Settings(
@@ -26,7 +30,7 @@ final class VNCViewerController: NSObject, ObservableObject, VNCConnectionDelega
             useDisplayLink: true,
             inputMode: .forwardKeyboardShortcutsEvenIfInUseLocally,
             isClipboardRedirectionEnabled: false,
-            colorDepth: .depth24Bit,
+            colorDepth: .depth16Bit,
             frameEncodings: .default
         )
         let client = VNCConnection(settings: settings)
@@ -151,6 +155,12 @@ final class VNCViewerController: NSObject, ObservableObject, VNCConnectionDelega
 
     private func publish(_ buffer: VNCFramebuffer, from connection: VNCConnection) {
         let image = buffer.cgImage
+        if image != nil && !firstFrameReported {
+            firstFrameReported = true
+            if let start = connectStartedAt {
+                NSLog("Neo Desktop: VNC first frame after %.2f s", Date().timeIntervalSince(start))
+            }
+        }
         DispatchQueue.main.async { [weak self] in
             guard let self, self.connection === connection else { return }
             self.frame = image
@@ -286,7 +296,9 @@ struct VNCViewerView: View {
         let generation = connectionGeneration
         Task {
             do {
+                let tunnelStartedAt = Date()
                 let created = try await remote.openVNCTunnel()
+                NSLog("Neo Desktop: tunnel ready after %.2f s", Date().timeIntervalSince(tunnelStartedAt))
                 guard generation == connectionGeneration else {
                     created.close()
                     return
