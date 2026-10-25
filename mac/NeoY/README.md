@@ -105,7 +105,10 @@ cd mac/NeoY
 ./install-local.sh
 ```
 
-The installer uses a valid Apple Development identity and installs `/Applications/NeoY.app`. macOS launchd keeps NeoY alive, and NeoY directly owns the `cloudflared` child whenever remote access is enabled. PM2 is not part of the NeoY/tunnel path. Stable signing lets macOS associate one-time TCC grants with `com.neox.neoy` across local rebuilds.
+The installer uses a valid Apple Development identity and installs `/Applications/Neo.app`. macOS launchd keeps NeoY alive, and NeoY directly owns the `cloudflared` child whenever remote access is enabled. PM2 is not part of the NeoY/tunnel path. Stable signing lets macOS associate one-time TCC grants with `com.neox.neoy` across local rebuilds.
+
+For the supported clean-user source-build, first-run, and private ChatGPT MCP
+connection flow, see [Clean Mac install and ChatGPT connection](docs/clean-user-install.md).
 
 An MCP client can point its remote entry at the stable HTTPS endpoint. NeoY's MCP tools are discovered dynamically rather than duplicated in a client manifest.
 
