@@ -45,12 +45,18 @@ struct DemoTarget: Codable, Equatable, Sendable {
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        rect = try? values.decode(CGRect.self, forKey: .rect)
-        stateID = try? values.decode(String.self, forKey: .stateID)
-        elementIndex = try? values.decode(String.self, forKey: .elementIndex)
-        path = try? values.decode(String.self, forKey: .path)
-        label = try? values.decode(String.self, forKey: .label)
-        role = try? values.decode(String.self, forKey: .role)
+        rect = try values.decodeIfPresent(CGRect.self, forKey: .rect)
+        stateID = try values.decodeIfPresent(String.self, forKey: .stateID)
+        elementIndex = try values.decodeIfPresent(String.self, forKey: .elementIndex)
+        path = try values.decodeIfPresent(String.self, forKey: .path)
+        label = try values.decodeIfPresent(String.self, forKey: .label)
+        role = try values.decodeIfPresent(String.self, forKey: .role)
+        guard rect != nil || !(elementIndex ?? "").isEmpty || !(path ?? "").isEmpty || !(label ?? "").isEmpty else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Target requires an element_index, rect, path, or label"))
+        }
+        if elementIndex != nil && rect == nil && (stateID ?? "").isEmpty {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "element_index requires state_id from get_app_state"))
+        }
     }
 
     var summary: String {

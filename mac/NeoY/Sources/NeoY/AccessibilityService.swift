@@ -705,26 +705,26 @@ enum AccessibilityTools {
             },
             ToolDefinition(name: "computer.type", description: "Type text into the focused or specified element.", parameters: schema([
                 "text": string("Text to type"),
-                "target": .object(["type": .string("object")]),
+                "target": targetObjectSchema(),
             ], required: ["text"])) { args in
                 let text = try requiredString(args, "text")
-                let parsedTarget = optionalTarget(from: args)
+                let parsedTarget = try optionalTarget(from: args)
                 return try await NeoYAccessibilityController.shared.type(text, target: parsedTarget)
             },
             ToolDefinition(name: "computer.set_value", description: "Set the accessibility value of an element.", parameters: schema([
                 "value": string("New value"),
-                "target": .object(["type": .string("object")]),
+                "target": targetObjectSchema(),
             ], required: ["value", "target"])) { args in
                 try await NeoYAccessibilityController.shared.setValue(try requiredString(args, "value"), target: try target(from: args))
             },
             ToolDefinition(name: "computer.key", description: "Press a supported key or cmd/option key combination.", parameters: schema([
                 "key": string("return, tab, space, delete, escape, arrow names, or cmd+c"),
-                "target": .object(["type": .string("object")]),
+                "target": targetObjectSchema(),
             ], required: ["key"])) { args in
-                try await NeoYAccessibilityController.shared.key(try requiredString(args, "key"), at: optionalTarget(from: args))
+                try await NeoYAccessibilityController.shared.key(try requiredString(args, "key"), at: try optionalTarget(from: args))
             },
             ToolDefinition(name: "computer.scroll", description: "Scroll at a resolved target.", parameters: schema([
-                "target": .object(["type": .string("object")]),
+                "target": targetObjectSchema(),
                 "delta_x": .object(["type": .string("number")]),
                 "delta_y": .object(["type": .string("number")]),
             ], required: ["target"])) { args in
@@ -735,8 +735,8 @@ enum AccessibilityTools {
                 )
             },
             ToolDefinition(name: "computer.drag", description: "Drag from one resolved target to another.", parameters: schema([
-                "from": .object(["type": .string("object")]),
-                "to": .object(["type": .string("object")]),
+                "from": targetObjectSchema(),
+                "to": targetObjectSchema(),
             ], required: ["from", "to"])) { args in
                 try await NeoYAccessibilityController.shared.drag(from: try target(from: args), to: try target(from: args, key: "to"))
             },
@@ -756,9 +756,9 @@ enum AccessibilityTools {
         return try JSONDecoder().decode(DemoTarget.self, from: JSONEncoder().encode(raw))
     }
 
-    private static func optionalTarget(from args: JSONValue) -> DemoTarget? {
+    private static func optionalTarget(from args: JSONValue) throws -> DemoTarget? {
         guard case .object(let object) = args, let raw = object["target"] else { return nil }
-        return try? JSONDecoder().decode(DemoTarget.self, from: JSONEncoder().encode(raw))
+        return try JSONDecoder().decode(DemoTarget.self, from: JSONEncoder().encode(raw))
     }
 
     private static func requiredString(_ args: JSONValue, _ key: String) throws -> String {
@@ -796,7 +796,31 @@ enum AccessibilityTools {
     }
 
     private static func targetSchema() -> JSONValue {
-        schema(["target": .object(["type": .string("object")])], required: ["target"])
+        schema(["target": targetObjectSchema()], required: ["target"])
+    }
+
+    private static func targetObjectSchema() -> JSONValue {
+        // Prefer the snapshot-scoped pair returned by computer.get_app_state.
+        // Legacy rectangle, path and label targeting remain available for demos.
+        .object([
+            "type": .string("object"),
+            "description": .string("Use state_id and element_index from computer.get_app_state. Refresh state after a stale-element error."),
+            "properties": .object([
+                "state_id": string("Snapshot ID from computer.get_app_state"),
+                "element_index": string("Element index from computer.get_app_state"),
+                "path": string("Legacy accessibility path from an inspected snapshot"),
+                "label": string("Legacy accessibility title or value, resolved from a prior snapshot"),
+                "role": string("Optional accessibility role narrowing a label match"),
+                "rect": .object(["type": .string("object"), "description": .string("CGRect with origin {x,y} and size {width,height}")]),
+            ]),
+            "anyOf": .array([
+                .object(["required": .array([.string("state_id"), .string("element_index")])]),
+                .object(["required": .array([.string("rect")])]),
+                .object(["required": .array([.string("path")])]),
+                .object(["required": .array([.string("label")])]),
+            ]),
+            "additionalProperties": .bool(false),
+        ])
     }
 
     private static func schema(_ properties: [String: JSONValue], required: [String] = []) -> JSONValue {

@@ -42,4 +42,19 @@ final class DemoRuntimeTests: XCTestCase {
         XCTAssertEqual(decoded.summary, "state:state-1/element:42")
     }
 
+    func testInvalidComputerTargetsAreRejected() throws {
+        let invalidTargets = [
+            "{}",
+            "{\"role\":\"AXButton\"}",
+            "{\"element_index\":\"42\"}",
+            "{\"state_id\":\"s1\",\"element_index\":42}",
+            "{\"rect\":\"invalid\"}",
+        ]
+        for value in invalidTargets {
+            XCTAssertThrowsError(try JSONDecoder().decode(DemoTarget.self, from: Data(value.utf8)), value)
+        }
+        let valid = "{\"state_id\":\"s1\",\"element_index\":\"42\"}"
+        XCTAssertNoThrow(try JSONDecoder().decode(DemoTarget.self, from: Data(valid.utf8)))
+    }
+
 }
