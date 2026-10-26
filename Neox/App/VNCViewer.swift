@@ -192,13 +192,14 @@ struct VNCViewerView: View {
     @FocusState private var keyboardActive: Bool
     @State private var connectionGeneration = 0
     @State private var automaticRetries = 0
+    @State private var retryPending = false
 
     var body: some View {
         VStack(spacing: 10) {
             if viewer.frame == nil {
                 VStack(spacing: 14) {
-                    if viewer.error == nil {
-                        ProgressView("Loading your desktop…")
+                    if viewer.error == nil || retryPending {
+                        ProgressView(retryPending ? "Retrying desktop connection…" : "Loading your desktop…")
                     } else {
                         Text("Could not show your desktop.")
                         Text(viewer.error ?? "").font(.caption).foregroundStyle(.secondary)
@@ -282,6 +283,7 @@ struct VNCViewerView: View {
                   (message.contains("Receive Server Init") || remote.usingLAN),
                   automaticRetries < 1 else { return }
             automaticRetries += 1
+            retryPending = true
             if remote.usingLAN { remote.preferPublicForDesktop() }
             let generation = connectionGeneration
             Task {
@@ -298,6 +300,7 @@ struct VNCViewerView: View {
     }
     private func connectDesktop(retrying: Bool = false) {
         if !retrying { automaticRetries = 0 }
+        retryPending = false
         let saved = MacScreenCredentials.load(for: remote.endpoint)
         let name = username.isEmpty ? (saved?.username ?? "") : username
         let secret = password.isEmpty ? (saved?.password ?? "") : password
@@ -311,6 +314,7 @@ struct VNCViewerView: View {
             viewer.error = error.localizedDescription
             return
         }
+        viewer.error = nil
         closeDesktop()
         let generation = connectionGeneration
         Task {
