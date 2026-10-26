@@ -53,7 +53,9 @@ struct RemoteDesktopCanvas: UIViewRepresentable {
             context.saveGState()
             context.translateBy(x: 0, y: bounds.height)
             context.scaleBy(x: 1, y: -1)
-            context.draw(image, in: imageRect())
+            let rect = imageRect()
+            context.draw(image, in: CGRect(x: rect.minX, y: bounds.height - rect.maxY,
+                                           width: rect.width, height: rect.height))
             context.restoreGState()
         }
 
