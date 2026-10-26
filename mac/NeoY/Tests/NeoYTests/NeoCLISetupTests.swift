@@ -12,6 +12,32 @@ final class NeoCLISetupTests: XCTestCase {
         XCTAssertTrue(NeoCLISetup.wantsProjectsToolkit(defaults: defaults))
     }
 
+    func testWorkspaceConfigurationDefaultsAndDerivesNeoRoot() {
+        let root = NeoWorkspaceConfiguration.defaultWorkspaceRoot.path
+        XCTAssertEqual(NeoWorkspaceConfiguration(schemaVersion: 1, workspaceRoot: root).neoRoot,
+                       URL(fileURLWithPath: root).appendingPathComponent("neo").path)
+    }
+
+    func testWorkspaceConfigurationValidatesAndAtomicallyReadsBack() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let workspace = directory.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("config/workspace.json")
+
+        XCTAssertThrowsError(try NeoWorkspaceConfiguration.validate(workspace.appendingPathComponent("missing").path))
+        XCTAssertThrowsError(try NeoWorkspaceConfiguration.validate("relative/path"))
+        let saved = try NeoWorkspaceConfiguration.save(workspaceRoot: workspace.path, to: file)
+        XCTAssertEqual(saved.workspaceRoot, workspace.resolvingSymlinksInPath().path)
+        XCTAssertEqual(try NeoWorkspaceConfiguration.load(from: file), saved)
+        let originalData = try Data(contentsOf: file)
+        XCTAssertThrowsError(try NeoWorkspaceConfiguration.save(workspaceRoot: "relative", to: file))
+        XCTAssertEqual(try Data(contentsOf: file), originalData)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+    }
+
     func testOnlyExplicitlySelectedOptionalSkillsAreRestored() {
         let suite = "NeoCLISetupTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

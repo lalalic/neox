@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 final class NeoYSetupModel: ObservableObject {
     enum Tab: String, CaseIterable, Identifiable {
+        case workspace = "Workspace"
         case connections = "MCP"
         case features = "Features"
         case deployment = "Deployment"
@@ -17,6 +18,12 @@ final class NeoYSetupModel: ObservableObject {
     }
 
     @Published var tab: Tab = .connections
+    @Published var workspaceRootDraft = (try? NeoWorkspaceConfiguration.load().workspaceRoot)
+        ?? NeoWorkspaceConfiguration.defaultWorkspaceRoot.path
+    @Published private(set) var appliedWorkspaceRoot = (try? NeoWorkspaceConfiguration.load().workspaceRoot)
+        ?? NeoWorkspaceConfiguration.defaultWorkspaceRoot.path
+    @Published private(set) var validatedWorkspaceRoot: String?
+    @Published var workspaceValidation = ""
     @Published var portText = String(NeoYDeploymentSettings.defaultPort)
     @Published var remoteEnabled = false
     @Published var remoteMode: RemoteMode = .temporary
@@ -64,6 +71,63 @@ final class NeoYSetupModel: ObservableObject {
 
     func refreshCoreRuntime() {
         coreRuntimeStatus = NeoYManagedCoreRuntime.active()?.lastPathComponent ?? "bootstrap Core (not installed)"
+    }
+
+    var appliedNeoRoot: String {
+        URL(fileURLWithPath: appliedWorkspaceRoot, isDirectory: true)
+            .appendingPathComponent("neo", isDirectory: true).path
+    }
+
+    var canApplyWorkspaceRoot: Bool {
+        guard let validatedWorkspaceRoot,
+              let current = try? NeoWorkspaceConfiguration.validate(workspaceRootDraft) else { return false }
+        return current == validatedWorkspaceRoot
+    }
+
+    func chooseWorkspaceRoot() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Workspace Root"
+        panel.message = "Neo will discover projects and shared skills under this directory."
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: workspaceRootDraft, isDirectory: true)
+        if panel.runModal() == .OK, let url = panel.url {
+            workspaceRootDraft = url.path
+            validatedWorkspaceRoot = nil
+            workspaceValidation = ""
+        }
+    }
+
+    func validateWorkspaceRoot() {
+        do {
+            let valid = try NeoWorkspaceConfiguration.validate(workspaceRootDraft)
+            validatedWorkspaceRoot = valid
+            let neoRoot = URL(fileURLWithPath: valid).appendingPathComponent("neo").path
+            workspaceValidation = "Valid directory. Neo Root: \(neoRoot)"
+        } catch {
+            validatedWorkspaceRoot = nil
+            workspaceValidation = error.localizedDescription
+        }
+    }
+
+    func invalidateWorkspaceValidation() {
+        validatedWorkspaceRoot = nil
+        workspaceValidation = ""
+    }
+
+    func applyWorkspaceRoot() {
+        do {
+            let saved = try NeoWorkspaceConfiguration.save(workspaceRoot: workspaceRootDraft)
+            appliedWorkspaceRoot = saved.workspaceRoot
+            workspaceRootDraft = saved.workspaceRoot
+            validatedWorkspaceRoot = saved.workspaceRoot
+            workspaceValidation = "Applied and verified."
+            result = "Workspace Root applied. Existing files and active jobs were not changed."
+            refreshProjects()
+        } catch {
+            workspaceValidation = "Not applied: \(error.localizedDescription)"
+        }
     }
 
     func checkCoreUpdates() {
@@ -650,6 +714,7 @@ struct NeoYSetupView: View {
                 ScrollView {
                     Group {
                         switch model.tab {
+                        case .workspace: workspaceTab
                         case .connections: connectionsTab
                         case .features: featuresTab
                         case .deployment: deploymentTab
@@ -678,9 +743,45 @@ struct NeoYSetupView: View {
 
     private func tabIcon(_ tab: NeoYSetupModel.Tab) -> String {
         switch tab {
+        case .workspace: "folder"
         case .connections: "point.3.connected.trianglepath.dotted"
         case .features: "square.grid.2x2"
         case .deployment: "server.rack"
+        }
+    }
+
+    private var workspaceTab: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            heading("Workspace", "Choose where Neo discovers projects and shared skills.")
+            GroupBox("Workspace Root") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("This setting only changes discovery for future work. It does not move folders or affect active jobs.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        TextField("Absolute directory path", text: $model.workspaceRootDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .onChange(of: model.workspaceRootDraft) { _, _ in
+                                model.invalidateWorkspaceValidation()
+                            }
+                        Button("Choose directory…") { model.chooseWorkspaceRoot() }
+                    }
+                    valueRow("Applied Neo Root", value: model.appliedNeoRoot)
+                    if !model.workspaceValidation.isEmpty {
+                        Text(model.workspaceValidation)
+                            .font(.caption)
+                            .foregroundStyle(model.validatedWorkspaceRoot == nil ? .orange : .secondary)
+                            .textSelection(.enabled)
+                    }
+                    HStack {
+                        Spacer()
+                        Button("Validate") { model.validateWorkspaceRoot() }
+                        Button("Apply") { model.applyWorkspaceRoot() }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(!model.canApplyWorkspaceRoot)
+                    }
+                }
+                .padding(8)
+            }
         }
     }
 
