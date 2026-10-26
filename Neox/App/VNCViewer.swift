@@ -187,6 +187,7 @@ struct VNCViewerView: View {
     @State private var username = ""
     @State private var password = ""
     @State private var input = ""
+    @State private var forwardedInput = ""
     @State private var passwordInInput = false
     @FocusState private var keyboardActive: Bool
     @State private var connectionGeneration = 0
@@ -265,6 +266,7 @@ struct VNCViewerView: View {
                 .textFieldStyle(.roundedBorder)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 10)
+                .onChange(of: input) { _, value in forwardInput(value) }
             }
         }
         .onAppear {
@@ -335,16 +337,27 @@ struct VNCViewerView: View {
         viewer.disconnect()
         keyboardActive = false
         input = ""
+        forwardedInput = ""
         passwordInInput = false
         resources.close()
         password = ""
     }
 
-    private func sendInputAndReturn() {
-        if !input.isEmpty {
-            viewer.sendText(input)
+    private func forwardInput(_ value: String) {
+        let previous = Array(forwardedInput)
+        let current = Array(value)
+        let shared = zip(previous, current).prefix { $0 == $1 }.count
+        for _ in shared..<previous.count { viewer.backspace() }
+        if shared < current.count {
+            viewer.sendText(String(current[shared...]))
         }
+        forwardedInput = value
+    }
+
+    private func sendInputAndReturn() {
+        forwardInput(input)
         viewer.sendReturn()
+        forwardedInput = ""
         input = ""
         passwordInInput = false
     }
