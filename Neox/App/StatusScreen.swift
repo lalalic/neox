@@ -124,12 +124,27 @@ struct StatusView: View {
     private var ListView: some View {
         List {
             Section("Neo Master") {
-                if bridge.discoveredBridges.isEmpty {
-                    Label(bridge.preferredBridge ?? "Looking for your Mac…",
-                          systemImage: "desktopcomputer")
+                if let preferred = bridge.preferredBridge {
+                    Button {
+                        showingRemote = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                            Label(preferred, systemImage: "desktopcomputer")
+                            Spacer()
+                            Text(bridge.discoveredBridges.contains { $0.name == preferred }
+                                 ? "Nearby" : "Remote")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                } else if bridge.discoveredBridges.isEmpty {
+                    Label("Looking for your Mac…", systemImage: "desktopcomputer")
                         .foregroundStyle(.secondary)
-                } else {
-                    ForEach(bridge.discoveredBridges) { entry in
+                }
+                ForEach(bridge.discoveredBridges.filter { $0.name != bridge.preferredBridge }) { entry in
                         Button {
                             bridge.preferredBridge = entry.name
                             showingRemote = true
@@ -145,7 +160,6 @@ struct StatusView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                }
             }
 
 
