@@ -41,6 +41,7 @@ final class NeoYSetupModel: ObservableObject {
     @Published var globalSkills = NeoCLISetup.globalSkills()
     @Published var optionalSkills: Set<String> = []
     @Published private(set) var projectNames: [String] = []
+    @Published private(set) var projectStatuses: [String: String] = [:]
     @Published private(set) var clusterNodes: [NeoYNodeConfiguration] = []
     @Published var newNodeName = ""
     @Published var newNodeURL = ""
@@ -108,7 +109,36 @@ final class NeoYSetupModel: ObservableObject {
     func refreshProjects() {
         Task.detached { [weak self] in
             let names = NeoCLISetup.projectNames()
-            await MainActor.run { self?.projectNames = names }
+            let statuses = Dictionary(uniqueKeysWithValues: names.compactMap { name -> (String, String)? in
+                NeoCLISetup.projectLifecycleStatus(name).map { (name, $0) }
+            })
+            await MainActor.run {
+                self?.projectNames = names
+                self?.projectStatuses = statuses
+            }
+        }
+    }
+
+    func projectCommand(_ command: String, name: String) {
+        guard !isBusy else { return }
+        if command == "uninstall" {
+            let alert = NSAlert()
+            alert.messageText = "Uninstall \(name)?"
+            alert.informativeText = "The project service will be removed. Your media and runs are preserved."
+            alert.addButton(withTitle: "Uninstall")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        isBusy = true
+        Task.detached { [weak self] in
+            let message: String
+            do { message = try NeoCLISetup.projectLifecycle(name, command: command) }
+            catch { message = error.localizedDescription }
+            await MainActor.run {
+                self?.result = "\(name) \(command): \(message)"
+                self?.isBusy = false
+                self?.refreshProjects()
+            }
         }
     }
 
@@ -818,9 +848,28 @@ struct NeoYSetupView: View {
                                 Button("Refresh") { model.refreshProjects() }
                             }
                             ForEach(model.projectNames, id: \.self) { name in
-                                Text(name)
-                                    .font(.system(.caption, design: .monospaced))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                HStack {
+                                    Text(name)
+                                        .font(.system(.caption, design: .monospaced))
+                                    Spacer()
+                                    if let status = model.projectStatuses[name] {
+                                        Text(status).font(.caption).foregroundStyle(.secondary)
+                                        Menu("Manage") {
+                                            Button("Setup") { model.projectCommand("setup", name: name) }
+                                            Button("Start") { model.projectCommand("start", name: name) }
+                                                .disabled(status == "online")
+                                            Button("Stop") { model.projectCommand("stop", name: name) }
+                                                .disabled(status != "online")
+                                            Button("Restart") { model.projectCommand("restart", name: name) }
+                                                .disabled(status != "online")
+                                            Divider()
+                                            Button("Uninstall", role: .destructive) {
+                                                model.projectCommand("uninstall", name: name)
+                                            }
+                                        }
+                                        .disabled(model.isBusy)
+                                    }
+                                }
                             }
                         }
                         .padding(.top, 6)

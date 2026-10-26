@@ -94,6 +94,64 @@ enum NeoCLISetup {
         } catch { return [] }
     }
 
+    /// Project-owned lifecycle scripts are the authority; NeoY does not manage PM2.
+    static func projectLifecycle(_ name: String, command: String) throws -> String {
+        let allowed = Set(["setup", "start", "stop", "restart", "status", "health", "uninstall"])
+        guard allowed.contains(command),
+              name.range(of: #"^[A-Za-z0-9._-]+$"#, options: .regularExpression) != nil,
+              let cli = cliPath() else {
+            throw NSError(domain: "NeoProject", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "Invalid project or command"])
+        }
+
+        let resolver = Process()
+        resolver.executableURL = cli
+        resolver.arguments = ["project", "resolve", "neo/\(name)"]
+        let resolvedOutput = Pipe()
+        resolver.standardOutput = resolvedOutput
+        resolver.standardError = Pipe()
+        try resolver.run()
+        let resolved = resolvedOutput.fileHandleForReading.readDataToEndOfFile()
+        resolver.waitUntilExit()
+        guard resolver.terminationStatus == 0,
+              let json = try JSONSerialization.jsonObject(with: resolved) as? [String: Any],
+              json["xchat_project"] as? String == "neo/\(name)",
+              let root = json["local_path"] as? String else {
+            throw NSError(domain: "NeoProject", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "Project resolution failed"])
+        }
+        let script = URL(fileURLWithPath: root).appendingPathComponent("neo-project")
+        guard FileManager.default.isExecutableFile(atPath: script.path) else {
+            throw NSError(domain: "NeoProject", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: "Project has no lifecycle entrypoint"])
+        }
+        let process = Process()
+        process.executableURL = script
+        process.arguments = [command]
+        process.currentDirectoryURL = URL(fileURLWithPath: root)
+        process.environment = ProcessInfo.processInfo.environment.merging(
+            ["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]) { _, configured in configured }
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let result = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard process.terminationStatus == 0 else {
+            throw NSError(domain: "NeoProject", code: Int(process.terminationStatus),
+                          userInfo: [NSLocalizedDescriptionKey: String(result.prefix(400))])
+        }
+        return result
+    }
+
+    static func projectLifecycleStatus(_ name: String) -> String? {
+        guard let result = try? projectLifecycle(name, command: "status"),
+              let data = result.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return json["status"] as? String
+    }
+
     /// The CLI discovers every Workspace project and nested README directory.
     /// Show first-level Neo products, not nested runs or infrastructure skills.
     static func neoProjectNames(from records: [[String: Any]]) -> [String] {
