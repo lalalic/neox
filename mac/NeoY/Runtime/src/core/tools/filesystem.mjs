@@ -40,7 +40,7 @@ export const FILESYSTEM_TOOLS = [
       required: ["path", "content"],
       additionalProperties: false,
     },
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, idempotentHint: false, openWorldHint: false },
   },
 {
     name: "fs_grep",
@@ -122,7 +122,7 @@ export const FILESYSTEM_TOOLS = [
       required: ["operation", "path"],
       additionalProperties: false,
     },
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, idempotentHint: false, openWorldHint: false },
   }
 ];
 

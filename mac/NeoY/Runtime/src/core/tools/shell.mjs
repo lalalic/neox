@@ -21,7 +21,7 @@ export const SHELL_TOOLS = [
       required: ["command"],
       additionalProperties: false,
     },
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, idempotentHint: false, openWorldHint: true },
   },
 {
     name: "shell_start",
@@ -38,7 +38,7 @@ export const SHELL_TOOLS = [
       required: ["command"],
       additionalProperties: false,
     },
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, idempotentHint: false, openWorldHint: true },
   },
 {
     name: "shell_job_status",
@@ -75,7 +75,7 @@ export const SHELL_TOOLS = [
       required: ["job_id"],
       additionalProperties: false,
     },
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, idempotentHint: false, openWorldHint: false },
   }
 ];
 

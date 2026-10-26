@@ -125,7 +125,7 @@ shell(command,args)     shell and background jobs (@lalalic/neo Core)
 fs(command,args)        filesystem read/write/manage (@lalalic/neo Core)
 terminal(command,args)  interactive PTY sessions (@lalalic/neo Core)
 codex(command,args)     read-only Codex history (@lalalic/neo Core)
-git_apply_patch         standard Git unified diff (required cwd) (@lalalic/neo Core)
+apply_file_patch         standard Git unified diff (required cwd) (@lalalic/neo Core)
 cluster(command)        trusted neo-node invocation
 computer(command,args)  native macOS Computer Use
 demo(command,args)      demo recording/annotation

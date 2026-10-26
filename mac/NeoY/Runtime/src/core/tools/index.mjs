@@ -878,7 +878,7 @@ async function dispatchTool(name, args) {
 
     case "shell": return shellFacade.execute(args, (tool, commandArgs) => handleShell(tool, commandArgs, context));
     case "fs": return filesystemFacade.execute(args, (tool, commandArgs) => handleFilesystem(tool, commandArgs, context));
-    case "git_apply_patch": return handlePatch(name, args, context);
+    case "apply_file_patch": return handlePatch(name, args, context);
     case "codex": return codexFacade.execute(args, (tool, commandArgs) => handleCodex(tool, commandArgs, context));
     case "terminal": return terminalFacade.execute(args, (tool, commandArgs) => handlePty(tool, commandArgs, context));
     case "chatgpt": {

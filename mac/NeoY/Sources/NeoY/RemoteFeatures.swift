@@ -2,7 +2,7 @@ import Foundation
 
 enum NeoYRemoteToolCatalog {
     static let coreToolNames: Set<String> = [
-        "setup", "cluster", "status", "shell", "fs", "git_apply_patch",
+        "setup", "cluster", "status", "shell", "fs", "apply_file_patch",
         "codex", "terminal", "chatgpt",
     ]
 
@@ -38,8 +38,8 @@ enum NeoYRemoteToolCatalog {
 
     /// Normalize persisted tool selections when Core renames or removes tools.
     static func normalizeToolNames(_ tools: Set<String>) -> Set<String> {
-        var normalized = tools.subtracting(["audit_tail", "apply_patch", "ask_questions.submit", "ask_questions.cancel"])
-        if tools.contains("apply_patch") { normalized.insert("git_apply_patch") }
+        var normalized = tools.subtracting(["audit_tail", "apply_patch", "git_apply_patch", "ask_questions.submit", "ask_questions.cancel"])
+        if !tools.isDisjoint(with: ["apply_patch", "git_apply_patch"]) { normalized.insert("apply_file_patch") }
         return normalized
     }
 
@@ -50,7 +50,7 @@ enum NeoYRemoteToolCatalog {
             switch feature {
             case "setup": tools.insert("setup")
             case "terminal": tools.formUnion(["status", "shell", "terminal"])
-            case "files": tools.formUnion(["fs", "git_apply_patch"])
+            case "files": tools.formUnion(["fs", "apply_file_patch"])
             case "codex": tools.insert("codex")
             case "nodes": tools.insert("cluster")
             case "computer": tools.insert("computer")

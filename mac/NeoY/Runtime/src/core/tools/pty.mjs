@@ -1269,7 +1269,7 @@ export const PTY_TOOLS = [
       required: ["command"],
       additionalProperties: false,
     },
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, idempotentHint: false, openWorldHint: true },
   },
 {
     name: "pty_read",
@@ -1303,7 +1303,7 @@ export const PTY_TOOLS = [
       required: ["session_id", "data"],
       additionalProperties: false,
     },
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, idempotentHint: false, openWorldHint: true },
   },
 {
     name: "pty_resize",
@@ -1334,7 +1334,7 @@ export const PTY_TOOLS = [
       required: ["session_id", "signal"],
       additionalProperties: false,
     },
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, idempotentHint: false, openWorldHint: false },
   },
 {
     name: "pty_close",
@@ -1350,7 +1350,7 @@ export const PTY_TOOLS = [
       required: ["session_id"],
       additionalProperties: false,
     },
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: false },
   }
 ];
 

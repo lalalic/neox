@@ -15,13 +15,13 @@ function fixture() {
   } };
 }
 test('publishes only explicit Git patch contract', () => {
-  assert.equal(PATCH_TOOLS[0].name, 'git_apply_patch');
+  assert.equal(PATCH_TOOLS[0].name, 'apply_file_patch');
   assert.deepEqual(PATCH_TOOLS[0].inputSchema.required, ['patch', 'cwd']);
   assert.match(PATCH_TOOLS[0].description, /Begin Patch/);
 });
 test('accepts unified Git diff and runs git apply in cwd', async () => {
   const { calls, context } = fixture();
-  const result = await handlePatch('git_apply_patch', { patch: unified, cwd: '/tmp', check_only: true }, context);
+  const result = await handlePatch('apply_file_patch', { patch: unified, cwd: '/tmp', check_only: true }, context);
   assert.equal(result.exitCode, 0);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].cwd, '/tmp');
@@ -30,14 +30,14 @@ test('accepts unified Git diff and runs git apply in cwd', async () => {
 });
 test('rejects Codex patch before execution', async () => {
   const { calls, context } = fixture();
-  const result = await handlePatch('git_apply_patch', { patch: codex, cwd: '/tmp' }, context);
+  const result = await handlePatch('apply_file_patch', { patch: codex, cwd: '/tmp' }, context);
   assert.equal(result.error.code, 'INVALID_PATCH_FORMAT');
   assert.equal(calls.length, 0);
 });
 test('requires cwd and rejects patch without hunks', async () => {
   const { calls, context } = fixture();
-  await assert.rejects(handlePatch('git_apply_patch', { patch: unified }, context), /cwd/);
-  const result = await handlePatch('git_apply_patch', { patch: 'diff --git a/x b/x\n', cwd: '/tmp' }, context);
+  await assert.rejects(handlePatch('apply_file_patch', { patch: unified }, context), /cwd/);
+  const result = await handlePatch('apply_file_patch', { patch: 'diff --git a/x b/x\n', cwd: '/tmp' }, context);
   assert.equal(result.error.code, 'INVALID_PATCH_FORMAT');
   assert.equal(calls.length, 0);
 });

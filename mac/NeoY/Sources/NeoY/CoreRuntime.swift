@@ -13,7 +13,7 @@ enum NeoYCoreRuntime {
             ?? "Unknown"
     }
     static let toolNames: Set<String> = [
-        "setup", "cluster", "status", "shell", "fs", "git_apply_patch",
+        "setup", "cluster", "status", "shell", "fs", "apply_file_patch",
         "codex", "terminal", "chatgpt"
     ]
 
