@@ -2,7 +2,7 @@ export const PATCH_TOOLS = [
 {
     name: "apply_file_patch",
     title: "Apply file patch",
-    description: "Apply a standard unified diff to files. Provide diff --git or ---/+++ file headers with @@ hunks. cwd is the base directory for patch paths. Supports check_only, reverse, and three_way. Codex Begin Patch format is not supported. Invalid patches are rejected without changes.",
+    description: "Apply a standard unified diff (git apply format). REQUIRED: patch (full diff string) and cwd (absolute working directory). Example patch: diff --git a/file.txt b/file.txt\\n--- a/file.txt\\n+++ b/file.txt\\n@@ -1 +1 @@\\n-old\\n+new\\n. Use check_only:true to validate before applying. Do not pass command/args wrappers or Codex Begin Patch markers. Supports reverse and three_way.",
     inputSchema: {
       type: "object",
       properties: {

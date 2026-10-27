@@ -1006,6 +1006,14 @@ async function handleMessage(message) {
     }
     // Reject unknown arguments at the MCP boundary with a useful validation error.
     const declared = advertisedTools().find((tool) => tool.name === name)?.inputSchema;
+    if (name === "apply_file_patch") {
+      const required = declared?.required ?? [];
+      const missing = required.filter((key) => typeof args?.[key] !== "string" || !args[key].trim());
+      if (missing.length) {
+        sendError(id, -32602, `Invalid arguments for ${name}: required non-empty parameter(s): ${missing.join(", ")}`, { missing, required });
+        return;
+      }
+    }
     if (declared?.additionalProperties === false && args && typeof args === "object" && !Array.isArray(args)) {
       const unknown = Object.keys(args).filter((key) => !Object.hasOwn(declared.properties ?? {}, key));
       if (unknown.length) {
@@ -1033,7 +1041,10 @@ async function handleMessage(message) {
           },
           modern,
         )
-        : toolTextResult(value, { modern }));
+        : toolTextResult(value, {
+          modern,
+          isError: name === "apply_file_patch" && typeof value?.exitCode === "number" && value.exitCode !== 0,
+        }));
     } catch (error) {
       stderr(`tool ${name} failed: ${error?.stack || error}`);
       await audit(name, args, {}, error, { event: "tool_input_error", category: error?.code || "handler_error", stage: "handler" });
