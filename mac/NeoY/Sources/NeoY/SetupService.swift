@@ -656,7 +656,7 @@ actor NeoYSetupService {
             feature install|enable|disable|uninstall <id>
             feature configure <id> '<json-object-patch>'
             feature start|stop|restart|doctor <id>
-            feature setup <id> — open the feature's temporary ChatGPT setup conversation.
+            feature setup <id> — open the feature's bootstrap setup agent in user Chrome.
             feature complete <id> — run doctor, start the service, verify MCP health, and mark setup ready.
             Optional features install from their published package; local MCP is automatic and remote exposure is separately opt-in.
             """

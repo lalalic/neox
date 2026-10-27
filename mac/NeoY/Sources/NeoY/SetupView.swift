@@ -187,12 +187,8 @@ final class NeoYSetupModel: ObservableObject {
     }
 
     func projectSetupAgent(_ name: String) {
-        guard let bootstrap = NeoCLISetup.projectSetupBootstrap(name) else {
-            result = "\(name): setup bootstrap is unavailable."
-            return
-        }
         do {
-            try NeoYAgentSetupLauncher.open(bootstrap: bootstrap, project: "neo/\(name)")
+            _ = try NeoCLISetup.projectSetupAgent(name)
             result = "Opened ChatGPT setup for \(name) in Chrome. Send the prepared prompt to begin."
         } catch {
             result = "Could not open setup agent: \(error.localizedDescription)"

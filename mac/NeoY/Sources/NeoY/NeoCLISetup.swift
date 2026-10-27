@@ -94,7 +94,7 @@ enum NeoCLISetup {
         } catch { return [] }
     }
 
-    static func projectRoot(_ name: String) throws -> URL {
+    static func projectInfo(_ name: String) throws -> [String: Any] {
         guard name.range(of: #"^[A-Za-z0-9._-]+$"#, options: .regularExpression) != nil,
               let cli = cliPath() else {
             throw NSError(domain: "NeoProject", code: 1,
@@ -103,29 +103,57 @@ enum NeoCLISetup {
         let resolver = Process()
         resolver.executableURL = cli
         resolver.arguments = ["project", "resolve", "neo/\(name)"]
-        let resolvedOutput = Pipe()
-        resolver.standardOutput = resolvedOutput
+        let output = Pipe()
+        resolver.standardOutput = output
         resolver.standardError = Pipe()
         try resolver.run()
-        let resolved = resolvedOutput.fileHandleForReading.readDataToEndOfFile()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
         resolver.waitUntilExit()
         guard resolver.terminationStatus == 0,
-              let json = try JSONSerialization.jsonObject(with: resolved) as? [String: Any],
+              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               json["xchat_project"] as? String == "neo/\(name)",
-              let root = json["local_path"] as? String else {
+              json["local_path"] is String else {
             throw NSError(domain: "NeoProject", code: 2,
                           userInfo: [NSLocalizedDescriptionKey: "Project resolution failed"])
+        }
+        return json
+    }
+
+    static func projectRoot(_ name: String) throws -> URL {
+        guard let root = try projectInfo(name)["local_path"] as? String else {
+            throw NSError(domain: "NeoProject", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "Project root missing"])
         }
         return URL(fileURLWithPath: root, isDirectory: true).standardizedFileURL
     }
 
     static func projectSetupBootstrap(_ name: String) -> URL? {
-        guard let root = try? projectRoot(name) else { return nil }
-        let file = root.appendingPathComponent("setup/bootstrap.md")
-        guard FileManager.default.isReadableFile(atPath: file.path),
-              (try? String(contentsOf: file, encoding: .utf8))?
-                  .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else { return nil }
-        return file
+        guard let info = try? projectInfo(name),
+              let setup = info["setup"] as? [String: Any],
+              let path = setup["bootstrap"] as? String else { return nil }
+        return URL(fileURLWithPath: path)
+    }
+
+    static func projectSetupAgent(_ name: String) throws -> String {
+        guard projectSetupBootstrap(name) != nil, let cli = cliPath() else {
+            throw NSError(domain: "NeoProject", code: 4,
+                          userInfo: [NSLocalizedDescriptionKey: "Project has no setup agent"])
+        }
+        let process = Process()
+        process.executableURL = cli
+        process.arguments = ["project", "setup-agent", "neo/\(name)"]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let response = String(decoding: data, as: UTF8.self)
+        guard process.terminationStatus == 0 else {
+            throw NSError(domain: "NeoProject", code: Int(process.terminationStatus),
+                          userInfo: [NSLocalizedDescriptionKey: response])
+        }
+        return response
     }
 
     /// Project-owned lifecycle scripts are the authority; NeoY does not manage PM2.

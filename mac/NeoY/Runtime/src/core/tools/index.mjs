@@ -3,6 +3,7 @@ import { handleShell, SHELL_TOOLS } from "./shell.mjs";
 import { handleFilesystem, FILESYSTEM_TOOLS } from "./filesystem.mjs";
 import { handlePatch, PATCH_TOOLS } from "./patch.mjs";
 import { handleCodex, CODEX_TOOLS } from "./codex.mjs";
+import { handleDiscord, DISCORD_TOOLS } from "./discord.mjs";
 import { configurePty, handlePty, ptyReady, ptyStatus, teardownPty, PTY_TOOLS } from "./pty.mjs";
 import { commandFacade } from "./command-facade.mjs";
 import { XCHAT_LIFECYCLE_TOOLS, scheduleXChatLifecycle } from "./xchat.mjs";
@@ -645,6 +646,13 @@ const codexFacade = commandFacade({
     codex_thread_turns_list: "thread.turns.list",
   })[name] || name,
 });
+const discordFacade = commandFacade({
+  name: "discord",
+  description: "Send replies only to verified Discord-originated turns using an opaque correlation ID.",
+  commands: DISCORD_TOOLS,
+  commandName: () => "reply",
+  examples: [{ command: "reply", args: { correlationId: "<gateway correlationId>", text: "Hello!" } }],
+});
 const terminalFacade = commandFacade({
   name: "terminal",
   description: "Create and interact with persistent pseudo-terminal sessions.",
@@ -669,6 +677,7 @@ const BASE_TOOLS = [
   filesystemFacade.tool,
   ...PATCH_TOOLS,
   codexFacade.tool,
+  discordFacade.tool,
   ...XCHAT_LIFECYCLE_TOOLS,
 ];
 
@@ -880,6 +889,7 @@ async function dispatchTool(name, args) {
     case "fs": return filesystemFacade.execute(args, (tool, commandArgs) => handleFilesystem(tool, commandArgs, context));
     case "apply_file_patch": return handlePatch(name, args, context);
     case "codex": return codexFacade.execute(args, (tool, commandArgs) => handleCodex(tool, commandArgs, context));
+    case "discord": return discordFacade.execute(args, (tool, commandArgs) => handleDiscord(tool, commandArgs));
     case "terminal": return terminalFacade.execute(args, (tool, commandArgs) => handlePty(tool, commandArgs, context));
     case "chatgpt": {
       const result = scheduleXChatLifecycle(name, args);
