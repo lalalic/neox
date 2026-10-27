@@ -2,6 +2,24 @@ import XCTest
 @testable import NeoY
 
 final class NeoCLISetupTests: XCTestCase {
+    func testSetupAgentURLUsesAbsoluteBootstrapWithoutEmbeddingContents() throws {
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("setup \(UUID().uuidString).md")
+        try "private test instructions".write(to: file, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: file) }
+
+        let target = try NeoYAgentSetupLauncher.url(bootstrap: file, project: "neo/family-tutor")
+        XCTAssertEqual(target.scheme, "https")
+        XCTAssertEqual(target.host, "chatgpt.com")
+        let prompt = try XCTUnwrap(URLComponents(url: target, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == "prompt" })?.value)
+        XCTAssertTrue(prompt.contains(file.path))
+        XCTAssertTrue(prompt.contains("@neo"))
+        XCTAssertFalse(prompt.contains("private test instructions"))
+        XCTAssertThrowsError(try NeoYAgentSetupLauncher.url(
+            bootstrap: URL(fileURLWithPath: "/nonexistent/neo-setup.md"), project: "neo/test"))
+    }
+
     func testStartupPreferencesPreserveExplicitToolkitChoice() {
         let suite = "NeoCLISetupTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

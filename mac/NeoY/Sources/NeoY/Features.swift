@@ -249,53 +249,20 @@ actor NeoYFeatureManager {
 
     func startSetup(id: String) async throws {
         let manifest = try loadManifest(id: id)
-        guard manifest.setup.mode == "chatgpt-temporary-thread" else { return }
+        guard ["chatgpt-temporary-thread", "agent-bootstrap"].contains(manifest.setup.mode) else { return }
         let package = packageRoot(id: id)
-        let bootstrap = try String(contentsOf: package.appendingPathComponent(manifest.setup.bootstrap), encoding: .utf8)
-        let manual = try String(contentsOf: package.appendingPathComponent(manifest.setup.manual), encoding: .utf8)
-        let prompt = """
-        \(bootstrap)
-
-        \(manual)
-
-        Neo feature id: \(manifest.id)
-        Installed instance: \(instanceRoot(id: id).path)
-
-        Use Neo's setup tool for feature lifecycle checks and actions:
-          feature status \(manifest.id)
-          feature configure \(manifest.id) '<json-object-patch>'
-          feature doctor \(manifest.id)
-          feature start \(manifest.id)
-          feature complete \(manifest.id)
-        Do not invent private shell paths when these standard actions are sufficient.
-
-        Begin setup now. Work interactively with the user and take one concrete configuration step at a time.
-        """
-        let configURL = productRoot(id: id).appendingPathComponent("setup-chat.json")
-        let data = try JSONSerialization.data(withJSONObject: ["prompt": prompt], options: [.prettyPrinted, .sortedKeys])
-        try data.write(to: configURL, options: .atomic)
-
-        guard let cli = Self.executable("uvx") else {
-            throw NSError(domain: "NeoYFeature", code: 10, userInfo: [NSLocalizedDescriptionKey: "browser-workspace is required for feature setup"])
+        let bootstrap = package.appendingPathComponent(manifest.setup.bootstrap).standardizedFileURL
+        let manual = package.appendingPathComponent(manifest.setup.manual).standardizedFileURL
+        guard bootstrap.path.hasPrefix(package.standardizedFileURL.path + "/"),
+              manual.path.hasPrefix(package.standardizedFileURL.path + "/"),
+              FileManager.default.isReadableFile(atPath: manual.path) else {
+            throw NSError(domain: "NeoYFeature", code: 10,
+                          userInfo: [NSLocalizedDescriptionKey: "Feature setup files are missing or outside its package"])
         }
-        // The setup conversation belongs to NeoY, not to the one-shot platform action.
-        // Keep a caller-owned Browser Workspace session alive until setup completes.
-        stopSetupSession(id: id)
-        let started = try Self.run(cli, ["browser-workspace", "session", "start", "--url", "https://chatgpt.com/"])
-        guard started.status == 0,
-              let startedData = started.output.data(using: .utf8),
-              let startedJSON = try? JSONSerialization.jsonObject(with: startedData) as? [String: Any],
-              let sessionID = startedJSON["session_id"] as? String, !sessionID.isEmpty else {
-            throw NSError(domain: "NeoYFeature", code: 11, userInfo: [NSLocalizedDescriptionKey: "failed to start Browser Workspace setup session: \(started.output)"])
-        }
-        let sessionData = try JSONSerialization.data(withJSONObject: ["session_id": sessionID], options: [.prettyPrinted, .sortedKeys])
-        try sessionData.write(to: setupSessionURL(id: id), options: .atomic)
-
-        let result = try Self.run(cli, ["browser-workspace", "platform", "run", "chatgpt", "temporary-submit", "--config", configURL.path, "--session-id", sessionID])
-        guard result.status == 0 else {
-            stopSetupSession(id: id)
-            throw NSError(domain: "NeoYFeature", code: 12, userInfo: [NSLocalizedDescriptionKey: result.output])
-        }
+        try NeoYAgentSetupLauncher.open(
+            bootstrap: bootstrap,
+            project: "feature/\(manifest.id). Also read setup manual at \(manual.path) and use Neo feature lifecycle actions to verify the installed instance"
+        )
         var records = loadRecords()
         if let index = records.firstIndex(where: { $0.id == id }) {
             records[index].state = .configuring

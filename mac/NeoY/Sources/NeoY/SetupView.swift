@@ -49,6 +49,7 @@ final class NeoYSetupModel: ObservableObject {
     @Published var optionalSkills: Set<String> = []
     @Published private(set) var projectNames: [String] = []
     @Published private(set) var projectStatuses: [String: String] = [:]
+    @Published private(set) var projectAgentSetupNames: Set<String> = []
     @Published private(set) var clusterNodes: [NeoYNodeConfiguration] = []
     @Published var newNodeName = ""
     @Published var newNodeURL = ""
@@ -176,10 +177,25 @@ final class NeoYSetupModel: ObservableObject {
             let statuses = Dictionary(uniqueKeysWithValues: names.compactMap { name -> (String, String)? in
                 NeoCLISetup.projectLifecycleStatus(name).map { (name, $0) }
             })
+            let agentSetupNames = Set(names.filter { NeoCLISetup.projectSetupBootstrap($0) != nil })
             await MainActor.run {
                 self?.projectNames = names
+                self?.projectAgentSetupNames = agentSetupNames
                 self?.projectStatuses = statuses
             }
+        }
+    }
+
+    func projectSetupAgent(_ name: String) {
+        guard let bootstrap = NeoCLISetup.projectSetupBootstrap(name) else {
+            result = "\(name): setup bootstrap is unavailable."
+            return
+        }
+        do {
+            try NeoYAgentSetupLauncher.open(bootstrap: bootstrap, project: "neo/\(name)")
+            result = "Opened ChatGPT setup for \(name) in Chrome. Send the prepared prompt to begin."
+        } catch {
+            result = "Could not open setup agent: \(error.localizedDescription)"
         }
     }
 
@@ -578,7 +594,7 @@ final class NeoYSetupModel: ObservableObject {
             do {
                 try await NeoYFeatureManager.shared.startSetup(id: item.id)
                 await refreshFeatures()
-                result = "Started \(item.name) setup in a temporary ChatGPT conversation."
+                result = "Opened \(item.name) setup in Chrome. Send the prepared ChatGPT prompt to begin."
             } catch {
                 result = error.localizedDescription
             }
@@ -953,6 +969,10 @@ struct NeoYSetupView: View {
                                     Text(name)
                                         .font(.system(.caption, design: .monospaced))
                                     Spacer()
+                                    if model.projectAgentSetupNames.contains(name) {
+                                        Button("Setup with Agent") { model.projectSetupAgent(name) }
+                                            .disabled(model.isBusy)
+                                    }
                                     if let status = model.projectStatuses[name] {
                                         Text(status).font(.caption).foregroundStyle(.secondary)
                                         Menu("Manage") {

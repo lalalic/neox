@@ -33,14 +33,14 @@ final class FeatureStartupIntegrationTests: XCTestCase {
         return (NeoYFeatureManager(root: products, stateURL: state), base, instance)
     }
 
-    func testEnabledFeatureServiceIsRestoredOnStartup() async throws {
+    func testRetiredFamilyTutorFeatureIsNotRestoredOnStartup() async throws {
         let (manager, base, instance) = try prepare(enabled: true)
         defer { try? FileManager.default.removeItem(at: base) }
         await manager.reconcileEnabledOnStartup()
         let record = await manager.record(id: "family-tutor")
         XCTAssertEqual(record?.state, .ready)
         XCTAssertNil(record?.error)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: instance.appendingPathComponent("started").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: instance.appendingPathComponent("started").path))
     }
 
     func testDisabledFeatureRemainsStopped() async throws {

@@ -94,16 +94,12 @@ enum NeoCLISetup {
         } catch { return [] }
     }
 
-    /// Project-owned lifecycle scripts are the authority; NeoY does not manage PM2.
-    static func projectLifecycle(_ name: String, command: String) throws -> String {
-        let allowed = Set(["setup", "start", "stop", "restart", "status", "health", "uninstall"])
-        guard allowed.contains(command),
-              name.range(of: #"^[A-Za-z0-9._-]+$"#, options: .regularExpression) != nil,
+    static func projectRoot(_ name: String) throws -> URL {
+        guard name.range(of: #"^[A-Za-z0-9._-]+$"#, options: .regularExpression) != nil,
               let cli = cliPath() else {
             throw NSError(domain: "NeoProject", code: 1,
-                          userInfo: [NSLocalizedDescriptionKey: "Invalid project or command"])
+                          userInfo: [NSLocalizedDescriptionKey: "Invalid project"])
         }
-
         let resolver = Process()
         resolver.executableURL = cli
         resolver.arguments = ["project", "resolve", "neo/\(name)"]
@@ -120,7 +116,27 @@ enum NeoCLISetup {
             throw NSError(domain: "NeoProject", code: 2,
                           userInfo: [NSLocalizedDescriptionKey: "Project resolution failed"])
         }
-        let script = URL(fileURLWithPath: root).appendingPathComponent("neo-project")
+        return URL(fileURLWithPath: root, isDirectory: true).standardizedFileURL
+    }
+
+    static func projectSetupBootstrap(_ name: String) -> URL? {
+        guard let root = try? projectRoot(name) else { return nil }
+        let file = root.appendingPathComponent("setup/bootstrap.md")
+        guard FileManager.default.isReadableFile(atPath: file.path),
+              (try? String(contentsOf: file, encoding: .utf8))?
+                  .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else { return nil }
+        return file
+    }
+
+    /// Project-owned lifecycle scripts are the authority; NeoY does not manage PM2.
+    static func projectLifecycle(_ name: String, command: String) throws -> String {
+        let allowed = Set(["setup", "start", "stop", "restart", "status", "health", "uninstall"])
+        guard allowed.contains(command) else {
+            throw NSError(domain: "NeoProject", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "Invalid command"])
+        }
+        let root = try projectRoot(name)
+        let script = root.appendingPathComponent("neo-project")
         guard FileManager.default.isExecutableFile(atPath: script.path) else {
             throw NSError(domain: "NeoProject", code: 3,
                           userInfo: [NSLocalizedDescriptionKey: "Project has no lifecycle entrypoint"])
@@ -128,7 +144,7 @@ enum NeoCLISetup {
         let process = Process()
         process.executableURL = script
         process.arguments = [command]
-        process.currentDirectoryURL = URL(fileURLWithPath: root)
+        process.currentDirectoryURL = root
         process.environment = ProcessInfo.processInfo.environment.merging(
             ["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]) { _, configured in configured }
         let output = Pipe()
@@ -326,5 +342,48 @@ enum NeoCLISetup {
         let location = cliPath().map { isDevelopmentLink($0) ? "developer link" : $0.path } ?? "missing"
         let installed = Set(installedGlobalSkills())
         return "CLI: \(location) | Neo Global Skills: \(installed.count)/\(requiredGlobalSkills.count)"
+    }
+}
+
+
+/// A user-owned Chrome conversation performs interactive project setup.
+enum NeoYAgentSetupLauncher {
+    static func prompt(bootstrap: URL, project: String) -> String {
+        """
+        Set up \(project) using @neo on my Mac. First read and follow this absolute bootstrap file:
+        \(bootstrap.path)
+        Run setup interactively, confirm permissions or credentials with me when needed, and verify the first real result. Do not claim success without evidence.
+        """
+    }
+
+    static func url(bootstrap: URL, project: String) throws -> URL {
+        guard bootstrap.isFileURL, bootstrap.path.hasPrefix("/"),
+              FileManager.default.isReadableFile(atPath: bootstrap.path) else {
+            throw NSError(domain: "NeoAgentSetup", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "Bootstrap must be a readable local file"])
+        }
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "chatgpt.com"
+        components.path = "/"
+        components.queryItems = [URLQueryItem(name: "prompt", value: prompt(bootstrap: bootstrap, project: project))]
+        guard let url = components.url else {
+            throw NSError(domain: "NeoAgentSetup", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "Could not construct ChatGPT setup URL"])
+        }
+        return url
+    }
+
+    static func open(bootstrap: URL, project: String) throws {
+        let target = try url(bootstrap: bootstrap, project: project)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-a", "Google Chrome", target.absoluteString]
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw NSError(domain: "NeoAgentSetup", code: Int(process.terminationStatus),
+                          userInfo: [NSLocalizedDescriptionKey: "Chrome is unavailable or could not open the URL"])
+        }
     }
 }
