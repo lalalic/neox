@@ -93,20 +93,24 @@ actor NeoYFeatureManager {
         Set(loadRecords().compactMap(\.provider))
     }
     func enabledMCPServers() -> [NeoYMCPServerConfiguration] {
-        loadRecords().compactMap { record in
-            guard record.enabled, let provider = record.provider, let url = record.mcpURL else { return nil }
+        let catalogIDs = Set(NeoYFeatureCatalog.all.map(\.id))
+        return loadRecords().compactMap { record in
+            guard catalogIDs.contains(record.id), record.enabled, let provider = record.provider, let url = record.mcpURL else { return nil }
             return NeoYMCPServerConfiguration(name: provider, url: url, isEnabled: true)
         }
     }
 
     /// Restore only previously configured, enabled features on every launch.
-    static func startupCandidates(_ records: [NeoYFeatureRecord]) -> [String] {
-        records.filter { $0.enabled && ($0.state == .ready || $0.state == .failed) }
+    static func startupCandidates(_ records: [NeoYFeatureRecord], catalogIDs: Set<String>? = nil) -> [String] {
+        records.filter { record in
+            (catalogIDs.map { $0.contains(record.id) } ?? true) && record.enabled && (record.state == .ready || record.state == .failed)
+        }
             .map(\.id).sorted()
     }
 
     func reconcileEnabledOnStartup() async {
-        for id in Self.startupCandidates(loadRecords()) {
+        let catalogIDs = Set(NeoYFeatureCatalog.all.map(\.id))
+        for id in Self.startupCandidates(loadRecords(), catalogIDs: catalogIDs) {
             do {
                 let manifest = try loadManifest(id: id)
                 let doctor = try runNodeScript(packageRoot(id: id).appendingPathComponent(manifest.runtime.doctorScript),

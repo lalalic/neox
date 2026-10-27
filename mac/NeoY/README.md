@@ -187,7 +187,7 @@ NeoY optional products are installed features rather than code compiled into Neo
 
 Local MCP exposes every enabled feature. Remote access is independent: built-in capabilities and installed MCP providers are explicitly selected on the Remote tab, and newly installed providers default to remote-disabled. `mcp-services` remains only a legacy compatibility identifier and is migrated away from broad remote exposure.
 
-Family Tutor is the first feature using this contract. Family Tutor itself owns Browser Workspace, learner Project/thread bindings, Discord/Cloudflare integration, and tutoring runtime; NeoY owns only installation, lifecycle, setup orchestration, MCP federation, and remote exposure policy.
+Family Tutor has moved to the Neo monorepo as a local Neo Project and is no longer in the Neo.app Feature catalog. The generic optional-Feature framework remains for other published packages. Retired installed records are not restarted or federated, while their private product files remain untouched.
 
 ## Project file mounts
 

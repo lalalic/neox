@@ -24,6 +24,11 @@ final class StartupReconciliationTests: XCTestCase {
         XCTAssertTrue(NeoYFeatureManager.startupCandidates([]).isEmpty)
     }
 
+    func testRetiredCatalogEntriesCannotRestart() {
+        let old = record("family-tutor", enabled: true, state: .ready)
+        XCTAssertTrue(NeoYFeatureManager.startupCandidates([old], catalogIDs: []).isEmpty)
+    }
+
     func testDisabledFeatureStillOwnsItsProvider() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -38,6 +43,6 @@ final class StartupReconciliationTests: XCTestCase {
         let owned = await manager.ownedProviderNames()
         let enabled = await manager.enabledMCPServers()
         XCTAssertEqual(owned, Set(["family-tutor", "enabled-feature"]))
-        XCTAssertEqual(enabled.map(\.name), ["enabled-feature"])
+        XCTAssertTrue(enabled.isEmpty)
     }
 }

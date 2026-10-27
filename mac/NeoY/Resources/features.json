@@ -1,8 +1,1 @@
-[
-  {
-    "id": "family-tutor",
-    "name": "Family Tutor",
-    "summary": "Persistent family AI tutor with separate learner context and Browser Workspace-backed ChatGPT sessions.",
-    "package": "@lalalic/family-tutor"
-  }
-]
+[]
