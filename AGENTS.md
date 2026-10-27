@@ -52,12 +52,11 @@ for a Runtime-only change.
 launchd/install configuration, signing, or the native app bundle:
 
 1. Fast-forward the canonical local checkout to merged `origin/main`.
-2. Do **not** run `mac/NeoY/install-local.sh`. NeoY loads Runtime code directly
-   from the canonical repo; there is no installed Runtime copy to refresh.
-3. Restart/recycle the Core stdio provider so the running NeoY process loads the
-   new Runtime code. Prefer NeoY's own provider lifecycle/reconcile path; do not
-   restart the whole app unless the provider cannot be recovered independently.
-4. Verify Core readiness (`tools/list`) and the task-relevant Runtime behavior.
+2. Do **not** run `mac/NeoY/install-local.sh`. Package the changed Core Runtime
+   with a version newer than the active managed release, then use Neo setup's
+   `core upgrade <absolute-tgz-path>` for probe, activation, and provider reconnect.
+3. Verify the activated Core version, provider readiness, and MCP behavior.
+   Do not restart the Neo app for a Runtime-only change.
 
 **Native-app path** — use this when Swift, UI, app resources, entitlements,
 permissions, launch behavior, installer/launchd configuration, signing, or the
