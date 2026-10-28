@@ -962,15 +962,33 @@ struct NeoYSetupView: View {
                             }
                             ForEach(model.projectNames, id: \.self) { name in
                                 HStack {
+                                    if model.projectStatuses[name] != nil {
+                                        Toggle("Enable \(name)", isOn: Binding(
+                                            get: { model.projectStatuses[name] == "online" },
+                                            set: { model.projectCommand($0 ? "start" : "stop", name: name) }
+                                        ))
+                                        .labelsHidden()
+                                        .toggleStyle(.checkbox)
+                                        .disabled(model.isBusy)
+                                        .accessibilityLabel("Enable \(name)")
+                                    }
                                     Text(name)
                                         .font(.system(.caption, design: .monospaced))
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                        .help(name)
                                     Spacer()
+                                    if let status = model.projectStatuses[name] {
+                                        Text(status.capitalized)
+                                            .font(.caption)
+                                            .foregroundStyle(status == "online" ? .green : .secondary)
+                                    }
                                     if model.projectAgentSetupNames.contains(name) {
                                         Button("Setup with Agent") { model.projectSetupAgent(name) }
+                                            .controlSize(.small)
                                             .disabled(model.isBusy)
                                     }
                                     if let status = model.projectStatuses[name] {
-                                        Text(status).font(.caption).foregroundStyle(.secondary)
                                         Menu("Manage") {
                                             Button("Setup") { model.projectCommand("setup", name: name) }
                                             Button("Start") { model.projectCommand("start", name: name) }
