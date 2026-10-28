@@ -13,13 +13,15 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>2.3.10</string>
+	<string>2.3.11</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Neo reads the active Chrome tab URL and title to bind Listen &amp; Talk to your ChatGPT thread.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_mcp._tcp</string>
@@ -31,13 +33,11 @@
 	<string>NeoY exposes a local MCP endpoint for desktop agents.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>NeoY uses the microphone to record guided capture-tour audio.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>NeoY uses speech recognition only during an explicitly started Listen &amp; Talk turn.</string>
-	<key>NSAppleEventsUsageDescription</key>
-	<string>Neo reads the active Chrome tab URL and title to bind Listen &amp; Talk to your ChatGPT thread.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>NeoY records the screen on demand to create agent-driven product demos.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>NeoY uses speech recognition only during an explicitly started Listen &amp; Talk turn.</string>
 </dict>
 </plist>

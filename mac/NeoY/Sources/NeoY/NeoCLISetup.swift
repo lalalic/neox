@@ -103,6 +103,7 @@ enum NeoCLISetup {
         let resolver = Process()
         resolver.executableURL = cli
         resolver.arguments = ["project", "resolve", "neo/\(name)"]
+        resolver.environment = ProcessInfo.processInfo.environment.merging(["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]) { _, configured in configured }
         let output = Pipe()
         resolver.standardOutput = output
         resolver.standardError = Pipe()
@@ -142,6 +143,7 @@ enum NeoCLISetup {
         let process = Process()
         process.executableURL = cli
         process.arguments = ["project", "setup-agent", "neo/\(name)"]
+        process.environment = ProcessInfo.processInfo.environment.merging(["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]) { _, configured in configured }
         let output = Pipe()
         process.standardOutput = output
         process.standardError = output
