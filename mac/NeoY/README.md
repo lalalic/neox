@@ -189,6 +189,38 @@ Local MCP exposes every enabled feature. Remote access is independent: built-in 
 
 Family Tutor has moved to the Neo monorepo as a local Neo Project and is no longer in the Neo.app Feature catalog. The generic optional-Feature framework remains for other published packages. Retired installed records are not restarted or federated, while their private product files remain untouched.
 
+## MCP Tool Skill dependencies
+
+The native Features screen preserves the 2.3.11 behavior: Tool Feature rows
+come from the live local MCP tools/list response, with disabled tools included
+so the user can re-enable them. It does not use a fixed Tool Feature list.
+markcut.preview belongs to the separate markcut Skill feature, not an
+additional Tool Feature row.
+
+Neo.app treats declared Skill dependencies as required when a tool is discovered,
+enabled, or invoked. Built-in requirements include chatgpt -> webhelm ->
+daemon-service-manage and markcut.preview -> markcut. MCP providers can also
+declare them in the tool's _meta.neo.requires.skills array. Neo installs
+missing approved Skills through npx skills, verifies the global inventory,
+and starts/health-checks WebHelm through the supported uvx webhelm entrypoint.
+A temporary bootstrap browser session is closed after setup. Skills requiring
+interactive account authorization still need the Setup with Agent action;
+installation alone is not proof that authentication succeeded.
+
+Automatic installation accepts only known, approved Skill sources. A user-installed
+Skill with another source can satisfy a dependency, but an unknown missing source
+is reported rather than fetched from an untrusted MCP declaration. Automatic
+Skill updates are opt-in, run daily (checked periodically while the app runs),
+and skip unowned/local developer Skills. Neo CLI and clean Git Project auto-updates
+have independent opt-in controls. Unclean Projects are never reset or force-pulled.
+Native Neo.app upgrades continue to require the signed installer and its rollback
+checks.
+
+Neo Project Toolkit shows each first-level Neo Project as an indented checkbox
+row, without a collapsible folder. The checkbox persists inclusion in Neo's
+project management and automatic updates; it is not a daemon running indicator.
+Service lifecycle actions, where available, are in the row's Actions menu.
+
 ## Project file mounts
 
 NeoY serves explicitly mounted, read-only project roots under the existing public HTTPS origin:

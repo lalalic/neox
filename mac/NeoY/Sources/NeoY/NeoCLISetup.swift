@@ -11,23 +11,214 @@ enum NeoCLISetup {
         "markcut": "lalalic/markcut",
     ]
 
+    // Trusted sources only. A remote MCP provider cannot install an arbitrary
+    // repository by declaring a dependency.
+    static let requiredSkillSources = [
+        "events-bus": "lalalic/neo",
+        "daemon-service-manage": "lalalic/neo",
+        "webhelm": "lalalic/browser-workspace",
+        "agents-relay": "lalalic/agents-relay",
+    ]
+    static var managedSkillSources: [String: String] {
+        requiredSkillSources.merging(optionalSkillSources) { existing, _ in existing }
+    }
+    static let skillPrerequisites: [String: Set<String>] = [
+        "events-bus": ["daemon-service-manage"],
+        "webhelm": ["daemon-service-manage"],
+        "wechat-bro": ["daemon-service-manage"],
+    ]
+
     /// Tool-to-Skill prerequisites, independent of the MCP provider lifecycle.
     static let toolSkillRequirements: [String: Set<String>] = [
         "markcut_preview": ["markcut"],
         "markcut.preview": ["markcut"],
         "neo_markcut_preview": ["markcut"],
+        "chatgpt": ["webhelm"],
+        "webhelm": ["webhelm"],
+        "browser-workspace": ["webhelm"],
     ]
 
+    /// Supports known aliases, browser tool namespaces, and trusted skill names
+    /// advertised in tools/list _meta.neo.requires.skills.
+    static func requiredSkills(forTool tool: String, advertised: Set<String> = []) -> Set<String> {
+        var required = toolSkillRequirements[tool] ?? []
+        if tool.hasPrefix("webhelm.") || tool.hasPrefix("browser-workspace.") {
+            required.insert("webhelm")
+        }
+        if tool.hasPrefix("markcut.") || tool.hasPrefix("markcut_") {
+            required.insert("markcut")
+        }
+        required.formUnion(advertised)
+        var pending = Array(required)
+        while let skill = pending.popLast() {
+            for prerequisite in skillPrerequisites[skill] ?? [] where !required.contains(prerequisite) {
+                required.insert(prerequisite)
+                pending.append(prerequisite)
+            }
+        }
+        return required
+    }
+
+    static func advertisedSkills(from tool: [String: Any]) -> Set<String> {
+        let meta = tool["_meta"] as? [String: Any] ?? [:]
+        let neo = meta["neo"] as? [String: Any] ?? [:]
+        let requires = neo["requires"] as? [String: Any] ?? [:]
+        return Set(requires["skills"] as? [String] ?? [])
+    }
+
     static func missingSkills(forTool tool: String, installed: Set<String>) -> Set<String> {
-        (toolSkillRequirements[tool] ?? []).subtracting(installed)
+        requiredSkills(forTool: tool).subtracting(installed)
+    }
+
+    /// Fast, side-effect-free dependency guard for actual MCP execution.
+    static func missingSkillsOnDisk(forTool tool: String, directory: URL? = nil,
+                                   advertised: Set<String> = []) -> Set<String> {
+        let root = directory ?? skillsDirectory
+        return Set(requiredSkills(forTool: tool, advertised: advertised).filter { name in
+            if FileManager.default.fileExists(atPath: root
+                .appendingPathComponent(name).appendingPathComponent("SKILL.md").path) {
+                return false
+            }
+            // The installed WebHelm skill is named "webhelm" but intentionally
+            // lives under the browser-workspace directory.
+            if name == "webhelm", FileManager.default.fileExists(atPath:
+                root.appendingPathComponent("browser-workspace/SKILL.md").path) {
+                return false
+            }
+            return true
+        })
+    }
+
+    /// Install and read back every trusted transitive Skill requirement.
+    /// The caller must run this off the main actor (npx may access the network).
+    static func ensureSkills(_ names: Set<String>) throws -> Set<String> {
+        let available = managedSkillSources
+        let expanded = names.reduce(into: Set<String>()) { result, name in
+            result.formUnion(requiredSkills(forTool: "", advertised: [name]))
+        }
+        guard !expanded.isEmpty else { return [] }
+        var installed = try installedGlobalSkillNames()
+        let unapproved = expanded.subtracting(installed).subtracting(available.keys)
+        guard unapproved.isEmpty else {
+            throw NSError(domain: "NeoSkillDependency", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey:
+                            "Missing Skill has no approved installation source: \(unapproved.sorted().joined(separator: ", "))"])
+        }
+        for name in expanded.sorted() where !installed.contains(name) {
+            guard let source = available[name] else { continue }
+            _ = try runSkills(["add", source, "-g", "-y", "-s", name])
+            installed = try installedGlobalSkillNames()
+            guard installed.contains(name) else {
+                throw NSError(domain: "NeoSkillDependency", code: 2,
+                              userInfo: [NSLocalizedDescriptionKey: "Skill \(name) not found after installation."])
+            }
+        }
+        return expanded
+    }
+
+    private static let dependencySetupLock = NSLock()
+
+    static func ensureToolSkills(_ requirements: Set<String>) throws -> String {
+        try dependencySetupLock.withLock {
+            let installed = try ensureSkills(requirements)
+            return try setupInstalledSkills(installed)
+        }
+    }
+
+    /// A Skill with no runtime setup contract is ready after installation.
+    /// WebHelm owns its browser daemon; initialize it through its public CLI.
+    /// Authentication/Chrome Store approvals remain explicitly interactive.
+    static func setupInstalledSkills(_ names: Set<String>) throws -> String {
+        guard names.contains("webhelm") else {
+            return names.isEmpty ? "No Tool Skill dependencies" :
+                "Installed required Skills: \(names.sorted().joined(separator: ", "))"
+        }
+        try setupWebhelm()
+        return "Installed required Skills: \(names.sorted().joined(separator: ", ")); WebHelm healthy"
+    }
+
+    private static func runWebhelm(_ arguments: [String]) throws -> String {
+        guard let uvx = ["/opt/homebrew/bin/uvx", "/usr/local/bin/uvx"]
+            .first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
+            throw NSError(domain: "NeoSkillDependency", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: "uvx is required to initialize WebHelm"])
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: uvx)
+        process.arguments = ["--from", "browser-workspace", "webhelm"] + arguments
+        process.environment = ProcessInfo.processInfo.environment
+            .merging(["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]) { _, configured in configured }
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw NSError(domain: "NeoSkillDependency", code: Int(process.terminationStatus),
+                          userInfo: [NSLocalizedDescriptionKey:
+                            "WebHelm \(arguments.first ?? "command") failed: \(String(decoding: data, as: UTF8.self).prefix(250))"])
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    static func webhelmIsHealthy(_ status: String) -> Bool {
+        guard let data = status.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let daemon = root["daemon"] as? [String: Any],
+              daemon["running"] as? Bool == true,
+              root["managed_chrome"] as? [String: Any] != nil else {
+            return false
+        }
+        return true
+    }
+
+    static func setupWebhelm() throws {
+        if let state = try? runWebhelm(["status"]), webhelmIsHealthy(state) { return }
+        // First-use bootstrap. Always release the temporary leased session.
+        let response = try runWebhelm(["session", "start"])
+        guard let data = response.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let session = object["session_id"] as? String,
+              !session.isEmpty else {
+            throw NSError(domain: "NeoSkillDependency", code: 4,
+                          userInfo: [NSLocalizedDescriptionKey: "WebHelm session start returned no session ID"])
+        }
+        defer { _ = try? runWebhelm(["session", "stop", session]) }
+        guard webhelmIsHealthy(try runWebhelm(["status"])) else {
+            throw NSError(domain: "NeoSkillDependency", code: 5,
+                          userInfo: [NSLocalizedDescriptionKey: "WebHelm daemon did not become healthy"])
+        }
     }
 
     static let toolkitPreferenceKey = "NeoProjectsToolkitEnabled"
     static let optionalSkillsPreferenceKey = "NeoOptionalSkillsEnabled"
+    static let projectSelectionPreferenceKey = "NeoEnabledProjects"
+    static let autoUpdateToolkitKey = "NeoAutoUpdateToolkit"
+    private static let lastToolkitUpdateKey = "NeoLastToolkitUpdate"
     static let autoUpdateSkillsKey = "NeoAutoUpdateSkills"
     static let autoUpdateProjectsKey = "NeoAutoUpdateProjects"
     private static let lastSkillUpdateKey = "NeoLastSkillUpdate"
     private static let lastProjectUpdateKey = "NeoLastProjectUpdate"
+
+    /// A project can be enabled even without a service lifecycle. This selection
+    /// controls Neo's project management and automatic update operations.
+    static func enabledProjects(discovered: [String], defaults: UserDefaults = .standard) -> Set<String> {
+        let names = Set(discovered)
+        guard let selected = defaults.stringArray(forKey: projectSelectionPreferenceKey) else { return names }
+        return Set(selected).intersection(names)
+    }
+
+    static func setProjectEnabled(_ name: String, enabled: Bool, discovered: [String],
+                                  defaults: UserDefaults = .standard) {
+        guard discovered.contains(name) else { return }
+        var selected = enabledProjects(discovered: discovered, defaults: defaults)
+        if enabled { selected.insert(name) } else { selected.remove(name) }
+        // Preserve preferences for names temporarily missing from discovery.
+        let missing = Set(defaults.stringArray(forKey: projectSelectionPreferenceKey) ?? [])
+            .subtracting(discovered)
+        defaults.set(Array(selected.union(missing)).sorted(), forKey: projectSelectionPreferenceKey)
+    }
 
     static func updateDue(last: Date?, now: Date = Date()) -> Bool {
         last.map { now.timeIntervalSince($0) >= 86_400 } ?? true
@@ -63,11 +254,9 @@ enum NeoCLISetup {
 
     /// Reinstall only user-selected optional Skills that have gone missing.
     static func reconcileDesiredOptionalSkills(defaults: UserDefaults = .standard) throws {
-        let missing = desiredOptionalSkills(defaults: defaults).subtracting(try installedGlobalSkillNames())
-        for name in missing.sorted() {
-            guard let source = optionalSkillSources[name] else { continue }
-            _ = try runSkills(["add", source, "-g", "-y", "-s", name])
-        }
+        let desired = desiredOptionalSkills(defaults: defaults)
+        guard !desired.isEmpty else { return }
+        _ = try ensureToolSkills(desired)
     }
 
     static func removeOptionalSkill(_ name: String) throws {
@@ -83,7 +272,37 @@ enum NeoCLISetup {
             throw NSError(domain: "NeoCLISetup", code: 4,
                           userInfo: [NSLocalizedDescriptionKey: "Unknown optional Neo Skill"])
         }
+        try updateManagedSkill(name)
+    }
+
+    static func autoUpdateEligible(name: String, installedSource: String?) -> Bool {
+        guard let expected = managedSkillSources[name] else { return false }
+        return expected == installedSource
+    }
+
+    static func updateManagedSkill(_ name: String, automatic: Bool = false) throws {
+        guard managedSkillSources[name] != nil else {
+            throw NSError(domain: "NeoCLISetup", code: 4,
+                          userInfo: [NSLocalizedDescriptionKey: "Unmanaged Skill update denied: \(name)"])
+        }
+        if automatic {
+            let raw = try runSkills(["list", "-g", "--json"])
+            guard let data = raw.data(using: .utf8),
+                  let records = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+                  let record = records.first(where: { ($0["name"] as? String) == name }),
+                  autoUpdateEligible(name: name, installedSource: record["source"] as? String) else {
+                throw NSError(domain: "NeoCLISetup", code: 7,
+                              userInfo: [NSLocalizedDescriptionKey:
+                                "Skill \(name) source is unknown or locally managed; automatic updates skipped"])
+            }
+        }
         _ = try runSkills(["update", name, "-g", "-y"])
+        let installed = try installedGlobalSkillNames()
+        guard installed.contains(name) else {
+            throw NSError(domain: "NeoCLISetup", code: 5,
+                          userInfo: [NSLocalizedDescriptionKey: "Skill disappeared after update: \(name)"])
+        }
+        if name == "webhelm" { try setupWebhelm() }
     }
 
     static func setupOptionalSkill(_ name: String) throws {
@@ -101,16 +320,24 @@ enum NeoCLISetup {
         if defaults.bool(forKey: autoUpdateSkillsKey),
            updateDue(last: defaults.object(forKey: lastSkillUpdateKey) as? Date, now: now) {
             defaults.set(now, forKey: lastSkillUpdateKey)
-            for name in desiredOptionalSkills(defaults: defaults).sorted() {
-                do { try updateOptionalSkill(name) }
+            let managed = Set(requiredGlobalSkills).union(desiredOptionalSkills(defaults: defaults))
+            for name in managed.sorted() {
+                do { try updateManagedSkill(name, automatic: true) }
                 catch { NSLog("Neo Skill %@ auto-update skipped: %@", name, error.localizedDescription) }
             }
+        }
+        if defaults.bool(forKey: autoUpdateToolkitKey),
+           updateDue(last: defaults.object(forKey: lastToolkitUpdateKey) as? Date, now: now) {
+            defaults.set(now, forKey: lastToolkitUpdateKey)
+            do { _ = try updateManagedToolkit() }
+            catch { NSLog("Neo Project Toolkit auto-update skipped: %@", error.localizedDescription) }
         }
         if defaults.bool(forKey: autoUpdateProjectsKey),
            updateDue(last: defaults.object(forKey: lastProjectUpdateKey) as? Date, now: now) {
             defaults.set(now, forKey: lastProjectUpdateKey)
             var updatedRoots = Set<String>()
-            for name in projectNames() {
+            let names = projectNames()
+            for name in enabledProjects(discovered: names, defaults: defaults).sorted() {
                 guard let info = try? projectInfo(name),
                       let gitRoot = info["git_root"] as? String,
                       updatedRoots.insert(gitRoot).inserted else { continue }
@@ -336,6 +563,7 @@ enum NeoCLISetup {
     static let npmCLI = "@lalalic/neo@1.0.2"
     static let npmPackage = "@lalalic/neo"
     static let expectedVersion = "1.0.2"
+    static let latestNpmCLI = "@lalalic/neo@latest"
 
     static func managedToolkitInstalled() -> Bool {
         guard let npm = ["/opt/homebrew/bin/npm", "/usr/local/bin/npm"].first(where: { FileManager.default.isExecutableFile(atPath: $0) }),
@@ -373,7 +601,9 @@ enum NeoCLISetup {
             return "migration_required: legacy neo@\(legacy) owns the command; remove or migrate it explicitly before installing \(npmPackage)"
         }
         if let current = installed[npmPackage] {
-            return current == expectedVersion && executableExists
+            return executableExists &&
+                (current == expectedVersion ||
+                 current.compare(expectedVersion, options: .numeric) == .orderedDescending)
                 ? "ready"
                 : "upgrade_required: \(npmPackage) \(current) != \(expectedVersion)"
         }
@@ -397,7 +627,7 @@ enum NeoCLISetup {
         return dependencies.compactMapValues { $0["version"] as? String }
     }
     /// CLI is an independently published npm release, never a build-machine checkout.
-    static func installIfMissing() throws -> String {
+    static func installIfMissing(update: Bool = false) throws -> String {
         guard let npm = ["/opt/homebrew/bin/npm", "/usr/local/bin/npm"].first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
             return "CLI needs setup: npm unavailable"
         }
@@ -406,15 +636,18 @@ enum NeoCLISetup {
             return "Developer CLI retained: \(path.path)"
         }
         let decision = packageDecision(installed: try installedNPMPackages(using: npm), executableExists: existing != nil)
-        if decision == "ready" { return "CLI already installed: \(npmCLI)" }
+        if decision == "ready" && !update { return "CLI already installed: \(npmCLI)" }
+        if update && !managedToolkitInstalled() {
+            return "Neo CLI update skipped: only managed npm installations may be updated."
+        }
         // Only the known managed npm package may be updated without user action.
         // Never replace unknown commands, legacy packages, or developer links.
-        if decision != "install" && !decision.hasPrefix("upgrade_required:") {
+        if decision != "ready" && decision != "install" && !decision.hasPrefix("upgrade_required:") {
             return "CLI needs setup: \(decision)"
         }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: npm)
-        task.arguments = ["install", "--global", npmCLI, "--ignore-scripts", "--no-audit", "--no-fund"]
+        task.arguments = ["install", "--global", update ? latestNpmCLI : npmCLI, "--ignore-scripts", "--no-audit", "--no-fund"]
         task.environment = ProcessInfo.processInfo.environment.merging(["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]) { _, configured in configured }
         let output = Pipe()
         task.standardOutput = output
@@ -425,27 +658,16 @@ enum NeoCLISetup {
         guard task.terminationStatus == 0, cliPath() != nil else {
             return "CLI npm install failed (exit \(task.terminationStatus)): \(String(decoding: data, as: UTF8.self).suffix(300))"
         }
-        return "CLI installed from npm \(npmCLI)"
+        let version = try installedNPMPackages(using: npm)[npmPackage] ?? "unknown"
+        return "CLI installed from npm \(npmPackage)@\(version)"
     }
-    /// Install only NeoY dependencies. Existing user-installed skills are never replaced.
-    /// webhelm is supplied by the browser-workspace skill repository, independently of lalalic/neo.
+    static func updateManagedToolkit() throws -> String {
+        try installIfMissing(update: true)
+    }
+    /// Required Skill dependencies are installed and initialized at launch.
+    /// Only approved sources are eligible for automatic installation.
     static func setupMissingGlobalSkills() throws -> String {
-        let missing = Set(requiredGlobalSkills).subtracting(installedGlobalSkills())
-        if missing.contains("events-bus") || missing.contains("daemon-service-manage") {
-            for skill in ["events-bus", "daemon-service-manage"] where missing.contains(skill) {
-                _ = try runSkills(["add", "lalalic/neo", "-g", "-y", "-s", skill])
-            }
-        }
-        if missing.contains("webhelm") {
-            _ = try runSkills(["add", "lalalic/browser-workspace", "-g", "-y", "-s", "webhelm"])
-        }
-        if missing.contains("agents-relay") {
-            _ = try runSkills(["add", "lalalic/agents-relay", "-g", "-y", "-s", "agents-relay"])
-        }
-        let installed = installedGlobalSkills()
-        let remaining = requiredGlobalSkills.filter { !installed.contains($0) }
-        guard remaining.isEmpty else { throw NSError(domain: "NeoCLISetup", code: 3, userInfo: [NSLocalizedDescriptionKey: "Global Skills missing after install: \(remaining.joined(separator: ", "))"]) }
-        return "Global dependencies present: \(installed.joined(separator: ", "))"
+        try ensureToolSkills(Set(requiredGlobalSkills))
     }
 
     static func setup() -> String {

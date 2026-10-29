@@ -146,6 +146,110 @@ final class NeoCLISetupTests: XCTestCase {
                                                from: Data(contentsOf: file)).isEmpty)
     }
 
+    func testProjectsEnableSelectionIsPersistentAndNotServiceStatus() {
+        let suite = "ProjectSelection.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let projects = ["vlog", "family-tutor", "commerce"]
+        XCTAssertEqual(NeoCLISetup.enabledProjects(discovered: projects, defaults: defaults), Set(projects))
+        NeoCLISetup.setProjectEnabled("commerce", enabled: false, discovered: projects, defaults: defaults)
+        XCTAssertEqual(NeoCLISetup.enabledProjects(discovered: projects, defaults: defaults),
+                       ["vlog", "family-tutor"])
+        NeoCLISetup.setProjectEnabled("commerce", enabled: true, discovered: projects, defaults: defaults)
+        XCTAssertEqual(NeoCLISetup.enabledProjects(discovered: projects, defaults: defaults), Set(projects))
+        NeoCLISetup.setProjectEnabled("nonexistent", enabled: false, discovered: projects, defaults: defaults)
+        XCTAssertEqual(NeoCLISetup.enabledProjects(discovered: projects, defaults: defaults), Set(projects))
+    }
+
+    func testProjectPreferencesSurviveTemporaryDiscoveryFailure() {
+        let suite = "ProjectSelection.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        NeoCLISetup.setProjectEnabled("commerce", enabled: false,
+                                      discovered: ["commerce", "vlog"], defaults: defaults)
+        XCTAssertTrue(NeoCLISetup.enabledProjects(discovered: [], defaults: defaults).isEmpty)
+        XCTAssertEqual(NeoCLISetup.enabledProjects(discovered: ["commerce", "vlog"], defaults: defaults), ["vlog"])
+    }
+
+    func testPreviewRequiresSkillOnDiskBeforeToolExecution() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        XCTAssertEqual(NeoCLISetup.missingSkillsOnDisk(forTool: "markcut.preview", directory: directory), ["markcut"])
+        XCTAssertEqual(NeoCLISetup.missingSkillsOnDisk(forTool: "markcut_preview", directory: directory), ["markcut"])
+        let skill = directory.appendingPathComponent("markcut")
+        try FileManager.default.createDirectory(at: skill, withIntermediateDirectories: true)
+        try "skill".write(to: skill.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+        XCTAssertTrue(NeoCLISetup.missingSkillsOnDisk(forTool: "neo_markcut_preview", directory: directory).isEmpty)
+        XCTAssertTrue(NeoCLISetup.missingSkillsOnDisk(forTool: "phone", directory: directory).isEmpty)
+    }
+
+    func testManagedNeoNewerVersionIsNotDowngraded() {
+        XCTAssertEqual(NeoCLISetup.packageDecision(installed: ["@lalalic/neo": "1.0.3"], executableExists: true),
+                       "ready")
+    }
+
+    func testNeoCLIUpdateIsIndependentOptIn() {
+        let defaults = UserDefaults(suiteName: "ToolkitUpdate.\(UUID().uuidString)")!
+        XCTAssertFalse(defaults.bool(forKey: NeoCLISetup.autoUpdateToolkitKey))
+    }
+
+    func testDynamicToolFeaturesKeepVersion211DiscoveryBehavior() {
+        let list = NeoYRemoteToolCatalog.visibleFeatureTools(
+            discovered: ["computer", "discord", "markcut.preview", "events", "shell"],
+            disabled: ["voice.session"])
+        XCTAssertEqual(list, ["computer", "discord", "voice.reply"])
+        let refreshed = NeoYRemoteToolCatalog.visibleFeatureTools(
+            discovered: ["computer", "new_provider_tool", "shell"], disabled: [])
+        XCTAssertEqual(refreshed, ["computer", "new_provider_tool"])
+        XCTAssertFalse(list.contains("new_provider_tool"))
+    }
+
+    func testToolDependenciesAndTransitiveRequirements() {
+        XCTAssertEqual(NeoCLISetup.requiredSkills(forTool: "markcut.preview"), ["markcut"])
+        XCTAssertEqual(NeoCLISetup.requiredSkills(forTool: "chatgpt"), ["webhelm", "daemon-service-manage"])
+        XCTAssertEqual(NeoCLISetup.requiredSkills(forTool: "webhelm.navigate"), ["webhelm", "daemon-service-manage"])
+        XCTAssertEqual(NeoCLISetup.requiredSkills(forTool: "phone"), [])
+        XCTAssertEqual(NeoCLISetup.requiredSkills(forTool: "custom",
+            advertised: ["wechat-bro"]), ["wechat-bro", "daemon-service-manage"])
+    }
+
+    func testToolMetadataRequiresApprovedSkillSources() {
+        let descriptor: [String: Any] = [
+            "name": "browser.test", "_meta": [
+                "neo": ["requires": ["skills": ["webhelm"]]]
+            ]
+        ]
+        XCTAssertEqual(NeoCLISetup.advertisedSkills(from: descriptor), ["webhelm"])
+        XCTAssertEqual(NeoCLISetup.advertisedSkills(from: ["name": "other"]), [])
+        XCTAssertThrowsError(try NeoCLISetup.ensureSkills(["unapproved-skill"]))
+        XCTAssertEqual(NeoCLISetup.managedSkillSources["webhelm"], "lalalic/browser-workspace")
+        XCTAssertEqual(NeoCLISetup.managedSkillSources["markcut"], "lalalic/markcut")
+    }
+
+    func testWebhelmSetupHealthNeedsDaemonAndManagedChrome() {
+        XCTAssertTrue(NeoCLISetup.webhelmIsHealthy(
+            #"{"managed_chrome":{"pid":120}, "daemon":{"running":true}}"#))
+        XCTAssertFalse(NeoCLISetup.webhelmIsHealthy(
+            #"{"managed_chrome":null, "daemon":{"running":true}}"#))
+        XCTAssertFalse(NeoCLISetup.webhelmIsHealthy(
+            #"{"managed_chrome":{"pid":120}, "daemon":{"running":false}}"#))
+        XCTAssertFalse(NeoCLISetup.webhelmIsHealthy("not JSON"))
+    }
+
+    func testAutomaticSkillUpdatePreservesUnownedAndDeveloperSources() {
+        XCTAssertTrue(NeoCLISetup.autoUpdateEligible(
+            name: "markcut", installedSource: "lalalic/markcut"))
+        XCTAssertTrue(NeoCLISetup.autoUpdateEligible(
+            name: "webhelm", installedSource: "lalalic/browser-workspace"))
+        XCTAssertFalse(NeoCLISetup.autoUpdateEligible(
+            name: "webhelm", installedSource: nil))
+        XCTAssertFalse(NeoCLISetup.autoUpdateEligible(
+            name: "markcut", installedSource: "other/repository"))
+        XCTAssertFalse(NeoCLISetup.autoUpdateEligible(
+            name: "unknown", installedSource: "other/repository"))
+    }
+
     func testGlobalSkillsReadOnlyInventory() {
         XCTAssertEqual(NeoCLISetup.globalSkills(), ["events-bus", "daemon-service-manage", "webhelm", "agents-relay"])
     }

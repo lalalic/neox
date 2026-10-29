@@ -31,6 +31,20 @@ enum NeoYRemoteToolCatalog {
         return names.sorted()
     }
 
+    /// Render the real tools/list inventory, plus disabled tools (so they can
+    /// be re-enabled). Do not replace this with a static feature whitelist.
+    static func visibleFeatureTools(discovered: Set<String>, disabled: Set<String>) -> [String] {
+        var disabled = disabled
+        if disabled.remove("voice.session") != nil { disabled.insert("voice.reply") }
+        return discovered.union(disabled).filter { name in
+            if NeoYCoreRuntime.toolNames.contains(name) { return false }
+            if ["events", "neoy.ui_smoke", "mcp.temp-files"].contains(name) { return false }
+            if name.hasPrefix("markcut.") || name.hasPrefix("family-tutor.")
+                || name == "mcp.family-tutor" { return false }
+            return true
+        }.sorted()
+    }
+
     /// App-only helpers are usable remotely only with their parent intent.
     static func remoteTools(for tools: Set<String>) -> Set<String> {
         return tools.subtracting(["ask_questions.submit", "ask_questions.cancel"])
