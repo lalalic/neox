@@ -24,6 +24,14 @@ enum NeoCLISetup {
 
     static let toolkitPreferenceKey = "NeoProjectsToolkitEnabled"
     static let optionalSkillsPreferenceKey = "NeoOptionalSkillsEnabled"
+    static let autoUpdateSkillsKey = "NeoAutoUpdateSkills"
+    static let autoUpdateProjectsKey = "NeoAutoUpdateProjects"
+    private static let lastSkillUpdateKey = "NeoLastSkillUpdate"
+    private static let lastProjectUpdateKey = "NeoLastProjectUpdate"
+
+    static func updateDue(last: Date?, now: Date = Date()) -> Bool {
+        last.map { now.timeIntervalSince($0) >= 86_400 } ?? true
+    }
 
     /// On existing installations preserve the observed CLI choice. New users
     /// must explicitly enable the optional Projects Toolkit.
@@ -85,6 +93,31 @@ enum NeoCLISetup {
         }
         let skill = skillsDirectory.appendingPathComponent(name).appendingPathComponent("SKILL.md")
         try NeoYAgentSetupLauncher.open(bootstrap: skill, project: "skill/\(name)")
+    }
+
+    /// Opt-in daily updates; package/skill ownership stays with their existing CLIs.
+    /// A failed update is logged and retried on the next daily check.
+    static func autoUpdateIfDue(defaults: UserDefaults = .standard, now: Date = Date()) {
+        if defaults.bool(forKey: autoUpdateSkillsKey),
+           updateDue(last: defaults.object(forKey: lastSkillUpdateKey) as? Date, now: now) {
+            defaults.set(now, forKey: lastSkillUpdateKey)
+            for name in desiredOptionalSkills(defaults: defaults).sorted() {
+                do { try updateOptionalSkill(name) }
+                catch { NSLog("Neo Skill %@ auto-update skipped: %@", name, error.localizedDescription) }
+            }
+        }
+        if defaults.bool(forKey: autoUpdateProjectsKey),
+           updateDue(last: defaults.object(forKey: lastProjectUpdateKey) as? Date, now: now) {
+            defaults.set(now, forKey: lastProjectUpdateKey)
+            var updatedRoots = Set<String>()
+            for name in projectNames() {
+                guard let info = try? projectInfo(name),
+                      let gitRoot = info["git_root"] as? String,
+                      updatedRoots.insert(gitRoot).inserted else { continue }
+                do { _ = try updateProject(name) }
+                catch { NSLog("Neo Project %@ auto-update skipped: %@", name, error.localizedDescription) }
+            }
+        }
     }
 
     static func allInstalledGlobalSkills() -> Set<String> {

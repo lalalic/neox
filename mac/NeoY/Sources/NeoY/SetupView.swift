@@ -45,6 +45,8 @@ final class NeoYSetupModel: ObservableObject {
     @Published var toolkitUninstallable = false
     @Published var toolkitInstalled = false
     @Published var toolkitEnabled = NeoCLISetup.wantsProjectsToolkit()
+    @Published var autoUpdateSkills = UserDefaults.standard.bool(forKey: NeoCLISetup.autoUpdateSkillsKey)
+    @Published var autoUpdateProjects = UserDefaults.standard.bool(forKey: NeoCLISetup.autoUpdateProjectsKey)
     @Published var globalSkills = NeoCLISetup.globalSkills()
     @Published var optionalSkills: Set<String> = []
     @Published private(set) var projectNames: [String] = []
@@ -368,6 +370,16 @@ final class NeoYSetupModel: ObservableObject {
         toolkitEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: NeoCLISetup.toolkitPreferenceKey)
         if enabled && !toolkitInstalled { setupNeoCLI() }
+    }
+
+    func setAutoUpdateSkills(_ enabled: Bool) {
+        autoUpdateSkills = enabled
+        UserDefaults.standard.set(enabled, forKey: NeoCLISetup.autoUpdateSkillsKey)
+    }
+
+    func setAutoUpdateProjects(_ enabled: Bool) {
+        autoUpdateProjects = enabled
+        UserDefaults.standard.set(enabled, forKey: NeoCLISetup.autoUpdateProjectsKey)
     }
 
     func installOptionalSkill(_ name: String) {
@@ -983,6 +995,16 @@ struct NeoYSetupView: View {
                     Divider()
                 }
 
+                featureRow("Auto-update Skills", detail: "Check selected Skills once per day at app launch") {
+                    Toggle("", isOn: Binding(
+                        get: { model.autoUpdateSkills },
+                        set: { model.setAutoUpdateSkills($0) }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.checkbox)
+                }
+                Divider()
+
                 featureRow("Neo Project Toolkit", detail: "CLI and workflows") {
                     Toggle("", isOn: Binding(
                         get: { model.toolkitEnabled && model.toolkitInstalled },
@@ -996,6 +1018,15 @@ struct NeoYSetupView: View {
                     }
                 }
                 if model.toolkitEnabled && model.toolkitInstalled {
+                    HStack {
+                        Toggle("Auto-update clean Git projects daily", isOn: Binding(
+                            get: { model.autoUpdateProjects },
+                            set: { model.setAutoUpdateProjects($0) }
+                        ))
+                        .toggleStyle(.checkbox)
+                        .font(.caption)
+                    }
+                    .padding(.leading, 32)
                     VStack(alignment: .leading, spacing: 6) {
                             HStack {
                                 Spacer()
@@ -1011,6 +1042,8 @@ struct NeoYSetupView: View {
                                         .toggleStyle(.checkbox)
                                         .disabled(model.isBusy || model.projectStatuses[name] == nil)
                                         .accessibilityLabel("Enable \(name)")
+                                        .help(model.projectStatuses[name] == nil
+                                              ? "No lifecycle service; use Setup with Agent if available." : "Start or stop project service")
                                     Text(name)
                                         .font(.subheadline)
                                         .lineLimit(1)
