@@ -150,6 +150,15 @@ final class NeoCLISetupTests: XCTestCase {
         XCTAssertEqual(NeoCLISetup.globalSkills(), ["events-bus", "daemon-service-manage", "webhelm", "agents-relay"])
     }
 
+    func testMarkcutPreviewRequiresInstalledMarkcutSkill() {
+        XCTAssertEqual(NeoCLISetup.missingSkills(forTool: "markcut_preview", installed: []),
+                       ["markcut"])
+        XCTAssertTrue(NeoCLISetup.missingSkills(
+            forTool: "markcut.preview", installed: ["markcut"]).isEmpty)
+        XCTAssertTrue(NeoCLISetup.missingSkills(
+            forTool: "unrelated_tool", installed: []).isEmpty)
+    }
+
     func testOptionalSkillCatalogDoesNotIncludeCoreDependencies() {
         XCTAssertEqual(Set(NeoCLISetup.optionalSkillSources.keys),
                        Set(["wechat-bro", "markcut"]))

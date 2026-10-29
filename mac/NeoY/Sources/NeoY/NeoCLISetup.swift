@@ -11,6 +11,17 @@ enum NeoCLISetup {
         "markcut": "lalalic/markcut",
     ]
 
+    /// Tool-to-Skill prerequisites, independent of the MCP provider lifecycle.
+    static let toolSkillRequirements: [String: Set<String>] = [
+        "markcut_preview": ["markcut"],
+        "markcut.preview": ["markcut"],
+        "neo_markcut_preview": ["markcut"],
+    ]
+
+    static func missingSkills(forTool tool: String, installed: Set<String>) -> Set<String> {
+        (toolSkillRequirements[tool] ?? []).subtracting(installed)
+    }
+
     static let toolkitPreferenceKey = "NeoProjectsToolkitEnabled"
     static let optionalSkillsPreferenceKey = "NeoOptionalSkillsEnabled"
 
@@ -57,6 +68,23 @@ enum NeoCLISetup {
             throw NSError(domain: "NeoCLISetup", code: 4, userInfo: [NSLocalizedDescriptionKey: "not an optional Neo Skill"])
         }
         _ = try runSkills(["remove", name, "-g", "-y"])
+    }
+
+    static func updateOptionalSkill(_ name: String) throws {
+        guard optionalSkillSources[name] != nil else {
+            throw NSError(domain: "NeoCLISetup", code: 4,
+                          userInfo: [NSLocalizedDescriptionKey: "Unknown optional Neo Skill"])
+        }
+        _ = try runSkills(["update", name, "-g", "-y"])
+    }
+
+    static func setupOptionalSkill(_ name: String) throws {
+        guard optionalSkillSources[name] != nil else {
+            throw NSError(domain: "NeoCLISetup", code: 4,
+                          userInfo: [NSLocalizedDescriptionKey: "Unknown optional Neo Skill"])
+        }
+        let skill = skillsDirectory.appendingPathComponent(name).appendingPathComponent("SKILL.md")
+        try NeoYAgentSetupLauncher.open(bootstrap: skill, project: "skill/\(name)")
     }
 
     static func allInstalledGlobalSkills() -> Set<String> {
@@ -156,6 +184,35 @@ enum NeoCLISetup {
                           userInfo: [NSLocalizedDescriptionKey: response])
         }
         return response
+    }
+
+    /// Explicit, conservative Git update. A project can share its checkout with
+    /// other Neo projects, so never reset, stash, or discard local work.
+    static func updateProject(_ name: String) throws -> String {
+        let root = try projectRoot(name)
+        func git(_ arguments: [String]) throws -> String {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = ["-C", root.path] + arguments
+            let output = Pipe()
+            process.standardOutput = output
+            process.standardError = output
+            try process.run()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            let result = String(decoding: data, as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard process.terminationStatus == 0 else {
+                throw NSError(domain: "NeoProject", code: Int(process.terminationStatus),
+                              userInfo: [NSLocalizedDescriptionKey: result])
+            }
+            return result
+        }
+        guard try git(["status", "--porcelain"]).isEmpty else {
+            throw NSError(domain: "NeoProject", code: 5,
+                          userInfo: [NSLocalizedDescriptionKey: "Project has local changes; update skipped."])
+        }
+        return try git(["pull", "--ff-only"])
     }
 
     /// Project-owned lifecycle scripts are the authority; NeoY does not manage PM2.
