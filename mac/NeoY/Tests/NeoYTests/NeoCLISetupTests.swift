@@ -115,6 +115,34 @@ final class NeoCLISetupTests: XCTestCase {
                        ["commerce", "family-tutor", "vlog"])
     }
 
+    func testProjectMembershipIsPersistedAndNeverControlsRuntimeStatus() {
+        let suite = "NeoProjectMembership.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let names = ["commerce", "family-tutor", "vlog"]
+        XCTAssertEqual(NeoCLISetup.enabledProjectNames(names, defaults: defaults), Set(names))
+        XCTAssertTrue(NeoCLISetup.setProjectEnabled("family-tutor", enabled: false,
+                                                     discovered: names, defaults: defaults))
+        XCTAssertFalse(NeoCLISetup.projectEnabled("family-tutor", defaults: defaults))
+        XCTAssertTrue(NeoCLISetup.projectEnabled("commerce", defaults: defaults))
+        XCTAssertFalse(NeoCLISetup.setProjectEnabled("not-discovered", enabled: false,
+                                                      discovered: names, defaults: defaults))
+        let reopened = UserDefaults(suiteName: suite)!
+        XCTAssertEqual(NeoCLISetup.enabledProjectNames(names, defaults: reopened),
+                       Set(["commerce", "vlog"]))
+        XCTAssertTrue(NeoCLISetup.projectEnabled("new-project", defaults: reopened))
+        XCTAssertTrue(NeoCLISetup.setProjectEnabled("family-tutor", enabled: true,
+                                                     discovered: names, defaults: reopened))
+        XCTAssertEqual(NeoCLISetup.enabledProjectNames(names, defaults: defaults), Set(names))
+    }
+
+    func testNativeFeatureCatalogNeverUsesCoreOrFederatedTools() {
+        let ids = Set(NeoYOptionalFeatureCatalog.all.map(\.id))
+        XCTAssertEqual(ids, Set(NeoYRemoteToolCatalog.nativeOptionalTools.keys).union(["voice.reply"]))
+        XCTAssertTrue(ids.isDisjoint(with: NeoYRemoteToolCatalog.coreToolNames))
+        XCTAssertTrue(ids.isDisjoint(with: ["events", "markcut.preview", "markcut_preview", "chatgpt", "fs"]))
+    }
+
     func testLegacyCapabilityConfigurationDefaultsToolOverrides() throws {
         let oldConfiguration = #"{ "disabled": ["ask-questions"] }"#.data(using: .utf8)!
         let decoded = try JSONDecoder().decode(NeoYCapabilityConfiguration.self, from: oldConfiguration)

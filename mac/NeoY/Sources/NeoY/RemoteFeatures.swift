@@ -1,5 +1,23 @@
 import Foundation
 
+/// The native, user-facing optional feature catalog. Tools/list is not a feature inventory.
+enum NeoYOptionalFeatureCatalog {
+    struct Item: Identifiable {
+        let id: String
+        let name: String
+        let summary: String
+    }
+
+    static let all: [Item] = [
+        .init(id: "computer", name: "Computer Use", summary: "Native macOS accessibility"),
+        .init(id: "demo", name: "Demo Recording", summary: "Native UI demonstrations"),
+        .init(id: "tour", name: "Capture Tour", summary: "Guided screen capture"),
+        .init(id: "phone", name: "Phone Integration", summary: "Connect to supported phones"),
+        .init(id: "ask_questions", name: "Ask Questions", summary: "Native interactive prompts"),
+        .init(id: "voice.reply", name: "Voice", summary: "Speech reply capability"),
+    ]
+}
+
 enum NeoYRemoteToolCatalog {
     static let coreToolNames: Set<String> = [
         "setup", "cluster", "status", "shell", "fs", "apply_file_patch",

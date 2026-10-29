@@ -35,7 +35,6 @@ final class NeoYSetupModel: ObservableObject {
     @Published private(set) var featureRecords: [NeoYFeatureRecord] = []
     @Published private(set) var nativeEnabledTools: Set<String> = []
     @Published private(set) var disabledDiscoveredTools: Set<String> = []
-    @Published private(set) var discoveredMCPTools: [String] = []
     @Published private(set) var remoteProviderOptions: [String] = []
     @Published private(set) var oauthClientID = ""
     @Published private(set) var oauthToken = ""
@@ -50,6 +49,7 @@ final class NeoYSetupModel: ObservableObject {
     @Published var globalSkills = NeoCLISetup.globalSkills()
     @Published var optionalSkills: Set<String> = []
     @Published private(set) var projectNames: [String] = []
+    @Published private(set) var enabledProjects: Set<String> = []
     @Published private(set) var projectStatuses: [String: String] = [:]
     @Published private(set) var projectAgentSetupNames: Set<String> = []
     @Published private(set) var clusterNodes: [NeoYNodeConfiguration] = []
@@ -65,7 +65,6 @@ final class NeoYSetupModel: ObservableObject {
             await refreshPermissions()
             await refreshFeatures()
             refreshNativeTools()
-            await refreshMCPTools()
             refreshProjects()
             refreshClusterNodes()
             refreshNeoCLI()
@@ -182,13 +181,25 @@ final class NeoYSetupModel: ObservableObject {
             let agentSetupNames = Set(names.filter { NeoCLISetup.projectSetupBootstrap($0) != nil })
             await MainActor.run {
                 self?.projectNames = names
+                self?.enabledProjects = NeoCLISetup.enabledProjectNames(names)
                 self?.projectAgentSetupNames = agentSetupNames
                 self?.projectStatuses = statuses
             }
         }
     }
 
+    func setProjectEnabled(_ name: String, enabled: Bool) {
+        guard projectNames.contains(name) else { return }
+        guard NeoCLISetup.setProjectEnabled(name, enabled: enabled, discovered: projectNames) else {
+            result = "Could not save the membership preference for \(name)."
+            return
+        }
+        enabledProjects = NeoCLISetup.enabledProjectNames(projectNames)
+        result = "\(name) \(enabled ? "enabled" : "disabled") in Neo Project Toolkit. Service state was not changed."
+    }
+
     func projectSetupAgent(_ name: String) {
+        guard enabledProjects.contains(name) else { result = "Enable \(name) before setup."; return }
         do {
             _ = try NeoCLISetup.projectSetupAgent(name)
             result = "Opened ChatGPT setup for \(name) in Chrome. Send the prepared prompt to begin."
@@ -199,6 +210,7 @@ final class NeoYSetupModel: ObservableObject {
 
     func projectCommand(_ command: String, name: String) {
         guard !isBusy else { return }
+        guard enabledProjects.contains(name) else { result = "Enable \(name) before managing it."; return }
         if command == "uninstall" {
             let alert = NSAlert()
             alert.messageText = "Uninstall \(name)?"
@@ -278,39 +290,6 @@ final class NeoYSetupModel: ObservableObject {
         }
     }
 
-    func refreshMCPTools() async {
-        let urlString = NeoYDeploymentSettingsStore.load().localMCPURL
-        guard let url = URL(string: urlString) else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = #"{"jsonrpc":"2.0","id":"feature-tools","method":"tools/list","params":{}}"#.data(using: .utf8)
-        do {
-            let (data, _) = try await URLSession.shared.data(for: request)
-            guard let rpc = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let result = rpc["result"] as? [String: Any],
-                  let tools = result["tools"] as? [[String: Any]] else { return }
-            discoveredMCPTools = tools.compactMap { $0["name"] as? String }.sorted()
-        } catch {
-            result = "Tool discovery failed: \(error.localizedDescription)"
-        }
-    }
-
-    var visibleMCPFeatureTools: [String] {
-        var disabled = disabledDiscoveredTools
-        if disabled.remove("voice.session") != nil { disabled.insert("voice.reply") }
-        let candidate = Set(discoveredMCPTools)
-            .union(disabled)
-        return candidate.filter { name in
-            if NeoYCoreRuntime.toolNames.contains(name) { return false }
-            if ["events", "neoy.ui_smoke", "mcp.temp-files"].contains(name) { return false }
-            if name.hasPrefix("markcut.") || name.hasPrefix("family-tutor.") || name == "mcp.family-tutor" {
-                return false // Shown as their owning Feature, not repeated as individual tools.
-            }
-            return true
-        }.sorted()
-    }
-
     func refreshNativeTools() {
         let store = NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)
         guard let configuration = try? store.loadOrCreate().document.configuration else { return }
@@ -336,7 +315,6 @@ final class NeoYSetupModel: ObservableObject {
             } catch { result = error.localizedDescription }
             refreshNativeTools()
             refreshRemoteToolOptions()
-            await refreshMCPTools()
             isBusy = false
         }
     }
@@ -360,7 +338,6 @@ final class NeoYSetupModel: ObservableObject {
                 result = "\(name) \(enabled ? "enabled" : "disabled")."
             } catch { result = error.localizedDescription }
             refreshNativeTools()
-            await refreshMCPTools()
             isBusy = false
         }
     }
@@ -935,7 +912,14 @@ struct NeoYSetupView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 heading("Features", "Manage Neo capabilities.")
-                Button("Refresh") { Task { await model.refreshMCPTools() } }
+                Button("Refresh") {
+                    Task {
+                        await model.refreshFeatures()
+                        model.refreshNativeTools()
+                        model.refreshProjects()
+                        model.refreshNeoCLI()
+                    }
+                }
             }
             GroupBox("Neo Core") {
                 HStack {
@@ -952,22 +936,27 @@ struct NeoYSetupView: View {
             }
 
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(model.visibleMCPFeatureTools, id: \.self) { tool in
-                    featureRow(featureTitle(tool), detail: "MCP") {
-                        if NeoYRemoteToolCatalog.nativeOptionalTools[tool] != nil {
+                ForEach(NeoYOptionalFeatureCatalog.all) { feature in
+                    featureRow(feature.name, detail: feature.summary) {
+                        if NeoYRemoteToolCatalog.nativeOptionalTools[feature.id] != nil {
                             Toggle("", isOn: Binding(
-                                get: { model.nativeEnabledTools.contains(tool) },
-                                set: { model.setNativeTool(tool, enabled: $0) }
+                                get: { model.nativeEnabledTools.contains(feature.id) },
+                                set: { model.setNativeTool(feature.id, enabled: $0) }
                             ))
                             .labelsHidden()
                             .toggleStyle(.checkbox)
+                            .accessibilityLabel("Enable \(feature.name)")
+                            .accessibilityIdentifier("optionalFeature.\(feature.id)")
+                            .disabled(model.isBusy)
                         } else {
                             Toggle("", isOn: Binding(
-                                get: { !model.disabledDiscoveredTools.contains(tool) },
-                                set: { model.setDiscoveredTool(tool, enabled: $0) }
+                                get: { !model.disabledDiscoveredTools.contains(feature.id) },
+                                set: { model.setDiscoveredTool(feature.id, enabled: $0) }
                             ))
                             .labelsHidden()
                             .toggleStyle(.checkbox)
+                            .accessibilityLabel("Enable \(feature.name)")
+                            .accessibilityIdentifier("optionalFeature.\(feature.id)")
                             .disabled(model.isBusy)
                         }
                     }
@@ -1035,15 +1024,15 @@ struct NeoYSetupView: View {
                             ForEach(model.projectNames, id: \.self) { name in
                                 HStack {
                                         Toggle("Enable \(name)", isOn: Binding(
-                                            get: { model.projectStatuses[name] == "online" },
-                                            set: { model.projectCommand($0 ? "start" : "stop", name: name) }
+                                            get: { model.enabledProjects.contains(name) },
+                                            set: { model.setProjectEnabled(name, enabled: $0) }
                                         ))
                                         .labelsHidden()
                                         .toggleStyle(.checkbox)
-                                        .disabled(model.isBusy || model.projectStatuses[name] == nil)
+                                        .disabled(model.isBusy)
                                         .accessibilityLabel("Enable \(name)")
-                                        .help(model.projectStatuses[name] == nil
-                                              ? "No lifecycle service; use Setup with Agent if available." : "Start or stop project service")
+                                        .accessibilityIdentifier("projectMembership.\(name)")
+                                        .help("Include in Toolkit and automatic updates. This does not start or stop a service.")
                                     Text(name)
                                         .font(.subheadline)
                                         .lineLimit(1)
@@ -1058,11 +1047,11 @@ struct NeoYSetupView: View {
                                     if model.projectAgentSetupNames.contains(name) {
                                         Button("Setup with Agent") { model.projectSetupAgent(name) }
                                             .controlSize(.small)
-                                            .disabled(model.isBusy)
+                                            .disabled(model.isBusy || !model.enabledProjects.contains(name))
                                     }
                                     Button("Update") { model.projectCommand("update", name: name) }
                                         .controlSize(.small)
-                                        .disabled(model.isBusy)
+                                        .disabled(model.isBusy || !model.enabledProjects.contains(name))
                                     if let status = model.projectStatuses[name] {
                                         Menu("Manage") {
                                             Button("Setup") { model.projectCommand("setup", name: name) }
@@ -1077,7 +1066,7 @@ struct NeoYSetupView: View {
                                                 model.projectCommand("uninstall", name: name)
                                             }
                                         }
-                                        .disabled(model.isBusy)
+                                        .disabled(model.isBusy || !model.enabledProjects.contains(name))
                                     }
                                 }
                             }
@@ -1117,14 +1106,6 @@ struct NeoYSetupView: View {
             }
             .background(Color(nsColor: .controlBackgroundColor))
             .clipShape(RoundedRectangle(cornerRadius: 12))
-        }
-    }
-
-    private func featureTitle(_ tool: String) -> String {
-        switch tool {
-        case "ask_questions": "Ask Questions"
-        case "voice.reply": "Voice"
-        default: tool.capitalized
         }
     }
 

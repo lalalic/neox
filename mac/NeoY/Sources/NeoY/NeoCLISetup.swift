@@ -26,6 +26,27 @@ enum NeoCLISetup {
     static let optionalSkillsPreferenceKey = "NeoOptionalSkillsEnabled"
     static let autoUpdateSkillsKey = "NeoAutoUpdateSkills"
     static let autoUpdateProjectsKey = "NeoAutoUpdateProjects"
+    /// This is Toolkit membership, not the process or daemon state.
+    static let projectMembershipKey = "NeoProjectMembership"
+
+    static func projectEnabled(_ name: String, defaults: UserDefaults = .standard) -> Bool {
+        (defaults.dictionary(forKey: projectMembershipKey)?[name] as? Bool) ?? true
+    }
+
+    @discardableResult
+    static func setProjectEnabled(_ name: String, enabled: Bool, discovered: [String],
+                                  defaults: UserDefaults = .standard) -> Bool {
+        guard discovered.contains(name) else { return false }
+        var saved = defaults.dictionary(forKey: projectMembershipKey) ?? [:]
+        saved[name] = enabled
+        defaults.set(saved, forKey: projectMembershipKey)
+        return projectEnabled(name, defaults: defaults) == enabled
+    }
+
+    static func enabledProjectNames(_ names: [String], defaults: UserDefaults = .standard) -> Set<String> {
+        Set(names.filter { projectEnabled($0, defaults: defaults) })
+    }
+
     private static let lastSkillUpdateKey = "NeoLastSkillUpdate"
     private static let lastProjectUpdateKey = "NeoLastProjectUpdate"
 
@@ -106,12 +127,13 @@ enum NeoCLISetup {
                 catch { NSLog("Neo Skill %@ auto-update skipped: %@", name, error.localizedDescription) }
             }
         }
-        if defaults.bool(forKey: autoUpdateProjectsKey),
+        if wantsProjectsToolkit(defaults: defaults),
+           defaults.bool(forKey: autoUpdateProjectsKey),
            updateDue(last: defaults.object(forKey: lastProjectUpdateKey) as? Date, now: now) {
             defaults.set(now, forKey: lastProjectUpdateKey)
             var updatedRoots = Set<String>()
             for name in projectNames() {
-                guard let info = try? projectInfo(name),
+                guard projectEnabled(name, defaults: defaults), let info = try? projectInfo(name),
                       let gitRoot = info["git_root"] as? String,
                       updatedRoots.insert(gitRoot).inserted else { continue }
                 do { _ = try updateProject(name) }
