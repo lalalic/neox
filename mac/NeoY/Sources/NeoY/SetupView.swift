@@ -36,6 +36,10 @@ final class NeoYSetupModel: ObservableObject {
     @Published private(set) var nativeEnabledTools: Set<String> = []
     @Published private(set) var disabledDiscoveredTools: Set<String> = []
     @Published private(set) var discoveredMCPTools: [String] = []
+    @Published private(set) var mcpToolDiscoveryError: String?
+    @Published private(set) var toolSkillStatus = ""
+    @Published private(set) var repairingToolSkills = false
+    private var discoveredToolSkills: [String: Set<String>] = [:]
     @Published private(set) var remoteProviderOptions: [String] = []
     @Published private(set) var oauthClientID = ""
     @Published private(set) var oauthToken = ""
@@ -47,9 +51,11 @@ final class NeoYSetupModel: ObservableObject {
     @Published var toolkitEnabled = NeoCLISetup.wantsProjectsToolkit()
     @Published var autoUpdateSkills = UserDefaults.standard.bool(forKey: NeoCLISetup.autoUpdateSkillsKey)
     @Published var autoUpdateProjects = UserDefaults.standard.bool(forKey: NeoCLISetup.autoUpdateProjectsKey)
+    @Published var autoUpdateToolkit = UserDefaults.standard.bool(forKey: NeoCLISetup.autoUpdateToolkitKey)
     @Published var globalSkills = NeoCLISetup.globalSkills()
     @Published var optionalSkills: Set<String> = []
     @Published private(set) var projectNames: [String] = []
+    @Published private(set) var enabledProjects: Set<String> = []
     @Published private(set) var projectStatuses: [String: String] = [:]
     @Published private(set) var projectAgentSetupNames: Set<String> = []
     @Published private(set) var clusterNodes: [NeoYNodeConfiguration] = []
@@ -182,10 +188,17 @@ final class NeoYSetupModel: ObservableObject {
             let agentSetupNames = Set(names.filter { NeoCLISetup.projectSetupBootstrap($0) != nil })
             await MainActor.run {
                 self?.projectNames = names
+                self?.enabledProjects = NeoCLISetup.enabledProjects(discovered: names)
                 self?.projectAgentSetupNames = agentSetupNames
                 self?.projectStatuses = statuses
             }
         }
+    }
+
+    func setProjectEnabled(_ name: String, enabled: Bool) {
+        NeoCLISetup.setProjectEnabled(name, enabled: enabled, discovered: projectNames)
+        enabledProjects = NeoCLISetup.enabledProjects(discovered: projectNames)
+        result = "\(name) \(enabled ? "enabled" : "disabled") in Neo Project Toolkit. Service state unchanged."
     }
 
     func projectSetupAgent(_ name: String) {
@@ -280,35 +293,67 @@ final class NeoYSetupModel: ObservableObject {
 
     func refreshMCPTools() async {
         let urlString = NeoYDeploymentSettingsStore.load().localMCPURL
-        guard let url = URL(string: urlString) else { return }
+        guard let url = URL(string: urlString) else {
+            mcpToolDiscoveryError = "Invalid local MCP endpoint"
+            return
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = #"{"jsonrpc":"2.0","id":"feature-tools","method":"tools/list","params":{}}"#.data(using: .utf8)
         do {
-            let (data, _) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                mcpToolDiscoveryError = "MCP tool discovery returned an HTTP error"
+                return
+            }
             guard let rpc = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let result = rpc["result"] as? [String: Any],
-                  let tools = result["tools"] as? [[String: Any]] else { return }
+                  let tools = result["tools"] as? [[String: Any]] else {
+                mcpToolDiscoveryError = "MCP tool discovery returned an invalid response"
+                return
+            }
             discoveredMCPTools = tools.compactMap { $0["name"] as? String }.sorted()
+            var declarations: [String: Set<String>] = [:]
+            for tool in tools {
+                guard let name = tool["name"] as? String else { continue }
+                declarations[name, default: []].formUnion(NeoCLISetup.advertisedSkills(from: tool))
+            }
+            discoveredToolSkills = declarations
+            mcpToolDiscoveryError = nil
+            repairRequiredToolSkills()
         } catch {
-            result = "Tool discovery failed: \(error.localizedDescription)"
+            mcpToolDiscoveryError = "Tool discovery failed: \(error.localizedDescription)"
         }
     }
 
     var visibleMCPFeatureTools: [String] {
-        var disabled = disabledDiscoveredTools
-        if disabled.remove("voice.session") != nil { disabled.insert("voice.reply") }
-        let candidate = Set(discoveredMCPTools)
-            .union(disabled)
-        return candidate.filter { name in
-            if NeoYCoreRuntime.toolNames.contains(name) { return false }
-            if ["events", "neoy.ui_smoke", "mcp.temp-files"].contains(name) { return false }
-            if name.hasPrefix("markcut.") || name.hasPrefix("family-tutor.") || name == "mcp.family-tutor" {
-                return false // Shown as their owning Feature, not repeated as individual tools.
+        NeoYRemoteToolCatalog.visibleFeatureTools(
+            discovered: Set(discoveredMCPTools), disabled: disabledDiscoveredTools)
+    }
+
+    func repairRequiredToolSkills() {
+        guard !repairingToolSkills else { return }
+        let required = discoveredMCPTools.reduce(into: Set<String>()) { all, name in
+            all.formUnion(NeoCLISetup.requiredSkills(
+                forTool: name, advertised: discoveredToolSkills[name] ?? []))
+        }
+        guard !required.isEmpty else {
+            toolSkillStatus = ""
+            return
+        }
+        repairingToolSkills = true
+        toolSkillStatus = "Checking required Skills…"
+        Task.detached { [weak self] in
+            let message: String
+            do { message = try NeoCLISetup.ensureToolSkills(required) }
+            catch { message = "Required Skill setup failed: \(error.localizedDescription)" }
+            await MainActor.run {
+                self?.toolSkillStatus = message
+                self?.repairingToolSkills = false
+                self?.refreshNeoCLI()
             }
-            return true
-        }.sorted()
+        }
     }
 
     func refreshNativeTools() {
@@ -343,16 +388,18 @@ final class NeoYSetupModel: ObservableObject {
 
     func setDiscoveredTool(_ name: String, enabled: Bool) {
         guard !isBusy else { return }
-        if enabled {
-            let missing = NeoCLISetup.missingSkills(forTool: name, installed: optionalSkills)
-            guard missing.isEmpty else {
-                result = "Install required Skill first: \(missing.sorted().joined(separator: ", "))."
-                return
-            }
-        }
+        let required = NeoCLISetup.requiredSkills(
+            forTool: name, advertised: discoveredToolSkills[name] ?? [])
         isBusy = true
         Task {
             do {
+                if enabled && !required.isEmpty {
+                    let message = try await Task.detached(priority: .utility) {
+                        try NeoCLISetup.ensureToolSkills(required)
+                    }.value
+                    toolSkillStatus = message
+                    refreshNeoCLI()
+                }
                 let control = NeoYControlPlaneService(
                     store: NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory))
                 _ = try await control.setToolEnabled(name, enabled: enabled)
@@ -377,20 +424,25 @@ final class NeoYSetupModel: ObservableObject {
         UserDefaults.standard.set(enabled, forKey: NeoCLISetup.autoUpdateSkillsKey)
     }
 
+    func setAutoUpdateToolkit(_ enabled: Bool) {
+        autoUpdateToolkit = enabled
+        UserDefaults.standard.set(enabled, forKey: NeoCLISetup.autoUpdateToolkitKey)
+    }
+
     func setAutoUpdateProjects(_ enabled: Bool) {
         autoUpdateProjects = enabled
         UserDefaults.standard.set(enabled, forKey: NeoCLISetup.autoUpdateProjectsKey)
     }
 
     func installOptionalSkill(_ name: String) {
-        guard !isBusy, let source = NeoCLISetup.optionalSkillSources[name] else { return }
+        guard !isBusy, NeoCLISetup.optionalSkillSources[name] != nil else { return }
         isBusy = true
         Task.detached { [weak self] in
             let message: String
             do {
-                _ = try NeoCLISetup.runSkills(["add", source, "-g", "-y", "-s", name])
+                let status = try NeoCLISetup.ensureToolSkills([name])
                 NeoCLISetup.setOptionalSkillDesired(name, enabled: true)
-                message = "Installed \(name)."
+                message = "\(status). Use Setup with Agent if login or permissions are required."
             } catch { message = "Installation failed: \(error.localizedDescription)" }
             await MainActor.run {
                 self?.result = message
@@ -444,16 +496,22 @@ final class NeoYSetupModel: ObservableObject {
     func setupOptionalSkill(_ name: String) {
         do {
             try NeoCLISetup.setupOptionalSkill(name)
-            result = "Opened setup agent for \(name) in Chrome."
+            result = "Opened interactive setup for \(name). Verify the real workflow before marking it ready."
         } catch {
             result = "Could not open \(name) setup: \(error.localizedDescription)"
         }
     }
 
-    func setupNeoCLI() {
+    func setupNeoCLI(update: Bool = false) {
         isBusy = true
         Task.detached { [weak self] in
-            let message = NeoCLISetup.setup()
+            let message: String
+            if update {
+                do { message = try NeoCLISetup.updateManagedToolkit() }
+                catch { message = "Neo CLI update failed: \(error.localizedDescription)" }
+            } else {
+                message = NeoCLISetup.setup()
+            }
             await MainActor.run {
                 self?.result = message
                 self?.refreshNeoCLI()
@@ -935,7 +993,31 @@ struct NeoYSetupView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 heading("Features", "Manage Neo capabilities.")
-                Button("Refresh") { Task { await model.refreshMCPTools() } }
+                Button("Refresh") {
+                    Task {
+                        await model.refreshFeatures()
+                        model.refreshNativeTools()
+                        await model.refreshMCPTools()
+                        model.refreshProjects()
+                        model.refreshNeoCLI()
+                    }
+                }
+            }
+            if let error = model.mcpToolDiscoveryError {
+                Text(error).font(.caption).foregroundStyle(.red)
+                    .accessibilityIdentifier("mcpToolDiscoveryError")
+            }
+            if !model.toolSkillStatus.isEmpty {
+                HStack {
+                    Text(model.toolSkillStatus).font(.caption)
+                        .foregroundStyle(model.toolSkillStatus.contains("failed") ? .red : .secondary)
+                        .lineLimit(2)
+                        .accessibilityIdentifier("mcpToolSkillStatus")
+                    Spacer()
+                    Button("Repair Skills") { model.repairRequiredToolSkills() }
+                        .controlSize(.small)
+                        .disabled(model.repairingToolSkills)
+                }
             }
             GroupBox("Neo Core") {
                 HStack {
@@ -975,7 +1057,7 @@ struct NeoYSetupView: View {
                 }
 
                 ForEach(["wechat-bro", "markcut"], id: \.self) { skill in
-                    featureRow(skill, detail: "Skill") {
+                    featureRow(skill, detail: skill == "markcut" ? "Skill · provides Preview" : "Skill") {
                         Toggle("", isOn: Binding(
                             get: { model.optionalSkills.contains(skill) },
                             set: { enabled in
@@ -995,7 +1077,7 @@ struct NeoYSetupView: View {
                     Divider()
                 }
 
-                featureRow("Auto-update Skills", detail: "Check selected Skills once per day at app launch") {
+                featureRow("Auto-update Skills", detail: "Daily checks of installed Neo Skills and dependencies") {
                     Toggle("", isOn: Binding(
                         get: { model.autoUpdateSkills },
                         set: { model.setAutoUpdateSkills($0) }
@@ -1014,78 +1096,80 @@ struct NeoYSetupView: View {
                     .toggleStyle(.checkbox)
                     .disabled(model.isBusy)
                     if model.toolkitEnabled && model.toolkitInstalled {
-                        Button("Update") { model.setupNeoCLI() }.disabled(model.isBusy)
+                        Button("Update") { model.setupNeoCLI(update: true) }.disabled(model.isBusy)
                     }
                 }
                 if model.toolkitEnabled && model.toolkitInstalled {
-                    HStack {
-                        Toggle("Auto-update clean Git projects daily", isOn: Binding(
+                    HStack(spacing: 20) {
+                        Toggle("Auto-update Neo CLI", isOn: Binding(
+                            get: { model.autoUpdateToolkit },
+                            set: { model.setAutoUpdateToolkit($0) }
+                        ))
+                        Toggle("Auto-update clean Git projects", isOn: Binding(
                             get: { model.autoUpdateProjects },
                             set: { model.setAutoUpdateProjects($0) }
                         ))
-                        .toggleStyle(.checkbox)
-                        .font(.caption)
+                    }
+                    .toggleStyle(.checkbox)
+                    .font(.caption)
+                    .padding(.leading, 32)
+
+                    HStack {
+                        Spacer()
+                        Button("Refresh projects") { model.refreshProjects() }
+                            .controlSize(.small)
                     }
                     .padding(.leading, 32)
-                    VStack(alignment: .leading, spacing: 6) {
-                            HStack {
-                                Spacer()
-                                Button("Refresh") { model.refreshProjects() }
+                    .padding(.top, 6)
+
+                    ForEach(model.projectNames, id: \.self) { name in
+                        HStack(spacing: 10) {
+                            Toggle("Enable \(name)", isOn: Binding(
+                                get: { model.enabledProjects.contains(name) },
+                                set: { model.setProjectEnabled(name, enabled: $0) }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(.checkbox)
+                            .accessibilityLabel("Enable \(name)")
+                            .help("Include in Neo Project Toolkit. Does not start or stop services.")
+                            Text(name).font(.subheadline)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .help(name)
+                            Spacer(minLength: 6)
+                            if let status = model.projectStatuses[name] {
+                                Text(status.capitalized)
+                                    .font(.caption)
+                                    .foregroundStyle(status == "online" ? .green : .secondary)
                             }
-                            ForEach(model.projectNames, id: \.self) { name in
-                                HStack {
-                                        Toggle("Enable \(name)", isOn: Binding(
-                                            get: { model.projectStatuses[name] == "online" },
-                                            set: { model.projectCommand($0 ? "start" : "stop", name: name) }
-                                        ))
-                                        .labelsHidden()
-                                        .toggleStyle(.checkbox)
-                                        .disabled(model.isBusy || model.projectStatuses[name] == nil)
-                                        .accessibilityLabel("Enable \(name)")
-                                        .help(model.projectStatuses[name] == nil
-                                              ? "No lifecycle service; use Setup with Agent if available." : "Start or stop project service")
-                                    Text(name)
-                                        .font(.subheadline)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                        .help(name)
-                                    Spacer()
-                                    if let status = model.projectStatuses[name] {
-                                        Text(status.capitalized)
-                                            .font(.caption)
-                                            .foregroundStyle(status == "online" ? .green : .secondary)
-                                    }
-                                    if model.projectAgentSetupNames.contains(name) {
-                                        Button("Setup with Agent") { model.projectSetupAgent(name) }
-                                            .controlSize(.small)
-                                            .disabled(model.isBusy)
-                                    }
-                                    Button("Update") { model.projectCommand("update", name: name) }
-                                        .controlSize(.small)
-                                        .disabled(model.isBusy)
-                                    if let status = model.projectStatuses[name] {
-                                        Menu("Manage") {
-                                            Button("Setup") { model.projectCommand("setup", name: name) }
-                                            Button("Start") { model.projectCommand("start", name: name) }
-                                                .disabled(status == "online")
-                                            Button("Stop") { model.projectCommand("stop", name: name) }
-                                                .disabled(status != "online")
-                                            Button("Restart") { model.projectCommand("restart", name: name) }
-                                                .disabled(status != "online")
-                                            Divider()
-                                            Button("Uninstall", role: .destructive) {
-                                                model.projectCommand("uninstall", name: name)
-                                            }
-                                        }
-                                        .disabled(model.isBusy)
+                            Menu("Actions") {
+                                if model.projectAgentSetupNames.contains(name) {
+                                    Button("Setup with Agent") { model.projectSetupAgent(name) }
+                                }
+                                Button("Update") { model.projectCommand("update", name: name) }
+                                if let status = model.projectStatuses[name] {
+                                    Divider()
+                                    Button("Setup") { model.projectCommand("setup", name: name) }
+                                    Button("Start") { model.projectCommand("start", name: name) }
+                                        .disabled(status == "online")
+                                    Button("Stop") { model.projectCommand("stop", name: name) }
+                                        .disabled(status != "online")
+                                    Button("Restart") { model.projectCommand("restart", name: name) }
+                                        .disabled(status != "online")
+                                    Divider()
+                                    Button("Uninstall", role: .destructive) {
+                                        model.projectCommand("uninstall", name: name)
                                     }
                                 }
                             }
+                            .controlSize(.small)
+                            .disabled(model.isBusy || !model.enabledProjects.contains(name))
                         }
-                        .padding(.top, 6)
-                    .padding(.leading, 32)
-                    .padding(.trailing, 12)
-                    .padding(.bottom, 4)
+                        .padding(.leading, 40)
+                        .padding(.trailing, 12)
+                        .padding(.vertical, 5)
+                        .accessibilityIdentifier("neo-project-\(name)")
+                    }
                 }
                 Divider()
 

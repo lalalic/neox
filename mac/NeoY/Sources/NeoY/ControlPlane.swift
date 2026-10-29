@@ -411,6 +411,10 @@ actor NeoYControlPlaneService {
     }
 
     func setToolEnabled(_ name: String, enabled: Bool) throws -> NeoYControlPlaneConfiguration {
+        if enabled, !NeoCLISetup.missingSkillsOnDisk(forTool: name).isEmpty {
+            throw NSError(domain: "NeoFeatureDependency", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "Install required Markcut Skill before enabling Preview."])
+        }
         guard !NeoYCoreRuntime.toolNames.contains(name),
               !["events", "neoy.ui_smoke", "mcp.temp-files"].contains(name),
               !name.isEmpty else {

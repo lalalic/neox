@@ -275,6 +275,8 @@ Deployment gotchas (all hit in practice):
 
 ## Project learnings
 
+- 2026-10-29: Tool Feature rows must remain derived from live tools/list (2.3.11 contract), never from a static capability array; Skill requirements are separate trusted-source metadata with explicit install/readback/health verification. Project checkbox inclusion is separate from daemon status, and unowned Skill sources must not be overwritten during automatic updates.
+
 - 2026-10-23: Installer output and XcodeGen settings are authoritative for the app bundle's display/install name; update onboarding docs from those sources instead of carrying forward the historical `/Applications/NeoY.app` path.
 - 2026-10-10: NeoY deployment has two distinct paths: Runtime-only changes are applied by recycling the Core provider because Runtime is loaded directly from the canonical repo; native-app changes use `mac/NeoY/install-local.sh` exactly once. Never supervise or retry-loop the installer with launchd/PM2/cron.
 - 2026-10-10: For high-frequency Core filesystem work, keep one `fs` facade and reuse bounded agent-proven edit/grep/find internals; pin and checksum native search binaries while NeoY retains path, audit, permission, and packaging ownership.

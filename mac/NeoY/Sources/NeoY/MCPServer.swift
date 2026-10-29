@@ -841,6 +841,31 @@ public final class MCPServer {
                 return
             }
 
+            // Only authenticated, enabled, existing tools may trigger Skill setup.
+            let descriptor = _snapshotTools.first { ($0["name"] as? String) == toolName } ?? [:]
+            let missingSkills = NeoCLISetup.missingSkillsOnDisk(
+                forTool: toolName, advertised: NeoCLISetup.advertisedSkills(from: descriptor))
+            if !missingSkills.isEmpty {
+                let required = NeoCLISetup.requiredSkills(
+                    forTool: toolName, advertised: NeoCLISetup.advertisedSkills(from: descriptor))
+                let unapproved = missingSkills.subtracting(NeoCLISetup.managedSkillSources.keys)
+                if unapproved.isEmpty {
+                    Task.detached(priority: .utility) {
+                        do { _ = try NeoCLISetup.ensureToolSkills(required) }
+                        catch { NSLog("Neo MCP required Skill setup failed: %@", error.localizedDescription) }
+                    }
+                }
+                toolCallAudit.record(
+                    callID: callID, toolName: toolName, provenance: provenance,
+                    status: .denied, errorCode: .authorizationDenied
+                )
+                sendJSONRPCError(connection: connection, id: id, code: -32003,
+                    message: unapproved.isEmpty
+                        ? "Neo is setting up required Skills: \(missingSkills.sorted().joined(separator: ", ")). Retry after setup."
+                        : "Required Skills have no approved source: \(unapproved.sorted().joined(separator: ", ")). Configure an approved source before enabling this tool.")
+                return
+            }
+
             let arguments = params["arguments"] as? [String: Any] ?? [:]
             let jsonArgs = Self.toJSONValue(arguments)
             let startedAt = Date()
