@@ -45,6 +45,8 @@ final class NeoYSetupModel: ObservableObject {
     @Published var toolkitUninstallable = false
     @Published var toolkitInstalled = false
     @Published var toolkitEnabled = NeoCLISetup.wantsProjectsToolkit()
+    @Published var autoUpdateSkills = UserDefaults.standard.bool(forKey: NeoCLISetup.autoUpdateSkillsKey)
+    @Published var autoUpdateProjects = UserDefaults.standard.bool(forKey: NeoCLISetup.autoUpdateProjectsKey)
     @Published var globalSkills = NeoCLISetup.globalSkills()
     @Published var optionalSkills: Set<String> = []
     @Published private(set) var projectNames: [String] = []
@@ -208,7 +210,11 @@ final class NeoYSetupModel: ObservableObject {
         isBusy = true
         Task.detached { [weak self] in
             let message: String
-            do { message = try NeoCLISetup.projectLifecycle(name, command: command) }
+            do {
+                message = try command == "update"
+                    ? NeoCLISetup.updateProject(name)
+                    : NeoCLISetup.projectLifecycle(name, command: command)
+            }
             catch { message = error.localizedDescription }
             await MainActor.run {
                 self?.result = "\(name) \(command): \(message)"
@@ -337,6 +343,13 @@ final class NeoYSetupModel: ObservableObject {
 
     func setDiscoveredTool(_ name: String, enabled: Bool) {
         guard !isBusy else { return }
+        if enabled {
+            let missing = NeoCLISetup.missingSkills(forTool: name, installed: optionalSkills)
+            guard missing.isEmpty else {
+                result = "Install required Skill first: \(missing.sorted().joined(separator: ", "))."
+                return
+            }
+        }
         isBusy = true
         Task {
             do {
@@ -357,6 +370,16 @@ final class NeoYSetupModel: ObservableObject {
         toolkitEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: NeoCLISetup.toolkitPreferenceKey)
         if enabled && !toolkitInstalled { setupNeoCLI() }
+    }
+
+    func setAutoUpdateSkills(_ enabled: Bool) {
+        autoUpdateSkills = enabled
+        UserDefaults.standard.set(enabled, forKey: NeoCLISetup.autoUpdateSkillsKey)
+    }
+
+    func setAutoUpdateProjects(_ enabled: Bool) {
+        autoUpdateProjects = enabled
+        UserDefaults.standard.set(enabled, forKey: NeoCLISetup.autoUpdateProjectsKey)
     }
 
     func installOptionalSkill(_ name: String) {
@@ -398,6 +421,32 @@ final class NeoYSetupModel: ObservableObject {
                 self?.refreshNeoCLI()
                 self?.isBusy = false
             }
+        }
+    }
+
+    func updateOptionalSkill(_ name: String) {
+        guard !isBusy, optionalSkills.contains(name) else { return }
+        isBusy = true
+        Task.detached { [weak self] in
+            let message: String
+            do {
+                try NeoCLISetup.updateOptionalSkill(name)
+                message = "Updated \(name)."
+            } catch { message = "Update failed: \(error.localizedDescription)" }
+            await MainActor.run {
+                self?.result = message
+                self?.refreshNeoCLI()
+                self?.isBusy = false
+            }
+        }
+    }
+
+    func setupOptionalSkill(_ name: String) {
+        do {
+            try NeoCLISetup.setupOptionalSkill(name)
+            result = "Opened setup agent for \(name) in Chrome."
+        } catch {
+            result = "Could not open \(name) setup: \(error.localizedDescription)"
         }
     }
 
@@ -937,11 +986,26 @@ struct NeoYSetupView: View {
                         .labelsHidden()
                         .toggleStyle(.checkbox)
                         .disabled(model.isBusy)
+                        if model.optionalSkills.contains(skill) {
+                            Button("Setup with Agent") { model.setupOptionalSkill(skill) }
+                                .disabled(model.isBusy)
+                            Button("Update") { model.updateOptionalSkill(skill) }.disabled(model.isBusy)
+                        }
                     }
                     Divider()
                 }
 
-                featureRow("Projects Toolkit", detail: "lalalic/neo · CLI and workflows") {
+                featureRow("Auto-update Skills", detail: "Check selected Skills once per day at app launch") {
+                    Toggle("", isOn: Binding(
+                        get: { model.autoUpdateSkills },
+                        set: { model.setAutoUpdateSkills($0) }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.checkbox)
+                }
+                Divider()
+
+                featureRow("Neo Project Toolkit", detail: "CLI and workflows") {
                     Toggle("", isOn: Binding(
                         get: { model.toolkitEnabled && model.toolkitInstalled },
                         set: { model.setToolkitEnabled($0) }
@@ -954,26 +1018,34 @@ struct NeoYSetupView: View {
                     }
                 }
                 if model.toolkitEnabled && model.toolkitInstalled {
-                    DisclosureGroup("Projects (\(model.projectNames.count))") {
-                        VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Toggle("Auto-update clean Git projects daily", isOn: Binding(
+                            get: { model.autoUpdateProjects },
+                            set: { model.setAutoUpdateProjects($0) }
+                        ))
+                        .toggleStyle(.checkbox)
+                        .font(.caption)
+                    }
+                    .padding(.leading, 32)
+                    VStack(alignment: .leading, spacing: 6) {
                             HStack {
                                 Spacer()
                                 Button("Refresh") { model.refreshProjects() }
                             }
                             ForEach(model.projectNames, id: \.self) { name in
                                 HStack {
-                                    if model.projectStatuses[name] != nil {
                                         Toggle("Enable \(name)", isOn: Binding(
                                             get: { model.projectStatuses[name] == "online" },
                                             set: { model.projectCommand($0 ? "start" : "stop", name: name) }
                                         ))
                                         .labelsHidden()
                                         .toggleStyle(.checkbox)
-                                        .disabled(model.isBusy)
+                                        .disabled(model.isBusy || model.projectStatuses[name] == nil)
                                         .accessibilityLabel("Enable \(name)")
-                                    }
+                                        .help(model.projectStatuses[name] == nil
+                                              ? "No lifecycle service; use Setup with Agent if available." : "Start or stop project service")
                                     Text(name)
-                                        .font(.system(.caption, design: .monospaced))
+                                        .font(.subheadline)
                                         .lineLimit(1)
                                         .truncationMode(.middle)
                                         .help(name)
@@ -988,6 +1060,9 @@ struct NeoYSetupView: View {
                                             .controlSize(.small)
                                             .disabled(model.isBusy)
                                     }
+                                    Button("Update") { model.projectCommand("update", name: name) }
+                                        .controlSize(.small)
+                                        .disabled(model.isBusy)
                                     if let status = model.projectStatuses[name] {
                                         Menu("Manage") {
                                             Button("Setup") { model.projectCommand("setup", name: name) }
@@ -1008,10 +1083,9 @@ struct NeoYSetupView: View {
                             }
                         }
                         .padding(.top, 6)
-                    }
-                    .padding(.leading, 28)
+                    .padding(.leading, 32)
                     .padding(.trailing, 12)
-                    .padding(.bottom, 10)
+                    .padding(.bottom, 4)
                 }
                 Divider()
 

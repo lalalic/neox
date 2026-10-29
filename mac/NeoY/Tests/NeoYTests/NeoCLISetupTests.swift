@@ -150,6 +150,28 @@ final class NeoCLISetupTests: XCTestCase {
         XCTAssertEqual(NeoCLISetup.globalSkills(), ["events-bus", "daemon-service-manage", "webhelm", "agents-relay"])
     }
 
+    func testMarkcutPreviewRequiresInstalledMarkcutSkill() {
+        XCTAssertEqual(NeoCLISetup.missingSkills(forTool: "markcut_preview", installed: []),
+                       ["markcut"])
+        XCTAssertTrue(NeoCLISetup.missingSkills(
+            forTool: "markcut.preview", installed: ["markcut"]).isEmpty)
+        XCTAssertTrue(NeoCLISetup.missingSkills(
+            forTool: "unrelated_tool", installed: []).isEmpty)
+    }
+
+    func testAutoUpdateIsOptInAndDaily() {
+        let suite = "NeoAutoUpdateTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertFalse(defaults.bool(forKey: NeoCLISetup.autoUpdateSkillsKey))
+        XCTAssertFalse(defaults.bool(forKey: NeoCLISetup.autoUpdateProjectsKey))
+
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        XCTAssertTrue(NeoCLISetup.updateDue(last: nil, now: now))
+        XCTAssertFalse(NeoCLISetup.updateDue(last: now.addingTimeInterval(-3_600), now: now))
+        XCTAssertTrue(NeoCLISetup.updateDue(last: now.addingTimeInterval(-86_401), now: now))
+    }
+
     func testOptionalSkillCatalogDoesNotIncludeCoreDependencies() {
         XCTAssertEqual(Set(NeoCLISetup.optionalSkillSources.keys),
                        Set(["wechat-bro", "markcut"]))

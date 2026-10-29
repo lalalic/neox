@@ -117,6 +117,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             do { try NeoCLISetup.reconcileDesiredOptionalSkills() }
             catch { NSLog("Neo optional Skills startup recovery failed: %@", error.localizedDescription) }
+            NeoCLISetup.autoUpdateIfDue()
         }
         startNativePhoneServices()
         startServer()
