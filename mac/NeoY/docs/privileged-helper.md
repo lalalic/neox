@@ -35,20 +35,18 @@ Every executed action and denial is reported to macOS Unified Logging.
 Development identity as NeoY, and requests a macOS administrator approval once
 if the root-owned helper is missing or has changed. The root installer verifies
 its signed developer team, owner and permissions, creates the exact sudoers
-entry and validates sudoers with `visudo`. On macOS installations without a
-sudoers include, it adds only `@include /private/etc/sudoers.d/com.neox.neoy.helper`
-to the root sudoers file, preserving the original for rollback. It verifies
-passwordless access as the actual target user before returning success.
+entry and validates sudoers with `visudo`. macOS already includes
+`/private/etc/sudoers.d`; its directory scanner skips names containing a
+period. The policy filename therefore has **no dots**. Installation never
+modifies `/private/etc/sudoers`. It verifies passwordless access as the actual
+target user before returning success.
 
 - `/Library/PrivilegedHelperTools/com.neox.neoy.helper` (root:wheel, 0755)
-- `/private/etc/sudoers.d/com.neox.neoy.helper` (root:wheel, 0440)
+- `/private/etc/sudoers.d/neoy-privileged-helper` (root:wheel, 0440)
 
 Check through `neoy.setup privilege status`. A passwordless local CLI test is
 `sudo -n -k /Library/PrivilegedHelperTools/com.neox.neoy.helper check dns.flush`.
-To revoke, use an interactive administrator shell to remove the exact
-`@include /private/etc/sudoers.d/com.neox.neoy.helper` line from
-`/private/etc/sudoers` (if Neo added it), validate with `visudo -c`, then
-remove the included policy file and optionally the helper. Never remove the
-included policy while leaving a dangling `#include` reference in sudoers.
-Removing the app alone does not revoke the separate authorization. Never
-store an administrator password or configure `NOPASSWD: ALL`.
+To revoke, use an interactive administrator shell to remove
+`/private/etc/sudoers.d/neoy-privileged-helper`, then optionally remove the
+root-owned helper. Removing the app alone does not revoke this separate
+permission. Never store an administrator password or configure `NOPASSWD: ALL`.
