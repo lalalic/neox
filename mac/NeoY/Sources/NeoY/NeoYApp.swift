@@ -104,8 +104,6 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 let inventory = try NeoCLISetup.installedGlobalSkillNames()
                 NeoCLISetup.migrateOptionalSkillPreferencesIfNeeded(installed: inventory)
             } catch { NSLog("Neo optional Skills inventory unavailable: %@", error.localizedDescription) }
-            do { _ = try NeoCLISetup.setupMissingGlobalSkills() }
-            catch { NSLog("Neo required Skills startup recovery failed: %@", error.localizedDescription) }
             if NeoCLISetup.wantsProjectsToolkit() {
                 do {
                     let outcome = try NeoCLISetup.installIfMissing()
@@ -117,9 +115,16 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             do { try NeoCLISetup.reconcileDesiredOptionalSkills() }
             catch { NSLog("Neo optional Skills startup recovery failed: %@", error.localizedDescription) }
+            // Required Skills and their service daemons are Neo-owned infrastructure.
+            // Keep them healthy while the app remains open, without user-facing toggles.
             while !Task.isCancelled {
+                do { _ = try NeoCLISetup.setupMissingGlobalSkills() }
+                catch { NSLog("Neo required Skills recovery failed: %@", error.localizedDescription) }
+                let optional = NeoCLISetup.desiredOptionalSkills()
+                do { try NeoRequiredSkillServices.reconcile(optionalEnabled: optional) }
+                catch { NSLog("Neo required Skill service recovery failed: %@", error.localizedDescription) }
                 NeoCLISetup.autoUpdateIfDue()
-                do { try await Task.sleep(for: .seconds(6 * 60 * 60)) }
+                do { try await Task.sleep(for: .seconds(5 * 60)) }
                 catch { break }
             }
         }

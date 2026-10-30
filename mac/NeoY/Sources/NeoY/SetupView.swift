@@ -37,8 +37,6 @@ final class NeoYSetupModel: ObservableObject {
     @Published private(set) var disabledDiscoveredTools: Set<String> = []
     @Published private(set) var discoveredMCPTools: [String] = []
     @Published private(set) var mcpToolDiscoveryError: String?
-    @Published private(set) var toolSkillStatus = ""
-    @Published private(set) var repairingToolSkills = false
     private var discoveredToolSkills: [String: Set<String>] = [:]
     @Published private(set) var remoteProviderOptions: [String] = []
     @Published private(set) var oauthClientID = ""
@@ -321,7 +319,6 @@ final class NeoYSetupModel: ObservableObject {
             }
             discoveredToolSkills = declarations
             mcpToolDiscoveryError = nil
-            repairRequiredToolSkills()
         } catch {
             mcpToolDiscoveryError = "Tool discovery failed: \(error.localizedDescription)"
         }
@@ -330,30 +327,6 @@ final class NeoYSetupModel: ObservableObject {
     var visibleMCPFeatureTools: [String] {
         NeoYRemoteToolCatalog.visibleFeatureTools(
             discovered: Set(discoveredMCPTools), disabled: disabledDiscoveredTools)
-    }
-
-    func repairRequiredToolSkills() {
-        guard !repairingToolSkills else { return }
-        let required = discoveredMCPTools.reduce(into: Set<String>()) { all, name in
-            all.formUnion(NeoCLISetup.requiredSkills(
-                forTool: name, advertised: discoveredToolSkills[name] ?? []))
-        }
-        guard !required.isEmpty else {
-            toolSkillStatus = ""
-            return
-        }
-        repairingToolSkills = true
-        toolSkillStatus = "Checking required Skills…"
-        Task.detached { [weak self] in
-            let message: String
-            do { message = try NeoCLISetup.ensureToolSkills(required) }
-            catch { message = "Required Skill setup failed: \(error.localizedDescription)" }
-            await MainActor.run {
-                self?.toolSkillStatus = message
-                self?.repairingToolSkills = false
-                self?.refreshNeoCLI()
-            }
-        }
     }
 
     func refreshNativeTools() {
@@ -394,10 +367,9 @@ final class NeoYSetupModel: ObservableObject {
         Task {
             do {
                 if enabled && !required.isEmpty {
-                    let message = try await Task.detached(priority: .utility) {
+                    _ = try await Task.detached(priority: .utility) {
                         try NeoCLISetup.ensureToolSkills(required)
                     }.value
-                    toolSkillStatus = message
                     refreshNeoCLI()
                 }
                 let control = NeoYControlPlaneService(
@@ -1006,18 +978,6 @@ struct NeoYSetupView: View {
             if let error = model.mcpToolDiscoveryError {
                 Text(error).font(.caption).foregroundStyle(.red)
                     .accessibilityIdentifier("mcpToolDiscoveryError")
-            }
-            if !model.toolSkillStatus.isEmpty {
-                HStack {
-                    Text(model.toolSkillStatus).font(.caption)
-                        .foregroundStyle(model.toolSkillStatus.contains("failed") ? .red : .secondary)
-                        .lineLimit(2)
-                        .accessibilityIdentifier("mcpToolSkillStatus")
-                    Spacer()
-                    Button("Repair Skills") { model.repairRequiredToolSkills() }
-                        .controlSize(.small)
-                        .disabled(model.repairingToolSkills)
-                }
             }
             GroupBox("Neo Core") {
                 HStack {

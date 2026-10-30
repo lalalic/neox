@@ -190,6 +190,16 @@ Local MCP exposes every enabled feature. Remote access is independent: built-in 
 
 Family Tutor has moved to the Neo monorepo as a local Neo Project and is no longer in the Neo.app Feature catalog. The generic optional-Feature framework remains for other published packages. Retired installed records are not restarted or federated, while their private product files remain untouched.
 
+## Required Skill maintenance
+
+Neo.app owns required Global Skills. It installs and checks these Skills at
+launch and every five minutes. It maintains Skill-owned persistent services
+through the declaring Skill's setup entry point and the existing serviceman
+lifecycle. It does not restart healthy services, manage unrelated PM2 processes,
+or expose the required Skills as optional Features. Service failures are
+recorded in the application logs. An optional Skill's services are maintained
+only while that Skill is selected. Automatic package updates remain opt-in.
+
 ## MCP Tool Skill dependencies
 
 The native Features screen preserves the 2.3.11 behavior: Tool Feature rows

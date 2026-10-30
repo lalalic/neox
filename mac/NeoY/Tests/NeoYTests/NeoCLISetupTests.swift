@@ -81,6 +81,30 @@ final class NeoCLISetupTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
     }
 
+    func testRequiredServiceOwnershipAndRecoveryPlan() {
+        let required = NeoRequiredSkillServices.owners(optionalEnabled: [])
+        XCTAssertEqual(Set(required.map(\.name)), ["events-bus", "agents-relay"])
+        let events = required.first { $0.name == "events-bus" }!
+        XCTAssertEqual(events.services, ["nats", "history"])
+        XCTAssertEqual(NeoRequiredSkillServices.missingServices(for: events, states: [
+            "events-bus/nats": "online", "unrelated/daemon": "errored"
+        ]), ["history"])
+        XCTAssertEqual(NeoRequiredSkillServices.unhealthyServices(for: events, states: [
+            "events-bus/nats": "online", "events-bus/history": "stopped"
+        ]), ["history"])
+        XCTAssertTrue(NeoRequiredSkillServices.unhealthyServices(for: events, states: [
+            "events-bus/nats": "online", "events-bus/history": "online"
+        ]).isEmpty)
+    }
+
+    func testOptionalServicesAreSupervisedOnlyWhenEnabled() {
+        XCTAssertFalse(NeoRequiredSkillServices.owners(optionalEnabled: []).contains { $0.name == "wechat-bro" })
+        XCTAssertTrue(NeoRequiredSkillServices.owners(optionalEnabled: ["wechat-bro"])
+            .contains { $0.name == "wechat-bro" && $0.services == ["daemon", "orchestrator"] })
+        XCTAssertFalse(NeoRequiredSkillServices.owners(optionalEnabled: ["markcut"])
+            .contains { $0.name == "markcut" })
+    }
+
     func testOnlyExplicitlySelectedOptionalSkillsAreRestored() {
         let suite = "NeoCLISetupTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

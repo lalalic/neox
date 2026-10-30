@@ -275,6 +275,8 @@ Deployment gotchas (all hit in practice):
 
 ## Project learnings
 
+- 2026-10-29: Required Neo Global Skills are infrastructure, not selectable Features or a Features-page diagnostic panel. Reconcile their installation, declared service registrations and PM2 health in the Neo.app detached startup loop; let Skill-owned setup and serviceman define/restart services, and verify live PM2 state without touching unrelated services.
+
 - 2026-10-29: Tool Feature rows must remain derived from live tools/list (2.3.11 contract), never from a static capability array; Skill requirements are separate trusted-source metadata with explicit install/readback/health verification. Project checkbox inclusion is separate from daemon status, and unowned Skill sources must not be overwritten during automatic updates.
 
 - 2026-10-23: Installer output and XcodeGen settings are authoritative for the app bundle's display/install name; update onboarding docs from those sources instead of carrying forward the historical `/Applications/NeoY.app` path.
