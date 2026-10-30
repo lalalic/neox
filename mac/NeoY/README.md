@@ -199,7 +199,8 @@ lifecycle. It does not restart healthy services, manage unrelated PM2 processes,
 or expose the required Skills as optional Features. Service failures are
 recorded in the application logs. Old Events Bus installations are upgraded
 only from approved sources, and legacy history services are migrated only
-when their executable is recognized as owned by Events Bus. An optional Skill's services are maintained
+when their executable is recognized as owned by Events Bus. Missing locked Node runtime dependencies in approved
+Events Bus installations are restored before service recovery. An optional Skill's services are maintained
 only while that Skill is selected. Automatic package updates remain opt-in.
 
 ## MCP Tool Skill dependencies

@@ -97,6 +97,18 @@ final class NeoCLISetupTests: XCTestCase {
         ]).isEmpty)
     }
 
+    func testEventsBusRuntimeDependenciesAreValidatedWithoutSideEffects() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        XCTAssertFalse(NeoRequiredSkillServices.eventsBusRuntimeReady(at: root))
+        let dependency = root.appendingPathComponent("node_modules/@nats-io/transport-node")
+        try FileManager.default.createDirectory(at: dependency, withIntermediateDirectories: true)
+        try "{}".write(to: dependency.appendingPathComponent("package.json"),
+                       atomically: true, encoding: .utf8)
+        XCTAssertTrue(NeoRequiredSkillServices.eventsBusRuntimeReady(at: root))
+    }
+
     func testLegacyEventsHistoryMigrationOnlyAcceptsOwnedExecutable() {
         XCTAssertTrue(NeoRequiredSkillServices.isLegacyEventsHistory(
             "/Users/test/.agents/skills/events-bus/api/server.mjs"))

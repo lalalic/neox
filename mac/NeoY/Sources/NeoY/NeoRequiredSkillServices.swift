@@ -34,10 +34,12 @@ enum NeoRequiredSkillServices {
         owner.services.filter { states["\(owner.name)/\($0)"] != "online" }
     }
 
-    private static func run(_ command: String, _ arguments: [String], timeout: TimeInterval = 40) throws -> String {
+    private static func run(_ command: String, _ arguments: [String],
+                            directory: URL? = nil, timeout: TimeInterval = 40) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = [command] + arguments
+        process.currentDirectoryURL = directory
         process.environment = ProcessInfo.processInfo.environment.merging([
             "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
         ]) { _, configured in configured }
@@ -95,19 +97,44 @@ enum NeoRequiredSkillServices {
         return script
     }
 
+    static func eventsBusRuntimeReady(at directory: URL) -> Bool {
+        FileManager.default.fileExists(atPath: directory
+            .appendingPathComponent("node_modules/@nats-io/transport-node/package.json").path)
+    }
+
     private static func ensureSupportedServiceContract(for owner: Owner) throws {
         guard owner.name == "events-bus" else { return }
         let script = try scriptPath(for: owner)
+        let skillRoot = script.deletingLastPathComponent().deletingLastPathComponent()
         let code = try String(contentsOf: script, encoding: .utf8)
-        guard !code.contains("serviceman") else { return }
-        // A legacy events-bus CLI registers unqualified PM2 names. Its known
-        // approved installation source may be upgraded; unknown sources aren't touched.
-        try NeoCLISetup.updateManagedSkill("events-bus", automatic: true)
-        let updated = try String(contentsOf: script, encoding: .utf8)
-        guard updated.contains("serviceman") else {
-            throw NSError(domain: "NeoSkillServices", code: 4,
-                          userInfo: [NSLocalizedDescriptionKey:
-                            "Installed events-bus Skill lacks namespaced service setup"])
+        if !code.contains("serviceman") {
+            // Legacy Events Bus setup registers unqualified PM2 names.
+            // Only upgrade an approved global installation.
+            try NeoCLISetup.updateManagedSkill("events-bus", automatic: true)
+            let updated = try String(contentsOf: script, encoding: .utf8)
+            guard updated.contains("serviceman") else {
+                throw NSError(domain: "NeoSkillServices", code: 4,
+                              userInfo: [NSLocalizedDescriptionKey:
+                                "Installed events-bus Skill lacks namespaced service setup"])
+            }
+        }
+        // A global Skill installer copies source, not npm node_modules.
+        // Install locked runtime dependencies before starting its MCP provider
+        // or migrating the existing history service.
+        if !eventsBusRuntimeReady(at: skillRoot) {
+            guard FileManager.default.fileExists(atPath: skillRoot
+                .appendingPathComponent("package-lock.json").path) else {
+                throw NSError(domain: "NeoSkillServices", code: 7,
+                              userInfo: [NSLocalizedDescriptionKey:
+                                "Events Bus has no dependency lockfile"])
+            }
+            _ = try run("npm", ["ci", "--omit=dev", "--no-audit", "--no-fund"],
+                        directory: skillRoot, timeout: 120)
+            guard eventsBusRuntimeReady(at: skillRoot) else {
+                throw NSError(domain: "NeoSkillServices", code: 8,
+                              userInfo: [NSLocalizedDescriptionKey:
+                                "Events Bus npm dependencies missing after setup"])
+            }
         }
     }
 
