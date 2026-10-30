@@ -76,6 +76,12 @@ enum NeoCLISetup {
                                    advertised: Set<String> = []) -> Set<String> {
         let root = directory ?? skillsDirectory
         return Set(requiredSkills(forTool: tool, advertised: advertised).filter { name in
+            // The installed WebHelm Skill may belong to any agent and live anywhere.
+            // Its self-setup owns the one global CLI, which is the consumer contract.
+            if name == "webhelm", directory == nil,
+               FileManager.default.isExecutableFile(atPath: globalWebhelmCLI.path) {
+                return false
+            }
             if FileManager.default.fileExists(atPath: root
                 .appendingPathComponent(name).appendingPathComponent("SKILL.md").path) {
                 return false
@@ -93,6 +99,11 @@ enum NeoCLISetup {
         }
         guard !expanded.isEmpty else { return [] }
         var installed = try installedGlobalSkillNames()
+        // Do not install a duplicate Skill if another agent already provided
+        // its global webhelm command from an arbitrary Skill directory.
+        if FileManager.default.isExecutableFile(atPath: globalWebhelmCLI.path) {
+            installed.insert("webhelm")
+        }
         let unapproved = expanded.subtracting(installed).subtracting(available.keys)
         guard unapproved.isEmpty else {
             throw NSError(domain: "NeoSkillDependency", code: 1,

@@ -324,6 +324,8 @@ final class NeoCLISetupTests: XCTestCase {
         XCTAssertTrue(code.contains(".local/bin/webhelm"))
         XCTAssertFalse(code.contains("webhelm/scripts/install-global-cli.sh"))
         XCTAssertFalse(code.contains("ensureGlobalWebhelmLauncher"))
+        XCTAssertTrue(code.contains("installed.insert(\"webhelm\")"))
+        XCTAssertTrue(code.contains("directory == nil"))
     }
 
     func testWebhelmSetupHealthNeedsDaemonAndManagedChrome() {
