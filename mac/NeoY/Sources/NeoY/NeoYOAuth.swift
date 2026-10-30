@@ -45,6 +45,7 @@ final class NeoYOAuthService: @unchecked Sendable {
         let clientID: String
         let audience: String?
         let expiresAt: TimeInterval
+        var renewUntil: TimeInterval? = nil
     }
 
     private struct RegisteredClient: Codable {
@@ -94,6 +95,7 @@ final class NeoYOAuthService: @unchecked Sendable {
 
     private let scope = "mcp"
     private let accessTTL: TimeInterval = 3600
+    private let interactiveSessionTTL: TimeInterval = 8 * 3600
     private let refreshTTL: TimeInterval = 30 * 24 * 3600
     private let codeTTL: TimeInterval = 60
     private let authTTL: TimeInterval = 300
@@ -169,6 +171,8 @@ final class NeoYOAuthService: @unchecked Sendable {
             return authorizePOST(body: body, origin: origin)
         case ("POST", "/token"):
             return tokenPOST(body: body, headers: headers)
+        case ("POST", "/token/renew"):
+            return renewAccessToken(headers: headers)
         case ("POST", "/revoke"):
             return revokePOST(body: body)
         case ("POST", "/register"):
@@ -323,6 +327,44 @@ final class NeoYOAuthService: @unchecked Sendable {
         }
     }
 
+    // An interactive, operator-approved access token can renew itself only until
+    // the original eight-hour session deadline. A renewed token replaces the old
+    // one. The Core/operator token and ordinary OAuth tokens cannot use this route.
+    private func renewAccessToken(headers: [String: String]) -> NeoYOAuthHTTPResponse {
+        guard let header = headers["authorization"], header.lowercased().hasPrefix("bearer ") else {
+            return oauthError(status: 401, code: "invalid_token", description: "Bearer access token required")
+        }
+        let presented = String(header.dropFirst(7)).trimmingCharacters(in: .whitespaces)
+        guard !presented.isEmpty else {
+            return oauthError(status: 401, code: "invalid_token", description: "Bearer access token required")
+        }
+        let digest = Self.sha256(presented)
+        let now = Date().timeIntervalSince1970
+        let nextToken = Self.randomToken(bytes: 32)
+        let result = lock.withLock { () -> (expiresIn: Int, sessionRemaining: Int)? in
+            sweepLocked(now: now)
+            guard let existing = access[digest], let deadline = existing.renewUntil,
+                  existing.expiresAt > now,
+                  deadline > now + 1,
+                  clients[existing.clientID]?.clientName == "Z.ai interactive" else { return nil }
+            let nextExpiry = min(now + accessTTL, deadline)
+            access.removeValue(forKey: digest)
+            access[Self.sha256(nextToken)] = StoredToken(
+                digest: Self.sha256(nextToken), clientID: existing.clientID,
+                audience: existing.audience, expiresAt: nextExpiry, renewUntil: deadline
+            )
+            saveStoreLocked()
+            return (max(1, Int(nextExpiry - now)), max(0, Int(deadline - now)))
+        }
+        guard let result else {
+            return oauthError(status: 401, code: "invalid_token", description: "Access token cannot be renewed")
+        }
+        return json(status: 200, [
+            "access_token": nextToken, "token_type": "Bearer", "scope": scope,
+            "expires_in": result.expiresIn, "session_expires_in": result.sessionRemaining
+        ], headers: ["Cache-Control": "no-store"])
+    }
+
     private func revokePOST(body: Data?) -> NeoYOAuthHTTPResponse {
         let form = Self.form(body)
         if let token = form["token"] {
@@ -403,21 +445,29 @@ final class NeoYOAuthService: @unchecked Sendable {
         let now = Date().timeIntervalSince1970
         let accessToken = Self.randomToken(bytes: 32)
         let refreshToken = Self.randomToken(bytes: 32)
-        let accessRecord = StoredToken(digest: Self.sha256(accessToken), clientID: clientID, audience: audience, expiresAt: now + accessTTL)
+        let interactive = knownClient(clientID)?.clientName == "Z.ai interactive"
+        let renewUntil = interactive ? now + interactiveSessionTTL : nil
+        let accessRecord = StoredToken(digest: Self.sha256(accessToken), clientID: clientID,
+                                       audience: audience, expiresAt: now + accessTTL, renewUntil: renewUntil)
         let refreshRecord = StoredToken(digest: Self.sha256(refreshToken), clientID: clientID, audience: audience, expiresAt: now + refreshTTL)
         lock.withLock {
             sweepLocked(now: now)
             access[accessRecord.digest] = accessRecord
-            refresh[refreshRecord.digest] = refreshRecord
+            if !interactive { refresh[refreshRecord.digest] = refreshRecord }
             saveStoreLocked()
         }
-        return json(status: 200, [
+        var response: [String: Any] = [
             "access_token": accessToken,
             "token_type": "Bearer",
             "expires_in": Int(accessTTL),
-            "refresh_token": refreshToken,
             "scope": scope
-        ], headers: ["Cache-Control": "no-store"])
+        ]
+        if let renewUntil {
+            response["session_expires_in"] = Int(renewUntil - now)
+        } else {
+            response["refresh_token"] = refreshToken
+        }
+        return json(status: 200, response, headers: ["Cache-Control": "no-store"])
     }
 
     private func oauthRedirect(_ redirect: String, params: [String: String]) -> NeoYOAuthHTTPResponse {
