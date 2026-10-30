@@ -27,9 +27,13 @@ helper="$helper_dir/com.neox.neoy.helper"
 policy="/private/etc/sudoers.d/com.neox.neoy.helper"
 helper_backup="$helper.previous"
 policy_backup="$policy.previous"
+sudoers=/private/etc/sudoers
+sudoers_backup=/private/etc/sudoers.neoy.previous
+sudoers_temp=/private/etc/sudoers.neoy.new
 helper_replaced=0
 policy_replaced=0
-/bin/rm -f "$helper_backup" "$policy_backup"
+sudoers_replaced=0
+/bin/rm -f "$helper_backup" "$policy_backup" "$sudoers_temp"
 restore_on_error() {
   result=$?
   trap - EXIT
@@ -42,7 +46,11 @@ restore_on_error() {
       /bin/rm -f "$policy"
       if [ -f "$policy_backup" ]; then /bin/mv "$policy_backup" "$policy"; fi
     fi
-    /bin/rm -f "$helper.new" "$policy.new"
+    if [ "$sudoers_replaced" -eq 1 ]; then
+      /bin/rm -f "$sudoers"
+      if [ -f "$sudoers_backup" ]; then /bin/mv "$sudoers_backup" "$sudoers"; fi
+    fi
+    /bin/rm -f "$helper.new" "$policy.new" "$sudoers_temp"
   fi
   exit "$result"
 }
@@ -62,9 +70,25 @@ printf '%s\n' "$target_user ALL=(root) NOPASSWD: $helper" > "$tmp"
 if [ -f "$policy" ]; then /bin/mv -f "$policy" "$policy_backup"; fi
 policy_replaced=1
 /bin/mv -f "$tmp" "$policy"
+# Some macOS installations do not load /etc/sudoers.d by default. Include
+# exactly this root-owned policy, not the entire directory or arbitrary rules.
+if ! /usr/bin/grep -Fxq "#include $policy" "$sudoers" && \
+   ! /usr/bin/grep -Eq '^[[:space:]]*#includedir[[:space:]]+(/private)?/etc/sudoers.d([[:space:]]|$)' "$sudoers"; then
+  /bin/cp -p "$sudoers" "$sudoers_temp"
+  printf '\n#include %s\n' "$policy" >> "$sudoers_temp"
+  /usr/sbin/chown root:wheel "$sudoers_temp"
+  /bin/chmod 0440 "$sudoers_temp"
+  /usr/sbin/visudo -cf "$sudoers_temp" || exit 65
+  /bin/rm -f "$sudoers_backup"
+  /bin/mv "$sudoers" "$sudoers_backup"
+  sudoers_replaced=1
+  /bin/mv "$sudoers_temp" "$sudoers"
+fi
 /usr/sbin/visudo -c || exit 65
+# Read back authorization as the actual target account, bypassing sudo cache.
+/usr/bin/sudo -u "$target_user" /usr/bin/sudo -n -k "$helper" check dns.flush >/dev/null || exit 77
 trap - EXIT
-/bin/rm -f "$helper_backup" "$policy_backup"
+/bin/rm -f "$helper_backup" "$policy_backup" "$sudoers_backup"
 # Root-only trusted installation is intentionally separate from the app's
 # normal, unprivileged auto-upgrade path.
 echo "installed $helper for $target_user"
