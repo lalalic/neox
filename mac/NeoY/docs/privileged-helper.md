@@ -50,3 +50,12 @@ To revoke, use an interactive administrator shell to remove
 `/private/etc/sudoers.d/neoy-privileged-helper`, then optionally remove the
 root-owned helper. Removing the app alone does not revoke this separate
 permission. Never store an administrator password or configure `NOPASSWD: ALL`.
+
+## Agent usage and discovery
+
+Agents use ordinary shell commands: `neo privilege list`, `neo privilege status`,
+and `neo privilege run dns.flush`. The root helper, not the CLI, enforces the
+fixed action allowlist. On failed sudo authentication, the Core shell returns
+a discovery hint directing the agent to this CLI without retrying the original
+command or accepting an administrator password. NeoY's setup privilege route
+remains a compatibility/diagnostic API; it does not own day-to-day execution.

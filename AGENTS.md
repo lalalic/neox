@@ -10,6 +10,11 @@ desktop agents over MCP. One app target, zero external SPM dependencies,
 
 ## Project learnings
 
+- 2026-10-29: Privileged operation discovery belongs in the existing shell
+  workflow: agents use the `neo privilege` CLI. NeoY setup remains a native
+  configuration boundary, not a prerequisite RPC for everyday execution.
+  Failed sudo calls may return a discovery hint but must never retry as root.
+
 - 2026-10-29: On macOS, a privileged agent operation must use a root-owned,
   signed, fixed-action helper. A broad passwordless sudo rule or a helper that
   accepts arbitrary paths/commands defeats the intended privilege boundary.

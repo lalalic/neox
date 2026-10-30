@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
-import { handleShell } from "../src/core/tools/shell.mjs";
+import { handleShell, privilegeHintForFailure } from "../src/core/tools/shell.mjs";
 
 async function makeContext(root, overrides = {}) {
   const jobs = path.join(root, "jobs");
@@ -223,5 +223,38 @@ test("shell_exec timeout=0 returns a running job immediately", async () => {
     assert.ok(result.jobId);
     await handleShell("shell_job_kill", { job_id: result.jobId }, context);
     await new Promise(resolve => setTimeout(resolve, 150));
+  } finally { await fsp.rm(root, { recursive: true, force: true }); }
+});
+
+test("sudo password failures suggest the Neo privilege shell command, without retries", () => {
+  assert.equal(privilegeHintForFailure(0, "sudo: a password is required"), null);
+  assert.equal(privilegeHintForFailure(1, "permission denied"), null);
+  assert.equal(privilegeHintForFailure(1, "sudo: command not found"), null);
+  const hint = privilegeHintForFailure(1, "sudo: a password is required");
+  assert.equal(hint.state, "authorization_required");
+  assert.equal(hint.next_tool, "shell");
+  assert.equal(hint.next_command, "neo privilege list");
+  assert.equal(hint.retry_original_command, false);
+});
+
+test("shell exec and job status include discovery hints only for sudo auth failures", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "neoy-privilege-hint-"));
+  try {
+    const ctx = await makeContext(root);
+    const failed = await handleShell("shell_exec", {
+      command: "printf 'sudo: a password is required\n' >&2; exit 1",
+    }, ctx);
+    assert.equal(failed.exitCode, 1);
+    assert.equal(failed.privilege?.next_command, "neo privilege list");
+    const unrelated = await handleShell("shell_exec", {
+      command: "printf 'ordinary failure\n' >&2; exit 1",
+    }, ctx);
+    assert.equal(unrelated.privilege, undefined);
+    const job = await handleShell("shell_start", {
+      command: "printf 'sudo: a password is required\n' >&2; exit 1",
+    }, ctx);
+    await waitForExit(ctx, job.id);
+    const status = await handleShell("shell_job_status", { job_id: job.id }, ctx);
+    assert.equal(status.privilege?.state, "authorization_required");
   } finally { await fsp.rm(root, { recursive: true, force: true }); }
 });
