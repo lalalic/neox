@@ -567,6 +567,20 @@ public final class MCPServer {
             return
         }
 
+        // Bootstrap contains local agent rules and absolute Skill paths. Protect
+        // it separately from the public static-file policy. Query tokens cannot
+        // authorize remote access to this endpoint; require a Bearer header.
+        if path == "/xchat/bootstrap" {
+            let bearerAuthorized = bearerToken != nil &&
+                ((_snapshotPrivilegedAccessToken != nil && bearerToken == _snapshotPrivilegedAccessToken) ||
+                 (_snapshotOAuthService?.isAuthorizedBearer(bearerToken) == true))
+            guard isDirectLoopback || bearerAuthorized else {
+                sendHTTP(connection: connection, status: 401, body: nil,
+                         extraHeaders: ["Cache-Control": "no-store"])
+                return
+            }
+        }
+
         if let route = _snapshotHTTPRoutes["\(method) \(path)"] {
             let query = URLComponents(string: "http://localhost\(requestTarget)")?.queryItems ?? []
             var queryValues: [String: String] = [:]
@@ -576,7 +590,8 @@ public final class MCPServer {
             Task {
                 let response = await route(method, headers, queryValues, body)
                 sendHTTP(connection: connection, status: response.status, body: response.body,
-                          contentType: response.contentType ?? "application/json")
+                          contentType: response.contentType ?? "application/json",
+                          extraHeaders: path == "/xchat/bootstrap" ? ["Cache-Control": "no-store"] : [:])
             }
             return
         }
@@ -1062,6 +1077,7 @@ public final class MCPServer {
         case 403: statusText = "Forbidden"
         case 405: statusText = "Method Not Allowed"
         case 500: statusText = "Internal Server Error"
+        case 503: statusText = "Service Unavailable"
         default: statusText = "Unknown"
         }
 

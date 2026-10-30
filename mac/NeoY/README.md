@@ -10,6 +10,7 @@ and principle-level review requirements.
 ## Runtime endpoints
 
 - MCP: configurable local port (default `http://127.0.0.1:6767/mcp`), Bonjour `_mcp._tcp` / `NeoY`
+- XChat Harness: `GET /xchat/bootstrap` returns Markdown dynamically composed by the existing `neo bootstrap` CLI from `~/.agents/AGENTS.md`, XChat rules, and `neo skill list`. No MCP Bootstrap Tool is added. On local loopback, use the endpoint directly; remote requests require an authorized `Authorization: Bearer` header (query tokens are not accepted). Responses set `Cache-Control: no-store`. Do not mount/share this private document publicly.
 - Public MCP: optional Cloudflare Temporary tunnel or named-domain tunnel; the Setup window can start, stop, and test either mode
 - Phone handoff: TCP `8686`, Bonjour `_neoy._tcp`, `POST /agent`
 - Handoff queue: `GET /agent/peek`, `GET /agent/next?timeout=0..30`

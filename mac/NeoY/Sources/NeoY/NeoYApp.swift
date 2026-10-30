@@ -380,6 +380,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
 
         (services.handoff as? NativeNeoYPhoneHandoffReceiver)?.registerRoutes(on: value)
+        NeoYXChatBootstrapRoute.register(on: value)
         try? services.files.prepare()
         value.setStaticFileRoot(services.files.root)
         try? value.start()

@@ -2,6 +2,31 @@ import XCTest
 @testable import NeoY
 
 final class NeoCLISetupTests: XCTestCase {
+    func testXChatHTTPBootstrapUsesNeoCLIWithoutNewMCPTool() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("xchat-bootstrap-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let working = root.appendingPathComponent("neo")
+        try """
+        #!/bin/sh
+        test "$1" = "bootstrap" || exit 4
+        printf '# XChat Harness Bootstrap\\nBootstrap works\\n'
+        """.write(to: working, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: working.path)
+        let reply = NeoYXChatBootstrapRoute.render(cli: working)
+        XCTAssertEqual(reply.status, 200)
+        XCTAssertEqual(reply.contentType, "text/markdown; charset=utf-8")
+        XCTAssertTrue(String(data: try XCTUnwrap(reply.body), encoding: .utf8)?.contains("Bootstrap works") == true)
+
+        let failed = root.appendingPathComponent("failed")
+        try "#!/bin/sh\\necho wrong data\\n".write(to: failed, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: failed.path)
+        XCTAssertEqual(NeoYXChatBootstrapRoute.render(cli: failed).status, 503)
+        XCTAssertEqual(NeoYXChatBootstrapRoute.render(cli: nil).status, 503)
+    }
+
     func testSetupAgentURLUsesAbsoluteBootstrapWithoutEmbeddingContents() throws {
         let file = FileManager.default.temporaryDirectory
             .appendingPathComponent("setup \(UUID().uuidString).md")
