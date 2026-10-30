@@ -314,6 +314,18 @@ final class NeoCLISetupTests: XCTestCase {
         XCTAssertFalse(NeoCLISetup.missingSkillsOnDisk(forTool: "chatgpt", directory: root).contains("webhelm"))
     }
 
+    func testWebhelmSetupDependsOnGlobalCLIWithoutFixedSkillInstallerPath() throws {
+        let sources = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/NeoY/NeoCLISetup.swift")
+        let code = try String(contentsOf: sources, encoding: .utf8)
+        XCTAssertTrue(code.contains(".local/bin/webhelm"))
+        XCTAssertFalse(code.contains("webhelm/scripts/install-global-cli.sh"))
+        XCTAssertFalse(code.contains("ensureGlobalWebhelmLauncher"))
+    }
+
     func testWebhelmSetupHealthNeedsDaemonAndManagedChrome() {
         XCTAssertTrue(NeoCLISetup.webhelmIsHealthy(
             #"{"managed_chrome":{"pid":120}, "daemon":{"running":true}}"#))

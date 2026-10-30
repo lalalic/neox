@@ -12,6 +12,6 @@
 
 ## Integration contract
 
-Install WebHelm once under `~/.agents/skills/webhelm` and expose its launcher at `~/.local/bin/webhelm` using `scripts/install-global-cli.sh` from that Skill. NeoY runs this installer before its WebHelm health check. Runtime ChatGPT submissions and native setup Session cleanup call this same absolute executable. The removed `browser-workspace` CLI is not a fallback.
+Install the WebHelm Skill at any location supported by the agent. The agent reads that Skill's `SKILL.md` and runs its installer relative to the loaded Skill file. The installer establishes the global `webhelm` command. NeoY does not resolve a Skill directory or invoke its installer; it calls the global `webhelm` CLI for health checks and browser Sessions. The removed `browser-workspace` CLI is not a fallback.
 
-Review must check: no duplicate platform implementation or new MCP surface, runtime tests for the global executable, native setup tests for the canonical skill directory, and live `webhelm` status/profile/validate receipts.
+Review must check: no duplicate platform implementation or new MCP surface, runtime tests for the global executable, native setup tests for a global CLI without any Skill-directory assumption, and live `webhelm` status/profile/validate receipts.
