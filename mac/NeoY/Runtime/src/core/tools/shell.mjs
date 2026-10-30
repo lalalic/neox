@@ -3,21 +3,6 @@ const SHELL_EXEC_DEFAULT_TIMEOUT_MS = 600_000;
 const SHELL_PROMOTION_MS = 300_000;
 const SHELL_INLINE_BYTES = 16_384;
 
-// Discovery metadata only: Core never retries a failed command as root.
-export function privilegeHintForFailure(exitCode, stderr) {
-  if (exitCode === 0 || typeof stderr !== "string" ||
-      !/^sudo:\s*(?:a password is required|a terminal is required to read the password|no tty present and no askpass program specified|no askpass program specified)/im.test(stderr)) {
-    return null;
-  }
-  return {
-    state: "authorization_required",
-    retry_original_command: false,
-    next_tool: "shell",
-    next_command: "neo privilege list",
-    guidance: "Run neo privilege list, then neo privilege status, using the existing shell tool. Only invoke neo privilege run <approved-action> for an exact approved match. Unsupported actions require explicit owner review and a newly signed helper; never supply passwords to agents or automatically retry an arbitrary command as root.",
-  };
-}
-
 export const SHELL_TOOLS = [
 {
     name: "shell_exec",
@@ -261,8 +246,6 @@ export async function handleShell(name, args, context) {
                 capturedStdoutBytes: out.bytes, capturedStderrBytes: err.bytes,
                 stdoutTruncated: false, stderrTruncated: false,
               };
-              const privilege = privilegeHintForFailure(result.exitCode, err.text);
-              if (privilege) result.privilege = privilege;
               await audit(name, args, {
                 exitCode: result.exitCode, durationMs: elapsed, jobId: job.id,
                 stdoutFile: out.file, stderrFile: err.file,
@@ -310,8 +293,6 @@ export async function handleShell(name, args, context) {
             tailFile(metadata.stderrPath, maxLogBytes),
           ]);
           const result = { ...metadata, running: processRunning(metadata.pid), stdout, stderr: stderrTail };
-          const privilege = metadata.finishedAt && privilegeHintForFailure(metadata.exitCode, stderrTail.text);
-          if (privilege) result.privilege = privilege;
           await audit(name, args, { jobId, running: result.running });
           return result;
         }

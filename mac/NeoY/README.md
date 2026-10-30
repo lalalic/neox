@@ -70,15 +70,6 @@ tool call. Consequently, the structured answer is returned by
 `ask_questions.submit` and sent through `ui/message` as a new turn. NeoY does
 not claim same-turn suspension/resumption or hold the gateway request open.
 
-## Controlled administrator operations
-
-`neoy.setup privilege status` reports whether the optional, signed Privileged
-Helper is installed and authorized for non-interactive use. The helper is
-provisioned with one macOS administrator prompt during native installation.
-Agent requests use `neoy.setup privilege run <approved-action>`, not a root
-shell or a sudo password. See [privileged-helper.md](docs/privileged-helper.md)
-for the exact operation allowlist and revocation procedure.
-
 ## Tool-call audit
 
 NeoY records metadata for every `tools/call` accepted at its authenticated MCP

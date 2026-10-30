@@ -611,7 +611,7 @@ async function callCodexAppServer(method, params, timeoutMs = 30_000) {
 
 const shellFacade = commandFacade({
   name: "shell",
-  description: "Execute commands and manage background shell jobs. On sudo authorization failure, the response provides permission guidance. Use shell command neo privilege list to discover approved actions; never automatically retry as root.",
+  description: "Execute commands and manage background shell jobs.",
   commands: SHELL_TOOLS,
   commandName: (name) => ({
     shell_exec: "exec", shell_start: "start", shell_job_status: "job.status",

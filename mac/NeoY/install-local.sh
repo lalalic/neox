@@ -57,39 +57,6 @@ if [[ ! -f "$CORE_ENTRY" || ! -f "$CORE_PACKAGE" ]]; then
   print -u2 "NeoY install preflight failed: signed app does not contain packaged Core."
   exit 1
 fi
-# The helper is installed separately from the signed app, under root ownership.
-# First provisioning or a reviewed helper update requires explicit OS approval.
-HELPER_DIR="$HERE/build/privileged-helper"
-HELPER_CANDIDATE="$HELPER_DIR/com.neox.neoy.helper"
-HELPER_ROOT="/Library/PrivilegedHelperTools/com.neox.neoy.helper"
-mkdir -p "$HELPER_DIR"
-xcrun swiftc -O "$HERE/Resources/PrivilegedHelper/NeoPrivilegedHelper.swift" -o "$HELPER_CANDIDATE"
-codesign --force --sign "$identity" --timestamp=none "$HELPER_CANDIDATE"
-codesign --verify --strict "$HELPER_CANDIDATE"
-sh "$HERE/Resources/PrivilegedHelper/test-helper.sh" "$HELPER_CANDIDATE"
-if [[ ! -f "$HELPER_ROOT" ]] || \
-  [[ "$(stat -f '%Su:%Sg:%Lp' "$HELPER_ROOT" 2>/dev/null)" != "root:wheel:755" ]] || \
-  ! codesign --verify --strict -R '=anchor apple generic and certificate leaf[subject.OU] = "JABNLDLN8G"' "$HELPER_ROOT" >/dev/null 2>&1 || \
-  [[ "$("$HELPER_ROOT" version 2>/dev/null)" != "1" ]] || \
-  ! sudo -n -k "$HELPER_ROOT" check dns.flush >/dev/null 2>&1; then
-  echo "NeoY Privileged Helper needs one-time macOS administrator authorization."
-  # Always require an OS-mediated authorization, never record/reuse a password.
-  osascript - "$HERE/Resources/PrivilegedHelper/install-helper.sh" \
-    "$HELPER_CANDIDATE" "$(id -un)" <<'APPLESCRIPT'
-on run argv
-  set installScript to item 1 of argv
-  set binaryPath to item 2 of argv
-  set accountName to item 3 of argv
-  set commandText to "/bin/sh " & quoted form of installScript & " " & quoted form of binaryPath & " " & quoted form of accountName
-  do shell script commandText with administrator privileges
-end run
-APPLESCRIPT
-fi
-if ! sudo -n -k "$HELPER_ROOT" check dns.flush >/dev/null 2>&1; then
-  echo "NeoY helper not authorized: preserving current installed app." >&2
-  exit 77
-fi
-
 # Stage the candidate and install a rollback watchdog before touching the working app.
 mkdir -p "$HOME/Library/Application Support/NeoY/bin" "$HOME/Library/Logs/NeoY"
 cp "$HERE/Resources/Scripts/upgrade-watchdog.sh" "$WATCHDOG"

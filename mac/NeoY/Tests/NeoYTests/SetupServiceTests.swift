@@ -3,23 +3,6 @@ import XCTest
 @testable import NeoY
 
 final class SetupServiceTests: XCTestCase {
-    func testPrivilegeParserIsFailClosed() throws {
-        XCTAssertEqual(try NeoYSetupParser.parse("privilege"), .privilegeStatus)
-        XCTAssertEqual(try NeoYSetupParser.parse("privilege status"), .privilegeStatus)
-        XCTAssertEqual(try NeoYSetupParser.parse("help privilege"), .help(topic: .privilege))
-        for action in NeoYPrivilegeBroker.actions {
-            XCTAssertEqual(try NeoYSetupParser.parse("privilege run \(action)"), .privilegeRun(action))
-        }
-        for attack in [
-            "privilege run /bin/sh", "privilege run dns.flush;id",
-            "privilege run dns.flush extra", "privilege run vpn.server.stop",
-            "privilege run ../../usr/bin/id", "privilege run sudo", "privilege run"
-        ] {
-            XCTAssertThrowsError(try NeoYSetupParser.parse(attack), attack)
-        }
-        XCTAssertTrue(NeoYSetupService.help(.privilege).contains("NEVER request"))
-    }
-
     func testCoreUpgradeCommands() throws {
         XCTAssertEqual(try NeoYSetupParser.parse("core status"), .coreStatus)
         XCTAssertEqual(try NeoYSetupParser.parse("core upgrade latest"), .coreUpgrade("latest"))
