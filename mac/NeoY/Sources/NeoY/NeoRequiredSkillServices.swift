@@ -62,12 +62,17 @@ enum NeoRequiredSkillServices {
         return response
     }
 
-    private static func states() throws -> [String: String] {
+    private static func records() throws -> [[String: Any]] {
         let data = Data(try run("npx", ["--yes", "pm2", "jlist"]).utf8)
-        guard let records = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+        guard let entries = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
             throw NSError(domain: "NeoSkillServices", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: "Invalid PM2 status inventory"])
         }
+        return entries
+    }
+
+    private static func states() throws -> [String: String] {
+        let records = try records()
         var output: [String: String] = [:]
         for record in records {
             guard let name = record["name"] as? String,
@@ -78,7 +83,7 @@ enum NeoRequiredSkillServices {
         return output
     }
 
-    private static func setup(_ owner: Owner) throws {
+    private static func scriptPath(for owner: Owner) throws -> URL {
         let directory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".agents/skills/\(owner.name)", isDirectory: true)
         let script = owner.setupScript.reduce(directory) { $0.appendingPathComponent($1) }
@@ -87,7 +92,69 @@ enum NeoRequiredSkillServices {
                           userInfo: [NSLocalizedDescriptionKey:
                             "Skill \(owner.name) has no installed service setup script"])
         }
-        _ = try run("node", [script.path, "setup"])
+        return script
+    }
+
+    private static func ensureSupportedServiceContract(for owner: Owner) throws {
+        guard owner.name == "events-bus" else { return }
+        let script = try scriptPath(for: owner)
+        let code = try String(contentsOf: script, encoding: .utf8)
+        guard !code.contains("serviceman") else { return }
+        // A legacy events-bus CLI registers unqualified PM2 names. Its known
+        // approved installation source may be upgraded; unknown sources aren't touched.
+        try NeoCLISetup.updateManagedSkill("events-bus", automatic: true)
+        let updated = try String(contentsOf: script, encoding: .utf8)
+        guard updated.contains("serviceman") else {
+            throw NSError(domain: "NeoSkillServices", code: 4,
+                          userInfo: [NSLocalizedDescriptionKey:
+                            "Installed events-bus Skill lacks namespaced service setup"])
+        }
+    }
+
+    static func isLegacyEventsHistory(_ path: String?) -> Bool {
+        path?.hasSuffix("/events-bus/api/server.mjs") == true
+    }
+
+    private static func migrateLegacyHistory(_ owner: Owner) throws {
+        try ensureSupportedServiceContract(for: owner)
+        guard let legacy = try records().first(where: { $0["name"] as? String == "events-bus-service" }),
+              let environment = legacy["pm2_env"] as? [String: Any],
+              isLegacyEventsHistory(environment["pm_exec_path"] as? String) else {
+            throw NSError(domain: "NeoSkillServices", code: 5,
+                          userInfo: [NSLocalizedDescriptionKey:
+                            "Unexpected legacy events-bus service; migration refused"])
+        }
+        let wasOnline = environment["status"] as? String == "online"
+        if wasOnline { _ = try run("npx", ["--yes", "pm2", "stop", "events-bus-service"]) }
+        do {
+            try setup(owner)
+            guard try states()["events-bus/history"] == "online" else {
+                throw NSError(domain: "NeoSkillServices", code: 6,
+                              userInfo: [NSLocalizedDescriptionKey:
+                                "Namespaced history service failed startup"])
+            }
+            _ = try run("npx", ["--yes", "pm2", "delete", "events-bus-service"])
+            // Old, failed NATS registration may be removed only when it is
+            // certainly the same legacy binary and the namespaced NATS is online.
+            if try states()["events-bus/nats"] == "online",
+               let old = try records().first(where: { $0["name"] as? String == "events-bus" }),
+               let pm = old["pm2_env"] as? [String: Any],
+               pm["status"] as? String == "errored",
+               (pm["pm_exec_path"] as? String)?.hasSuffix("/nats-server") == true {
+                _ = try run("npx", ["--yes", "pm2", "delete", "events-bus"])
+            }
+        } catch {
+            if (try? states()["events-bus/history"]) != nil {
+                _ = try? run("npx", ["--yes", "pm2", "delete", "events-bus/history"])
+            }
+            if wasOnline { _ = try? run("npx", ["--yes", "pm2", "restart", "events-bus-service"]) }
+            throw error
+        }
+    }
+
+    private static func setup(_ owner: Owner) throws {
+        try ensureSupportedServiceContract(for: owner)
+        _ = try run("node", [try scriptPath(for: owner).path, "setup"])
     }
 
     /// Called on a detached task at launch and periodically. Setup only repairs
@@ -98,9 +165,17 @@ enum NeoRequiredSkillServices {
         var inventory = try states()
         var installedService = false
         for owner in selected where !missingServices(for: owner, states: inventory).isEmpty {
-            do { try setup(owner) }
-            catch { NSLog("Neo Skill %@ service setup: %@", owner.name, error.localizedDescription) }
-            installedService = true
+            do {
+                if owner.name == "events-bus", inventory["events-bus-service"] != nil,
+                   inventory["events-bus/history"] == nil {
+                    try migrateLegacyHistory(owner)
+                } else {
+                    try setup(owner)
+                }
+                installedService = true
+            } catch {
+                NSLog("Neo Skill %@ service setup: %@", owner.name, error.localizedDescription)
+            }
             inventory = try states()
         }
         for owner in selected {

@@ -97,6 +97,14 @@ final class NeoCLISetupTests: XCTestCase {
         ]).isEmpty)
     }
 
+    func testLegacyEventsHistoryMigrationOnlyAcceptsOwnedExecutable() {
+        XCTAssertTrue(NeoRequiredSkillServices.isLegacyEventsHistory(
+            "/Users/test/.agents/skills/events-bus/api/server.mjs"))
+        XCTAssertFalse(NeoRequiredSkillServices.isLegacyEventsHistory(
+            "/Users/test/another-service/api/server.mjs"))
+        XCTAssertFalse(NeoRequiredSkillServices.isLegacyEventsHistory(nil))
+    }
+
     func testOptionalServicesAreSupervisedOnlyWhenEnabled() {
         XCTAssertFalse(NeoRequiredSkillServices.owners(optionalEnabled: []).contains { $0.name == "wechat-bro" })
         XCTAssertTrue(NeoRequiredSkillServices.owners(optionalEnabled: ["wechat-bro"])
