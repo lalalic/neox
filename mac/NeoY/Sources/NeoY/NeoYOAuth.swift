@@ -557,6 +557,9 @@ final class NeoYOAuthService: @unchecked Sendable {
     }
 
     private static func allowedRedirect(_ value: String) -> Bool {
+        if let url = URLComponents(string: value), url.scheme == "http", url.host == "127.0.0.1",
+           let port = url.port, (1024...65535).contains(port), url.path == "/neo/oauth/callback",
+           url.user == nil, url.password == nil, url.query == nil, url.fragment == nil { return true }
         if value == "https://chatgpt.com/connector_platform_oauth_redirect" { return true }
         guard let url = URL(string: value), url.scheme == "https", url.host == "chatgpt.com", url.user == nil, url.password == nil,
               url.port == nil, url.query == nil, url.fragment == nil else { return false }
