@@ -72,10 +72,10 @@ policy_replaced=1
 /bin/mv -f "$tmp" "$policy"
 # Some macOS installations do not load /etc/sudoers.d by default. Include
 # exactly this root-owned policy, not the entire directory or arbitrary rules.
-if ! /usr/bin/grep -Fxq "#include $policy" "$sudoers" && \
+if ! /usr/bin/grep -Eq "^(@include|#include)[[:space:]]+$policy$" "$sudoers" && \
    ! /usr/bin/grep -Eq '^[[:space:]]*#includedir[[:space:]]+(/private)?/etc/sudoers.d([[:space:]]|$)' "$sudoers"; then
   /bin/cp -p "$sudoers" "$sudoers_temp"
-  printf '\n#include %s\n' "$policy" >> "$sudoers_temp"
+  printf '\n@include %s\n' "$policy" >> "$sudoers_temp"
   /usr/sbin/chown root:wheel "$sudoers_temp"
   /bin/chmod 0440 "$sudoers_temp"
   /usr/sbin/visudo -cf "$sudoers_temp" || exit 65
@@ -86,7 +86,11 @@ if ! /usr/bin/grep -Fxq "#include $policy" "$sudoers" && \
 fi
 /usr/sbin/visudo -c || exit 65
 # Read back authorization as the actual target account, bypassing sudo cache.
-/usr/bin/sudo -u "$target_user" /usr/bin/sudo -n -k "$helper" check dns.flush >/dev/null || exit 77
+if ! /usr/bin/sudo -u "$target_user" /usr/bin/sudo -n -k "$helper" check dns.flush >/dev/null; then
+  echo "User privilege check failed. Effective policy for $target_user:" >&2
+  /usr/bin/sudo -l -U "$target_user" 2>&1 >&2 || true
+  exit 77
+fi
 trap - EXIT
 /bin/rm -f "$helper_backup" "$policy_backup" "$sudoers_backup"
 # Root-only trusted installation is intentionally separate from the app's
