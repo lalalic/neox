@@ -1,7 +1,7 @@
 import Foundation
 
 enum NeoYSetupTopic: String, CaseIterable, Sendable {
-    case overview, status, configuration, core, deployment, diagnostics, permissions, federation, features, events, capabilities, auth, files, roadmap
+    case overview, status, configuration, core, deployment, diagnostics, permissions, privilege, federation, features, events, capabilities, auth, files, roadmap
 }
 
 enum NeoYSetupCommand: Equatable, Sendable {
@@ -20,6 +20,8 @@ enum NeoYSetupCommand: Equatable, Sendable {
     case diagnosticsSet(NeoYDiagnosticsSetting)
     case permissionsStatus
     case permissionOpen(NeoYPermissionKind)
+    case privilegeStatus
+    case privilegeRun(String)
     case filesList
     case filesMount(name: String, path: String)
     case filesUnmount(String)
@@ -88,6 +90,7 @@ enum NeoYSetupParser {
         case "deployment": return try deployment(tokens)
         case "diagnostics": return try diagnostics(tokens)
         case "permissions": return try permissions(tokens)
+        case "privilege": return try privilege(tokens)
         case "mcp": return try mcp(tokens)
         case "files": return try files(tokens)
         case "feature", "features": return try feature(tokens)
@@ -179,6 +182,17 @@ enum NeoYSetupParser {
             return .permissionOpen(kind)
         default: throw NeoYSetupError.unknownCommand(tokens.prefix(2).joined(separator: " "))
         }
+    }
+
+    private static func privilege(_ tokens: [String]) throws -> NeoYSetupCommand {
+        if tokens == ["privilege"] || tokens == ["privilege", "status"] { return .privilegeStatus }
+        guard tokens.count == 3, tokens[1] == "run" else {
+            throw NeoYSetupError.unknownCommand(tokens.joined(separator: " "))
+        }
+        guard NeoYPrivilegeBroker.actions.contains(tokens[2]) else {
+            throw NeoYSetupError.invalidValue("Denied: unapproved privileged action")
+        }
+        return .privilegeRun(tokens[2])
     }
 
     private static func files(_ tokens: [String]) throws -> NeoYSetupCommand {
@@ -436,6 +450,15 @@ actor NeoYSetupService {
             return Self.json(await runtime?.permissions() ?? [])
         case .permissionOpen(let kind):
             return Self.json(JSONValue.object(["opened": .bool(await runtime?.openPermission(kind) ?? false), "permission": .string(kind.rawValue)]))
+        case .privilegeStatus:
+            return Self.json(NeoYPrivilegeBroker.status())
+        case .privilegeRun(let action):
+            do {
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try NeoYPrivilegeBroker.run(action)
+                }.value
+                return Self.json(result)
+            } catch { return Self.json(["state": "failed", "action": action, "error": error.localizedDescription]) }
         case .filesList, .filesMount, .filesUnmount, .filesURL:
             do { return try NeoYSetupFiles.execute(command) }
             catch { return Self.json(JSONValue.object(["ok": .bool(false), "error": .string(error.localizedDescription)])) }
@@ -640,6 +663,8 @@ actor NeoYSetupService {
             "diagnostics enable|disable; diagnostics set level <info|warning|error>; diagnostics set retention-days <1...365>"
         case .permissions:
             "permissions status; permissions open <accessibility|screen-recording|camera|microphone|notifications|local-network>. Human approval remains required."
+        case .privilege:
+            "privilege status | privilege run <dns.flush|vpn.server.status|vpn.routing.status|vpn.server.restart|vpn.routing.restart>. Only root-owned, explicitly allowlisted operations are supported. One-time administrator approval installs the helper. NEVER request an unrestricted root shell."
         case .files:
             "files list; files mount <name> <absolute-directory>; files unmount <name>; files url <absolute-file>. Mounts are PUBLIC read-only HTTPS shares."
         case .federation:
@@ -691,6 +716,7 @@ actor NeoYSetupService {
               deployment show|set ...
               diagnostics ...
               permissions status|open ...
+              privilege status|run <approved-action>
               files list|mount|unmount|url ...
               mcp list|add|remove|enable|disable ...
               feature list|status|install|enable|disable|uninstall|configure|start|stop|restart|doctor|setup|complete ...
@@ -716,7 +742,7 @@ enum NeoYSetupTools {
     static func tools(service: NeoYSetupService) -> [ToolDefinition] {
         [ToolDefinition(
             name: "setup",
-            description: "Neo setup/control CLI. Run without command or run 'help' for authoritative runtime commands covering status, permissions, MCP federation, diagnostics, optional capabilities, Core auth, and important NeoX events.",
+            description: "Neo setup/control CLI. Run help for commands including privilege status/run (strictly allowlisted root helper, no root shell), permissions, federation, diagnostics, deployment and other controls.",
             parameters: .object([
                 "type": .string("object"),
                 "properties": .object([

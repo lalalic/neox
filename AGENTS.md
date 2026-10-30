@@ -8,6 +8,14 @@ Instructions for coding agents (and humans) modifying this repo.
 desktop agents over MCP. One app target, zero external SPM dependencies,
 27 tracked files (18 Swift). Source of truth for behavior: `Neox/Server/`.
 
+## Project learnings
+
+- 2026-10-29: On macOS, a privileged agent operation must use a root-owned,
+  signed, fixed-action helper. A broad passwordless sudo rule or a helper that
+  accepts arbitrary paths/commands defeats the intended privilege boundary.
+  Native installation must obtain separate OS authorization and verify the
+  passwordless policy before replacing the running Neo.app.
+
 ## NeoY v2 architecture rules
 
 For any work under `mac/NeoY`, the canonical architecture contract is
