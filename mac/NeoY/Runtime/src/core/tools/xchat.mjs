@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -160,8 +161,8 @@ export function scheduleXChatLifecycle(name, input, options = {}) {
   try {
     fs.chmodSync(dir, 0o700);
     fs.writeFileSync(configPath, JSON.stringify(config), { mode: 0o600 });
-    const cli = options.cli || process.env.BROWSER_WORKSPACE_CLI || "uvx";
-    const prefix = options.cli || process.env.BROWSER_WORKSPACE_CLI ? [] : ["browser-workspace"];
+    const cli = options.cli || process.env.WEBHELM_CLI || path.join(os.homedir(), ".local", "bin", "webhelm");
+    const prefix = [];
     const sessionArgs = action === "new-thread" ? ["--auto-session"] :
       parsed.mode === "sync" ? ["--mode", "sync", "--session-id", parsed.sessionId.trim()] : ["--mode", "async"];
     const result = (options.spawnSyncImpl || spawnSync)(cli, [...prefix, "platform", "run", "chatgpt", action, ...sessionArgs, "--config", configPath], {

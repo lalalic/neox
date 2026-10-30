@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {XCHAT_LIFECYCLE_TOOLS,scheduleXChatLifecycle,parsePlatformReceipt} from '../src/core/tools/xchat.mjs';
 const call=(command,args={},options={})=>JSON.parse(scheduleXChatLifecycle('chatgpt',{command,args},options).content[0].text);
 const thread={status:'submitted',mode:'new-thread',temporary:false,thread_id:'6acfc12e-c1a0-83ea-bfa3-5b5c609ec588',thread_url:'https://chatgpt.com/c/6acfc12e-c1a0-83ea-bfa3-5b5c609ec588',verified_by:'composer-cleared'};
@@ -56,4 +58,14 @@ test('errors propagate without false-positive success',()=>{
  assert.throws(()=>call('thread',{message:'x'},{cli:'test',spawnSyncImpl:()=>({status:1,stderr:'browser failed'})}),/browser failed/);
  assert.throws(()=>call('thread',{message:'x'},{cli:'test',spawnSyncImpl:()=>({status:0,stdout:JSON.stringify({result:{ok:true,stdout:'{"status":"submitted","mode":"new-thread"}'}})})}),/durable/);
  assert.throws(()=>parsePlatformReceipt({result:{ok:false,stderr:'blocked'}},'new-thread'),/blocked/);
+});
+
+test('default uses the global webhelm launcher',()=>{
+ let executable;
+ const response=call('thread',{message:'Global CLI check'},{spawnSyncImpl:(cli)=>{
+   executable=cli;
+   return {status:0,stdout:JSON.stringify({result:{ok:true,stdout:JSON.stringify(thread)}})};
+ }});
+ assert.equal(response.status,'submitted');
+ assert.equal(executable,path.join(os.homedir(),'.local','bin','webhelm'));
 });

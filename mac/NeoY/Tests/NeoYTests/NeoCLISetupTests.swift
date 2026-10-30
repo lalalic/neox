@@ -298,6 +298,22 @@ final class NeoCLISetupTests: XCTestCase {
         XCTAssertEqual(NeoCLISetup.managedSkillSources["markcut"], "lalalic/markcut")
     }
 
+    func testLegacySkillFolderDoesNotSatisfyWebhelmRequirement() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("webhelm-skill-check-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let legacy = root.appendingPathComponent("browser-workspace")
+        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+        try "name: webhelm".write(to: legacy.appendingPathComponent("SKILL.md"),
+                                atomically: true, encoding: .utf8)
+        XCTAssertTrue(NeoCLISetup.missingSkillsOnDisk(forTool: "chatgpt", directory: root).contains("webhelm"))
+        let current = root.appendingPathComponent("webhelm")
+        try FileManager.default.createDirectory(at: current, withIntermediateDirectories: true)
+        try "name: webhelm".write(to: current.appendingPathComponent("SKILL.md"),
+                                atomically: true, encoding: .utf8)
+        XCTAssertFalse(NeoCLISetup.missingSkillsOnDisk(forTool: "chatgpt", directory: root).contains("webhelm"))
+    }
+
     func testWebhelmSetupHealthNeedsDaemonAndManagedChrome() {
         XCTAssertTrue(NeoCLISetup.webhelmIsHealthy(
             #"{"managed_chrome":{"pid":120}, "daemon":{"running":true}}"#))

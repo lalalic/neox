@@ -354,8 +354,10 @@ actor NeoYFeatureManager {
         guard let data = try? Data(contentsOf: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let sessionID = json["session_id"] as? String, !sessionID.isEmpty else { return }
-        guard let cli = Self.executable("uvx") else { return }
-        _ = try? Self.run(cli, ["browser-workspace", "session", "stop", sessionID])
+        let cli = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".local/bin/webhelm").path
+        guard FileManager.default.isExecutableFile(atPath: cli) else { return }
+        _ = try? Self.run(cli, ["session", "stop", sessionID])
     }
 
     private func productRoot(id: String) -> URL { root.appendingPathComponent(id, isDirectory: true) }

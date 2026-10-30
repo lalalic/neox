@@ -80,12 +80,6 @@ enum NeoCLISetup {
                 .appendingPathComponent(name).appendingPathComponent("SKILL.md").path) {
                 return false
             }
-            // The installed WebHelm skill is named "webhelm" but intentionally
-            // lives under the browser-workspace directory.
-            if name == "webhelm", FileManager.default.fileExists(atPath:
-                root.appendingPathComponent("browser-workspace/SKILL.md").path) {
-                return false
-            }
             return true
         })
     }
@@ -138,17 +132,45 @@ enum NeoCLISetup {
         return "Installed required Skills: \(names.sorted().joined(separator: ", ")); WebHelm healthy"
     }
 
-    private static func runWebhelm(_ arguments: [String]) throws -> String {
-        guard let uvx = ["/opt/homebrew/bin/uvx", "/usr/local/bin/uvx"]
-            .first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
+    /// Native setup provisions the global launcher owned by the installed Skill.
+    /// Do not create a second WebHelm executable or bypass its platform directory.
+    static func ensureGlobalWebhelmLauncher() throws {
+        let script = skillsDirectory.appendingPathComponent("webhelm/scripts/install-global-cli.sh")
+        guard FileManager.default.fileExists(atPath: script.path) else {
             throw NSError(domain: "NeoSkillDependency", code: 3,
-                          userInfo: [NSLocalizedDescriptionKey: "uvx is required to initialize WebHelm"])
+                          userInfo: [NSLocalizedDescriptionKey: "Installed WebHelm skill has no global CLI installer"])
         }
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: uvx)
-        process.arguments = ["--from", "browser-workspace", "webhelm"] + arguments
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [script.path]
+        let output = Pipe()
+        process.standardError = output
+        process.standardOutput = output
+        try process.run()
+        let response = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw NSError(domain: "NeoSkillDependency", code: Int(process.terminationStatus),
+                          userInfo: [NSLocalizedDescriptionKey:
+                            "WebHelm global CLI setup failed: \(String(decoding: response, as: UTF8.self).prefix(250))"])
+        }
+    }
+
+    private static var globalWebhelmCLI: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/webhelm")
+    }
+
+    private static func runWebhelm(_ arguments: [String]) throws -> String {
+        guard FileManager.default.isExecutableFile(atPath: globalWebhelmCLI.path) else {
+            throw NSError(domain: "NeoSkillDependency", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: "Global webhelm executable is unavailable"])
+        }
+        let process = Process()
+        process.executableURL = globalWebhelmCLI
+        process.arguments = arguments
+        let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin").path
         process.environment = ProcessInfo.processInfo.environment
-            .merging(["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]) { _, configured in configured }
+            .merging(["PATH": "\(path):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]) { _, configured in configured }
         let output = Pipe()
         process.standardOutput = output
         process.standardError = output
@@ -175,6 +197,7 @@ enum NeoCLISetup {
     }
 
     static func setupWebhelm() throws {
+        try ensureGlobalWebhelmLauncher()
         if let state = try? runWebhelm(["status"]), webhelmIsHealthy(state) { return }
         // First-use bootstrap. Always release the temporary leased session.
         let response = try runWebhelm(["session", "start"])
