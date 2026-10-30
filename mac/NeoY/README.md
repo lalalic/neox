@@ -195,8 +195,9 @@ Family Tutor has moved to the Neo monorepo as a local Neo Project and is no long
 The native Features screen preserves the 2.3.11 behavior: Tool Feature rows
 come from the live local MCP tools/list response, with disabled tools included
 so the user can re-enable them. It does not use a fixed Tool Feature list.
-markcut.preview belongs to the separate markcut Skill feature, not an
-additional Tool Feature row.
+markcut is one of the five required Global Skills, not a selectable Feature row.
+markcut.preview still requires the installed markcut Skill; the dependency
+manager can restore it from the approved source if needed.
 
 Neo.app treats declared Skill dependencies as required when a tool is discovered,
 enabled, or invoked. Built-in requirements include chatgpt -> webhelm ->

@@ -3,12 +3,12 @@ import Foundation
 /// NeoY manages installation; lalalic/neo remains the CLI implementation owner.
 enum NeoCLISetup {
     static var skillsDirectory: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".agents/skills", isDirectory: true) }
-    static let requiredGlobalSkills = ["events-bus", "daemon-service-manage", "webhelm", "agents-relay"]
+    static let requiredGlobalSkills = ["events-bus", "daemon-service-manage", "webhelm", "agents-relay", "markcut"]
     static func globalSkills() -> [String] { requiredGlobalSkills }
 
+    // Required/built-in Global Skills never get a user-facing Features toggle.
     static let optionalSkillSources = [
         "wechat-bro": "lalalic/wechat-bro",
-        "markcut": "lalalic/markcut",
     ]
 
     // Trusted sources only. A remote MCP provider cannot install an arbitrary
@@ -18,6 +18,7 @@ enum NeoCLISetup {
         "daemon-service-manage": "lalalic/neo",
         "webhelm": "lalalic/browser-workspace",
         "agents-relay": "lalalic/agents-relay",
+        "markcut": "lalalic/markcut",
     ]
     static var managedSkillSources: [String: String] {
         requiredSkillSources.merging(optionalSkillSources) { existing, _ in existing }

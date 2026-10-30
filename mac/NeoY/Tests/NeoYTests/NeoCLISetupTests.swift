@@ -86,10 +86,11 @@ final class NeoCLISetupTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         XCTAssertTrue(NeoCLISetup.desiredOptionalSkills(defaults: defaults).isEmpty)
+        NeoCLISetup.setOptionalSkillDesired("wechat-bro", enabled: true, defaults: defaults)
         NeoCLISetup.setOptionalSkillDesired("markcut", enabled: true, defaults: defaults)
         NeoCLISetup.setOptionalSkillDesired("unknown", enabled: true, defaults: defaults)
-        XCTAssertEqual(NeoCLISetup.desiredOptionalSkills(defaults: defaults), ["markcut"])
-        NeoCLISetup.setOptionalSkillDesired("markcut", enabled: false, defaults: defaults)
+        XCTAssertEqual(NeoCLISetup.desiredOptionalSkills(defaults: defaults), ["wechat-bro"])
+        NeoCLISetup.setOptionalSkillDesired("wechat-bro", enabled: false, defaults: defaults)
         XCTAssertTrue(NeoCLISetup.desiredOptionalSkills(defaults: defaults).isEmpty)
     }
 
@@ -99,9 +100,10 @@ final class NeoCLISetupTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         NeoCLISetup.migrateOptionalSkillPreferencesIfNeeded(
             installed: ["markcut", "webhelm", "wechat-bro"], defaults: defaults)
-        XCTAssertEqual(NeoCLISetup.desiredOptionalSkills(defaults: defaults),
-                       ["markcut", "wechat-bro"])
-        NeoCLISetup.setOptionalSkillDesired("markcut", enabled: false, defaults: defaults)
+        XCTAssertEqual(NeoCLISetup.desiredOptionalSkills(defaults: defaults), ["wechat-bro"])
+        // Ignore stale markcut preferences left by Neo.app 2.3.13.
+        defaults.set(["markcut", "wechat-bro"], forKey: NeoCLISetup.optionalSkillsPreferenceKey)
+        XCTAssertEqual(NeoCLISetup.desiredOptionalSkills(defaults: defaults), ["wechat-bro"])
         NeoCLISetup.migrateOptionalSkillPreferencesIfNeeded(
             installed: ["markcut", "wechat-bro"], defaults: defaults)
         XCTAssertEqual(NeoCLISetup.desiredOptionalSkills(defaults: defaults), ["wechat-bro"])
@@ -276,7 +278,7 @@ final class NeoCLISetupTests: XCTestCase {
     }
 
     func testGlobalSkillsReadOnlyInventory() {
-        XCTAssertEqual(NeoCLISetup.globalSkills(), ["events-bus", "daemon-service-manage", "webhelm", "agents-relay"])
+        XCTAssertEqual(NeoCLISetup.globalSkills(), ["events-bus", "daemon-service-manage", "webhelm", "agents-relay", "markcut"])
     }
 
     func testMarkcutPreviewRequiresInstalledMarkcutSkill() {
@@ -303,9 +305,13 @@ final class NeoCLISetupTests: XCTestCase {
 
     func testOptionalSkillCatalogDoesNotIncludeCoreDependencies() {
         XCTAssertEqual(Set(NeoCLISetup.optionalSkillSources.keys),
-                       Set(["wechat-bro", "markcut"]))
+                       Set(["wechat-bro"]))
+        XCTAssertEqual(Set(NeoCLISetup.requiredGlobalSkills),
+                       Set(["events-bus", "daemon-service-manage", "webhelm", "agents-relay", "markcut"]))
+        XCTAssertEqual(NeoCLISetup.managedSkillSources["markcut"], "lalalic/markcut")
         XCTAssertTrue(Set(NeoCLISetup.optionalSkillSources.keys)
             .isDisjoint(with: NeoCLISetup.requiredGlobalSkills))
+        XCTAssertThrowsError(try NeoCLISetup.removeOptionalSkill("markcut"))
         XCTAssertThrowsError(try NeoCLISetup.removeOptionalSkill("agents-relay"))
     }
 

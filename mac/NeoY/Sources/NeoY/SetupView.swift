@@ -1056,8 +1056,8 @@ struct NeoYSetupView: View {
                     Divider()
                 }
 
-                ForEach(["wechat-bro", "markcut"], id: \.self) { skill in
-                    featureRow(skill, detail: skill == "markcut" ? "Skill · provides Preview" : "Skill") {
+                ForEach(NeoCLISetup.optionalSkillSources.keys.sorted(), id: \.self) { skill in
+                    featureRow(skill, detail: "Skill") {
                         Toggle("", isOn: Binding(
                             get: { model.optionalSkills.contains(skill) },
                             set: { enabled in
