@@ -345,6 +345,8 @@ final class NeoCLISetupTests: XCTestCase {
             name: "markcut", installedSource: "lalalic/markcut"))
         XCTAssertTrue(NeoCLISetup.autoUpdateEligible(
             name: "webhelm", installedSource: "lalalic/webhelm"))
+        XCTAssertTrue(NeoCLISetup.autoUpdateEligible(
+            name: "webhelm", installedSource: "lalalic/browser-workspace"))
         XCTAssertFalse(NeoCLISetup.autoUpdateEligible(
             name: "webhelm", installedSource: nil))
         XCTAssertFalse(NeoCLISetup.autoUpdateEligible(

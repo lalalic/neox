@@ -274,6 +274,9 @@ enum NeoCLISetup {
 
     static func autoUpdateEligible(name: String, installedSource: String?) -> Bool {
         guard let expected = managedSkillSources[name] else { return false }
+        // GitHub automatically redirects the original repository name after
+        // the rename. Keep trusted installed Skills eligible for maintenance.
+        if name == "webhelm", installedSource == "lalalic/browser-workspace" { return true }
         return expected == installedSource
     }
 
