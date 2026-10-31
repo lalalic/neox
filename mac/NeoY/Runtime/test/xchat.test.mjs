@@ -60,12 +60,13 @@ test('errors propagate without false-positive success',()=>{
  assert.throws(()=>parsePlatformReceipt({result:{ok:false,stderr:'blocked'}},'new-thread'),/blocked/);
 });
 
-test('default uses the global webhelm launcher',()=>{
- let executable;
- const response=call('thread',{message:'Global CLI check'},{spawnSyncImpl:(cli)=>{
-   executable=cli;
+test('default invokes latest WebHelm via noninteractive npx',()=>{
+ let executable, argumentsSeen;
+ const response=call('thread',{message:'Global CLI check'},{spawnSyncImpl:(cli,args)=>{
+   executable=cli; argumentsSeen=args;
    return {status:0,stdout:JSON.stringify({result:{ok:true,stdout:JSON.stringify(thread)}})};
  }});
  assert.equal(response.status,'submitted');
- assert.equal(executable,path.join(os.homedir(),'.local','bin','webhelm'));
+ assert.equal(executable,'npx');
+ assert.deepEqual(argumentsSeen.slice(0,2),['--yes','webhelm@latest']);
 });

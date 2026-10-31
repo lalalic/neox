@@ -294,7 +294,7 @@ final class NeoCLISetupTests: XCTestCase {
         XCTAssertEqual(NeoCLISetup.advertisedSkills(from: descriptor), ["webhelm"])
         XCTAssertEqual(NeoCLISetup.advertisedSkills(from: ["name": "other"]), [])
         XCTAssertThrowsError(try NeoCLISetup.ensureSkills(["unapproved-skill"]))
-        XCTAssertEqual(NeoCLISetup.managedSkillSources["webhelm"], "lalalic/browser-workspace")
+        XCTAssertEqual(NeoCLISetup.managedSkillSources["webhelm"], "lalalic/webhelm")
         XCTAssertEqual(NeoCLISetup.managedSkillSources["markcut"], "lalalic/markcut")
     }
 
@@ -321,11 +321,13 @@ final class NeoCLISetupTests: XCTestCase {
             .deletingLastPathComponent()
             .appendingPathComponent("Sources/NeoY/NeoCLISetup.swift")
         let code = try String(contentsOf: sources, encoding: .utf8)
-        XCTAssertTrue(code.contains(".local/bin/webhelm"))
+        XCTAssertTrue(code.contains("npx"))
+        XCTAssertTrue(code.contains("--yes"))
+        XCTAssertTrue(code.contains("webhelm@latest"))
         XCTAssertFalse(code.contains("webhelm/scripts/install-global-cli.sh"))
         XCTAssertFalse(code.contains("ensureGlobalWebhelmLauncher"))
-        XCTAssertTrue(code.contains("installed.insert(\"webhelm\")"))
-        XCTAssertTrue(code.contains("directory == nil"))
+        XCTAssertFalse(code.contains("installed.insert(\"webhelm\")"))
+        XCTAssertFalse(code.contains("globalWebhelmCLI"))
     }
 
     func testWebhelmSetupHealthNeedsDaemonAndManagedChrome() {
@@ -342,7 +344,7 @@ final class NeoCLISetupTests: XCTestCase {
         XCTAssertTrue(NeoCLISetup.autoUpdateEligible(
             name: "markcut", installedSource: "lalalic/markcut"))
         XCTAssertTrue(NeoCLISetup.autoUpdateEligible(
-            name: "webhelm", installedSource: "lalalic/browser-workspace"))
+            name: "webhelm", installedSource: "lalalic/webhelm"))
         XCTAssertFalse(NeoCLISetup.autoUpdateEligible(
             name: "webhelm", installedSource: nil))
         XCTAssertFalse(NeoCLISetup.autoUpdateEligible(

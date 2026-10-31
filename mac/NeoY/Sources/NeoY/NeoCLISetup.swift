@@ -16,7 +16,7 @@ enum NeoCLISetup {
     static let requiredSkillSources = [
         "events-bus": "lalalic/neo",
         "daemon-service-manage": "lalalic/neo",
-        "webhelm": "lalalic/browser-workspace",
+        "webhelm": "lalalic/webhelm",
         "agents-relay": "lalalic/agents-relay",
         "markcut": "lalalic/markcut",
     ]
@@ -76,12 +76,6 @@ enum NeoCLISetup {
                                    advertised: Set<String> = []) -> Set<String> {
         let root = directory ?? skillsDirectory
         return Set(requiredSkills(forTool: tool, advertised: advertised).filter { name in
-            // The installed WebHelm Skill may belong to any agent and live anywhere.
-            // Its self-setup owns the one global CLI, which is the consumer contract.
-            if name == "webhelm", directory == nil,
-               FileManager.default.isExecutableFile(atPath: globalWebhelmCLI.path) {
-                return false
-            }
             if FileManager.default.fileExists(atPath: root
                 .appendingPathComponent(name).appendingPathComponent("SKILL.md").path) {
                 return false
@@ -99,11 +93,7 @@ enum NeoCLISetup {
         }
         guard !expanded.isEmpty else { return [] }
         var installed = try installedGlobalSkillNames()
-        // Do not install a duplicate Skill if another agent already provided
-        // its global webhelm command from an arbitrary Skill directory.
-        if FileManager.default.isExecutableFile(atPath: globalWebhelmCLI.path) {
-            installed.insert("webhelm")
-        }
+        // WebHelm is a mandatory built-in Skill even when an old CLI shortcut exists.
         let unapproved = expanded.subtracting(installed).subtracting(available.keys)
         guard unapproved.isEmpty else {
             throw NSError(domain: "NeoSkillDependency", code: 1,
@@ -143,18 +133,12 @@ enum NeoCLISetup {
         return "Installed required Skills: \(names.sorted().joined(separator: ", ")); WebHelm healthy"
     }
 
-    private static var globalWebhelmCLI: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/webhelm")
-    }
-
     private static func runWebhelm(_ arguments: [String]) throws -> String {
-        guard FileManager.default.isExecutableFile(atPath: globalWebhelmCLI.path) else {
-            throw NSError(domain: "NeoSkillDependency", code: 3,
-                          userInfo: [NSLocalizedDescriptionKey: "Global webhelm executable is unavailable. Load the webhelm Skill and follow its CLI setup instructions."])
-        }
+        // Runtime is published independently of the built-in WebHelm Skill.
+        // --yes prevents npm install prompts in Neo's service process.
         let process = Process()
-        process.executableURL = globalWebhelmCLI
-        process.arguments = arguments
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["npx", "--yes", "webhelm@latest"] + arguments
         let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin").path
         process.environment = ProcessInfo.processInfo.environment
             .merging(["PATH": "\(path):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]) { _, configured in configured }
@@ -184,6 +168,9 @@ enum NeoCLISetup {
     }
 
     static func setupWebhelm() throws {
+        // Always ensure the independently versioned Actions checkout exists.
+        // This does not restart a healthy daemon or discard local Action edits.
+        _ = try runWebhelm(["setup"])
         if let state = try? runWebhelm(["status"]), webhelmIsHealthy(state) { return }
         // First-use bootstrap. Always release the temporary leased session.
         let response = try runWebhelm(["session", "start"])
