@@ -45,4 +45,24 @@ final class StartupReconciliationTests: XCTestCase {
         XCTAssertEqual(owned, Set(["family-tutor", "enabled-feature"]))
         XCTAssertTrue(enabled.isEmpty)
     }
+
+    func testProjectLifecycleRunsOnlyExplicitlyEnabledProjects() throws {
+        let empty = try JSONEncoder().encode(NeoProjectLifecycleServices.Preferences(enabled: []))
+        XCTAssertEqual(try NeoProjectLifecycleServices.desiredProjects(from: empty), [])
+        let chosen = try JSONEncoder().encode(NeoProjectLifecycleServices.Preferences(enabled: ["vlog", "vlog"]))
+        XCTAssertEqual(try NeoProjectLifecycleServices.desiredProjects(from: chosen), ["vlog"])
+        XCTAssertThrowsError(try NeoProjectLifecycleServices.desiredProjects(from: Data("{\"enabled\":[\"../../etc\"]}".utf8)))
+        XCTAssertFalse(NeoProjectLifecycleServices.needsStart(["running": true]))
+        XCTAssertTrue(NeoProjectLifecycleServices.needsStart(["running": false]))
+    }
+
+    func testProjectLifecycleEntrypointScopeCannotEscapeWorkspace() {
+        let workspace = URL(fileURLWithPath: "/Users/test/Workspace")
+        XCTAssertTrue(NeoProjectLifecycleServices.permittedEntrypoint(
+            URL(fileURLWithPath: "/Users/test/Workspace/neo/vlog/neo-project"), workspace: workspace))
+        XCTAssertFalse(NeoProjectLifecycleServices.permittedEntrypoint(
+            URL(fileURLWithPath: "/Users/test/Workspace-other/vlog/neo-project"), workspace: workspace))
+        XCTAssertFalse(NeoProjectLifecycleServices.permittedEntrypoint(
+            URL(fileURLWithPath: "/Users/test/Workspace/neo/vlog/untrusted"), workspace: workspace))
+    }
 }

@@ -123,6 +123,8 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 let optional = NeoCLISetup.desiredOptionalSkills()
                 do { try NeoRequiredSkillServices.reconcile(optionalEnabled: optional) }
                 catch { NSLog("Neo required Skill service recovery failed: %@", error.localizedDescription) }
+                do { try NeoProjectLifecycleServices.reconcile() }
+                catch { NSLog("Neo Project lifecycle configuration unavailable: %@", error.localizedDescription) }
                 NeoCLISetup.autoUpdateIfDue()
                 do { try await Task.sleep(for: .seconds(5 * 60)) }
                 catch { break }

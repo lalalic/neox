@@ -233,3 +233,120 @@ enum NeoRequiredSkillServices {
         }
     }
 }
+
+/// Reconciles *user-enabled* Neo Projects. A project's own executable owns
+/// setup, daemon management, and health; NeoY only owns app-start recovery.
+/// This adds no MCP tool, duplicate scheduler, or project-specific daemon.
+enum NeoProjectLifecycleServices {
+    struct Preferences: Codable {
+        var enabled: [String]
+    }
+
+    static var configurationURL: URL {
+        NeoYPaths.supportDirectory.appendingPathComponent("projects.json")
+    }
+
+    static func validName(_ name: String) -> Bool {
+        name.range(of: "^[a-z0-9][a-z0-9_-]{0,63}$", options: .regularExpression) != nil
+    }
+
+    static func desiredProjects(from data: Data) throws -> [String] {
+        let names = try JSONDecoder().decode(Preferences.self, from: data).enabled
+        guard names.allSatisfy(validName) else {
+            throw NSError(domain: "NeoProjects", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "Invalid enabled project name"])
+        }
+        return Array(Set(names)).sorted()
+    }
+
+    static func permittedEntrypoint(_ candidate: URL, workspace: URL) -> Bool {
+        let resolved = candidate.resolvingSymlinksInPath().standardizedFileURL
+        let base = workspace.resolvingSymlinksInPath().standardizedFileURL
+        return resolved.lastPathComponent == "neo-project"
+            && resolved.path.hasPrefix(base.path + "/")
+    }
+
+    static func needsStart(_ state: [String: Any]) -> Bool {
+        state["running"] as? Bool != true
+    }
+
+    private static func run(_ command: URL, _ arguments: [String],
+                            directory: URL? = nil, timeout: TimeInterval = 100) throws -> Data {
+        let process = Process()
+        process.executableURL = command
+        process.arguments = arguments
+        process.currentDirectoryURL = directory
+        process.environment = ProcessInfo.processInfo.environment.merging([
+            "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+        ]) { _, configured in configured }
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        let deadline = DispatchWorkItem { if process.isRunning { process.terminate() } }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout, execute: deadline)
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        deadline.cancel()
+        guard process.terminationStatus == 0 else {
+            throw NSError(domain: "NeoProjects", code: Int(process.terminationStatus),
+                          userInfo: [NSLocalizedDescriptionKey:
+                            "Project lifecycle command failed (exit \(process.terminationStatus))"])
+        }
+        return data
+    }
+
+    private static func resolve(_ name: String) throws -> URL {
+        let executable = URL(fileURLWithPath: "/usr/bin/env")
+        let data = try run(executable, ["neo", "project", "resolve", name], timeout: 20)
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let lifecycle = object["lifecycle"] as? [String: Any],
+              let entry = lifecycle["entrypoint"] as? String else {
+            throw NSError(domain: "NeoProjects", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "Project has no lifecycle entrypoint"])
+        }
+        let candidate = URL(fileURLWithPath: entry)
+        let workspace = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Workspace")
+        guard permittedEntrypoint(candidate, workspace: workspace),
+              FileManager.default.isExecutableFile(atPath: candidate.path) else {
+            throw NSError(domain: "NeoProjects", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: "Project lifecycle entrypoint is not trusted or executable"])
+        }
+        return candidate
+    }
+
+    private static func state(_ script: URL) throws -> [String: Any] {
+        let data = try run(script, ["status"], directory: script.deletingLastPathComponent(), timeout: 30)
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw NSError(domain: "NeoProjects", code: 4,
+                          userInfo: [NSLocalizedDescriptionKey: "Invalid project lifecycle status"])
+        }
+        return object
+    }
+
+    /// Called after required Skill recovery, then periodically by Neo.app.
+    /// A missing preferences file never starts arbitrary discovered projects.
+    static func reconcile(configURL: URL = configurationURL) throws {
+        let data: Data
+        do { data = try Data(contentsOf: configURL) }
+        catch let error as NSError where error.domain == NSCocoaErrorDomain
+            && error.code == NSFileReadNoSuchFileError { return }
+        let projects = try desiredProjects(from: data)
+        for name in projects {
+            do {
+                let script = try resolve(name)
+                if needsStart(try state(script)) {
+                    _ = try run(script, ["setup"], directory: script.deletingLastPathComponent())
+                    _ = try run(script, ["start"], directory: script.deletingLastPathComponent())
+                } else {
+                    do { _ = try run(script, ["health"], directory: script.deletingLastPathComponent(), timeout: 30) }
+                    catch { _ = try run(script, ["restart"], directory: script.deletingLastPathComponent()) }
+                }
+                _ = try run(script, ["health"], directory: script.deletingLastPathComponent(), timeout: 30)
+            } catch {
+                // A failing optional Project cannot block Neo's MCP or other Projects.
+                NSLog("Neo Project %@ lifecycle recovery: %@", name, error.localizedDescription)
+            }
+        }
+    }
+}
