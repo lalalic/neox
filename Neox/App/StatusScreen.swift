@@ -14,6 +14,10 @@ struct StatusView: View {
     @State private var hasTemp = false
     @State private var clearingTemp = false
     @StateObject private var tours = CaptureTourStore.shared
+    // Bonjour is a *nearby* signal, not the authoritative online status.
+    // Test the saved HTTPS address with its existing Keychain credential.
+    @StateObject private var savedMaster = RemoteMCPClient()
+    @State private var remoteChecked = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -107,6 +111,13 @@ struct StatusView: View {
                 }
             }
         }
+        .task(id: bridge.preferredBridge) {
+            while !Task.isCancelled {
+                await checkSavedMaster()
+                do { try await Task.sleep(for: .seconds(30)) }
+                catch { return }
+            }
+        }
         // No .onAppear ensureRunning() here — NeoxApp's scenePhase(.active)
         // handler already restarts on every foreground. Keeping both would
         // restart twice at launch and log two 'listening' lines.
@@ -121,30 +132,65 @@ struct StatusView: View {
         .contentShape(Rectangle())
     }
 
+    static func masterStatus(nearby: Bool, authenticated: Bool,
+                             checked: Bool, hasCredential: Bool) -> String {
+        if nearby { return "Nearby" }
+        if authenticated { return "Online" }
+        if checked && hasCredential { return "Connection issue" }
+        return "Remote"
+    }
+
+    private func checkSavedMaster() async {
+        guard let preferred = bridge.preferredBridge else { return }
+        if savedMaster.selectedMasterName != preferred {
+            savedMaster.selectMaster(name: preferred, advertisedURL: nil)
+        }
+        savedMaster.useLocalEndpoint(ip: nil, port: nil)
+        // Missing credentials are a setup state, not proof that the Mac is offline.
+        guard savedMaster.hasCredential && savedMaster.hasConfiguredAddress else {
+            remoteChecked = false
+            return
+        }
+        await savedMaster.connect()
+        remoteChecked = true
+    }
+
     private var ListView: some View {
         List {
             Section("Neo Master") {
-                if bridge.discoveredBridges.isEmpty {
-                    Label(bridge.preferredBridge ?? "Looking for your Mac…",
-                          systemImage: "desktopcomputer")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(bridge.discoveredBridges) { entry in
-                        Button {
-                            bridge.preferredBridge = entry.name
-                            showingRemote = true
-                        } label: {
-                            HStack {
-                                Image(systemName: bridge.preferredBridge == entry.name
-                                      ? "checkmark.circle.fill" : "circle")
-                                Label(entry.displayName, systemImage: "desktopcomputer")
-                                Spacer()
-                                Text("Nearby").font(.caption).foregroundStyle(.secondary)
-                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
-                            }
+                if let preferred = bridge.preferredBridge {
+                    Button { showingRemote = true } label: {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                            Label(preferred, systemImage: "desktopcomputer")
+                            Spacer()
+                            Text(Self.masterStatus(nearby: bridge.discoveredBridges.contains { $0.name == preferred },
+                                                   authenticated: savedMaster.connected,
+                                                   checked: remoteChecked,
+                                                   hasCredential: savedMaster.hasCredential))
+                                .font(.caption).foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
                         }
-                        .buttonStyle(.plain)
                     }
+                    .buttonStyle(.plain)
+                } else if bridge.discoveredBridges.isEmpty {
+                    Label("Looking for your Mac…", systemImage: "desktopcomputer")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(bridge.discoveredBridges.filter { $0.name != bridge.preferredBridge }) { entry in
+                    Button {
+                        bridge.preferredBridge = entry.name
+                        showingRemote = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "circle")
+                            Label(entry.displayName, systemImage: "desktopcomputer")
+                            Spacer()
+                            Text("Nearby").font(.caption).foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
                 }
             }
 

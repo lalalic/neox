@@ -8,6 +8,10 @@ Instructions for coding agents (and humans) modifying this repo.
 desktop agents over MCP. One app target, zero external SPM dependencies,
 27 tracked files (18 Swift). Source of truth for behavior: `Neox/Server/`.
 
+## Neo Mobile online status
+
+Bonjour discovery only shows whether a Master is **nearby**. It is not evidence that an authenticated Neo HTTPS gateway is offline. Keep the user-selected Master visible while away from its LAN and probe its saved HTTPS MCP endpoint using the existing Keychain token. Only a successful authenticated response establishes Remote **Online**. A failed probe is a connection/credential issue, not proof the Mac is powered off. Never copy or redirect an existing token to a Bonjour-advertised URL without prior credential binding. Verify with iOS Simulator UI/state tests and a real authenticated phone connection before claiming the installed phone is fixed.
+
 ## NeoY v2 architecture rules
 
 For any work under `mac/NeoY`, the canonical architecture contract is
