@@ -179,6 +179,78 @@ enum NeoRequiredSkillServices {
         }
     }
 
+    /// Inspect only approved Skill-owned npm services. Tarball/private project
+    /// services have no registry latest tag and must not be rewritten.
+    static func usesPinnedPublishedPackage(_ record: [String: Any], ownerName: String) -> Bool {
+        guard ["agents-relay", "wechat-bro"].contains(ownerName),
+              let pm = record["pm2_env"] as? [String: Any],
+              let args = pm["args"] as? [String] else { return false }
+        let script = (pm["pm_exec_path"] as? String ?? "") as NSString
+        guard ["npx", "npm"].contains(script.lastPathComponent) else { return false }
+        let prefix = ownerName + "@"
+        return args.contains { $0.hasPrefix(prefix) && $0 != prefix + "latest" }
+    }
+
+    /// Migrate only a known Skill-owned launcher. The Skill's canonical setup
+    /// already uses @latest; never guess a new command in the native app.
+    private static func reconcilePublishedLaunchers(_ selected: [Owner]) throws -> Bool {
+        var changed = false
+        for owner in selected {
+            for service in owner.services {
+                let id = "\(owner.name)/\(service)"
+                guard let record = try records().first(where: { $0["name"] as? String == id }),
+                      usesPinnedPublishedPackage(record, ownerName: owner.name) else { continue }
+                let script = try scriptPath(for: owner)
+                let source = try String(contentsOf: script, encoding: .utf8)
+                guard source.contains(owner.name + "@latest") else {
+                    throw NSError(domain: "NeoSkillServices", code: 9,
+                                  userInfo: [NSLocalizedDescriptionKey:
+                                    "Refusing to migrate \(id): owner setup does not declare @latest"])
+                }
+                _ = try run("npx", ["--yes", "pm2", "delete", id])
+                try setup(owner)
+                guard let updated = try records().first(where: { $0["name"] as? String == id }),
+                      !usesPinnedPublishedPackage(updated, ownerName: owner.name),
+                      (updated["pm2_env"] as? [String: Any])?["status"] as? String == "online" else {
+                    throw NSError(domain: "NeoSkillServices", code: 10,
+                                  userInfo: [NSLocalizedDescriptionKey:
+                                    "\(id) did not recover on its @latest launcher"])
+                }
+                changed = true
+            }
+        }
+        return changed
+    }
+
+    /// The existing Neo package-publication watcher owns event interpretation
+    /// and deployment. NeoY only owns its PM2 registration and health.
+    static let publicationWatcher = "neo/package-service-updater"
+
+    private static func reconcilePackagePublicationWatcher() throws -> Bool {
+        let script = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Workspace/neo/.bin/package-service-updater.mjs")
+        guard FileManager.default.isReadableFile(atPath: script.path) else {
+            throw NSError(domain: "NeoSkillServices", code: 11,
+                          userInfo: [NSLocalizedDescriptionKey:
+                            "Neo package publication watcher is not installed"])
+        }
+        let current = try states()[publicationWatcher]
+        if current == nil {
+            _ = try run("node", [script.path, "install"], timeout: 120)
+            guard try states()[publicationWatcher] == "online" else {
+                throw NSError(domain: "NeoSkillServices", code: 12,
+                              userInfo: [NSLocalizedDescriptionKey:
+                                "Package publication watcher failed to start"])
+            }
+            return true
+        }
+        if current != "online" {
+            _ = try run("serviceman", ["restart", "--skill", "neo",
+                                      "--service", "package-service-updater", "--apply"])
+        }
+        return false
+    }
+
     private static func setup(_ owner: Owner) throws {
         try ensureSupportedServiceContract(for: owner)
         _ = try run("node", [try scriptPath(for: owner).path, "setup"])
@@ -205,6 +277,9 @@ enum NeoRequiredSkillServices {
             }
             inventory = try states()
         }
+        do { if try reconcilePublishedLaunchers(selected) { installedService = true } }
+        catch { NSLog("Neo published service launcher repair: %@", error.localizedDescription) }
+        inventory = try states()
         for owner in selected {
             for service in owner.services {
                 let id = "\(owner.name)/\(service)"
@@ -221,10 +296,17 @@ enum NeoRequiredSkillServices {
                 }
             }
         }
+        // NATS/history recovery above must precede starting its subscriber.
+        do { if try reconcilePackagePublicationWatcher() { installedService = true } }
+        catch { NSLog("Neo publication watcher recovery: %@", error.localizedDescription) }
         if installedService { _ = try run("npx", ["--yes", "pm2", "save"]) }
         let verified = try states()
         let unhealthy = selected.flatMap { owner in
             unhealthyServices(for: owner, states: verified).map { "\(owner.name)/\($0)" }
+        }
+        if try states()[publicationWatcher] != "online" {
+            throw NSError(domain: "NeoSkillServices", code: 13,
+                          userInfo: [NSLocalizedDescriptionKey: "Publication watcher is not online"])
         }
         if !unhealthy.isEmpty {
             throw NSError(domain: "NeoSkillServices", code: 3,

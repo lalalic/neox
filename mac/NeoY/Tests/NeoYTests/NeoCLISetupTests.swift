@@ -97,6 +97,28 @@ final class NeoCLISetupTests: XCTestCase {
         ]).isEmpty)
     }
 
+    func testVersionPinnedPublishedServiceRequiresLatestMigration() {
+        func pm2(_ binary: String, _ args: [String]) -> [String: Any] {
+            ["pm2_env": ["pm_exec_path": binary, "args": args]]
+        }
+        XCTAssertTrue(NeoRequiredSkillServices.usesPinnedPublishedPackage(
+            pm2("/opt/homebrew/bin/npx", ["-y", "--package", "agents-relay@2.0.196", "agents-relayd"]),
+            ownerName: "agents-relay"))
+        XCTAssertFalse(NeoRequiredSkillServices.usesPinnedPublishedPackage(
+            pm2("/opt/homebrew/bin/npx", ["-y", "--package", "agents-relay@latest", "agents-relayd"]),
+            ownerName: "agents-relay"))
+        XCTAssertTrue(NeoRequiredSkillServices.usesPinnedPublishedPackage(
+            pm2("/opt/homebrew/bin/npx", ["-y", "wechat-bro@2.0.1", "--daemon"]),
+            ownerName: "wechat-bro"))
+        XCTAssertFalse(NeoRequiredSkillServices.usesPinnedPublishedPackage(
+            pm2("/opt/homebrew/bin/npx", ["-y", "--package", "/local/vlog-0.1.1.tgz"]),
+            ownerName: "agents-relay"))
+        XCTAssertFalse(NeoRequiredSkillServices.usesPinnedPublishedPackage(
+            pm2("/usr/bin/node", ["events-bus/api/server.mjs"]),
+            ownerName: "events-bus"))
+        XCTAssertEqual(NeoRequiredSkillServices.publicationWatcher, "neo/package-service-updater")
+    }
+
     func testEventsBusRuntimeDependenciesAreValidatedWithoutSideEffects() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
