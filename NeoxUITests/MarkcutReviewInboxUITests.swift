@@ -16,6 +16,21 @@ final class MarkcutReviewInboxUITests: XCTestCase {
     }
 
     @MainActor
+    func testLocalReviewGroupCanBeRemovedWithOptionsMenu() {
+        let app = XCUIApplication()
+        app.launchArguments.append("-markcut-review-ui-fixture")
+        app.launch()
+        app.buttons["markcutReviewInboxOpen"].tap()
+        let options = app.buttons["markcutReviewOptions"]
+        XCTAssertTrue(options.waitForExistence(timeout: 5))
+        options.tap()
+        let remove = app.buttons["markcutReviewRemoveMenuItem"]
+        XCTAssertTrue(remove.waitForExistence(timeout: 5))
+        remove.tap()
+        XCTAssertTrue(app.staticTexts["No video reviews"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testLocalReviewGroupCanBeRemovedWithSwipe() {
         let app = XCUIApplication()
         app.launchArguments.append("-markcut-review-ui-fixture")
