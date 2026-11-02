@@ -14,6 +14,7 @@ struct MarkcutReviewInboxView: View {
     @State private var previewError: String?
     @State private var loadingStage = "Loading preview…"
     @State private var previewRetry = 0
+    @State private var landscapeExpanded = false
     @State private var feedback = ""
     @State private var message: String?
     @State private var syncing = false
@@ -133,6 +134,9 @@ struct MarkcutReviewInboxView: View {
                 }
             }
             .background(Color(uiColor: .systemGroupedBackground))
+            .fullScreenCover(isPresented: $landscapeExpanded) {
+                landscapePreview()
+            }
             .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .top, spacing: 0) {
                 HStack(spacing: 8) {
@@ -175,7 +179,13 @@ struct MarkcutReviewInboxView: View {
                     .accessibilityLabel("Choose video or revision")
                     .accessibilityIdentifier("markcutReviewVersionMenu")
                     .frame(maxWidth: .infinity)
-                    Spacer().frame(width: 44)
+                    Button { landscapeExpanded = true } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .frame(width: 44, height: 44)
+                    }
+                    .disabled(html == nil)
+                    .accessibilityLabel("Expand video landscape")
+                    .accessibilityIdentifier("markcutReviewExpandVideo")
                 }
                 .buttonStyle(.plain)
                 .padding(.horizontal, 8)
@@ -184,6 +194,42 @@ struct MarkcutReviewInboxView: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+    }
+
+    /// An uncropped, orientation-independent landscape theater. Portrait iOS
+    /// screen rotations are not required: fit the actual landscape video into
+    /// the long side of the phone with responsive WebView sizing.
+    private func landscapePreview() -> some View {
+        GeometryReader { proxy in
+            let availableWidth = proxy.size.height - 28
+            let availableHeight = proxy.size.width - 22
+            ZStack {
+                Color.black.ignoresSafeArea()
+                MarkcutReviewSurface(html: $html, origin: $previewOrigin,
+                    error: $previewError, loadingStage: $loadingStage, retry: $previewRetry) {
+                    if let group = selectedGroup, let item = selectedItem(in: group) {
+                        Task { await loadPreview(item) }
+                    }
+                }
+                .frame(width: availableWidth, height: availableHeight)
+                .rotationEffect(.degrees(90))
+                .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+                Button { landscapeExpanded = false } label: {
+                    Image(systemName: "xmark")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background(.black.opacity(0.55), in: Circle())
+                }
+                .accessibilityLabel("Close landscape preview")
+                .accessibilityIdentifier("markcutReviewCollapseVideo")
+                .position(x: 34, y: 58)
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+        }
+        .background(Color.black)
+        .ignoresSafeArea()
+        .statusBarHidden()
     }
 
     private func preview(for item: [String: Any]) -> some View {
@@ -223,6 +269,7 @@ struct MarkcutReviewInboxView: View {
 
     private func clearSelection() {
         selectedSessionID = nil
+        landscapeExpanded = false
         html = nil
         previewOrigin = nil
         previewError = nil

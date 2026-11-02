@@ -29,6 +29,30 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         // The binding-backed child must update without closing/reopening it.
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["Async preview ready"].waitForExistence(timeout: 8))
+        let expand = app.buttons["markcutReviewExpandVideo"]
+        XCTAssertTrue(expand.isEnabled)
+        expand.tap()
+        let collapse = app.buttons["markcutReviewCollapseVideo"]
+        XCTAssertTrue(collapse.waitForExistence(timeout: 5))
+        collapse.tap()
+        XCTAssertTrue(app.buttons["markcutReviewPreviewClose"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["markcutReviewApprove"].exists)
+    }
+
+    @MainActor
+    func testLandscapeVideoCanExpandWithoutChangingReviewDecision() {
+        let app = XCUIApplication()
+        app.launchArguments.append("-markcut-review-ui-fixture")
+        app.launch()
+        app.buttons["markcutReviewInboxOpen"].tap()
+        let group = app.buttons["markcutReviewGroup"].firstMatch
+        XCTAssertTrue(group.waitForExistence(timeout: 5))
+        group.tap()
+        let expand = app.buttons["markcutReviewExpandVideo"]
+        XCTAssertTrue(expand.waitForExistence(timeout: 5))
+        // The fixture has no compiled video; do not open an empty theater.
+        XCTAssertFalse(expand.isEnabled)
+        XCTAssertTrue(app.buttons["markcutReviewApprove"].exists)
     }
 
     @MainActor
