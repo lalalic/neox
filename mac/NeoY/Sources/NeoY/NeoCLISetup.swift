@@ -133,27 +133,61 @@ enum NeoCLISetup {
         return "Installed required Skills: \(names.sorted().joined(separator: ", ")); WebHelm healthy"
     }
 
-    private static func runWebhelm(_ arguments: [String]) throws -> String {
-        // Runtime is published independently of the built-in WebHelm Skill.
-        // --yes prevents npm install prompts in Neo's service process.
+    /// The CLI data channel is stdout only. Warnings on stderr must never corrupt
+    /// JSON receipts, and large diagnostic output must not block stdout reads.
+    static func runCLI(executable: URL, arguments: [String],
+                       environment: [String: String] = ProcessInfo.processInfo.environment) throws
+        -> (stdout: String, stderr: String, status: Int32) {
+        let errorURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("neoy-cli-stderr-\(UUID().uuidString)")
+        guard FileManager.default.createFile(atPath: errorURL.path, contents: nil,
+                                             attributes: [.posixPermissions: 0o600]) else {
+            throw NSError(domain: "NeoCLISetup", code: 8,
+                          userInfo: [NSLocalizedDescriptionKey: "Unable to capture CLI diagnostics"])
+        }
+        defer { try? FileManager.default.removeItem(at: errorURL) }
+        let errorFile = try FileHandle(forWritingTo: errorURL)
+        defer { try? errorFile.close() }
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["npx", "--yes", "webhelm@latest"] + arguments
-        let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin").path
-        process.environment = ProcessInfo.processInfo.environment
-            .merging(["PATH": "\(path):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]) { _, configured in configured }
+        process.executableURL = executable
+        process.arguments = arguments
+        process.environment = environment
         let output = Pipe()
         process.standardOutput = output
-        process.standardError = output
+        process.standardError = errorFile
         try process.run()
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw NSError(domain: "NeoSkillDependency", code: Int(process.terminationStatus),
+        try errorFile.synchronize()
+        let diagnostic = (try? String(contentsOf: errorURL, encoding: .utf8)) ?? ""
+        return (String(decoding: data, as: UTF8.self), diagnostic, process.terminationStatus)
+    }
+
+    private static func runWebhelm(_ arguments: [String]) throws -> String {
+        let bin = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".local/bin").path
+        let env = ProcessInfo.processInfo.environment.merging([
+            "PATH": "\(bin):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+        ]) { _, configured in configured }
+        let result = try runCLI(executable: URL(fileURLWithPath: "/usr/bin/env"),
+                                arguments: ["npx", "--yes", "webhelm@latest"] + arguments,
+                                environment: env)
+        guard result.status == 0 else {
+            let detail = (result.stderr.isEmpty ? result.stdout : result.stderr)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            throw NSError(domain: "NeoSkillDependency", code: Int(result.status),
                           userInfo: [NSLocalizedDescriptionKey:
-                            "WebHelm \(arguments.first ?? "command") failed: \(String(decoding: data, as: UTF8.self).prefix(250))"])
+                            "WebHelm \(arguments.first ?? "command") failed: \(detail.prefix(250))"])
         }
-        return String(decoding: data, as: UTF8.self)
+        return result.stdout
+    }
+
+    /// `webhelm ensure` is owned by WebHelm and never creates a browser Session.
+    /// A deferred upgrade is acceptable while the old daemon owns active work.
+    static func webhelmEnsureSucceeded(_ output: String) -> Bool {
+        guard let data = output.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        return value["ok"] as? Bool == true
     }
 
     static func webhelmIsHealthy(_ status: String) -> Bool {
@@ -161,30 +195,19 @@ enum NeoCLISetup {
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let daemon = root["daemon"] as? [String: Any],
               daemon["running"] as? Bool == true,
-              root["managed_chrome"] as? [String: Any] != nil else {
-            return false
-        }
+              root["managed_chrome"] as? [String: Any] != nil else { return false }
         return true
     }
 
-    static func setupWebhelm() throws {
-        // Always ensure the independently versioned Actions checkout exists.
-        // This does not restart a healthy daemon or discard local Action edits.
-        _ = try runWebhelm(["setup"])
-        if let state = try? runWebhelm(["status"]), webhelmIsHealthy(state) { return }
-        // First-use bootstrap. Always release the temporary leased session.
-        let response = try runWebhelm(["session", "start"])
-        guard let data = response.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let session = object["session_id"] as? String,
-              !session.isEmpty else {
-            throw NSError(domain: "NeoSkillDependency", code: 4,
-                          userInfo: [NSLocalizedDescriptionKey: "WebHelm session start returned no session ID"])
-        }
-        defer { _ = try? runWebhelm(["session", "stop", session]) }
-        guard webhelmIsHealthy(try runWebhelm(["status"])) else {
+    static func setupWebhelm(run: ([String]) throws -> String = { try runWebhelm($0) }) throws {
+        // The periodic NeoY dependency reconciliation must not create browser
+        // Sessions or repeatedly reinstall an already healthy WebHelm runtime.
+        if let result = try? run(["ensure"]), webhelmEnsureSucceeded(result) { return }
+        // First-use / failed health bootstrap belongs entirely to WebHelm.
+        _ = try run(["setup"])
+        guard webhelmEnsureSucceeded(try run(["ensure"])) else {
             throw NSError(domain: "NeoSkillDependency", code: 5,
-                          userInfo: [NSLocalizedDescriptionKey: "WebHelm daemon did not become healthy"])
+                          userInfo: [NSLocalizedDescriptionKey: "WebHelm ensure did not confirm healthy browser and daemon"])
         }
     }
 
@@ -534,23 +557,24 @@ enum NeoCLISetup {
     }
 
     static func runSkills(_ arguments: [String]) throws -> String {
-        guard let npx = ["/opt/homebrew/bin/npx", "/usr/local/bin/npx"].first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
-            throw NSError(domain: "NeoCLISetup", code: 1, userInfo: [NSLocalizedDescriptionKey: "npx unavailable"])
+        guard let npx = ["/opt/homebrew/bin/npx", "/usr/local/bin/npx"]
+                .first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
+            throw NSError(domain: "NeoCLISetup", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "npx unavailable"])
         }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: npx)
-        process.arguments = ["--yes", "skills"] + arguments
-        process.environment = ProcessInfo.processInfo.environment.merging(["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]) { _, configured in configured }
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        try process.run()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw NSError(domain: "NeoCLISetup", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: "npx skills failed: \(String(decoding: data, as: UTF8.self).prefix(400))"])
+        let env = ProcessInfo.processInfo.environment.merging([
+            "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+        ]) { _, configured in configured }
+        let result = try runCLI(executable: URL(fileURLWithPath: npx),
+                                arguments: ["--yes", "skills"] + arguments,
+                                environment: env)
+        guard result.status == 0 else {
+            let diagnostics = result.stderr.isEmpty ? result.stdout : result.stderr
+            throw NSError(domain: "NeoCLISetup", code: Int(result.status),
+                          userInfo: [NSLocalizedDescriptionKey:
+                            "npx skills failed: \(diagnostics.prefix(400))"])
         }
-        return String(decoding: data, as: UTF8.self)
+        return result.stdout
     }
 
     static func cliPath() -> URL? {

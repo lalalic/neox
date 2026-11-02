@@ -336,6 +336,51 @@ final class NeoCLISetupTests: XCTestCase {
         XCTAssertFalse(NeoCLISetup.missingSkillsOnDisk(forTool: "chatgpt", directory: root).contains("webhelm"))
     }
 
+    func testWebhelmEnsureNeverCreatesSessionsWhenHealthyOrDeferred() throws {
+        for response in [#"{"ok":true,"chrome_guard":{"status":"healthy"}}"#,
+                         #"{"ok":true,"deferred_upgrade":true,"session_count":1}"#] {
+            var calls: [[String]] = []
+            try NeoCLISetup.setupWebhelm { args in
+                calls.append(args)
+                return response
+            }
+            XCTAssertEqual(calls, [["ensure"]], "Healthy or busy WebHelm must not be re-provisioned")
+        }
+    }
+
+    func testWebhelmBootstrapUsesOnlyOwnedSetupAndEnsure() throws {
+        var calls: [[String]] = []
+        try NeoCLISetup.setupWebhelm { args in
+            calls.append(args)
+            if calls.count == 1 { throw NSError(domain: "test", code: 1) }
+            return args == ["setup"] ? #"{"status":"ready"}"# : #"{"ok":true}"#
+        }
+        XCTAssertEqual(calls, [["ensure"], ["setup"], ["ensure"]])
+        XCTAssertThrowsError(try NeoCLISetup.setupWebhelm { args in
+            return args == ["setup"] ? #"{"status":"ready"}"# : "warning not JSON"
+        })
+    }
+
+    func testCLICapturesDiagnosticsWithoutCorruptingJSON() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("neoy-cli-stdout-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let script = root.appendingPathComponent("sample.sh")
+        try """
+        #!/bin/sh
+        echo 'ExperimentalWarning: SQLite is experimental' >&2
+        echo '{"ok":true}'
+        """.write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700],
+                                              ofItemAtPath: script.path)
+        let result = try NeoCLISetup.runCLI(executable: script, arguments: [])
+        XCTAssertEqual(result.status, 0)
+        XCTAssertTrue(result.stderr.contains("ExperimentalWarning"))
+        XCTAssertTrue(NeoCLISetup.webhelmEnsureSucceeded(result.stdout))
+        XCTAssertFalse(NeoCLISetup.webhelmEnsureSucceeded(result.stderr + result.stdout))
+    }
+
     func testWebhelmSetupDependsOnGlobalCLIWithoutFixedSkillInstallerPath() throws {
         let sources = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
