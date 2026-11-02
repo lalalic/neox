@@ -34,25 +34,31 @@ struct MarkcutReviewInboxView: View {
                     Text(message).font(.caption).foregroundStyle(.secondary)
                 }
                 ForEach(groups) { group in
-                    Button { open(group) } label: {
-                        ReviewGroupRow(group: group)
+                    HStack(spacing: 0) {
+                        Button { open(group) } label: { ReviewGroupRow(group: group) }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("markcutReviewGroup")
+                        Menu {
+                            Button("Remove from Inbox", systemImage: "trash", role: .destructive) {
+                                removeGroup(group)
+                            }
+                            .disabled(queuedFeedback(in: group))
+                            .accessibilityIdentifier("markcutReviewRemoveMenuItem")
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.title3.weight(.semibold))
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Review options")
+                        .accessibilityIdentifier("markcutReviewOptions")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("markcutReviewGroup")
                     .swipeActions {
                         Button("Remove", systemImage: "trash", role: .destructive) {
-                            if fixtureSessions != nil {
-                                fixtureSessions?.removeAll { value in
-                                    group.sessions.contains { $0.reviewSessionID == value["id"] as? String }
-                                }
-                            } else {
-                                group.sessions.forEach { inbox.remove($0.reviewSessionID) }
-                            }
+                            removeGroup(group)
                         }
                         .accessibilityIdentifier("markcutReviewRemoveGroup")
-                        .disabled(group.sessions.contains { revision in
-                            inbox.feedbackQueue.contains { $0.requestId == revision.reviewSessionID }
-                        })
+                        .disabled(queuedFeedback(in: group))
                     }
                 }
             }
@@ -102,6 +108,22 @@ struct MarkcutReviewInboxView: View {
             .sheet(item: $selectedGroup, onDismiss: clearSelection) { group in
                 reviewSheet(group)
             }
+        }
+    }
+
+    private func queuedFeedback(in group: MarkcutReviewGroup) -> Bool {
+        group.sessions.contains { revision in
+            inbox.feedbackQueue.contains { $0.requestId == revision.reviewSessionID }
+        }
+    }
+
+    private func removeGroup(_ group: MarkcutReviewGroup) {
+        if fixtureSessions != nil {
+            fixtureSessions?.removeAll { value in
+                group.sessions.contains { $0.reviewSessionID == value["id"] as? String }
+            }
+        } else if !queuedFeedback(in: group) {
+            group.sessions.forEach { inbox.remove($0.reviewSessionID) }
         }
     }
 
@@ -260,6 +282,11 @@ struct MarkcutReviewInboxView: View {
         }
     }
 
+    private func cannotDeliver(_ item: [String: Any]) -> Bool {
+        guard let id = item["id"] as? String, let request = inbox.request(id: id) else { return false }
+        return request.ownerCallbackTool == nil
+    }
+
     private func decisionControls(for item: [String: Any]) -> some View {
         VStack(spacing: 7) {
             if let requestID = item["id"] as? String,
@@ -279,14 +306,14 @@ struct MarkcutReviewInboxView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
-                .disabled(syncing || feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(syncing || cannotDeliver(item) || feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityIdentifier("markcutReviewRequestChanges")
                 Button { Task { await submit("approved", item: item) } } label: {
                     Label("Approve", systemImage: "checkmark")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(syncing)
+                .disabled(syncing || cannotDeliver(item))
                 .accessibilityIdentifier("markcutReviewApprove")
             }
             .controlSize(.regular)
@@ -447,6 +474,10 @@ struct MarkcutReviewInboxView: View {
         guard !syncing else { return }
         guard let requestID = item["id"] as? String,
               let request = inbox.request(id: requestID) else { return }
+        guard request.ownerCallbackTool != nil else {
+            message = "Cannot deliver feedback without an owner callback. Remove this request or ask the owner to reissue it."
+            return
+        }
         let choice: MarkcutReviewChoice = decision == "approved" ? .approved : .changesRequested
         let pending = MarkcutReviewFeedback(requestId: request.id, decision: choice,
             feedback: choice == .changesRequested ? feedback.trimmingCharacters(in: .whitespacesAndNewlines) : "",
