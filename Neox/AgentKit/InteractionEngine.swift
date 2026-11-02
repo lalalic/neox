@@ -1,5 +1,6 @@
 #if os(iOS)
 import UIKit
+import WebKit
 
 /// Handles user interaction simulation on native iOS views.
 /// Uses public accessibility APIs — no private API usage.
@@ -82,7 +83,7 @@ public final class InteractionEngine {
 
     /// Tap at arbitrary screen coordinates. Essential for SwiftUI buttons
     /// which aren't individually discoverable as UIKit views.
-    public func tapXY(x: Double, y: Double) -> String {
+    public func tapXY(x: Double, y: Double) async -> String {
         guard let window = Self.keyWindow else {
             return "Error: no active window found"
         }
@@ -118,9 +119,32 @@ public final class InteractionEngine {
             current = view.superview
         }
 
-        // Method 4: Synthesize full touch event sequence on the window
+        // Method 4: WKWebView DOM controls are not exposed as native UIControls.
+        // UIKit's synthetic touch fallback does not deliver events to WebKit's
+        // separate content process. A coordinate-only click is equivalent to
+        // agent.pilot tapping an accessible HTML button; no arbitrary script is
+        // accepted from the caller.
+        var ancestor: UIView? = hitView
+        while let view = ancestor {
+            if let webView = view as? WKWebView {
+                let local = webView.convert(point, from: window)
+                let script = "(function(){const el=document.elementFromPoint(\(local.x),\(local.y));if(!el)return 'no DOM target'; const target=el.closest?.('button,[role=button],a')||el; target.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,view:window}));return target.tagName.toLowerCase();})()"
+                do {
+                    let result = try await webView.evaluateJavaScript(script)
+                    guard let tag = result as? String, tag != "no DOM target" else {
+                        return "Error: no WebView DOM target at (\(Int(x)), \(Int(y)))"
+                    }
+                    return "Tapped (\(Int(x)), \(Int(y))) → WebView DOM \(tag)"
+                } catch {
+                    return "Error: WebView DOM tap failed: \(error.localizedDescription)"
+                }
+            }
+            ancestor = view.superview
+        }
+
+        // Method 5: Synthesize full touch event sequence on the window
         synthesizeTouch(at: point, in: window)
-        return "Tapped (\(Int(x)), \(Int(y))) → synthesized touch on [\(Swift.type(of: hitView))]"
+        return "Warning: tapped (\(Int(x)), \(Int(y))) via synthesized touch — may not have triggered"
     }
 
     private func selectSegment(_ control: UISegmentedControl, at point: CGPoint, in window: UIWindow) -> String {

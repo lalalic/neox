@@ -287,6 +287,10 @@ struct MarkcutReviewInboxView: View {
             if !remote.connected { await remote.connect() }
             loadingStage = "Fetching compiled scenes…"
             let media = try await remote.markcutReviewMedia(sessionID: sessionID, contentHash: hash)
+            // Remote responses can arrive after the user switches revisions or
+            // dismisses the sheet. Never replace the selected preview with stale media.
+            guard !Task.isCancelled, selectedSessionID == sessionID,
+                  selectedGroup?.sessions.contains(where: { $0.reviewSessionID == sessionID }) == true else { return }
             loadingStage = "Preparing video player…"
             guard let compiled = media["compiled"], let player = media["playerUrl"] as? String else {
                 throw NSError(domain: "MarkcutReviewInbox", code: 2, userInfo: [NSLocalizedDescriptionKey:"Neo Master returned no compiled preview"])
@@ -316,7 +320,12 @@ struct MarkcutReviewInboxView: View {
             </script><script src="\(player)"></script>
             """
             previewRetry += 1
+        } catch is CancellationError {
+            return
+        } catch let error as URLError where error.code == .cancelled {
+            return
         } catch {
+            guard !Task.isCancelled, selectedSessionID == sessionID else { return }
             previewError = error.localizedDescription
         }
     }
