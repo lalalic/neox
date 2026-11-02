@@ -11,6 +11,7 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         inbox.tap()
 
         XCTAssertTrue(app.navigationBars["Review Inbox"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["markcutReviewInboxClose"].exists)
         XCTAssertTrue(app.staticTexts["Markcut previews from Neo Master will appear here."].waitForExistence(timeout: 5))
     }
 
@@ -26,16 +27,17 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         XCTAssertTrue(job.label.contains("Job #review-fixture-job"))
         job.tap()
 
-        let current = app.buttons["markcutReviewRevision-fixture-current"]
-        let historical = app.buttons["markcutReviewRevision-fixture-old"]
-        XCTAssertTrue(current.waitForExistence(timeout: 5))
-        XCTAssertTrue(historical.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Ready for review"].exists)
+        XCTAssertTrue(app.buttons["markcutReviewPreviewClose"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["markcutReviewApprove"].exists)
-
+        XCTAssertFalse(app.staticTexts["VIDEOS & REVISIONS"].exists)
+        XCTAssertFalse(app.staticTexts["video-a-v2"].exists)
+        let picker = app.buttons["markcutReviewVersionMenu"]
+        XCTAssertTrue(picker.exists)
+        picker.tap()
+        let historical = app.buttons["markcutReviewRevision-fixture-old"]
+        XCTAssertTrue(historical.waitForExistence(timeout: 5))
         historical.tap()
-        XCTAssertTrue(app.staticTexts["video-a-v1"].exists)
-        XCTAssertTrue(app.staticTexts["Historical revision · review disabled"].exists)
+        XCTAssertTrue(app.staticTexts["Historical revision · review disabled"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["markcutReviewApprove"].exists)
     }
 }

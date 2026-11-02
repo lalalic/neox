@@ -4,6 +4,7 @@ import UIKit
 /// Phone-side view of durable Markcut Review Sessions. Reads and decisions
 /// always pass through Neo Master's saved authenticated MCP endpoint.
 struct MarkcutReviewInboxView: View {
+    @Environment(\.dismiss) private var dismiss
     @StateObject private var remote = RemoteMCPClient()
     @State private var sessions: [[String: Any]] = []
     @State private var selectedGroup: MarkcutReviewGroup?
@@ -48,6 +49,11 @@ struct MarkcutReviewInboxView: View {
             }
             .navigationTitle("Review Inbox")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: { Image(systemName: "xmark") }
+                        .accessibilityLabel("Close")
+                        .accessibilityIdentifier("markcutReviewInboxClose")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { Task { await sync() } } label: { Image(systemName: "arrow.clockwise") }
                         .disabled(syncing)
@@ -75,22 +81,9 @@ struct MarkcutReviewInboxView: View {
     private func reviewSheet(_ group: MarkcutReviewGroup) -> some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // The clip picker is always visible while reviewing, even on a
-                // long portrait film or when the keyboard is open.
-                revisionPicker(group)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-                    .padding(.bottom, 6)
-                Divider()
                 ScrollView {
                     if let item = selectedItem(in: group) {
                         VStack(alignment: .leading, spacing: 8) {
-                            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                Text(displayTitle(item))
-                                    .font(.subheadline.weight(.semibold)).lineLimit(1)
-                                Spacer(minLength: 4)
-                                statusBadge(item)
-                            }
                             preview(for: item)
                             if let decision = item["decision"] as? [String: Any] {
                                 Label((decision["decision"] as? String) == "approved" ? "Approved" : "Changes requested",
@@ -129,54 +122,50 @@ struct MarkcutReviewInboxView: View {
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle(group.title)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { selectedGroup = nil } } }
-        }
-        .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
-    }
-
-    private func revisionPicker(_ group: MarkcutReviewGroup) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Text(group.sessions.count > 1 ? "VIDEOS & REVISIONS" : "CURRENT VIDEO")
-                    .font(.caption2.weight(.semibold)).tracking(0.3).foregroundStyle(.secondary)
-                Spacer()
-                Text("\(group.sessions.count) \(group.sessions.count == 1 ? "version" : "versions")")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(Array(group.sessions.enumerated()), id: \.element.reviewSessionID) { index, item in
-                        let isSelected = item.reviewSessionID == (selectedSessionID ?? group.sessions.first?.reviewSessionID)
-                        Button {
-                            guard !isSelected else { return }
-                            selectedSessionID = item.reviewSessionID
-                            html = nil
-                            previewError = nil
-                            feedback = ""
-                            Task { await loadPreview(item.value) }
-                        } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(group.sessions.count > 1 ? "\(index + 1) · \(item.title)" : item.title)
-                                    .font(.caption.weight(.semibold)).lineLimit(1)
-                                Text(MarkcutReviewGrouping.statusText(item.value))
-                                    .font(.caption2).lineLimit(1)
-                                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { selectedGroup = nil } label: { Image(systemName: "xmark") }
+                        .accessibilityLabel("Close")
+                        .accessibilityIdentifier("markcutReviewPreviewClose")
+                }
+                ToolbarItem(placement: .principal) {
+                    Menu {
+                        ForEach(group.sessions, id: \.reviewSessionID) { revision in
+                            Button {
+                                guard revision.reviewSessionID != selectedSessionID else { return }
+                                selectedSessionID = revision.reviewSessionID
+                                html = nil
+                                previewError = nil
+                                feedback = ""
+                                Task { await loadPreview(revision.value) }
+                            } label: {
+                                if revision.reviewSessionID == selectedSessionID {
+                                    Label("\(revision.title) · \(MarkcutReviewGrouping.statusText(revision.value))", systemImage: "checkmark")
+                                } else {
+                                    Text("\(revision.title) · \(MarkcutReviewGrouping.statusText(revision.value))")
+                                }
                             }
-                            .padding(.horizontal, 10).padding(.vertical, 6)
-                            .frame(minWidth: group.sessions.count > 1 ? 146 : 185, alignment: .leading)
-                            .background(isSelected ? Color.accentColor.opacity(0.10) : Color(uiColor: .secondarySystemGroupedBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 1))
+                            .accessibilityIdentifier("markcutReviewRevision-\(revision.reviewSessionID)")
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityValue(isSelected ? "Selected" : "")
-                        .accessibilityIdentifier("markcutReviewRevision-\(item.reviewSessionID)")
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(group.title).lineLimit(1)
+                            if group.sessions.count > 1 {
+                                let selectedIndex = group.sessions.firstIndex(where: { $0.reviewSessionID == selectedSessionID }) ?? 0
+                                Text("\(selectedIndex + 1)/\(group.sessions.count)")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                Image(systemName: "chevron.down").font(.caption2)
+                            }
+                        }
+                        .font(.subheadline.weight(.semibold))
                     }
+                    .accessibilityLabel("Choose video or revision")
+                    .accessibilityIdentifier("markcutReviewVersionMenu")
                 }
             }
         }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
     }
 
     @ViewBuilder private func preview(for item: [String: Any]) -> some View {
@@ -247,25 +236,6 @@ struct MarkcutReviewInboxView: View {
             }
             .controlSize(.regular)
         }
-    }
-
-    private func statusBadge(_ item: [String: Any]) -> some View {
-        let status = MarkcutReviewGrouping.statusText(item)
-        return Text(status)
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 9).padding(.vertical, 5)
-            .background(status == "Ready for review" ? Color.orange.opacity(0.16) : Color.secondary.opacity(0.12), in: Capsule())
-            .foregroundStyle(status == "Ready for review" ? Color.orange : Color.secondary)
-            .fixedSize()
-    }
-
-    private func displayTitle(_ item: [String: Any]) -> String {
-        let label = (item["title"] as? String) ?? (item["label"] as? String) ?? "Video"
-        if !["video", "video.md", "untitled"].contains(label.lowercased()) { return label }
-        if let variant = item["videoItemTitle"] as? String { return variant.uppercased() }
-        if let relay = (item["relayCorrelations"] as? [[String: Any]])?.first,
-           let task = relay["taskId"] { return "Task \(task) · Video" }
-        return "Video draft"
     }
 
     private func clearSelection() {
@@ -347,7 +317,7 @@ struct MarkcutReviewInboxView: View {
             // Decode UTF-8 explicitly so non-ASCII scene metadata stays valid.
             html = """
             <!doctype html><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-            <style>html,body,#remotion-root{margin:0;width:100%;min-height:0;background:#111;color:white}body{overflow:hidden}#remotion-preview{width:100%}#remotion-canvas{width:\(previewCanvasSize().width)px!important;max-height:none!important;margin:0 auto!important}#scene-thumbnails{display:flex;align-items:center;gap:6px;overflow-x:auto;white-space:nowrap;height:36px;padding:5px 10px;box-sizing:border-box;scrollbar-width:none}#scene-thumbnails .scene-pill{flex:0 0 auto;font-size:11px;line-height:19px;border-radius:7px;background:#282b32;color:#ddd;padding:0 9px}#scene-thumbnails .scene-pill.active{background:#245da0;color:#fff}</style>
+            <style>html,body,#remotion-root{margin:0;width:100%;min-height:0;background:#111;color:white}body{overflow:hidden}#remotion-preview{width:100%}#remotion-canvas{width:\(previewCanvasSize().width)px!important;max-height:none!important;margin:0 auto!important}#scene-thumbnails{display:flex;align-items:center;gap:6px;overflow-x:auto;white-space:nowrap;height:36px;padding:5px 10px;box-sizing:border-box;scrollbar-width:none}#scene-thumbnails .scene-pill{flex:0 0 auto;font-size:11px;line-height:19px;border-radius:7px;background:#282b32;color:#ddd;padding:0 9px}#scene-thumbnails .scene-pill.active{background:#245da0;color:#fff}.comment-marker{display:none!important}</style>
             <div id="remotion-root"></div>
             <script>
             window.__markcutRevision={compiled:JSON.parse(new TextDecoder().decode(Uint8Array.from(atob('\(encoded)'),c=>c.charCodeAt(0))))};
