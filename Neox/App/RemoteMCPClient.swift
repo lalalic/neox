@@ -295,31 +295,41 @@ final class RemoteMCPClient: ObservableObject {
         return response
     }
 
-    /// Markcut review calls always use the saved Master's authenticated MCP
-    /// gateway. Provider prefixes are resolved from tools/list, never guessed.
-    func listMarkcutReviewSessions() async throws -> [[String: Any]] {
-        let result = try await callMarkcut("markcut.review.list", [:])
-        return result["sessions"] as? [[String: Any]] ?? []
+    /// Review media and feedback always use the saved Master's authenticated
+    /// HTTPS gateway. The request list itself is owned and stored by this phone.
+    func markcutPreviewMedia(contentHash: String) async throws -> [String: Any] {
+        let media = try await callAuthenticatedTool("markcut.preview.media", ["contentHash": contentHash])
+        // Load executable video-player JS only from the already trusted Master.
+        guard let player = media["playerUrl"] as? String,
+              let url = URL(string: player), let gateway = URL(string: endpoint),
+              url.scheme == "https", url.host == gateway.host,
+              url.path.hasPrefix("/files/_neoy/markcut/") else {
+            throw RemoteError.toolFailure("Master returned an untrusted Markcut player URL")
+        }
+        return media
     }
 
-    func markcutReviewMedia(sessionID: String, contentHash: String) async throws -> [String: Any] {
-        try await callMarkcut("markcut.review.media", ["sessionId":sessionID,"contentHash":contentHash])
+    func deliverMarkcutReviewFeedback(request: MarkcutReviewRequest,
+                                      feedback: MarkcutReviewFeedback) async throws {
+        guard let tool = request.ownerCallbackTool else { throw RemoteError.toolsUnavailable }
+        let result = try await callAuthenticatedTool(tool, [
+            "requestId": request.id,
+            "revisionId": request.revisionID,
+            "contentHash": request.contentHash,
+            "decision": feedback.decision.rawValue,
+            "feedback": feedback.feedback,
+            "idempotencyKey": feedback.idempotencyKey
+        ])
+        try MarkcutReviewFeedback.requireAcknowledgement(result)
     }
 
-    func decideMarkcutReview(sessionID: String, contentHash: String, decision: String,
-                             comments: [[String: Any]], idempotencyKey: String) async throws -> [String: Any] {
-        try await callMarkcut("markcut.review.decide", ["sessionId":sessionID,"contentHash":contentHash,
-            "decision":decision,"comments":comments,"idempotencyKey":idempotencyKey])
-    }
-
-    private func callMarkcut(_ baseName: String, _ arguments: [String: Any]) async throws -> [String: Any] {
-        // Review inbox data and decisions never fall back to a Bonjour/LAN URL.
-        // Resolve the provider name against tools/list from the saved HTTPS
-        // Master and send the request to that same authenticated endpoint.
+    private func callAuthenticatedTool(_ toolName: String, _ arguments: [String: Any]) async throws -> [String: Any] {
+        // Resolve the requested provider tool on the saved HTTPS endpoint; never
+        // redirect credentials to an endpoint carried by a review request.
         guard URL(string: endpoint)?.scheme == "https", !bearer.isEmpty else { throw RemoteError.missingCredential }
         let listing = try await requestRPC(method: "tools/list", params: [:], address: endpoint)
         let names = (listing["tools"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
-        guard let name = names.first(where: { $0 == baseName || $0.hasSuffix("." + baseName) }) else {
+        guard let name = names.first(where: { $0 == toolName || $0.hasSuffix("." + toolName) }) else {
             throw RemoteError.toolsUnavailable
         }
         let response = try await requestRPC(method: "tools/call", params: ["name":name,"arguments":arguments], address:endpoint)

@@ -1,12 +1,13 @@
 import SwiftUI
 import UIKit
 
-/// Phone-side view of durable Markcut Review Sessions. Reads and decisions
-/// always pass through Neo Master's saved authenticated MCP endpoint.
+/// Phone-owned local inbox. Refresh only retries feedback delivery; requests
+/// are never reconstructed from a remote Markcut list.
 struct MarkcutReviewInboxView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var remote = RemoteMCPClient()
-    @State private var sessions: [[String: Any]] = []
+    @ObservedObject private var inbox = MarkcutReviewInboxStore.shared
+    @State private var fixtureSessions: [[String: Any]]?
     @State private var selectedGroup: MarkcutReviewGroup?
     @State private var selectedSessionID: String?
     @State private var html: String?
@@ -18,7 +19,7 @@ struct MarkcutReviewInboxView: View {
     @State private var feedback = ""
     @State private var message: String?
     @State private var syncing = false
-    @State private var queued = MarkcutReviewDecision.loadQueue(from: .standard)
+    private var sessions: [[String: Any]] { fixtureSessions ?? inbox.requests.map(\.groupingValue) }
 
     private var groups: [MarkcutReviewGroup] { MarkcutReviewGrouping.groups(from: sessions) }
     private func selectedItem(in group: MarkcutReviewGroup) -> [String: Any]? {
@@ -38,13 +39,28 @@ struct MarkcutReviewInboxView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("markcutReviewGroup")
+                    .swipeActions {
+                        Button("Remove", systemImage: "trash", role: .destructive) {
+                            if fixtureSessions != nil {
+                                fixtureSessions?.removeAll { value in
+                                    group.sessions.contains { $0.reviewSessionID == value["id"] as? String }
+                                }
+                            } else {
+                                group.sessions.forEach { inbox.remove($0.reviewSessionID) }
+                            }
+                        }
+                        .accessibilityIdentifier("markcutReviewRemoveGroup")
+                        .disabled(group.sessions.contains { revision in
+                            inbox.feedbackQueue.contains { $0.requestId == revision.reviewSessionID }
+                        })
+                    }
                 }
             }
             .listStyle(.insetGrouped)
             .overlay {
                 if sessions.isEmpty && !syncing {
                     ContentUnavailableView("No video reviews", systemImage: "film",
-                        description: Text("Markcut previews from Neo Master will appear here."))
+                        description: Text("Review requests sent to this phone will appear here."))
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -58,26 +74,29 @@ struct MarkcutReviewInboxView: View {
                     Spacer(minLength: 4)
                     Text("Review Inbox").font(.headline).lineLimit(1)
                     Spacer(minLength: 4)
-                    Button { Task { await sync() } } label: {
+                    Button { Task { await refreshLocalInbox() } } label: {
                         Image(systemName: "arrow.clockwise").frame(width: 44, height: 44)
                     }
                     .disabled(syncing)
-                    .accessibilityLabel("Refresh reviews")
+                    .accessibilityLabel("Refresh local reviews")
                 }
                 .buttonStyle(.plain)
                 .padding(.horizontal, 8)
                 .background(Color(uiColor: .systemBackground))
             }
-            .task {
+            .refreshable { await refreshLocalInbox() }
+            .task(id: inbox.feedbackQueue.count) {
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("-markcut-review-ui-fixture") {
-                    sessions = MarkcutReviewGrouping.uiFixture
-                    return
+                    fixtureSessions = MarkcutReviewGrouping.uiFixture
                 }
                 #endif
                 while !Task.isCancelled {
-                    await sync()
-                    do { try await Task.sleep(for: .seconds(12)) } catch { return }
+                    await retryQueuedFeedback()
+                    guard inbox.feedbackQueue.contains(where: { feedback in
+                        inbox.request(id: feedback.requestId)?.ownerCallbackTool != nil
+                    }) else { return }
+                    do { try await Task.sleep(for: .seconds(30)) } catch { return }
                 }
             }
             .sheet(item: $selectedGroup, onDismiss: clearSelection) { group in
@@ -243,6 +262,13 @@ struct MarkcutReviewInboxView: View {
 
     private func decisionControls(for item: [String: Any]) -> some View {
         VStack(spacing: 7) {
+            if let requestID = item["id"] as? String,
+               inbox.request(id: requestID)?.ownerCallbackTool == nil {
+                Label("No owner callback configured; feedback cannot be delivered",
+                      systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             TextField("Add feedback for changes…", text: $feedback, axis: .vertical)
                 .lineLimit(3...8)
                 .textFieldStyle(.roundedBorder)
@@ -296,34 +322,10 @@ struct MarkcutReviewInboxView: View {
         if let first { Task { await loadPreview(first.value) } }
     }
 
-    private func sync() async {
-        guard !syncing else { return }
-        syncing = true
-        defer { syncing = false }
-        do {
-            if !remote.connected { await remote.connect() }
-            guard remote.connected else { throw NSError(domain: "MarkcutReviewInbox", code: 1, userInfo: [NSLocalizedDescriptionKey:"Neo Master is not connected"]) }
-            for (key, value) in Array(queued) {
-                do {
-                    _ = try await remote.decideMarkcutReview(sessionID: value.sessionID,
-                        contentHash: value.contentHash, decision: value.choice.rawValue,
-                        comments: value.comments.map { ["scope":$0.scope,"text":$0.text] }, idempotencyKey: key)
-                    queued.removeValue(forKey: key)
-                } catch {
-                    message = "A queued review could not sync yet: \(error.localizedDescription)"
-                    if error.localizedDescription.contains("current compiled revision") || error.localizedDescription.contains("decision already exists") {
-                        queued.removeValue(forKey: key)
-                    }
-                }
-            }
-            MarkcutReviewDecision.saveQueue(queued, to: .standard)
-            sessions = try await remote.listMarkcutReviewSessions()
-            message = queued.isEmpty ? "Synced with Neo Master" : "Offline decision queued · waiting for Neo Master"
-        } catch { message = "Offline · saved reviews will resync when Neo Master is reachable" }
-    }
-
     private func loadPreview(_ item: [String: Any]) async {
-        guard let sessionID = item["id"] as? String, let hash = item["contentHash"] as? String,
+        guard let requestID = item["id"] as? String,
+              let request = inbox.request(id: requestID),
+              let hash = item["contentHash"] as? String,
               ["ready", "decided", "superseded"].contains(item["status"] as? String ?? "") else {
             previewError = "This revision has no compiled preview yet. Refresh after compilation finishes."
             return
@@ -331,15 +333,15 @@ struct MarkcutReviewInboxView: View {
         previewError = nil
         loadingStage = "Connecting to Neo Master…"
         do {
-            if !remote.connected { await remote.connect() }
             loadingStage = "Fetching compiled scenes…"
-            let media = try await remote.markcutReviewMedia(sessionID: sessionID, contentHash: hash)
+            let media = try await remote.markcutPreviewMedia(contentHash: hash)
             // Remote responses can arrive after the user switches revisions or
             // dismisses the sheet. Never replace the selected preview with stale media.
-            guard !Task.isCancelled, selectedSessionID == sessionID,
-                  selectedGroup?.sessions.contains(where: { $0.reviewSessionID == sessionID }) == true else { return }
+            guard !Task.isCancelled, selectedSessionID == requestID,
+                  selectedGroup?.sessions.contains(where: { $0.reviewSessionID == requestID }) == true else { return }
             loadingStage = "Preparing video player…"
-            guard let compiled = media["compiled"], let player = media["playerUrl"] as? String else {
+            guard let compiled = media["compiled"],
+                  let player = media["playerUrl"] as? String else {
                 throw NSError(domain: "MarkcutReviewInbox", code: 2, userInfo: [NSLocalizedDescriptionKey:"Neo Master returned no compiled preview"])
             }
             // The compiled scene tree gives actual aspect ratio (landscape/portrait).
@@ -436,41 +438,49 @@ struct MarkcutReviewInboxView: View {
         } catch let error as URLError where error.code == .cancelled {
             return
         } catch {
-            guard !Task.isCancelled, selectedSessionID == sessionID else { return }
+            guard !Task.isCancelled, selectedSessionID == requestID else { return }
             previewError = error.localizedDescription
         }
     }
 
     private func submit(_ decision: String, item: [String: Any]) async {
         guard !syncing else { return }
-        guard let sessionID = item["id"] as? String, let hash = item["contentHash"] as? String else { return }
-        if queued.values.contains(where: { $0.sessionID == sessionID && $0.contentHash == hash }) {
-            message = "A decision for this revision is already queued for sync"
-            return
-        }
+        guard let requestID = item["id"] as? String,
+              let request = inbox.request(id: requestID) else { return }
         let choice: MarkcutReviewChoice = decision == "approved" ? .approved : .changesRequested
-        let comments = choice == .changesRequested ? [MarkcutReviewComment(scope:"overall",text:feedback.trimmingCharacters(in: .whitespacesAndNewlines))] : []
-        guard let pending = try? MarkcutReviewDecision(sessionID:sessionID,contentHash:hash,choice:choice,comments:comments) else { return }
-        let key = pending.idempotencyKey
-        queued[key] = pending
-        MarkcutReviewDecision.saveQueue(queued, to: .standard)
+        let pending = MarkcutReviewFeedback(requestId: request.id, decision: choice,
+            feedback: choice == .changesRequested ? feedback.trimmingCharacters(in: .whitespacesAndNewlines) : "",
+            idempotencyKey: UUID().uuidString)
+        inbox.queue(pending)
+        await retryQueuedFeedback()
+    }
+
+    private func refreshLocalInbox() async {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-markcut-review-ui-fixture") { return }
+        #endif
+        await retryQueuedFeedback()
+    }
+
+    private func retryQueuedFeedback() async {
+        guard !syncing else { return }
         syncing = true
         defer { syncing = false }
-        do {
-            if !remote.connected { await remote.connect() }
-            _ = try await remote.decideMarkcutReview(sessionID:sessionID,contentHash:hash,decision:decision,comments:comments.map { ["scope":$0.scope,"text":$0.text] },idempotencyKey:key)
-            queued.removeValue(forKey:key); MarkcutReviewDecision.saveQueue(queued, to:.standard)
-            message = decision == "approved" ? "Approved for this revision" : "Changes requested for this revision"
-            sessions = try await remote.listMarkcutReviewSessions()
-            if let updated = sessions.first(where: { $0["id"] as? String == sessionID }) {
-                selectedGroup = MarkcutReviewGrouping.groups(from: sessions).first(where: { group in
-                    group.sessions.contains(where: { $0.reviewSessionID == sessionID })
-                })
-                selectedSessionID = updated["id"] as? String
+        var failures = 0
+        for pending in inbox.feedbackQueue {
+            guard let request = inbox.request(id: pending.requestId) else { continue }
+            do {
+                try await remote.deliverMarkcutReviewFeedback(request: request, feedback: pending)
+                inbox.acknowledge(pending)
+                message = pending.decision == .approved ? "Feedback acknowledged by the owner" : "Changes acknowledged by the owner"
+            } catch {
+                failures += 1
+                message = request.ownerCallbackTool == nil
+                    ? "Cannot deliver: no owner callback is configured. This review remains pending."
+                    : "Feedback is queued on this phone and will retry when the owner is reachable."
             }
-        } catch {
-            message = "Decision saved on this phone; it will sync when Neo Master is reachable"
         }
+        if failures == 0, inbox.feedbackQueue.isEmpty { message = nil }
     }
 }
 

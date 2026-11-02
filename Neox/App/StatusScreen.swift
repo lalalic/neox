@@ -108,6 +108,9 @@ struct StatusView: View {
         .sheet(isPresented: $showingTourRunner) { CaptureTourRunnerView(tours: tours) }
         .sheet(isPresented: $showingVlogSubmission) { VlogSubmissionView() }
         .sheet(isPresented: $showingMarkcutReviews) { MarkcutReviewInboxView() }
+        .onReceive(NotificationCenter.default.publisher(for: .markcutReviewNotificationTapped)) { _ in
+            showingMarkcutReviews = true
+        }
         .sheet(isPresented: $showingRemote) { RemoteControlView() }
         .task {
             while !Task.isCancelled {

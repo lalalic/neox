@@ -12,7 +12,22 @@ final class MarkcutReviewInboxUITests: XCTestCase {
 
         XCTAssertTrue(app.staticTexts["Review Inbox"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["markcutReviewInboxClose"].exists)
-        XCTAssertTrue(app.staticTexts["Markcut previews from Neo Master will appear here."].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Review requests sent to this phone will appear here."].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testLocalReviewGroupCanBeRemovedWithSwipe() {
+        let app = XCUIApplication()
+        app.launchArguments.append("-markcut-review-ui-fixture")
+        app.launch()
+        app.buttons["markcutReviewInboxOpen"].tap()
+        let group = app.buttons["markcutReviewGroup"].firstMatch
+        XCTAssertTrue(group.waitForExistence(timeout: 5))
+        group.swipeLeft()
+        let remove = app.buttons["markcutReviewRemoveGroup"]
+        XCTAssertTrue(remove.waitForExistence(timeout: 3))
+        remove.tap()
+        XCTAssertTrue(app.staticTexts["No video reviews"].waitForExistence(timeout: 5))
     }
 
     @MainActor

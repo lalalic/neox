@@ -2,33 +2,81 @@ import XCTest
 @testable import NeoxApp
 
 final class MarkcutReviewDecisionTests: XCTestCase {
-    func testOfflineQueueRoundTripsExactRevisionAndIdempotencyKey() throws {
-        let suite = "MarkcutReviewDecisionTests.\(UUID().uuidString)"
+    @MainActor
+    func testReviewRequestPersistenceReplayAndRemovalArePhoneOwned() throws {
+        let suite = "MarkcutReviewInboxTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let decision = try MarkcutReviewDecision(sessionID: "00000000-0000-4000-8000-000000000001",
-            contentHash: String(repeating: "a", count: 64), choice: .changesRequested,
-            comments: [MarkcutReviewComment(scope: "overall", text: "Tighten the opening")],
-            idempotencyKey: "mobile-action-0001")
+        let request = try MarkcutReviewRequest(id: "00000000-0000-4000-8000-000000000001",
+            contentHash: String(repeating: "a", count: 64), revisionID: "rev-2", title: "Cut review",
+            groupID: "creative-1", groupTitle: "Creative", ownerCallbackTool: "vlog.review.feedback")
+        let store = MarkcutReviewInboxStore(defaults: defaults)
 
-        MarkcutReviewDecision.saveQueue([decision.idempotencyKey: decision], to: defaults)
-        let restored = MarkcutReviewDecision.loadQueue(from: defaults)[decision.idempotencyKey]
+        let firstAccepted = store.accept(request, notify: false)
+        let replayAccepted = store.accept(request, notify: false)
+        let restored = MarkcutReviewInboxStore(defaults: defaults).requests
+        XCTAssertTrue(firstAccepted)
+        XCTAssertFalse(replayAccepted, "replayed request UUID must be idempotent")
+        XCTAssertEqual(restored, [request])
 
-        XCTAssertEqual(restored, decision)
-        XCTAssertEqual(decision.mcpArguments["contentHash"] as? String, String(repeating: "a", count: 64))
-        XCTAssertEqual(decision.mcpArguments["decision"] as? String, "changes_requested")
+        store.remove(request.id)
+        let afterRemoval = MarkcutReviewInboxStore(defaults: defaults).requests
+        XCTAssertTrue(afterRemoval.isEmpty,
+                      "local refresh/relaunch must not restore removed rows")
     }
 
-    func testOnlyValidApprovalOrFeedbackDecisionCanBeQueued() {
-        XCTAssertThrowsError(try MarkcutReviewDecision(sessionID: "not-a-session",
-            contentHash: String(repeating: "b", count: 64), choice: .approved, comments: []))
-        XCTAssertThrowsError(try MarkcutReviewDecision(sessionID: "00000000-0000-4000-8000-000000000002",
-            contentHash: "old-hash", choice: .approved, comments: []))
-        XCTAssertThrowsError(try MarkcutReviewDecision(sessionID: "00000000-0000-4000-8000-000000000002",
-            contentHash: String(repeating: "b", count: 64), choice: .changesRequested, comments: []))
-        XCTAssertThrowsError(try MarkcutReviewDecision(sessionID: "00000000-0000-4000-8000-000000000002",
-            contentHash: String(repeating: "b", count: 64), choice: .approved,
-            comments: [MarkcutReviewComment(scope: "overall", text: "comment")]))
+    @MainActor
+    func testRequestValidationAndToolRegistration() throws {
+        XCTAssertThrowsError(try MarkcutReviewRequest(id: "not-uuid", contentHash: String(repeating: "a", count: 64),
+            revisionID: "rev", title: "Cut"))
+        XCTAssertThrowsError(try MarkcutReviewRequest(id: UUID().uuidString, contentHash: String(repeating: "A", count: 64),
+            revisionID: "rev", title: "Cut"))
+        XCTAssertThrowsError(try MarkcutReviewRequest(id: UUID().uuidString, contentHash: String(repeating: "a", count: 64),
+            revisionID: " ", title: "Cut"))
+        XCTAssertThrowsError(try MarkcutReviewRequest(id: UUID().uuidString,
+            contentHash: String(repeating: "a", count: 64), revisionID: "rev", title: "Unsafe",
+            ownerCallbackTool: "neo.shell.exec"))
+        let invalidJSON = """
+            {"id":"not-a-uuid","contentHash":"\(String(repeating: "a", count: 64))",
+             "revisionId":"rev","title":"Invalid"}
+            """
+        XCTAssertThrowsError(try JSONDecoder().decode(MarkcutReviewRequest.self,
+            from: Data(invalidJSON.utf8)))
+        let unsafeCallbackJSON = """
+            {"id":"\(UUID().uuidString)","contentHash":"\(String(repeating: "a", count: 64))",
+             "revisionId":"rev","title":"Invalid","ownerCallbackTool":"neo.shell.exec"}
+            """
+        XCTAssertThrowsError(try JSONDecoder().decode(MarkcutReviewRequest.self,
+            from: Data(unsafeCallbackJSON.utf8)))
+        let server = MCPServer()
+        server.register(tools: MarkcutReviewRequestTool.tools())
+        let registeredTools = server.toolNames
+        XCTAssertEqual(registeredTools, ["review.request"])
+    }
+
+    @MainActor
+    func testFeedbackRemainsQueuedWithoutOwnerAcknowledgement() throws {
+        let suite = "MarkcutReviewFeedbackTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let request = try MarkcutReviewRequest(id: UUID().uuidString,
+            contentHash: String(repeating: "b", count: 64), revisionID: "rev-1", title: "Review",
+            ownerCallbackTool: "vlog.review.feedback")
+        let feedback = MarkcutReviewFeedback(requestId: request.id, decision: .approved,
+            feedback: "", idempotencyKey: UUID().uuidString)
+        let store = MarkcutReviewInboxStore(defaults: defaults)
+        store.accept(request, notify: false)
+        store.queue(feedback)
+
+        XCTAssertThrowsError(try MarkcutReviewFeedback.requireAcknowledgement(["accepted": true]))
+        let queuedFeedback = MarkcutReviewInboxStore(defaults: defaults).feedbackQueue
+        let pendingRequests = MarkcutReviewInboxStore(defaults: defaults).requests
+        XCTAssertEqual(queuedFeedback, [feedback])
+        XCTAssertEqual(pendingRequests, [request])
+        XCTAssertNoThrow(try MarkcutReviewFeedback.requireAcknowledgement(["acknowledged": true]))
+        store.acknowledge(feedback)
+        let afterAcknowledgement = MarkcutReviewInboxStore(defaults: defaults).requests
+        XCTAssertTrue(afterAcknowledgement.isEmpty)
     }
 
     func testReviewGroupingKeepsJobSessionsTogetherAndSeparatesJobs() {

@@ -130,6 +130,7 @@ final class ServerController: ObservableObject {
         server.register(tools: MediaTools.tools(exportsDir: exportsDir))
         server.register(tools: PhoneTransactionTools.tools())
         server.register(tools: CaptureTourTools.tools())
+        server.register(tools: MarkcutReviewRequestTool.tools())
         server.register(tools: agentKit.tools)
         server.register(tools: DebugTools.tools())
         server.register(tools: VlogDebugTools.tools())
