@@ -112,16 +112,14 @@ public final class AppAgentToolProvider {
                       case .string(let command) = dict["command"] else {
                     return "Error: 'command' parameter required"
                 }
-                return await MainActor.run {
-                    self.dispatch(command: command, args: dict)
-                }
+                return await self.dispatch(command: command, args: dict)
             }
         )
     }
 
     // MARK: - Dispatch
 
-    public func dispatch(command: String, args: [String: JSONValue]) -> String {
+    public func dispatch(command: String, args: [String: JSONValue]) async -> String {
         switch command {
         case "snapshot":
             return scanner.scan()
@@ -142,7 +140,7 @@ public final class AppAgentToolProvider {
             guard let x, let y else {
                 return "Error: 'x' and 'y' required for tap_xy. Get coordinates from snapshot output."
             }
-            return engine.tapXY(x: x, y: y)
+            return await engine.tapXY(x: x, y: y)
 
         case "type":
             guard case .string(let ref) = args["ref"],

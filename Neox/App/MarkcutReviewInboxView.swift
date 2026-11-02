@@ -22,7 +22,7 @@ struct MarkcutReviewInboxView: View {
                 if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
                 ForEach(Array(sessions.enumerated()), id: \.offset) { entry in
                     let item = entry.element
-                    Button { Task { await open(item) } } label: {
+                    Button { open(item) } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             Text((item["title"] as? String) ?? (item["label"] as? String) ?? "Markcut review")
                                 .font(.headline).lineLimit(1)
@@ -110,11 +110,13 @@ struct MarkcutReviewInboxView: View {
         } catch { message = "Offline · saved reviews will resync when Neo Master is reachable" }
     }
 
-    private func open(_ item: [String: Any]) async {
-        selected = item
+    private func open(_ item: [String: Any]) {
+        // Clear the previous revision before presenting the next sheet. Its
+        // .task(id:) owns media loading; a second load here would race it.
         html = nil
+        previewOrigin = nil
         feedback = ""
-        await loadPreview(item)
+        selected = item
     }
 
     private func loadPreview(_ item: [String: Any]) async {
@@ -123,6 +125,11 @@ struct MarkcutReviewInboxView: View {
         do {
             if !remote.connected { await remote.connect() }
             let media = try await remote.markcutReviewMedia(sessionID: sessionID, contentHash: hash)
+            // The user may have closed this sheet or selected another review
+            // while the MCP request was in flight. Never publish stale media.
+            guard !Task.isCancelled,
+                  selected?["id"] as? String == sessionID,
+                  selected?["contentHash"] as? String == hash else { return }
             guard let compiled = media["compiled"], let player = media["playerUrl"] as? String else {
                 throw NSError(domain: "MarkcutReviewInbox", code: 2, userInfo: [NSLocalizedDescriptionKey:"Neo Master returned no compiled preview"])
             }
@@ -132,7 +139,15 @@ struct MarkcutReviewInboxView: View {
                 var root = $0; root.path = "/"; root.query = nil; root.fragment = nil; return root.url
             }
             html = "<!doctype html><meta name='viewport' content='width=device-width,initial-scale=1'><style>html,body,#remotion-root{margin:0;min-height:100%;background:#111;color:white}body{overflow:auto}</style><div id='remotion-root'></div><script>window.__markcutRevision={compiled:JSON.parse(atob('\(encoded)'))};</script><script src='\(player)'></script>"
-        } catch { message = "Preview unavailable: \(error.localizedDescription)" }
+        } catch is CancellationError {
+            // Dismissal or revision replacement cancels the sheet task.
+        } catch let error as URLError where error.code == .cancelled {
+            // URLSession may surface the same sheet cancellation as -999.
+        } catch {
+            guard !Task.isCancelled, selected?["id"] as? String == sessionID,
+                  selected?["contentHash"] as? String == hash else { return }
+            message = "Preview unavailable: \(error.localizedDescription)"
+        }
     }
 
     private func submit(_ decision: String, item: [String: Any]) async {
@@ -174,7 +189,16 @@ private struct ReviewSelection: Identifiable { let value: [String: Any]; var id:
 private struct MarkcutWebPreview: UIViewRepresentable {
     let html: String
     let baseURL: URL?
-    func makeUIView(context: Context) -> WKWebView { WKWebView(frame: .zero) }
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.allowsInlineMediaPlayback = true
+        configuration.mediaTypesRequiringUserActionForPlayback = []
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.isOpaque = false
+        webView.backgroundColor = .black
+        webView.scrollView.backgroundColor = .black
+        return webView
+    }
     func updateUIView(_ view: WKWebView, context: Context) {
         guard context.coordinator.lastHTML != html else { return }
         context.coordinator.lastHTML = html
