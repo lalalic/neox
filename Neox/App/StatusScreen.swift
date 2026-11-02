@@ -10,6 +10,7 @@ struct StatusView: View {
     @State private var requestsExpanded = false
     @State private var showingTourRunner = false
     @State private var showingVlogSubmission = false
+    @State private var showingMarkcutReviews = false
     @State private var showingRemote = false
     @State private var hasTemp = false
     @State private var clearingTemp = false
@@ -78,6 +79,12 @@ struct StatusView: View {
                 }
                 .buttonStyle(.plain)
 
+                Button { showingMarkcutReviews = true } label: {
+                    actionLabel("Review Inbox", icon: "checkmark.rectangle.stack")
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("markcutReviewInboxOpen")
+
                 Button {
                     guard hasTemp && !clearingTemp else { return }
                     clearingTemp = true
@@ -100,6 +107,7 @@ struct StatusView: View {
         .background(Color(.systemBackground))
         .sheet(isPresented: $showingTourRunner) { CaptureTourRunnerView(tours: tours) }
         .sheet(isPresented: $showingVlogSubmission) { VlogSubmissionView() }
+        .sheet(isPresented: $showingMarkcutReviews) { MarkcutReviewInboxView() }
         .sheet(isPresented: $showingRemote) { RemoteControlView() }
         .task {
             while !Task.isCancelled {

@@ -34,6 +34,7 @@ final class RemoteMCPClient: ObservableObject {
     private var bearer = ""
     private var localEndpoint: String?
     private var activeEndpoint: String?
+    private var remoteToolNames: [String] = []
 
     init() {
         let urls = UserDefaults.standard.stringArray(forKey: savedMacsKey) ?? []
@@ -195,6 +196,7 @@ final class RemoteMCPClient: ObservableObject {
             let result = try await rpc(method: "tools/list", params: [:])
             let tools = result["tools"] as? [[String: Any]] ?? []
             let names = tools.compactMap { $0["name"] as? String }
+            remoteToolNames = names
             // Federated Core tools keep their provider-defined names.
             terminalTool = names.first { $0 == "terminal" || $0.hasSuffix(".terminal") || $0 == "neo_terminal" } ?? ""
             connected = true
@@ -290,6 +292,45 @@ final class RemoteMCPClient: ObservableObject {
            let dictionary = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             return dictionary
         }
+        return response
+    }
+
+    /// Markcut review calls always use the saved Master's authenticated MCP
+    /// gateway. Provider prefixes are resolved from tools/list, never guessed.
+    func listMarkcutReviewSessions() async throws -> [[String: Any]] {
+        let result = try await callMarkcut("markcut.review.list", [:])
+        return result["sessions"] as? [[String: Any]] ?? []
+    }
+
+    func markcutReviewMedia(sessionID: String, contentHash: String) async throws -> [String: Any] {
+        try await callMarkcut("markcut.review.media", ["sessionId":sessionID,"contentHash":contentHash])
+    }
+
+    func decideMarkcutReview(sessionID: String, contentHash: String, decision: String,
+                             comments: [[String: Any]], idempotencyKey: String) async throws -> [String: Any] {
+        try await callMarkcut("markcut.review.decide", ["sessionId":sessionID,"contentHash":contentHash,
+            "decision":decision,"comments":comments,"idempotencyKey":idempotencyKey])
+    }
+
+    private func callMarkcut(_ baseName: String, _ arguments: [String: Any]) async throws -> [String: Any] {
+        // Review inbox data and decisions never fall back to a Bonjour/LAN URL.
+        // Resolve the provider name against tools/list from the saved HTTPS
+        // Master and send the request to that same authenticated endpoint.
+        guard URL(string: endpoint)?.scheme == "https", !bearer.isEmpty else { throw RemoteError.missingCredential }
+        let listing = try await requestRPC(method: "tools/list", params: [:], address: endpoint)
+        let names = (listing["tools"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
+        guard let name = names.first(where: { $0 == baseName || $0.hasSuffix("." + baseName) }) else {
+            throw RemoteError.toolsUnavailable
+        }
+        let response = try await requestRPC(method: "tools/call", params: ["name":name,"arguments":arguments], address:endpoint)
+        let blocks = response["content"] as? [[String: Any]] ?? []
+        if response["isError"] as? Bool == true {
+            throw RemoteError.toolFailure(blocks.compactMap { $0["text"] as? String }.joined(separator:"\n"))
+        }
+        if let structured = response["structuredContent"] as? [String: Any] { return structured }
+        if let text = blocks.compactMap({ $0["text"] as? String }).first,
+           let data = text.data(using:.utf8),
+           let dictionary = try? JSONSerialization.jsonObject(with:data) as? [String:Any] { return dictionary }
         return response
     }
 
