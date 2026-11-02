@@ -85,7 +85,7 @@ enum MarkcutReviewGrouping {
         // Use it to group revisions of the same video without leaking paths.
         if let key = item["videoGroupKey"] as? String, !key.isEmpty {
             let title = (item["videoGroupTitle"] as? String) ?? (item["label"] as? String) ?? "Video"
-            return ("video:\(key)", humanize(title))
+            return ("video:\(key)", displayRunTitle(title))
         }
         for field in ["creativeId", "projectId", "creativePath", "projectPath", "sourcePath", "path"] {
             guard let raw = item[field] as? String, !raw.isEmpty else { continue }
@@ -107,7 +107,12 @@ enum MarkcutReviewGrouping {
     }
 
     private static func revisionTitle(_ item: [String: Any]) -> String {
-        let base = (item["title"] as? String) ?? (item["label"] as? String) ?? "Video"
+        var base = (item["title"] as? String) ?? (item["label"] as? String) ?? "Video"
+        if ["video", "video.md", "untitled"].contains(base.lowercased()),
+           let variant = item["videoItemTitle"] as? String { base = variant }
+        if ["video", "video.md", "untitled"].contains(base.lowercased()),
+           let relay = (item["relayCorrelations"] as? [[String: Any]])?.first,
+           let task = relay["taskId"] { base = "Task \(task)" }
         let date = (item["createdAt"] as? String).map { String($0.prefix(10)) }
         return date.map { "\(humanize(base)) · \($0)" } ?? humanize(base)
     }
@@ -124,6 +129,18 @@ enum MarkcutReviewGrouping {
         let trimmed = jobID.trimmingCharacters(in: .whitespacesAndNewlines)
         if UUID(uuidString: trimmed) != nil { return String(trimmed.prefix(8)) }
         return trimmed.count > 18 ? String(trimmed.prefix(15)) + "…" : trimmed
+    }
+
+    private static func displayRunTitle(_ value: String) -> String {
+        // Display a dated creative run concisely inside the iPhone sheet title.
+        // The opaque group key, not this label, determines identity.
+        let chunks = value.split(separator: "-", omittingEmptySubsequences: false)
+        if chunks.count >= 4, chunks[0].count == 4, chunks[1].count == 2,
+           chunks[2].count == 2, chunks.prefix(3).allSatisfy({ $0.allSatisfy(\.isNumber) }) {
+            let name = chunks.dropFirst(3).joined(separator: "-")
+            if !name.isEmpty { return "\(humanize(name)) · \(chunks[1])/\(chunks[2])" }
+        }
+        return humanize(value)
     }
 
     private static func humanize(_ value: String) -> String {

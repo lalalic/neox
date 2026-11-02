@@ -28,7 +28,9 @@ struct MarkcutReviewInboxView: View {
     var body: some View {
         NavigationStack {
             List {
-                if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
+                if let message, message != "Synced with Neo Master" {
+                    Text(message).font(.caption).foregroundStyle(.secondary)
+                }
                 ForEach(groups) { group in
                     Button { open(group) } label: {
                         ReviewGroupRow(group: group)
@@ -72,35 +74,57 @@ struct MarkcutReviewInboxView: View {
 
     private func reviewSheet(_ group: MarkcutReviewGroup) -> some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    revisionPicker(group)
+            VStack(spacing: 0) {
+                // The clip picker is always visible while reviewing, even on a
+                // long portrait film or when the keyboard is open.
+                revisionPicker(group)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                    .padding(.bottom, 6)
+                Divider()
+                ScrollView {
                     if let item = selectedItem(in: group) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(displayTitle(item)).font(.headline).lineLimit(2)
-                                Spacer(minLength: 8)
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text(displayTitle(item))
+                                    .font(.subheadline.weight(.semibold)).lineLimit(1)
+                                Spacer(minLength: 4)
                                 statusBadge(item)
                             }
                             preview(for: item)
                             if let decision = item["decision"] as? [String: Any] {
                                 Label((decision["decision"] as? String) == "approved" ? "Approved" : "Changes requested",
-                                      systemImage: "checkmark.seal.fill")
-                                    .font(.subheadline.weight(.medium)).foregroundStyle(.green)
+                                      systemImage: (decision["decision"] as? String) == "approved" ? "checkmark.seal.fill" : "arrow.uturn.backward.circle.fill")
+                                    .font(.footnote.weight(.medium))
+                                    .foregroundStyle((decision["decision"] as? String) == "approved" ? .green : .orange)
                                     .accessibilityIdentifier("markcutReviewDecision")
                             } else if item["status"] as? String == "superseded" {
                                 Label("Historical revision · review disabled", systemImage: "clock.arrow.circlepath")
-                                    .font(.subheadline).foregroundStyle(.secondary)
-                            } else if item["status"] as? String == "ready" {
-                                decisionControls(for: item)
+                                    .font(.footnote).foregroundStyle(.secondary)
                             }
                         }
+                        .padding(.horizontal, 12)
+                        .padding(.top, 10)
+                        .padding(.bottom, 8)
                     } else {
                         ContentUnavailableView("No revisions", systemImage: "film")
                     }
-                    if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
                 }
-                .padding(16)
+                .scrollDismissesKeyboard(.interactively)
+                // Do not place action buttons after a potentially 40-second film
+                // in the scroll view. The decision dock remains reachable.
+                if let item = selectedItem(in: group), item["status"] as? String == "ready",
+                   !(item["decision"] is [String: Any]) {
+                    Divider()
+                    decisionControls(for: item)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(.bar)
+                }
+                if let message, message != "Synced with Neo Master" {
+                    Text(message).font(.caption2).foregroundStyle(.secondary)
+                        .lineLimit(2).padding(.horizontal, 12).padding(.bottom, 6)
+                }
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle(group.title)
@@ -112,15 +136,17 @@ struct MarkcutReviewInboxView: View {
     }
 
     private func revisionPicker(_ group: MarkcutReviewGroup) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 5) {
             HStack {
-                Text("VIDEO REVISIONS").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Text(group.sessions.count > 1 ? "VIDEOS & REVISIONS" : "CURRENT VIDEO")
+                    .font(.caption2.weight(.semibold)).tracking(0.3).foregroundStyle(.secondary)
                 Spacer()
-                Text("\(group.sessions.count) \(group.sessions.count == 1 ? "revision" : "revisions")").font(.caption).foregroundStyle(.secondary)
+                Text("\(group.sessions.count) \(group.sessions.count == 1 ? "version" : "versions")")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(group.sessions, id: \.reviewSessionID) { item in
+                HStack(spacing: 6) {
+                    ForEach(Array(group.sessions.enumerated()), id: \.element.reviewSessionID) { index, item in
                         let isSelected = item.reviewSessionID == (selectedSessionID ?? group.sessions.first?.reviewSessionID)
                         Button {
                             guard !isSelected else { return }
@@ -130,17 +156,19 @@ struct MarkcutReviewInboxView: View {
                             feedback = ""
                             Task { await loadPreview(item.value) }
                         } label: {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(item.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(group.sessions.count > 1 ? "\(index + 1) · \(item.title)" : item.title)
+                                    .font(.caption.weight(.semibold)).lineLimit(1)
                                 Text(MarkcutReviewGrouping.statusText(item.value))
-                                    .font(.caption).lineLimit(1)
+                                    .font(.caption2).lineLimit(1)
+                                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
                             }
-                            .padding(.horizontal, 12).padding(.vertical, 9)
-                            .frame(minWidth: 130, alignment: .leading)
-                            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(uiColor: .secondarySystemGroupedBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 1.5))
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .frame(minWidth: group.sessions.count > 1 ? 146 : 185, alignment: .leading)
+                            .background(isSelected ? Color.accentColor.opacity(0.10) : Color(uiColor: .secondarySystemGroupedBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 1))
                         }
                         .buttonStyle(.plain)
                         .accessibilityValue(isSelected ? "Selected" : "")
@@ -149,8 +177,6 @@ struct MarkcutReviewInboxView: View {
                 }
             }
         }
-        .padding(12)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     @ViewBuilder private func preview(for item: [String: Any]) -> some View {
@@ -185,36 +211,42 @@ struct MarkcutReviewInboxView: View {
     }
 
     private func previewCanvasSize() -> CGSize {
-        let availableWidth = UIScreen.main.bounds.width - 64
+        let availableWidth = UIScreen.main.bounds.width - 24
         let aspect = previewDimensions.width / max(1, previewDimensions.height)
-        let width = min(availableWidth, 335 * aspect)
+        let maxHeight = min(450, UIScreen.main.bounds.height * 0.52)
+        let width = min(availableWidth, maxHeight * aspect)
         return CGSize(width: width, height: width / aspect)
     }
 
     private func previewHeight() -> CGFloat {
         // Reserve space for Markcut's scene strip beneath its Remotion canvas.
-        min(385, max(190, previewCanvasSize().height + 42))
+        min(505, max(170, previewCanvasSize().height + 42))
     }
 
     private func decisionControls(for item: [String: Any]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            TextField("Feedback (required to request changes)", text: $feedback, axis: .vertical)
-                .lineLimit(2...4)
+        VStack(spacing: 7) {
+            TextField("Add feedback for changes…", text: $feedback, axis: .vertical)
+                .lineLimit(1...3)
                 .textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("markcutReviewFeedback")
             HStack(spacing: 10) {
-                Button("Request changes") { Task { await submit("changes_requested", item: item) } }
-                    .buttonStyle(.bordered)
-                    .disabled(syncing || feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .accessibilityIdentifier("markcutReviewRequestChanges")
-                Button("Approve") { Task { await submit("approved", item: item) } }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(syncing)
-                    .accessibilityIdentifier("markcutReviewApprove")
+                Button { Task { await submit("changes_requested", item: item) } } label: {
+                    Label("Request changes", systemImage: "arrow.uturn.backward")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(syncing || feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityIdentifier("markcutReviewRequestChanges")
+                Button { Task { await submit("approved", item: item) } } label: {
+                    Label("Approve", systemImage: "checkmark")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(syncing)
+                .accessibilityIdentifier("markcutReviewApprove")
             }
+            .controlSize(.regular)
         }
-        .padding(12)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func statusBadge(_ item: [String: Any]) -> some View {
@@ -228,7 +260,12 @@ struct MarkcutReviewInboxView: View {
     }
 
     private func displayTitle(_ item: [String: Any]) -> String {
-        (item["title"] as? String) ?? (item["label"] as? String) ?? "Markcut video"
+        let label = (item["title"] as? String) ?? (item["label"] as? String) ?? "Video"
+        if !["video", "video.md", "untitled"].contains(label.lowercased()) { return label }
+        if let variant = item["videoItemTitle"] as? String { return variant.uppercased() }
+        if let relay = (item["relayCorrelations"] as? [[String: Any]])?.first,
+           let task = relay["taskId"] { return "Task \(task) · Video" }
+        return "Video draft"
     }
 
     private func clearSelection() {

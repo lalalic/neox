@@ -72,6 +72,13 @@ final class MarkcutReviewDecisionTests: XCTestCase {
         XCTAssertEqual(groups.first(where: { $0.id == "video:source-one" })?.pendingCount, 1)
     }
 
+    func testDatedCreativeJobGetsCompactHeader() {
+        let groups = MarkcutReviewGrouping.groups(from: [
+            ["id":"a", "videoGroupKey":"run", "videoGroupTitle":"2026-11-02-rsboost-backup", "status":"ready"]
+        ])
+        XCTAssertEqual(groups.first?.title, "Rsboost Backup · 11/02")
+    }
+
     func testFallbackGroupsByParentAndKeepsGenericBasenamesWithoutParentSeparate() {
         let sessions: [[String: Any]] = [
             ["id":"a", "path":"/work/creative-a/video.md", "status":"ready"],
