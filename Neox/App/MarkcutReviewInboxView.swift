@@ -11,7 +11,6 @@ struct MarkcutReviewInboxView: View {
     @State private var selectedSessionID: String?
     @State private var html: String?
     @State private var previewOrigin: URL?
-    @State private var previewDimensions = CGSize(width: 1080, height: 1920)
     @State private var previewError: String?
     @State private var loadingStage = "Loading preview…"
     @State private var previewRetry = 0
@@ -187,34 +186,12 @@ struct MarkcutReviewInboxView: View {
         .presentationDragIndicator(.visible)
     }
 
-    @ViewBuilder private func preview(for item: [String: Any]) -> some View {
-        if let html {
-            MarkcutWebPreview(html: html, baseURL: previewOrigin, failure: $previewError, retry: previewRetry)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.1)))
-                .accessibilityIdentifier("markcutReviewPlayer")
-            if let previewError {
-                Label(previewError, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-                Button { Task { await loadPreview(item) } } label: {
-                    Label("Retry preview", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
-                .accessibilityIdentifier("markcutReviewRetry")
-            }
-        } else if let previewError {
-            ContentUnavailableView {
-                Label("Preview unavailable", systemImage: "exclamationmark.triangle")
-            } description: { Text(previewError) } actions: {
-                Button("Retry") { Task { await loadPreview(item) } }.buttonStyle(.borderedProminent)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .accessibilityIdentifier("markcutReviewRetry")
-        } else {
-            ProgressView(loadingStage)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    private func preview(for item: [String: Any]) -> some View {
+        // The sheet closure can outlive the parent View's captured @State values.
+        // Let a dedicated Binding-backed child observe the asynchronous preview.
+        MarkcutReviewSurface(html: $html, origin: $previewOrigin,
+            error: $previewError, loadingStage: $loadingStage, retry: $previewRetry) {
+            Task { await loadPreview(item) }
         }
     }
 
@@ -259,6 +236,16 @@ struct MarkcutReviewInboxView: View {
         html = nil
         previewError = nil
         feedback = ""
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-markcut-review-async-preview-fixture") {
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(350))
+                html = "<html><body><div>Async preview ready</div></body></html>"
+                previewRetry += 1
+            }
+            return
+        }
+        #endif
         if let first { Task { await loadPreview(first.value) } }
     }
 
@@ -313,23 +300,84 @@ struct MarkcutReviewInboxView: View {
             let root = tree["root"] as? [String: Any] ?? tree
             let width = (root["width"] as? NSNumber)?.doubleValue ?? 1080
             let height = (root["height"] as? NSNumber)?.doubleValue ?? 1920
-            previewDimensions = CGSize(width: max(1, width), height: max(1, height))
             let data = try JSONSerialization.data(withJSONObject: compiled, options: [.fragmentsAllowed])
             let encoded = data.base64EncodedString()
             previewOrigin = URL(string: player).flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }.flatMap {
                 var root = $0; root.path = "/"; root.query = nil; root.fragment = nil; return root.url
             }
             let aspect = width / max(1, height)
-            let canvasWidth = Int(max(120, min(Double(UIScreen.main.bounds.width) - 24,
-                                                  (Double(UIScreen.main.bounds.height) - 290) * aspect)))
             // The player bundle consumes the injected revision on first render.
             // Decode UTF-8 explicitly so non-ASCII scene metadata stays valid.
             html = """
             <!doctype html><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-            <style>html,body,#remotion-root{margin:0;width:100%;min-height:0;background:#111;color:white}body{overflow:hidden}#remotion-preview{width:100%;height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;overflow:hidden}#remotion-canvas{width:min(100%,\(canvasWidth)px)!important;max-height:none!important;margin:auto!important}#scene-thumbnails{width:100%;flex-shrink:0;display:flex;align-items:center;gap:6px;overflow-x:auto;white-space:nowrap;height:36px;padding:5px 10px;box-sizing:border-box;scrollbar-width:none}#scene-thumbnails .scene-pill{flex:0 0 auto;font-size:11px;line-height:19px;border-radius:7px;background:#282b32;color:#ddd;padding:0 9px}#scene-thumbnails .scene-pill.active{background:#245da0;color:#fff}.comment-marker{display:none!important}</style>
+            <style>
+            html,body,#remotion-root{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent;color:white}
+            #remotion-preview{position:absolute;inset:0;width:100%;height:100%;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:8px;overflow:hidden;background:transparent}
+            #remotion-canvas{flex:0 0 auto;width:100%!important;max-width:100%!important;max-height:none!important;aspect-ratio:\(Int(width))/\(Int(height));margin:0!important;background:#111;border-radius:12px;overflow:hidden}
+            #scene-thumbnails{box-sizing:border-box;flex:0 0 42px;height:42px;width:100%;min-width:0;display:flex;flex-wrap:nowrap;gap:8px;align-items:center;justify-content:flex-start;overflow-x:auto;overflow-y:hidden;white-space:nowrap;padding:4px 8px;scrollbar-width:none;-webkit-overflow-scrolling:touch;touch-action:pan-x;overscroll-behavior-x:contain}
+            #scene-thumbnails::-webkit-scrollbar{display:none}
+            #scene-thumbnails .scene-pill{box-sizing:border-box;flex:0 0 auto;white-space:nowrap;font-size:12px;line-height:22px;border-radius:8px;background:#282b32;color:#ddd;padding:3px 11px;cursor:pointer}
+            #scene-thumbnails .scene-pill.active{background:#245da0;color:#fff}
+            .comment-marker{display:none!important}
+            .markcut-scene-nav{position:fixed;z-index:15;display:none;width:28px;height:42px;border:none;border-radius:8px;background:#191b20;color:#fff;font-size:23px;cursor:pointer;opacity:0.95;padding:0}
+            </style>
             <div id="remotion-root"></div>
             <script>
             window.__markcutRevision={compiled:JSON.parse(new TextDecoder().decode(Uint8Array.from(atob('\(encoded)'),c=>c.charCodeAt(0))))};
+            // The WebView is smaller than the phone screen and changes with the
+            // feedback keyboard. Measure its real viewport rather than UIScreen.
+            // Reserve a full scene-list row before fitting the video frame.
+            (function(){
+              const ratio=\(aspect);
+              const container=document.getElementById('remotion-root');
+              function sceneButton(id, symbol, direction){
+                const button=document.createElement('button');
+                button.id=id;button.className='markcut-scene-nav';button.textContent=symbol;
+                button.setAttribute('aria-label',direction<0?'Previous scenes':'Next scenes');
+                button.addEventListener('click',()=>{
+                  document.getElementById('scene-thumbnails')?.scrollBy({left:direction*260,behavior:'smooth'});
+                });
+                document.body.appendChild(button);return button;
+              }
+              const prev=sceneButton('markcut-scene-prev','‹',-1);
+              const next=sceneButton('markcut-scene-next','›',1);
+              let observedStrip=null;
+              function updateSceneNav(){
+                const strip=document.getElementById('scene-thumbnails');
+                if(!strip){prev.style.display='none';next.style.display='none';return;}
+                if(observedStrip!==strip){
+                  observedStrip=strip;
+                  strip.addEventListener('scroll',updateSceneNav,{passive:true});
+                }
+                const rect=strip.getBoundingClientRect();
+                const overflowing=strip.scrollWidth>strip.clientWidth+3 && rect.height>0;
+                const maxScroll=strip.scrollWidth-strip.clientWidth;
+                for(const button of [prev,next]){
+                  button.style.top=rect.top+'px';
+                  button.style.height=rect.height+'px';
+                }
+                prev.style.left=rect.left+'px';
+                next.style.left=(rect.right-28)+'px';
+                prev.style.display=overflowing&&strip.scrollLeft>3?'block':'none';
+                next.style.display=overflowing&&strip.scrollLeft<maxScroll-3?'block':'none';
+              }
+              function fit(){
+                const panel=document.getElementById('remotion-preview');
+                const canvas=document.getElementById('remotion-canvas');
+                if(!panel||!canvas)return;
+                const availableWidth=Math.max(1,panel.clientWidth);
+                const availableHeight=Math.max(1,panel.clientHeight-50);
+                const fittedWidth=Math.max(1,Math.floor(Math.min(availableWidth,availableHeight*ratio)));
+                canvas.style.setProperty('width',fittedWidth+'px','important');
+                updateSceneNav();
+              }
+              new ResizeObserver(fit).observe(container);
+              new MutationObserver(fit).observe(container,{childList:true,subtree:false});
+              window.addEventListener('resize',fit);
+              requestAnimationFrame(fit);
+              setInterval(updateSceneNav,700);
+            })();
+
             window.onerror=function(message){window.webkit.messageHandlers.markcutPreviewError.postMessage(String(message));};
             window.addEventListener('unhandledrejection',function(e){window.webkit.messageHandlers.markcutPreviewError.postMessage(String(e.reason||'Preview playback failed'));});
             window.addEventListener('error',function(e){if(e.target instanceof HTMLMediaElement)window.webkit.messageHandlers.markcutPreviewError.postMessage('Video or audio could not be loaded or decoded.');},true);
@@ -407,5 +455,54 @@ private struct ReviewGroupRow: View {
         }
         .padding(.vertical, 5)
         .contentShape(Rectangle())
+    }
+}
+
+/// Binding-backed preview renderer. A sheet's content closure may be created
+/// before the remote MCP media arrives; this view must observe the new HTML.
+private struct MarkcutReviewSurface: View {
+    @Binding var html: String?
+    @Binding var origin: URL?
+    @Binding var error: String?
+    @Binding var loadingStage: String
+    @Binding var retry: Int
+    let onRetry: () -> Void
+
+    var body: some View {
+        Group {
+            if let html {
+                MarkcutWebPreview(html: html, baseURL: origin, failure: $error, retry: retry)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(.white.opacity(0.1)))
+                    .accessibilityIdentifier("markcutReviewPlayer")
+                    .overlay(alignment: .topLeading) {
+                        if let error {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Label(error, systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption).foregroundStyle(.orange)
+                                Button("Retry preview", action: onRetry)
+                                    .buttonStyle(.bordered)
+                                    .accessibilityIdentifier("markcutReviewRetry")
+                            }
+                            .padding(8)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                    }
+            } else if let error {
+                ContentUnavailableView {
+                    Label("Preview unavailable", systemImage: "exclamationmark.triangle")
+                } description: { Text(error) } actions: {
+                    Button("Retry", action: onRetry).buttonStyle(.borderedProminent)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier("markcutReviewRetry")
+            } else {
+                ProgressView(loadingStage)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black, in: RoundedRectangle(cornerRadius: 16))
+            }
+        }
     }
 }

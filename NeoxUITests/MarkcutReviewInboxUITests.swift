@@ -16,6 +16,22 @@ final class MarkcutReviewInboxUITests: XCTestCase {
     }
 
     @MainActor
+    func testPreviewAppearsWhenMediaArrivesAfterSheetIsPresented() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-markcut-review-ui-fixture", "-markcut-review-async-preview-fixture"]
+        app.launch()
+        app.buttons["markcutReviewInboxOpen"].tap()
+        let group = app.buttons["markcutReviewGroup"].firstMatch
+        XCTAssertTrue(group.waitForExistence(timeout: 5))
+        group.tap()
+        XCTAssertTrue(app.buttons["markcutReviewPreviewClose"].waitForExistence(timeout: 5))
+        // The host sheet can be created before the remote media has arrived.
+        // The binding-backed child must update without closing/reopening it.
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Async preview ready"].waitForExistence(timeout: 8))
+    }
+
+    @MainActor
     func testFeedbackStartsAtThreeLinesAndAcceptsLineBreaks() {
         let app = XCUIApplication()
         app.launchArguments.append("-markcut-review-ui-fixture")

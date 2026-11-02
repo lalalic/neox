@@ -16,8 +16,10 @@ struct MarkcutWebPreview: UIViewRepresentable {
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
         view.scrollView.isScrollEnabled = false
-        view.isOpaque = true
-        view.backgroundColor = UIColor(white: 0.07, alpha: 1)
+        // Let the review sheet show around letterboxed landscape videos instead
+        // of presenting an oversized black rectangle as though it were the film.
+        view.isOpaque = false
+        view.backgroundColor = .clear
         view.scrollView.backgroundColor = view.backgroundColor
         return view
     }
