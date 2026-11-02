@@ -41,7 +41,8 @@ enum NeoRequiredSkillServices {
         process.arguments = [command] + arguments
         process.currentDirectoryURL = directory
         process.environment = ProcessInfo.processInfo.environment.merging([
-            "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+            "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+            "npm_config_prefer_online": "true"
         ]) { _, configured in configured }
         let output = Pipe()
         process.standardOutput = output
