@@ -1,86 +1,252 @@
 import SwiftUI
-import WebKit
 import UIKit
 
-/// Phone-side view of the same durable Markcut Review Sessions used by the
-/// hosted Markcut app. All reads and decisions pass through Neo Master's saved
-/// authenticated MCP endpoint.
+/// Phone-side view of durable Markcut Review Sessions. Reads and decisions
+/// always pass through Neo Master's saved authenticated MCP endpoint.
 struct MarkcutReviewInboxView: View {
     @StateObject private var remote = RemoteMCPClient()
     @State private var sessions: [[String: Any]] = []
-    @State private var selected: [String: Any]?
+    @State private var selectedGroup: MarkcutReviewGroup?
+    @State private var selectedSessionID: String?
     @State private var html: String?
     @State private var previewOrigin: URL?
+    @State private var previewDimensions = CGSize(width: 1080, height: 1920)
+    @State private var previewError: String?
+    @State private var loadingStage = "Loading preview…"
+    @State private var previewRetry = 0
     @State private var feedback = ""
     @State private var message: String?
     @State private var syncing = false
     @State private var queued = MarkcutReviewDecision.loadQueue(from: .standard)
 
+    private var groups: [MarkcutReviewGroup] { MarkcutReviewGrouping.groups(from: sessions) }
+    private func selectedItem(in group: MarkcutReviewGroup) -> [String: Any]? {
+        return group.sessions.filter { $0.reviewSessionID == selectedSessionID }.first?.value
+            ?? group.sessions.first?.value
+    }
+
     var body: some View {
         NavigationStack {
             List {
                 if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
-                ForEach(Array(sessions.enumerated()), id: \.offset) { entry in
-                    let item = entry.element
-                    Button { Task { await open(item) } } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text((item["title"] as? String) ?? (item["label"] as? String) ?? "Markcut review")
-                                .font(.headline).lineLimit(1)
-                            Text(statusText(item)).font(.caption).foregroundStyle(.secondary)
-                            if let relay = (item["relayCorrelations"] as? [[String: Any]])?.first,
-                               let task = relay["taskId"] { Text("Relay task · \(String(describing: task))").font(.caption2).foregroundStyle(.secondary) }
-                        }
+                ForEach(groups) { group in
+                    Button { open(group) } label: {
+                        ReviewGroupRow(group: group)
                     }
-                    .accessibilityIdentifier("markcutReviewSession")
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("markcutReviewGroup")
                 }
             }
+            .listStyle(.insetGrouped)
             .overlay {
-                if sessions.isEmpty && !syncing { ContentUnavailableView("No video reviews", systemImage: "film", description: Text("Markcut previews from Neo Master will appear here.")) }
+                if sessions.isEmpty && !syncing {
+                    ContentUnavailableView("No video reviews", systemImage: "film",
+                        description: Text("Markcut previews from Neo Master will appear here."))
+                }
             }
             .navigationTitle("Review Inbox")
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button { Task { await sync() } } label: { Image(systemName: "arrow.clockwise") }.disabled(syncing) } }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { Task { await sync() } } label: { Image(systemName: "arrow.clockwise") }
+                        .disabled(syncing)
+                        .accessibilityLabel("Refresh reviews")
+                }
+            }
             .task {
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-markcut-review-ui-fixture") {
+                    sessions = MarkcutReviewGrouping.uiFixture
+                    return
+                }
+                #endif
                 while !Task.isCancelled {
                     await sync()
                     do { try await Task.sleep(for: .seconds(12)) } catch { return }
                 }
             }
-            .sheet(item: Binding(get: { selected.map(ReviewSelection.init) }, set: { selected = $0?.value })) { selection in
-                reviewSheet(selection.value)
+            .sheet(item: $selectedGroup, onDismiss: clearSelection) { group in
+                reviewSheet(group)
             }
         }
     }
 
-    private func reviewSheet(_ item: [String: Any]) -> some View {
+    private func reviewSheet(_ group: MarkcutReviewGroup) -> some View {
         NavigationStack {
-            VStack(spacing: 10) {
-                if let html { MarkcutWebPreview(html: html, baseURL: previewOrigin).frame(minHeight: 280) }
-                else { ProgressView("Loading compiled preview…").frame(maxWidth: .infinity, minHeight: 280) }
-                if let decision = item["decision"] as? [String: Any] {
-                    Label((decision["decision"] as? String) == "approved" ? "Approved" : "Changes requested", systemImage: "checkmark.seal.fill")
-                        .foregroundStyle(.green).accessibilityIdentifier("markcutReviewDecision")
-                } else if item["status"] as? String == "superseded" {
-                    Label("Historical revision · review disabled", systemImage: "clock.arrow.circlepath").foregroundStyle(.secondary)
-                } else {
-                    TextEditor(text: $feedback).frame(height: 78).overlay(alignment: .topLeading) {
-                        if feedback.isEmpty { Text("Feedback (required to request changes)").font(.caption).foregroundStyle(.secondary).padding(8).allowsHitTesting(false) }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    revisionPicker(group)
+                    if let item = selectedItem(in: group) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(displayTitle(item)).font(.headline).lineLimit(2)
+                                Spacer(minLength: 8)
+                                statusBadge(item)
+                            }
+                            preview(for: item)
+                            if let decision = item["decision"] as? [String: Any] {
+                                Label((decision["decision"] as? String) == "approved" ? "Approved" : "Changes requested",
+                                      systemImage: "checkmark.seal.fill")
+                                    .font(.subheadline.weight(.medium)).foregroundStyle(.green)
+                                    .accessibilityIdentifier("markcutReviewDecision")
+                            } else if item["status"] as? String == "superseded" {
+                                Label("Historical revision · review disabled", systemImage: "clock.arrow.circlepath")
+                                    .font(.subheadline).foregroundStyle(.secondary)
+                            } else if item["status"] as? String == "ready" {
+                                decisionControls(for: item)
+                            }
+                        }
+                    } else {
+                        ContentUnavailableView("No revisions", systemImage: "film")
                     }
-                    HStack {
-                        Button("Request changes") { Task { await submit("changes_requested", item: item) } }
-                            .buttonStyle(.bordered).disabled(syncing || feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        Button("Approve") { Task { await submit("approved", item: item) } }
-                            .buttonStyle(.borderedProminent).disabled(syncing)
+                    if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
+                }
+                .padding(16)
+            }
+            .background(Color(uiColor: .systemGroupedBackground))
+            .navigationTitle(group.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { selectedGroup = nil } } }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func revisionPicker(_ group: MarkcutReviewGroup) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("VIDEO REVISIONS").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Spacer()
+                Text("\(group.sessions.count) \(group.sessions.count == 1 ? "revision" : "revisions")").font(.caption).foregroundStyle(.secondary)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(group.sessions, id: \.reviewSessionID) { item in
+                        let isSelected = item.reviewSessionID == (selectedSessionID ?? group.sessions.first?.reviewSessionID)
+                        Button {
+                            guard !isSelected else { return }
+                            selectedSessionID = item.reviewSessionID
+                            html = nil
+                            previewError = nil
+                            feedback = ""
+                            Task { await loadPreview(item.value) }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(item.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                                Text(MarkcutReviewGrouping.statusText(item.value))
+                                    .font(.caption).lineLimit(1)
+                            }
+                            .padding(.horizontal, 12).padding(.vertical, 9)
+                            .frame(minWidth: 130, alignment: .leading)
+                            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(uiColor: .secondarySystemGroupedBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 1.5))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityValue(isSelected ? "Selected" : "")
+                        .accessibilityIdentifier("markcutReviewRevision-\(item.reviewSessionID)")
                     }
                 }
-                if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
-                Spacer(minLength: 0)
             }
-            .padding()
-            .navigationTitle("Markcut Preview")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { selected = nil; html = nil } } }
-            .task(id: item["contentHash"] as? String) { await loadPreview(item) }
         }
+        .padding(12)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    @ViewBuilder private func preview(for item: [String: Any]) -> some View {
+        if let html {
+            MarkcutWebPreview(html: html, baseURL: previewOrigin, failure: $previewError, retry: previewRetry)
+                .frame(height: previewHeight())
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.1)))
+                .accessibilityIdentifier("markcutReviewPlayer")
+            if let previewError {
+                Label(previewError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                Button { Task { await loadPreview(item) } } label: {
+                    Label("Retry preview", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("markcutReviewRetry")
+            }
+        } else if let previewError {
+            ContentUnavailableView {
+                Label("Preview unavailable", systemImage: "exclamationmark.triangle")
+            } description: { Text(previewError) } actions: {
+                Button("Retry") { Task { await loadPreview(item) } }.buttonStyle(.borderedProminent)
+            }
+            .frame(height: 210)
+            .accessibilityIdentifier("markcutReviewRetry")
+        } else {
+            ProgressView(loadingStage)
+                .frame(maxWidth: .infinity).frame(height: 210)
+                .background(Color.black, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+    }
+
+    private func previewCanvasSize() -> CGSize {
+        let availableWidth = UIScreen.main.bounds.width - 64
+        let aspect = previewDimensions.width / max(1, previewDimensions.height)
+        let width = min(availableWidth, 335 * aspect)
+        return CGSize(width: width, height: width / aspect)
+    }
+
+    private func previewHeight() -> CGFloat {
+        // Reserve space for Markcut's scene strip beneath its Remotion canvas.
+        min(385, max(190, previewCanvasSize().height + 42))
+    }
+
+    private func decisionControls(for item: [String: Any]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TextField("Feedback (required to request changes)", text: $feedback, axis: .vertical)
+                .lineLimit(2...4)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("markcutReviewFeedback")
+            HStack(spacing: 10) {
+                Button("Request changes") { Task { await submit("changes_requested", item: item) } }
+                    .buttonStyle(.bordered)
+                    .disabled(syncing || feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("markcutReviewRequestChanges")
+                Button("Approve") { Task { await submit("approved", item: item) } }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(syncing)
+                    .accessibilityIdentifier("markcutReviewApprove")
+            }
+        }
+        .padding(12)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func statusBadge(_ item: [String: Any]) -> some View {
+        let status = MarkcutReviewGrouping.statusText(item)
+        return Text(status)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 9).padding(.vertical, 5)
+            .background(status == "Ready for review" ? Color.orange.opacity(0.16) : Color.secondary.opacity(0.12), in: Capsule())
+            .foregroundStyle(status == "Ready for review" ? Color.orange : Color.secondary)
+            .fixedSize()
+    }
+
+    private func displayTitle(_ item: [String: Any]) -> String {
+        (item["title"] as? String) ?? (item["label"] as? String) ?? "Markcut video"
+    }
+
+    private func clearSelection() {
+        selectedSessionID = nil
+        html = nil
+        previewOrigin = nil
+        previewError = nil
+        feedback = ""
+    }
+
+    private func open(_ group: MarkcutReviewGroup) {
+        selectedGroup = group
+        let first = group.sessions.first
+        selectedSessionID = first?.reviewSessionID
+        html = nil
+        previewError = nil
+        feedback = ""
+        if let first { Task { await loadPreview(first.value) } }
     }
 
     private func sync() async {
@@ -90,7 +256,6 @@ struct MarkcutReviewInboxView: View {
         do {
             if !remote.connected { await remote.connect() }
             guard remote.connected else { throw NSError(domain: "MarkcutReviewInbox", code: 1, userInfo: [NSLocalizedDescriptionKey:"Neo Master is not connected"]) }
-            // Replay a persisted decision with its original idempotency key.
             for (key, value) in Array(queued) {
                 do {
                     _ = try await remote.decideMarkcutReview(sessionID: value.sessionID,
@@ -110,29 +275,50 @@ struct MarkcutReviewInboxView: View {
         } catch { message = "Offline · saved reviews will resync when Neo Master is reachable" }
     }
 
-    private func open(_ item: [String: Any]) async {
-        selected = item
-        html = nil
-        feedback = ""
-        await loadPreview(item)
-    }
-
     private func loadPreview(_ item: [String: Any]) async {
         guard let sessionID = item["id"] as? String, let hash = item["contentHash"] as? String,
-              ["ready", "decided", "superseded"].contains(item["status"] as? String ?? "") else { return }
+              ["ready", "decided", "superseded"].contains(item["status"] as? String ?? "") else {
+            previewError = "This revision has no compiled preview yet. Refresh after compilation finishes."
+            return
+        }
+        previewError = nil
+        loadingStage = "Connecting to Neo Master…"
         do {
             if !remote.connected { await remote.connect() }
+            loadingStage = "Fetching compiled scenes…"
             let media = try await remote.markcutReviewMedia(sessionID: sessionID, contentHash: hash)
+            loadingStage = "Preparing video player…"
             guard let compiled = media["compiled"], let player = media["playerUrl"] as? String else {
                 throw NSError(domain: "MarkcutReviewInbox", code: 2, userInfo: [NSLocalizedDescriptionKey:"Neo Master returned no compiled preview"])
             }
+            // The compiled scene tree gives actual aspect ratio (landscape/portrait).
+            let tree = compiled as? [String: Any] ?? [:]
+            let root = tree["root"] as? [String: Any] ?? tree
+            let width = (root["width"] as? NSNumber)?.doubleValue ?? 1080
+            let height = (root["height"] as? NSNumber)?.doubleValue ?? 1920
+            previewDimensions = CGSize(width: max(1, width), height: max(1, height))
             let data = try JSONSerialization.data(withJSONObject: compiled, options: [.fragmentsAllowed])
             let encoded = data.base64EncodedString()
             previewOrigin = URL(string: player).flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }.flatMap {
                 var root = $0; root.path = "/"; root.query = nil; root.fragment = nil; return root.url
             }
-            html = "<!doctype html><meta name='viewport' content='width=device-width,initial-scale=1'><style>html,body,#remotion-root{margin:0;min-height:100%;background:#111;color:white}body{overflow:auto}</style><div id='remotion-root'></div><script>window.__markcutRevision={compiled:JSON.parse(atob('\(encoded)'))};</script><script src='\(player)'></script>"
-        } catch { message = "Preview unavailable: \(error.localizedDescription)" }
+            // The player bundle consumes the injected revision on first render.
+            // Decode UTF-8 explicitly so non-ASCII scene metadata stays valid.
+            html = """
+            <!doctype html><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+            <style>html,body,#remotion-root{margin:0;width:100%;min-height:0;background:#111;color:white}body{overflow:hidden}#remotion-preview{width:100%}#remotion-canvas{width:\(previewCanvasSize().width)px!important;max-height:none!important;margin:0 auto!important}#scene-thumbnails{display:flex;align-items:center;gap:6px;overflow-x:auto;white-space:nowrap;height:36px;padding:5px 10px;box-sizing:border-box;scrollbar-width:none}#scene-thumbnails .scene-pill{flex:0 0 auto;font-size:11px;line-height:19px;border-radius:7px;background:#282b32;color:#ddd;padding:0 9px}#scene-thumbnails .scene-pill.active{background:#245da0;color:#fff}</style>
+            <div id="remotion-root"></div>
+            <script>
+            window.__markcutRevision={compiled:JSON.parse(new TextDecoder().decode(Uint8Array.from(atob('\(encoded)'),c=>c.charCodeAt(0))))};
+            window.onerror=function(message){window.webkit.messageHandlers.markcutPreviewError.postMessage(String(message));};
+            window.addEventListener('unhandledrejection',function(e){window.webkit.messageHandlers.markcutPreviewError.postMessage(String(e.reason||'Preview playback failed'));});
+            window.addEventListener('error',function(e){if(e.target instanceof HTMLMediaElement)window.webkit.messageHandlers.markcutPreviewError.postMessage('Video or audio could not be loaded or decoded.');},true);
+            </script><script src="\(player)"></script>
+            """
+            previewRetry += 1
+        } catch {
+            previewError = error.localizedDescription
+        }
     }
 
     private func submit(_ decision: String, item: [String: Any]) async {
@@ -156,30 +342,45 @@ struct MarkcutReviewInboxView: View {
             queued.removeValue(forKey:key); MarkcutReviewDecision.saveQueue(queued, to:.standard)
             message = decision == "approved" ? "Approved for this revision" : "Changes requested for this revision"
             sessions = try await remote.listMarkcutReviewSessions()
-            if let updated = sessions.first(where: { $0["id"] as? String == sessionID }) { selected = updated }
+            if let updated = sessions.first(where: { $0["id"] as? String == sessionID }) {
+                selectedGroup = MarkcutReviewGrouping.groups(from: sessions).first(where: { group in
+                    group.sessions.contains(where: { $0.reviewSessionID == sessionID })
+                })
+                selectedSessionID = updated["id"] as? String
+            }
         } catch {
             message = "Decision saved on this phone; it will sync when Neo Master is reachable"
         }
     }
-
-    private func statusText(_ item: [String: Any]) -> String {
-        let status = item["status"] as? String ?? "pending"
-        if let decision = item["decision"] as? [String: Any], let value = decision["decision"] as? String { return value == "approved" ? "Approved" : "Changes requested" }
-        return status == "ready" ? "Ready for review" : status.capitalized
-    }
 }
 
-private struct ReviewSelection: Identifiable { let value: [String: Any]; var id: String { value["id"] as? String ?? UUID().uuidString }; init(_ value: [String: Any]) { self.value = value } }
-
-private struct MarkcutWebPreview: UIViewRepresentable {
-    let html: String
-    let baseURL: URL?
-    func makeUIView(context: Context) -> WKWebView { WKWebView(frame: .zero) }
-    func updateUIView(_ view: WKWebView, context: Context) {
-        guard context.coordinator.lastHTML != html else { return }
-        context.coordinator.lastHTML = html
-        view.loadHTMLString(html, baseURL: baseURL)
+private struct ReviewGroupRow: View {
+    let group: MarkcutReviewGroup
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: group.jobID == nil ? "film.stack" : "rectangle.stack.fill")
+                .font(.title3).foregroundStyle(Color.accentColor)
+                .frame(width: 42, height: 42)
+                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            VStack(alignment: .leading, spacing: 5) {
+                Text(group.title).font(.headline).lineLimit(1)
+                HStack(spacing: 7) {
+                    Text("\(group.sessions.count) \(group.sessions.count == 1 ? "revision" : "revisions")")
+                    Text("·")
+                    Text(group.pendingCount == 0 ? "No pending reviews" : "\(group.pendingCount) pending")
+                }
+                .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 4)
+            if group.pendingCount > 0 {
+                Text("\(group.pendingCount)").font(.caption.weight(.bold))
+                    .foregroundStyle(.white).frame(minWidth: 24, minHeight: 24)
+                    .background(Color.orange, in: Circle())
+                    .accessibilityHidden(true) // row's text already reports the pending count
+            }
+            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
     }
-    func makeCoordinator() -> Coordinator { Coordinator() }
-    final class Coordinator { var lastHTML: String? }
 }

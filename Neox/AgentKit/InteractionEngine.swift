@@ -276,7 +276,11 @@ public final class InteractionEngine {
 
         let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
         let image = renderer.image { ctx in
-            window.layer.render(in: ctx.cgContext)
+            // Layer.render omits WKWebView/video's composited content and produces
+            // misleading black previews. Capture the rendered UI hierarchy first.
+            if !window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) {
+                window.layer.render(in: ctx.cgContext)
+            }
         }
 
         guard let data = image.pngData() else {

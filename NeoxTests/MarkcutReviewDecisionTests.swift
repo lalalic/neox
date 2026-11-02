@@ -30,4 +30,61 @@ final class MarkcutReviewDecisionTests: XCTestCase {
             contentHash: String(repeating: "b", count: 64), choice: .approved,
             comments: [MarkcutReviewComment(scope: "overall", text: "comment")]))
     }
+
+    func testReviewGroupingKeepsJobSessionsTogetherAndSeparatesJobs() {
+        let sessions: [[String: Any]] = [
+            ["id":"a", "label":"video-a-v1", "status":"ready", "createdAt":"2026-11-01T10:00:00Z",
+             "relayCorrelations":[["jobId":"job-one", "taskId":"task-a"]]],
+            ["id":"b", "label":"video-a-v2", "status":"superseded", "createdAt":"2026-11-01T11:00:00Z",
+             "relayCorrelations":[["jobId":"job-one", "taskId":"task-a"]]],
+            ["id":"c", "label":"video-a-v3", "status":"ready", "createdAt":"2026-11-01T12:00:00Z",
+             "relayCorrelations":[["jobId":"job-two", "taskId":"task-b"]]]
+        ]
+
+        let groups = MarkcutReviewGrouping.groups(from: sessions)
+
+        XCTAssertEqual(groups.count, 2)
+        XCTAssertEqual(groups.first(where: { $0.jobID == "job-one" })?.sessions.map(\.reviewSessionID), ["b", "a"])
+        XCTAssertEqual(groups.first(where: { $0.jobID == "job-one" })?.pendingCount, 1)
+        XCTAssertEqual(groups.first(where: { $0.jobID == "job-one" })?.title, "Job #job-one")
+    }
+
+    func testSessionWithMultipleRelayCorrelationsIsVisibleInEachCorrelatedJob() {
+        let session: [String: Any] = ["id":"shared-session", "label":"clip", "status":"ready",
+            "relayCorrelations":[["jobId":"job-one"], ["jobId":"job-two"]]]
+
+        let groups = MarkcutReviewGrouping.groups(from: [session])
+
+        XCTAssertEqual(groups.count, 2)
+        XCTAssertTrue(groups.allSatisfy { $0.sessions.map(\.reviewSessionID) == ["shared-session"] })
+    }
+
+    func testOpaqueVideoGroupKeysKeepRevisionsTogetherWithoutExposingPaths() {
+        let sessions: [[String: Any]] = [
+            ["id":"a", "videoGroupKey":"source-one", "videoGroupTitle":"v1", "status":"ready"],
+            ["id":"b", "videoGroupKey":"source-one", "videoGroupTitle":"v1", "status":"superseded"],
+            ["id":"c", "videoGroupKey":"source-two", "videoGroupTitle":"v2", "status":"ready"]
+        ]
+        let groups = MarkcutReviewGrouping.groups(from: sessions)
+        XCTAssertEqual(groups.count, 2)
+        XCTAssertEqual(groups.first(where: { $0.id == "video:source-one" })?.sessions.count, 2)
+        XCTAssertEqual(groups.first(where: { $0.id == "video:source-one" })?.title, "V1")
+        XCTAssertEqual(groups.first(where: { $0.id == "video:source-one" })?.pendingCount, 1)
+    }
+
+    func testFallbackGroupsByParentAndKeepsGenericBasenamesWithoutParentSeparate() {
+        let sessions: [[String: Any]] = [
+            ["id":"a", "path":"/work/creative-a/video.md", "status":"ready"],
+            ["id":"b", "path":"/work/creative-a/video.md", "status":"superseded"],
+            ["id":"c", "label":"video.md", "status":"ready"],
+            ["id":"d", "label":"video.md", "status":"ready"]
+        ]
+
+        let groups = MarkcutReviewGrouping.groups(from: sessions)
+
+        XCTAssertEqual(groups.count, 3)
+        XCTAssertEqual(groups.first(where: { $0.id == "parent:work/creative-a" })?.sessions.count, 2)
+        XCTAssertNotEqual(groups.first(where: { $0.sessions.contains(where: { $0.reviewSessionID == "c" }) })?.id,
+                          groups.first(where: { $0.sessions.contains(where: { $0.reviewSessionID == "d" }) })?.id)
+    }
 }
