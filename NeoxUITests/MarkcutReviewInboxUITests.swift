@@ -10,9 +10,31 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         XCTAssertTrue(inbox.waitForExistence(timeout: 5))
         inbox.tap()
 
-        XCTAssertTrue(app.navigationBars["Review Inbox"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Review Inbox"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["markcutReviewInboxClose"].exists)
         XCTAssertTrue(app.staticTexts["Markcut previews from Neo Master will appear here."].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testFeedbackStartsAtThreeLinesAndAcceptsLineBreaks() {
+        let app = XCUIApplication()
+        app.launchArguments.append("-markcut-review-ui-fixture")
+        app.launch()
+        app.buttons["markcutReviewInboxOpen"].tap()
+        let group = app.buttons["markcutReviewGroup"].firstMatch
+        XCTAssertTrue(group.waitForExistence(timeout: 5))
+        group.tap()
+        let textView = app.textViews["markcutReviewFeedback"]
+        let textField = app.textFields["markcutReviewFeedback"]
+        let field = textView.exists ? textView : textField
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(field.frame.height, 58)
+        field.tap()
+        field.typeText("Opening feedback\nMiddle feedback\nClosing feedback")
+        let text = field.value as? String ?? ""
+        XCTAssertTrue(text.contains("Opening feedback"))
+        XCTAssertTrue(text.contains("Middle feedback"))
+        XCTAssertTrue(text.contains("Closing feedback"))
     }
 
     @MainActor
@@ -29,6 +51,7 @@ final class MarkcutReviewInboxUITests: XCTestCase {
 
         XCTAssertTrue(app.buttons["markcutReviewPreviewClose"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["markcutReviewApprove"].exists)
+        XCTAssertTrue(app.textViews["markcutReviewFeedback"].exists || app.textFields["markcutReviewFeedback"].exists)
         XCTAssertFalse(app.staticTexts["VIDEOS & REVISIONS"].exists)
         XCTAssertFalse(app.staticTexts["video-a-v2"].exists)
         let picker = app.buttons["markcutReviewVersionMenu"]

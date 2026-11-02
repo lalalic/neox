@@ -47,18 +47,26 @@ struct MarkcutReviewInboxView: View {
                         description: Text("Markcut previews from Neo Master will appear here."))
                 }
             }
-            .navigationTitle("Review Inbox")
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { dismiss() } label: { Image(systemName: "xmark") }
-                        .accessibilityLabel("Close")
-                        .accessibilityIdentifier("markcutReviewInboxClose")
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                HStack(spacing: 8) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark").frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("Close")
+                    .accessibilityIdentifier("markcutReviewInboxClose")
+                    Spacer(minLength: 4)
+                    Text("Review Inbox").font(.headline).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Button { Task { await sync() } } label: {
+                        Image(systemName: "arrow.clockwise").frame(width: 44, height: 44)
+                    }
+                    .disabled(syncing)
+                    .accessibilityLabel("Refresh reviews")
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { Task { await sync() } } label: { Image(systemName: "arrow.clockwise") }
-                        .disabled(syncing)
-                        .accessibilityLabel("Refresh reviews")
-                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 8)
+                .background(Color(uiColor: .systemBackground))
             }
             .task {
                 #if DEBUG
@@ -81,29 +89,35 @@ struct MarkcutReviewInboxView: View {
     private func reviewSheet(_ group: MarkcutReviewGroup) -> some View {
         NavigationStack {
             VStack(spacing: 0) {
-                ScrollView {
+                GeometryReader { proxy in
                     if let item = selectedItem(in: group) {
-                        VStack(alignment: .leading, spacing: 8) {
+                        ZStack(alignment: .topTrailing) {
                             preview(for: item)
+                                .frame(width: proxy.size.width, height: proxy.size.height)
                             if let decision = item["decision"] as? [String: Any] {
                                 Label((decision["decision"] as? String) == "approved" ? "Approved" : "Changes requested",
                                       systemImage: (decision["decision"] as? String) == "approved" ? "checkmark.seal.fill" : "arrow.uturn.backward.circle.fill")
-                                    .font(.footnote.weight(.medium))
-                                    .foregroundStyle((decision["decision"] as? String) == "approved" ? .green : .orange)
+                                    .font(.caption.weight(.medium))
+                                    .padding(7)
+                                    .background(.regularMaterial, in: Capsule())
+                                    .padding(10)
                                     .accessibilityIdentifier("markcutReviewDecision")
                             } else if item["status"] as? String == "superseded" {
                                 Label("Historical revision · review disabled", systemImage: "clock.arrow.circlepath")
-                                    .font(.footnote).foregroundStyle(.secondary)
+                                    .font(.caption.weight(.medium))
+                                    .padding(7)
+                                    .background(.regularMaterial, in: Capsule())
+                                    .padding(10)
                             }
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.top, 10)
-                        .padding(.bottom, 8)
+                        .frame(width: proxy.size.width, height: proxy.size.height)
                     } else {
                         ContentUnavailableView("No revisions", systemImage: "film")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
-                .scrollDismissesKeyboard(.interactively)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
                 // Do not place action buttons after a potentially 40-second film
                 // in the scroll view. The decision dock remains reachable.
                 if let item = selectedItem(in: group), item["status"] as? String == "ready",
@@ -120,15 +134,15 @@ struct MarkcutReviewInboxView: View {
                 }
             }
             .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle(group.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { selectedGroup = nil } label: { Image(systemName: "xmark") }
-                        .accessibilityLabel("Close")
-                        .accessibilityIdentifier("markcutReviewPreviewClose")
-                }
-                ToolbarItem(placement: .principal) {
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                HStack(spacing: 8) {
+                    Button { selectedGroup = nil } label: {
+                        Image(systemName: "xmark").frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("Close")
+                    .accessibilityIdentifier("markcutReviewPreviewClose")
+                    Spacer(minLength: 2)
                     Menu {
                         ForEach(group.sessions, id: \.reviewSessionID) { revision in
                             Button {
@@ -161,7 +175,12 @@ struct MarkcutReviewInboxView: View {
                     }
                     .accessibilityLabel("Choose video or revision")
                     .accessibilityIdentifier("markcutReviewVersionMenu")
+                    .frame(maxWidth: .infinity)
+                    Spacer().frame(width: 44)
                 }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 8)
+                .background(Color(uiColor: .systemBackground))
             }
         }
         .presentationDetents([.large])
@@ -171,7 +190,7 @@ struct MarkcutReviewInboxView: View {
     @ViewBuilder private func preview(for item: [String: Any]) -> some View {
         if let html {
             MarkcutWebPreview(html: html, baseURL: previewOrigin, failure: $previewError, retry: previewRetry)
-                .frame(height: previewHeight())
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.1)))
                 .accessibilityIdentifier("markcutReviewPlayer")
@@ -190,32 +209,19 @@ struct MarkcutReviewInboxView: View {
             } description: { Text(previewError) } actions: {
                 Button("Retry") { Task { await loadPreview(item) } }.buttonStyle(.borderedProminent)
             }
-            .frame(height: 210)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityIdentifier("markcutReviewRetry")
         } else {
             ProgressView(loadingStage)
-                .frame(maxWidth: .infinity).frame(height: 210)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.black, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
-    }
-
-    private func previewCanvasSize() -> CGSize {
-        let availableWidth = UIScreen.main.bounds.width - 24
-        let aspect = previewDimensions.width / max(1, previewDimensions.height)
-        let maxHeight = min(450, UIScreen.main.bounds.height * 0.52)
-        let width = min(availableWidth, maxHeight * aspect)
-        return CGSize(width: width, height: width / aspect)
-    }
-
-    private func previewHeight() -> CGFloat {
-        // Reserve space for Markcut's scene strip beneath its Remotion canvas.
-        min(505, max(170, previewCanvasSize().height + 42))
     }
 
     private func decisionControls(for item: [String: Any]) -> some View {
         VStack(spacing: 7) {
             TextField("Add feedback for changes…", text: $feedback, axis: .vertical)
-                .lineLimit(1...3)
+                .lineLimit(3...8)
                 .textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("markcutReviewFeedback")
             HStack(spacing: 10) {
@@ -313,11 +319,14 @@ struct MarkcutReviewInboxView: View {
             previewOrigin = URL(string: player).flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }.flatMap {
                 var root = $0; root.path = "/"; root.query = nil; root.fragment = nil; return root.url
             }
+            let aspect = width / max(1, height)
+            let canvasWidth = Int(max(120, min(Double(UIScreen.main.bounds.width) - 24,
+                                                  (Double(UIScreen.main.bounds.height) - 290) * aspect)))
             // The player bundle consumes the injected revision on first render.
             // Decode UTF-8 explicitly so non-ASCII scene metadata stays valid.
             html = """
             <!doctype html><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-            <style>html,body,#remotion-root{margin:0;width:100%;min-height:0;background:#111;color:white}body{overflow:hidden}#remotion-preview{width:100%}#remotion-canvas{width:\(previewCanvasSize().width)px!important;max-height:none!important;margin:0 auto!important}#scene-thumbnails{display:flex;align-items:center;gap:6px;overflow-x:auto;white-space:nowrap;height:36px;padding:5px 10px;box-sizing:border-box;scrollbar-width:none}#scene-thumbnails .scene-pill{flex:0 0 auto;font-size:11px;line-height:19px;border-radius:7px;background:#282b32;color:#ddd;padding:0 9px}#scene-thumbnails .scene-pill.active{background:#245da0;color:#fff}.comment-marker{display:none!important}</style>
+            <style>html,body,#remotion-root{margin:0;width:100%;min-height:0;background:#111;color:white}body{overflow:hidden}#remotion-preview{width:100%;height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;overflow:hidden}#remotion-canvas{width:min(100%,\(canvasWidth)px)!important;max-height:none!important;margin:auto!important}#scene-thumbnails{width:100%;flex-shrink:0;display:flex;align-items:center;gap:6px;overflow-x:auto;white-space:nowrap;height:36px;padding:5px 10px;box-sizing:border-box;scrollbar-width:none}#scene-thumbnails .scene-pill{flex:0 0 auto;font-size:11px;line-height:19px;border-radius:7px;background:#282b32;color:#ddd;padding:0 9px}#scene-thumbnails .scene-pill.active{background:#245da0;color:#fff}.comment-marker{display:none!important}</style>
             <div id="remotion-root"></div>
             <script>
             window.__markcutRevision={compiled:JSON.parse(new TextDecoder().decode(Uint8Array.from(atob('\(encoded)'),c=>c.charCodeAt(0))))};

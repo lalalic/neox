@@ -16,7 +16,7 @@ struct MarkcutWebPreview: UIViewRepresentable {
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
         view.scrollView.isScrollEnabled = false
-        view.isOpaque = false
+        view.isOpaque = true
         view.backgroundColor = UIColor(white: 0.07, alpha: 1)
         view.scrollView.backgroundColor = view.backgroundColor
         return view
