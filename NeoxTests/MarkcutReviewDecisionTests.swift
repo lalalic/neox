@@ -55,6 +55,31 @@ final class MarkcutReviewDecisionTests: XCTestCase {
     }
 
     @MainActor
+    func testChatGPTOwnerRoutingAndReceiptRequirements() throws {
+        let request = try MarkcutReviewRequest(id: UUID().uuidString,
+            contentHash: String(repeating: "c", count: 64), revisionID: "rev-3", title: "Test",
+            ownerCallbackTool: "chatgpt", ownerThreadID: "6ae92acc-cd28-83ea-8dc6-224653c9b433")
+        let feedback = MarkcutReviewFeedback(requestId: request.id, decision: .changesRequested,
+            feedback: "Needs a transition", idempotencyKey: "test-key-1")
+        let message = MarkcutReviewFeedback.chatGPTMessage(request: request, feedback: feedback)
+        XCTAssertTrue(message.contains(request.id))
+        XCTAssertTrue(message.contains(request.contentHash))
+        XCTAssertTrue(message.contains("test-key-1"))
+        XCTAssertTrue(message.contains("Needs a transition"))
+        XCTAssertNoThrow(try MarkcutReviewFeedback.requireChatGPTReceipt([
+            "status": "submitted", "mode": "new-turn"]))
+        XCTAssertThrowsError(try MarkcutReviewFeedback.requireChatGPTReceipt([
+            "status": "submitted", "mode": "new-thread"]))
+        XCTAssertThrowsError(try MarkcutReviewFeedback.requireChatGPTReceipt([
+            "status": "queued", "mode": "new-turn"]))
+        XCTAssertThrowsError(try MarkcutReviewRequest(id: UUID().uuidString,
+            contentHash: String(repeating: "c", count: 64), revisionID: "rev", title: "No thread",
+            ownerCallbackTool: "chatgpt"))
+        let encoded = try JSONEncoder().encode(request)
+        XCTAssertEqual(try JSONDecoder().decode(MarkcutReviewRequest.self, from: encoded), request)
+    }
+
+    @MainActor
     func testFeedbackRemainsQueuedWithoutOwnerAcknowledgement() throws {
         let suite = "MarkcutReviewFeedbackTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

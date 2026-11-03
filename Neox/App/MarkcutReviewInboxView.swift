@@ -79,18 +79,12 @@ struct MarkcutReviewInboxView: View {
                     .accessibilityIdentifier("markcutReviewInboxClose")
                     Spacer(minLength: 4)
                     Text("Review Inbox").font(.headline).lineLimit(1)
-                    Spacer(minLength: 4)
-                    Button { Task { await refreshLocalInbox() } } label: {
-                        Image(systemName: "arrow.clockwise").frame(width: 44, height: 44)
-                    }
-                    .disabled(syncing)
-                    .accessibilityLabel("Refresh local reviews")
+                    Spacer().frame(width: 44)
                 }
                 .buttonStyle(.plain)
                 .padding(.horizontal, 8)
                 .background(Color(uiColor: .systemBackground))
             }
-            .refreshable { await refreshLocalInbox() }
             .task(id: inbox.feedbackQueue.count) {
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("-markcut-review-ui-fixture") {
@@ -486,13 +480,6 @@ struct MarkcutReviewInboxView: View {
         await retryQueuedFeedback()
     }
 
-    private func refreshLocalInbox() async {
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-markcut-review-ui-fixture") { return }
-        #endif
-        await retryQueuedFeedback()
-    }
-
     private func retryQueuedFeedback() async {
         guard !syncing else { return }
         syncing = true
@@ -503,6 +490,9 @@ struct MarkcutReviewInboxView: View {
             do {
                 try await remote.deliverMarkcutReviewFeedback(request: request, feedback: pending)
                 inbox.acknowledge(pending)
+                // Never leave the reviewed (now removed) revision in an open sheet.
+                if selectedSessionID == pending.requestId { selectedGroup = nil }
+                if inbox.requests.isEmpty { dismiss() }
                 message = pending.decision == .approved ? "Feedback acknowledged by the owner" : "Changes acknowledged by the owner"
             } catch {
                 failures += 1

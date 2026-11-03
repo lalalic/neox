@@ -312,6 +312,17 @@ final class RemoteMCPClient: ObservableObject {
     func deliverMarkcutReviewFeedback(request: MarkcutReviewRequest,
                                       feedback: MarkcutReviewFeedback) async throws {
         guard let tool = request.ownerCallbackTool else { throw RemoteError.toolsUnavailable }
+        if tool == "chatgpt" {
+            guard let threadID = request.ownerThreadID else { throw RemoteError.toolsUnavailable }
+            let message = MarkcutReviewFeedback.chatGPTMessage(request: request, feedback: feedback)
+            let receipt = try await callAuthenticatedTool("chatgpt", [
+                "command": "turn", "args": ["thread_id": threadID, "message": message,
+                                            "mode": "async", "mergeable": false,
+                                            "reason": "Neo Mobile video review feedback"]
+            ])
+            try MarkcutReviewFeedback.requireChatGPTReceipt(receipt)
+            return
+        }
         let result = try await callAuthenticatedTool(tool, [
             "requestId": request.id,
             "revisionId": request.revisionID,

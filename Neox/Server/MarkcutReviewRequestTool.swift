@@ -12,7 +12,8 @@ enum MarkcutReviewRequestTool {
                 "groupId": MediaTools.stringProp("Optional stable grouping identifier"),
                 "groupTitle": MediaTools.stringProp("Optional title for a grouped set of revisions"),
                 "jobId": MediaTools.stringProp("Optional originating job identifier"),
-                "ownerCallbackTool": MediaTools.stringProp("Optional trusted review.feedback MCP callback on the saved authenticated Master"),
+                "ownerCallbackTool": MediaTools.stringProp("Owner callback: chatgpt for a thread, or an approved review.feedback MCP tool"),
+                "ownerThreadId": MediaTools.stringProp("Required for chatgpt callback: originating ChatGPT thread ID"),
                 "playerUrl": MediaTools.stringProp("Optional immutable HTTPS player bundle URL")
             ], required: ["id", "contentHash", "revisionId", "title"]),
             handler: { args in

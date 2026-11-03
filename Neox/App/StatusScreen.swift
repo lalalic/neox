@@ -15,6 +15,7 @@ struct StatusView: View {
     @State private var hasTemp = false
     @State private var clearingTemp = false
     @StateObject private var tours = CaptureTourStore.shared
+    @ObservedObject private var reviewInbox = MarkcutReviewInboxStore.shared
     // Bonjour is a *nearby* signal, not the authoritative online status.
     // Test the saved HTTPS address with its existing Keychain credential.
     @StateObject private var savedMaster = RemoteMCPClient()
@@ -83,6 +84,7 @@ struct StatusView: View {
                     actionLabel("Review Inbox", icon: "checkmark.rectangle.stack")
                 }
                 .buttonStyle(.plain)
+                .disabled(reviewInbox.requests.isEmpty && !ProcessInfo.processInfo.arguments.contains("-markcut-review-ui-fixture"))
                 .accessibilityIdentifier("markcutReviewInboxOpen")
 
                 Button {
@@ -109,7 +111,7 @@ struct StatusView: View {
         .sheet(isPresented: $showingVlogSubmission) { VlogSubmissionView() }
         .sheet(isPresented: $showingMarkcutReviews) { MarkcutReviewInboxView() }
         .onReceive(NotificationCenter.default.publisher(for: .markcutReviewNotificationTapped)) { _ in
-            showingMarkcutReviews = true
+            if !reviewInbox.requests.isEmpty { showingMarkcutReviews = true }
         }
         .sheet(isPresented: $showingRemote) { RemoteControlView() }
         .task {

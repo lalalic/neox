@@ -2,17 +2,13 @@ import XCTest
 
 final class MarkcutReviewInboxUITests: XCTestCase {
     @MainActor
-    func testReviewInboxOpensFromNeoStatusScreen() {
+    func testReviewInboxDisabledWhenNoPendingRequest() {
         let app = XCUIApplication()
         app.launch()
-
         let inbox = app.buttons["markcutReviewInboxOpen"]
         XCTAssertTrue(inbox.waitForExistence(timeout: 5))
-        inbox.tap()
-
-        XCTAssertTrue(app.staticTexts["Review Inbox"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["markcutReviewInboxClose"].exists)
-        XCTAssertTrue(app.staticTexts["Review requests sent to this phone will appear here."].waitForExistence(timeout: 5))
+        XCTAssertFalse(inbox.isEnabled)
+        XCTAssertFalse(app.buttons["Refresh local reviews"].exists)
     }
 
     @MainActor
@@ -21,6 +17,7 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         app.launchArguments.append("-markcut-review-ui-fixture")
         app.launch()
         app.buttons["markcutReviewInboxOpen"].tap()
+        XCTAssertFalse(app.buttons["Refresh local reviews"].exists)
         let options = app.buttons["markcutReviewOptions"]
         XCTAssertTrue(options.waitForExistence(timeout: 5))
         options.tap()

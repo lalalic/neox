@@ -10,6 +10,7 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
     let groupTitle: String?
     let jobID: String?
     let ownerCallbackTool: String?
+    let ownerThreadID: String?
     let playerURL: String?
 
     enum CodingKeys: String, CodingKey {
@@ -17,17 +18,20 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
         case revisionID = "revisionId"
         case groupID = "groupId"
         case jobID = "jobId"
-        case ownerCallbackTool, playerURL = "playerUrl"
+        case ownerCallbackTool, ownerThreadID = "ownerThreadId", playerURL = "playerUrl"
     }
 
     init(id: String, contentHash: String, revisionID: String, title: String,
          groupID: String? = nil, groupTitle: String? = nil, jobID: String? = nil,
-         ownerCallbackTool: String? = nil, playerURL: String? = nil) throws {
+         ownerCallbackTool: String? = nil, ownerThreadID: String? = nil,
+         playerURL: String? = nil) throws {
         guard UUID(uuidString: id) != nil,
               contentHash.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
               !revisionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              ownerCallbackTool.map({ $0 == "review.feedback" || $0.hasSuffix(".review.feedback") }) ?? true,
+              ownerCallbackTool.map({ $0 == "chatgpt" || $0 == "review.feedback" || $0.hasSuffix(".review.feedback") }) ?? true,
+              ownerThreadID.map({ $0.range(of: "^[A-Za-z0-9_-]{8,160}$", options: .regularExpression) != nil }) ?? true,
+              (ownerCallbackTool != "chatgpt" || ownerThreadID != nil),
               playerURL.map({ URL(string: $0)?.scheme == "https" }) ?? true else {
             throw CocoaError(.validationMissingMandatoryProperty)
         }
@@ -39,6 +43,7 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
         self.groupTitle = groupTitle
         self.jobID = jobID
         self.ownerCallbackTool = ownerCallbackTool
+        self.ownerThreadID = ownerThreadID
         self.playerURL = playerURL
     }
 
@@ -55,6 +60,7 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
             groupTitle: fields.decodeIfPresent(String.self, forKey: .groupTitle),
             jobID: fields.decodeIfPresent(String.self, forKey: .jobID),
             ownerCallbackTool: fields.decodeIfPresent(String.self, forKey: .ownerCallbackTool),
+            ownerThreadID: fields.decodeIfPresent(String.self, forKey: .ownerThreadID),
             playerURL: fields.decodeIfPresent(String.self, forKey: .playerURL)
         )
     }
@@ -76,6 +82,32 @@ struct MarkcutReviewFeedback: Codable, Equatable, Identifiable {
     let feedback: String
     let idempotencyKey: String
     var id: String { requestId }
+
+    static func chatGPTMessage(request: MarkcutReviewRequest, feedback: MarkcutReviewFeedback) -> String {
+        // Structured evidence for the owning thread to process, with an idempotency
+        // key so revisiting a queue turn is not a second human decision.
+        """
+        Neo Mobile Markcut review feedback (user-submitted)
+        request_id: \(request.id)
+        revision_id: \(request.revisionID)
+        content_hash: \(request.contentHash)
+        idempotency_key: \(feedback.idempotencyKey)
+        decision: \(feedback.decision.rawValue)
+        feedback: \(feedback.feedback)
+        Process this decision for the exact revision above. Do not assume approval for later revisions.
+        """
+    }
+
+    static func requireChatGPTReceipt(_ receipt: [String: Any]) throws {
+        // Async means accepted into the platform's durable delivery queue;
+        // it does NOT prove the thread has finished acting on the review.
+        let inner = receipt["result"] as? [String: Any] ?? receipt
+        guard inner["status"] as? String == "submitted",
+              inner["mode"] as? String == "new-turn" else {
+            throw NSError(domain: "MarkcutReviewFeedback", code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "ChatGPT did not confirm queued delivery"])
+        }
+    }
 
     static func requireAcknowledgement(_ result: [String: Any]) throws {
         guard result["acknowledged"] as? Bool == true else {
