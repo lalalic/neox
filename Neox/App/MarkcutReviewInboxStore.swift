@@ -122,12 +122,15 @@ final class MarkcutReviewInboxStore: ObservableObject {
     static let shared = MarkcutReviewInboxStore()
     private let requestsKey = "markcut.review.inbox.v2"
     private let feedbackKey = "markcut.review.feedback.v2"
+    private let dismissedKey = "markcut.review.dismissed.v1"
+    private var dismissedIDs: [String]
     private let defaults: UserDefaults
     @Published private(set) var requests: [MarkcutReviewRequest]
     @Published private(set) var feedbackQueue: [MarkcutReviewFeedback]
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        dismissedIDs = defaults.stringArray(forKey: dismissedKey) ?? []
         requests = (try? JSONDecoder().decode([MarkcutReviewRequest].self,
             from: defaults.data(forKey: requestsKey) ?? Data())) ?? []
         feedbackQueue = (try? JSONDecoder().decode([MarkcutReviewFeedback].self,
@@ -136,7 +139,8 @@ final class MarkcutReviewInboxStore: ObservableObject {
 
     @discardableResult
     func accept(_ request: MarkcutReviewRequest, notify: Bool = true) -> Bool {
-        guard !requests.contains(where: { $0.id == request.id }) else { return false }
+        guard !dismissedIDs.contains(request.id),
+              !requests.contains(where: { $0.id == request.id }) else { return false }
         requests.insert(request, at: 0)
         saveRequests()
         if notify { notifyForNewRequest(request) }
@@ -146,9 +150,9 @@ final class MarkcutReviewInboxStore: ObservableObject {
     func remove(_ id: String) {
         guard !feedbackQueue.contains(where: { $0.requestId == id }) else { return }
         requests.removeAll { $0.id == id }
+        rememberDismissed(id)
         saveRequests()
-        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["markcut-review-\(id)"])
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["markcut-review-\(id)"])
+        clearNotifications(id)
     }
 
     func queue(_ feedback: MarkcutReviewFeedback) {
@@ -160,11 +164,29 @@ final class MarkcutReviewInboxStore: ObservableObject {
     func acknowledge(_ feedback: MarkcutReviewFeedback) {
         feedbackQueue.removeAll { $0.id == feedback.id }
         requests.removeAll { $0.id == feedback.requestId }
+        rememberDismissed(feedback.requestId)
         saveFeedback()
         saveRequests()
+        clearNotifications(feedback.requestId)
     }
 
     func request(id: String) -> MarkcutReviewRequest? { requests.first { $0.id == id } }
+
+    private func rememberDismissed(_ id: String) {
+        // Client-owned, bounded dedup tombstones prevent a delayed APNs alert
+        // or repeat delivery from resurrecting a completed review.
+        dismissedIDs.removeAll { $0 == id }
+        dismissedIDs.append(id)
+        if dismissedIDs.count > 512 { dismissedIDs.removeFirst(dismissedIDs.count - 512) }
+        defaults.set(dismissedIDs, forKey: dismissedKey)
+    }
+
+    private func clearNotifications(_ id: String) {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: ["markcut-review-\(id)"])
+        center.removeDeliveredNotifications(withIdentifiers: ["markcut-review-\(id)"])
+        Task { await ReviewPushCoordinator.shared.clearDeliveredReview(id) }
+    }
 
     private func saveRequests() {
         if let data = try? JSONEncoder().encode(requests) { defaults.set(data, forKey: requestsKey) }

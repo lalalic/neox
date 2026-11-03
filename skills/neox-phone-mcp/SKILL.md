@@ -263,3 +263,16 @@ internet.
 Neox is on the App Store. If the phone doesn't have it, ask the user to
 install it from there and grant Local Network and Photos permission on first
 launch — no other setup is needed.
+
+## Push a Markcut review while Neo Mobile is backgrounded
+
+Use Neo Master's authenticated `mcp.neox-apns` facade, command
+`review.push.notify`, with a stable UUID, `contentHash`/`revisionId` from
+`markcut.preview`, a short title and the original `ownerThreadId` with
+`ownerCallbackTool: "chatgpt"`. The iPhone registers its APNs device token
+at launch and manages its own Inbox; the Master retains no review sessions.
+An APNs accepted response means only Apple accepted the alert. If the user
+opens Neo via the app icon instead of tapping a notification, Neo imports
+still-delivered review alerts locally. See `NeoxAPNs/README.md` for the
+validated API and operational limits. Keep the existing direct
+`review.request` path for connected foreground testing.

@@ -25,6 +25,7 @@ targets:
     entitlements:
       path: Neox/Neox.entitlements
       properties:
+        aps-environment: $(APNS_ENVIRONMENT)
         com.apple.developer.icloud-container-identifiers:
           - iCloud.com.neox.app
         com.apple.developer.icloud-services:
@@ -43,6 +44,11 @@ targets:
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "1"
         DEVELOPMENT_TEAM: "JABNLDLN8G"
+      configs:
+        Debug:
+          APNS_ENVIRONMENT: development
+        Release:
+          APNS_ENVIRONMENT: production
 
   NeoxTests:
     type: bundle.unit-test

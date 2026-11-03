@@ -20,6 +20,7 @@ final class MarkcutReviewDecisionTests: XCTestCase {
         XCTAssertEqual(restored, [request])
 
         store.remove(request.id)
+        XCTAssertFalse(store.accept(request, notify: false), "late APNs must not resurrect a removed review")
         let afterRemoval = MarkcutReviewInboxStore(defaults: defaults).requests
         XCTAssertTrue(afterRemoval.isEmpty,
                       "local refresh/relaunch must not restore removed rows")
@@ -77,6 +78,18 @@ final class MarkcutReviewDecisionTests: XCTestCase {
             ownerCallbackTool: "chatgpt"))
         let encoded = try JSONEncoder().encode(request)
         XCTAssertEqual(try JSONDecoder().decode(MarkcutReviewRequest.self, from: encoded), request)
+    }
+
+    @MainActor
+    func testAPNsPayloadDecodingRejectsInvalidRequests() throws {
+        let valid: [AnyHashable: Any] = ["neoReview": [
+            "id": UUID().uuidString, "contentHash": String(repeating: "a", count: 64),
+            "revisionId": "rev-1", "title": "Push review", "ownerCallbackTool": "chatgpt",
+            "ownerThreadId": "6ae92acc-cd28-83ea-8dc6-224653c9b433"
+        ]]
+        XCTAssertEqual(ReviewPushCoordinator.decodeReview(valid)?.title, "Push review")
+        XCTAssertNil(ReviewPushCoordinator.decodeReview(["neoReview": ["id": "bad"]]))
+        XCTAssertNil(ReviewPushCoordinator.decodeReview(["unrelated": "data"]))
     }
 
     @MainActor

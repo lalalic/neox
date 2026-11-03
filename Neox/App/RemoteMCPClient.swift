@@ -295,6 +295,19 @@ final class RemoteMCPClient: ObservableObject {
         return response
     }
 
+    /// APNs device registration goes through Neo Master's existing authenticated
+    /// HTTPS MCP gateway. The token is never stored on this phone.
+    func registerAPNsDevice(deviceID: String, token: String, environment: String) async throws {
+        let result = try await callAuthenticatedTool("mcp.neox-apns", [
+            "command": "review.push.register", "args": [
+                "deviceId": deviceID, "token": token, "environment": environment
+            ]
+        ])
+        guard result["registered"] as? Bool == true else {
+            throw RemoteError.toolFailure("APNs device registration was not acknowledged")
+        }
+    }
+
     /// Review media and feedback always use the saved Master's authenticated
     /// HTTPS gateway. The request list itself is owned and stored by this phone.
     func markcutPreviewMedia(contentHash: String) async throws -> [String: Any] {

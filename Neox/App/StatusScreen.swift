@@ -165,6 +165,7 @@ struct StatusView: View {
             return
         }
         await savedMaster.connect()
+        if savedMaster.connected { await ReviewPushCoordinator.shared.retryRegistration() }
         remoteChecked = true
     }
 

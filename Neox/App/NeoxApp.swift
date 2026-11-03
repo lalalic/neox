@@ -23,6 +23,10 @@ struct NeoxApp: App {
                         enteredBackground = true
                     case .active:
                         bridge.ensureRunning()
+                        Task {
+                            await ReviewPushCoordinator.shared.retryRegistration()
+                            await ReviewPushCoordinator.shared.recoverDeliveredNotifications()
+                        }
                         if enteredBackground {
                             enteredBackground = false
                             Task { await bridge.recoverAfterBackgroundIfNeeded() }
