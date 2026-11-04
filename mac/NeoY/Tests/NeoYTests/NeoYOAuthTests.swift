@@ -4,6 +4,27 @@ import XCTest
 @testable import NeoY
 
 final class NeoYOAuthTests: XCTestCase {
+    func testDiscoveryMethodNotAllowedAdvertisesSupportedMethods() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("neoy-oauth-405-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = NeoYOAuthService(
+            clientID: "configured-client",
+            consentToken: "test-static-token-0123456789abcdef",
+            stateURL: directory.appendingPathComponent("native-oauth-state.json")
+        )
+        let headers = ["host": "neoy.example", "x-forwarded-proto": "https"]
+        let path = "/.well-known/oauth-authorization-server"
+        let rejected = service.handle(method: "POST", path: path, requestTarget: path,
+                                      headers: headers, body: nil)
+        XCTAssertEqual(rejected?.status, 405)
+        XCTAssertEqual(rejected?.headers["Allow"], "GET, HEAD, OPTIONS")
+        let accepted = service.handle(method: "GET", path: path, requestTarget: path,
+                                      headers: headers, body: nil)
+        XCTAssertEqual(accepted?.status, 200)
+    }
+
     func testNativeOAuthUsesIndependentStateFile() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("neoy-oauth-\(UUID().uuidString)", isDirectory: true)

@@ -619,7 +619,9 @@ public final class MCPServer {
             )
 
         case ("GET", "/mcp"):
-            sendHTTP(connection: connection, status: 405, body: nil)
+            // RFC 9110 requires Allow on 405; MCP clients use it to detect POST-only transport.
+            sendHTTP(connection: connection, status: 405, body: nil,
+                     extraHeaders: ["Allow": "POST, DELETE, OPTIONS"])
 
         case ("DELETE", "/mcp"):
             sendHTTP(connection: connection, status: 200, body: nil)

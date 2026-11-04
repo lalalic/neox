@@ -3,6 +3,32 @@ import XCTest
 @testable import NeoY
 
 final class ToolCallAuditTests: XCTestCase {
+    func testMCPGETWithoutEventStreamAdvertisesAllowedMethods() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("neoy-mcp-405-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let audit = ToolCallAudit(url: root.appendingPathComponent("audit.jsonl"))
+        let (server, boundPort) = try await MainActor.run { try Self.makeServer(audit: audit) }
+        defer { Task { @MainActor in server.stop() } }
+        let url = URL(string: "http://127.0.0.1:\(boundPort)/mcp")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
+
+        // A client may probe GET to discover whether SSE is supported.
+        let (_, response) = try await URLSession.shared.data(for: request)
+        let http = try XCTUnwrap(response as? HTTPURLResponse)
+        XCTAssertEqual(http.statusCode, 405)
+        let allowed = Set((http.value(forHTTPHeaderField: "Allow") ?? "")
+            .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
+        XCTAssertTrue(allowed.isSuperset(of: ["POST", "DELETE", "OPTIONS"]))
+
+        request.httpMethod = "OPTIONS"
+        let (_, options) = try await URLSession.shared.data(for: request)
+        XCTAssertEqual((options as? HTTPURLResponse)?.statusCode, 204)
+    }
+
     func testGatewayAuditPreservesRawInputOutputAndFailures() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("neoy-tool-call-audit", isDirectory: true)

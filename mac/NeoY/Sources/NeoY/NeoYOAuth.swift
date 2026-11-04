@@ -146,7 +146,8 @@ final class NeoYOAuthService: @unchecked Sendable {
                 return NeoYOAuthHTTPResponse(status: 204, headers: discoveryHeaders())
             }
             guard method == "GET" || method == "HEAD" else {
-                return json(status: 405, ["error": "method_not_allowed"], headers: discoveryHeaders())
+                return json(status: 405, ["error": "method_not_allowed"],
+                            headers: discoveryHeaders().merging(["Allow": "GET, HEAD, OPTIONS"]) { _, allowed in allowed })
             }
             let object: [String: Any]
             if path.contains("oauth-protected-resource") {
