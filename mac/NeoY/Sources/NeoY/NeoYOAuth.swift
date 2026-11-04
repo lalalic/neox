@@ -245,7 +245,7 @@ final class NeoYOAuthService: @unchecked Sendable {
         """
         return NeoYOAuthHTTPResponse(status: 200, body: Data(page.utf8), contentType: "text/html; charset=utf-8", headers: [
             "Cache-Control": "no-store",
-            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://chatgpt.com https://claude.ai; base-uri 'none'; frame-ancestors 'none'",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://chatgpt.com https://claude.ai https://grok.com; base-uri 'none'; frame-ancestors 'none'",
             "X-Frame-Options": "DENY",
             "Referrer-Policy": "no-referrer"
         ])
@@ -613,6 +613,7 @@ final class NeoYOAuthService: @unchecked Sendable {
            url.user == nil, url.password == nil, url.query == nil, url.fragment == nil { return true }
         if value == "https://chatgpt.com/connector_platform_oauth_redirect" { return true }
         if value == "https://claude.ai/api/mcp/auth_callback" { return true }
+        if value == "https://grok.com/connectors-oauth-exchange-code/" { return true }
         guard let url = URL(string: value), url.scheme == "https", url.host == "chatgpt.com", url.user == nil, url.password == nil,
               url.port == nil, url.query == nil, url.fragment == nil else { return false }
         return url.path.range(of: #"^/connector/oauth/[A-Za-z0-9_-]{1,128}$"#, options: .regularExpression) != nil
