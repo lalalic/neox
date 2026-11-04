@@ -132,6 +132,52 @@ final class NeoYOAuthTests: XCTestCase {
         XCTAssertEqual(registration?.status, 201)
     }
 
+    func testClaudeOAuthCallbackRegistrationRequiresExactTrustedURI() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("neoy-oauth-claude-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let service = NeoYOAuthService(
+            clientID: "configured-client",
+            consentToken: "test-static-token-0123456789abcdef",
+            stateURL: directory.appendingPathComponent("native-oauth-state.json")
+        )
+        let headers = ["host": "neoy.example", "x-forwarded-proto": "https"]
+        func register(_ redirect: String) throws -> NeoYOAuthHTTPResponse? {
+            service.handle(method: "POST", path: "/register", requestTarget: "/register",
+                headers: headers, body: try JSONSerialization.data(withJSONObject: [
+                    "client_name": "Claude", "redirect_uris": [redirect],
+                    "token_endpoint_auth_method": "none",
+                ]))
+        }
+
+        let callback = "https://claude.ai/api/mcp/auth_callback"
+        let registration = try register(callback)
+        XCTAssertEqual(registration?.status, 201)
+        let data = try XCTUnwrap(registration?.body)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let clientID = try XCTUnwrap(object["client_id"] as? String)
+        for untrusted in [
+            "http://claude.ai/api/mcp/auth_callback",
+            "https://claude.ai.evil.example/api/mcp/auth_callback",
+            "https://claude.ai/api/mcp/auth_callback?next=evil",
+            "https://claude.ai/api/mcp/other",
+        ] {
+            XCTAssertEqual(try register(untrusted)?.status, 400, untrusted)
+        }
+
+        let target = "/authorize?response_type=code&client_id=\(clientID)"
+            + "&redirect_uri=https%3A%2F%2Fclaude.ai%2Fapi%2Fmcp%2Fauth_callback"
+            + "&code_challenge=\(String(repeating: "a", count: 43))&code_challenge_method=S256"
+        let authorization = service.handle(method: "GET", path: "/authorize", requestTarget: target,
+            headers: headers, body: nil)
+        XCTAssertEqual(authorization?.status, 200)
+        XCTAssertTrue(authorization?.headers["Content-Security-Policy"]?.contains("https://claude.ai") == true)
+        XCTAssertTrue(String(data: try XCTUnwrap(authorization?.body), encoding: .utf8)?
+            .contains("requesting MCP client") == true)
+    }
+
     func testInteractiveAccessTokenSelfRenewsWithoutRefreshSecret() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("neoy-oauth-interactive-\(UUID().uuidString)", isDirectory: true)

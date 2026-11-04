@@ -16,10 +16,10 @@ struct NeoYOAuthHTTPResponse: Sendable {
     }
 }
 
-/// Minimal OAuth 2.1 authorization server for ChatGPT MCP apps.
+/// Minimal OAuth 2.1 authorization server for approved remote MCP clients.
 ///
 /// The existing NeoY Core token remains the operator consent secret and a valid
-/// Bearer credential for non-ChatGPT clients. OAuth access tokens are issued only
+/// Bearer credential for non-OAuth clients. OAuth access tokens are issued only
 /// after the operator proves possession of that token on /authorize.
 final class NeoYOAuthService: @unchecked Sendable {
     private struct PendingAuth {
@@ -237,14 +237,14 @@ final class NeoYOAuthService: @unchecked Sendable {
         let page = """
         <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
         <title>Authorize Neo</title><style>body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:34rem;margin:3rem auto;padding:0 1.25rem}code{background:#f2f2f2;padding:.1rem .3rem;border-radius:3px;word-break:break-all}input{width:100%;padding:.5rem;box-sizing:border-box}button{margin-top:1rem;padding:.6rem 1.2rem}</style></head><body>
-        <h1>Authorize Neo</h1><p>This grants ChatGPT the Neo MCP capabilities enabled for remote access.</p>
+        <h1>Authorize Neo</h1><p>This grants the requesting MCP client the Neo capabilities enabled for remote access.</p>
         <p>Server: <code>\(safeIssuer)</code><br>Redirect: <code>\(safeRedirect)</code></p>
         <form method="post" action="/authorize"><input type="hidden" name="rid" value="\(safeRID)"><label for="token">Neo token</label><input id="token" type="password" name="token" autocomplete="off"><button type="submit">Approve</button></form>
         </body></html>
         """
         return NeoYOAuthHTTPResponse(status: 200, body: Data(page.utf8), contentType: "text/html; charset=utf-8", headers: [
             "Cache-Control": "no-store",
-            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://chatgpt.com; base-uri 'none'; frame-ancestors 'none'",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://chatgpt.com https://claude.ai; base-uri 'none'; frame-ancestors 'none'",
             "X-Frame-Options": "DENY",
             "Referrer-Policy": "no-referrer"
         ])
@@ -386,7 +386,7 @@ final class NeoYOAuthService: @unchecked Sendable {
         guard let redirectUris = object["redirect_uris"] as? [String], !redirectUris.isEmpty,
               redirectUris.allSatisfy(Self.allowedRedirect) else {
             return oauthError(status: 400, code: "invalid_redirect_uri",
-                              description: "all redirect_uris must be approved ChatGPT callback URLs")
+                              description: "all redirect_uris must be approved OAuth callback URLs")
         }
         if let method = object["token_endpoint_auth_method"] as? String, method != "none" {
             return oauthError(status: 400, code: "invalid_client_metadata",
@@ -611,6 +611,7 @@ final class NeoYOAuthService: @unchecked Sendable {
            let port = url.port, (1024...65535).contains(port), url.path == "/neo/oauth/callback",
            url.user == nil, url.password == nil, url.query == nil, url.fragment == nil { return true }
         if value == "https://chatgpt.com/connector_platform_oauth_redirect" { return true }
+        if value == "https://claude.ai/api/mcp/auth_callback" { return true }
         guard let url = URL(string: value), url.scheme == "https", url.host == "chatgpt.com", url.user == nil, url.password == nil,
               url.port == nil, url.query == nil, url.fragment == nil else { return false }
         return url.path.range(of: #"^/connector/oauth/[A-Za-z0-9_-]{1,128}$"#, options: .regularExpression) != nil
