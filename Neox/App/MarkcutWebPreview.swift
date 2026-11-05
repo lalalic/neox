@@ -2,10 +2,16 @@ import SwiftUI
 import WebKit
 import UIKit
 
+struct MarkcutPlaybackPosition: Equatable {
+    let sceneID: String?
+    let timeSeconds: Double
+}
+
 struct MarkcutWebPreview: UIViewRepresentable {
     let html: String
     let baseURL: URL?
     @Binding var failure: String?
+    @Binding var playbackPosition: MarkcutPlaybackPosition?
     let retry: Int
 
     func makeUIView(context: Context) -> WKWebView {
@@ -13,6 +19,7 @@ struct MarkcutWebPreview: UIViewRepresentable {
         configuration.allowsInlineMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.userContentController.add(context.coordinator, name: "markcutPreviewError")
+        configuration.userContentController.add(context.coordinator, name: "markcutPlaybackPosition")
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
         view.scrollView.isScrollEnabled = false
@@ -33,15 +40,30 @@ struct MarkcutWebPreview: UIViewRepresentable {
         view.loadHTMLString(html, baseURL: baseURL)
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(failure: $failure) }
+    func makeCoordinator() -> Coordinator { Coordinator(failure: $failure, playbackPosition: $playbackPosition) }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var lastHTML: String?
         var lastRetry = -1
         var failure: Binding<String?>
-        init(failure: Binding<String?>) { self.failure = failure }
+        var playbackPosition: Binding<MarkcutPlaybackPosition?>
+        init(failure: Binding<String?>, playbackPosition: Binding<MarkcutPlaybackPosition?>) {
+            self.failure = failure
+            self.playbackPosition = playbackPosition
+        }
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            DispatchQueue.main.async { self.failure.wrappedValue = String(describing: message.body) }
+            if message.name == "markcutPlaybackPosition",
+               let value = message.body as? [String: Any],
+               let seconds = value["timeSeconds"] as? Double,
+               seconds.isFinite && seconds >= 0 {
+                let sceneID = value["sceneId"] as? String
+                DispatchQueue.main.async {
+                    self.playbackPosition.wrappedValue = MarkcutPlaybackPosition(
+                        sceneID: sceneID, timeSeconds: seconds)
+                }
+            } else if message.name == "markcutPreviewError" {
+                DispatchQueue.main.async { self.failure.wrappedValue = String(describing: message.body) }
+            }
         }
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
             DispatchQueue.main.async { self.failure.wrappedValue = error.localizedDescription }

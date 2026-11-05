@@ -324,7 +324,21 @@ final class RemoteMCPClient: ObservableObject {
 
     func deliverMarkcutReviewFeedback(request: MarkcutReviewRequest,
                                       feedback: MarkcutReviewFeedback) async throws {
-        guard let tool = request.ownerCallbackTool else { throw RemoteError.toolsUnavailable }
+        if request.effectiveDelivery == "event" {
+            guard let template = request.eventTemplate else { throw RemoteError.toolsUnavailable }
+            let event = try template.event(review: feedback.reviewResult(request: request))
+            let receipt = try await callAuthenticatedTool("events", [
+                "command": "publish", "args": event
+            ])
+            guard receipt["published"] as? Bool == true else {
+                throw RemoteError.toolFailure("Events MCP did not acknowledge publish")
+            }
+            return
+        }
+        // Explicit text reviews use the Agent new-turn route. Legacy callback
+        // requests retain their old behavior until their outstanding queue drains.
+        let tool = request.delivery == "text" ? "chatgpt" : (request.ownerCallbackTool ?? "")
+        guard !tool.isEmpty else { throw RemoteError.toolsUnavailable }
         if tool == "chatgpt" {
             guard let threadID = request.ownerThreadID else { throw RemoteError.toolsUnavailable }
             let message = MarkcutReviewFeedback.chatGPTMessage(request: request, feedback: feedback)

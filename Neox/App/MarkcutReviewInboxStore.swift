@@ -1,6 +1,37 @@
 import Foundation
 import UserNotifications
 
+struct MarkcutReviewEventTemplate: Codable, Equatable {
+    let type: String
+    let source: String
+    let data: [String: JSONValue]
+
+    func validate() throws {
+        let jobSource = #"^job/[A-Za-z0-9_-]+/task/[A-Za-z0-9_-]+/execution/[A-Za-z0-9_-]+$"#
+        guard type == "markcut.review.submitted",
+              (source.range(of: jobSource, options: .regularExpression) != nil),
+              data["review"] == nil,
+              !data.keys.contains(where: { ["__proto__", "constructor", "prototype"].contains($0) }) else {
+            throw CocoaError(.validationMissingMandatoryProperty)
+        }
+    }
+
+    func event(review: [String: Any]) throws -> [String: Any] {
+        try validate()
+        let encoded = try JSONEncoder().encode(data)
+        var fixed = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] ?? [:]
+        fixed["review"] = review
+        return ["type": type, "source": source, "data": fixed]
+    }
+}
+
+struct MarkcutReviewComment: Codable, Equatable {
+    let sceneId: String?
+    let timeSeconds: Double
+    let text: String
+    let scope: String
+}
+
 struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
     let id: String
     let contentHash: String
@@ -9,12 +40,16 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
     let groupID: String?
     let groupTitle: String?
     let jobID: String?
+    let delivery: String?
+    let eventTemplate: MarkcutReviewEventTemplate?
+    let previewID: String?
     let ownerCallbackTool: String?
     let ownerThreadID: String?
     let playerURL: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, contentHash, title, groupTitle
+        case id, contentHash, title, groupTitle, delivery, eventTemplate
+        case previewID = "previewId"
         case revisionID = "revisionId"
         case groupID = "groupId"
         case jobID = "jobId"
@@ -23,18 +58,26 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
 
     init(id: String, contentHash: String, revisionID: String, title: String,
          groupID: String? = nil, groupTitle: String? = nil, jobID: String? = nil,
-         ownerCallbackTool: String? = nil, ownerThreadID: String? = nil,
+         delivery: String? = nil, eventTemplate: MarkcutReviewEventTemplate? = nil,
+         previewID: String? = nil, ownerCallbackTool: String? = nil, ownerThreadID: String? = nil,
          playerURL: String? = nil) throws {
         guard UUID(uuidString: id) != nil,
               contentHash.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
               !revisionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              delivery.map({ $0 == "text" || $0 == "event" }) ?? true,
+              (delivery == "event" ? eventTemplate != nil : eventTemplate == nil),
+              (delivery != "text" || ownerThreadID != nil),
               ownerCallbackTool.map({ $0 == "chatgpt" || $0 == "review.feedback" || $0.hasSuffix(".review.feedback") }) ?? true,
               ownerThreadID.map({ $0.range(of: "^[A-Za-z0-9_-]{8,160}$", options: .regularExpression) != nil }) ?? true,
               (ownerCallbackTool != "chatgpt" || ownerThreadID != nil),
               playerURL.map({ URL(string: $0)?.scheme == "https" }) ?? true else {
             throw CocoaError(.validationMissingMandatoryProperty)
         }
+        try eventTemplate?.validate()
+        self.delivery = delivery
+        self.eventTemplate = eventTemplate
+        self.previewID = previewID
         self.id = id
         self.contentHash = contentHash
         self.revisionID = revisionID
@@ -59,11 +102,17 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
             groupID: fields.decodeIfPresent(String.self, forKey: .groupID),
             groupTitle: fields.decodeIfPresent(String.self, forKey: .groupTitle),
             jobID: fields.decodeIfPresent(String.self, forKey: .jobID),
+            delivery: fields.decodeIfPresent(String.self, forKey: .delivery),
+            eventTemplate: fields.decodeIfPresent(MarkcutReviewEventTemplate.self, forKey: .eventTemplate),
+            previewID: fields.decodeIfPresent(String.self, forKey: .previewID),
             ownerCallbackTool: fields.decodeIfPresent(String.self, forKey: .ownerCallbackTool),
             ownerThreadID: fields.decodeIfPresent(String.self, forKey: .ownerThreadID),
             playerURL: fields.decodeIfPresent(String.self, forKey: .playerURL)
         )
     }
+
+    var effectiveDelivery: String { delivery ?? "text" }
+    var canDeliver: Bool { delivery == "event" ? eventTemplate != nil : (ownerThreadID != nil || ownerCallbackTool != nil) }
 
     var groupingValue: [String: Any] {
         var value: [String: Any] = ["id": id, "revisionId": revisionID, "contentHash": contentHash,
@@ -81,6 +130,31 @@ struct MarkcutReviewFeedback: Codable, Equatable, Identifiable {
     let decision: MarkcutReviewChoice
     let feedback: String
     let idempotencyKey: String
+    let comments: [MarkcutReviewComment]?
+
+    init(requestId: String, decision: MarkcutReviewChoice, feedback: String, idempotencyKey: String,
+         comments: [MarkcutReviewComment]? = nil) {
+        self.requestId = requestId
+        self.decision = decision
+        self.feedback = feedback
+        self.idempotencyKey = idempotencyKey
+        self.comments = comments
+    }
+
+    func reviewResult(request: MarkcutReviewRequest) -> [String: Any] {
+        let resolvedComments: [MarkcutReviewComment] = decision == .approved ? [] :
+            (comments ?? [MarkcutReviewComment(sceneId: nil, timeSeconds: 0, text: feedback, scope: "overall")])
+        return ["requestId": request.id,
+                "previewId": request.previewID ?? request.revisionID,
+                "revisionId": request.revisionID,
+                "contentHash": request.contentHash,
+                "decision": decision.rawValue,
+                "comments": resolvedComments.map { comment in
+                    ["sceneId": comment.sceneId as Any? ?? NSNull(),
+                     "timeSeconds": comment.timeSeconds, "text": comment.text, "scope": comment.scope] as [String: Any]
+                },
+                "idempotencyKey": idempotencyKey]
+    }
     var id: String { requestId }
 
     static func chatGPTMessage(request: MarkcutReviewRequest, feedback: MarkcutReviewFeedback) -> String {
@@ -94,8 +168,14 @@ struct MarkcutReviewFeedback: Codable, Equatable, Identifiable {
         idempotency_key: \(feedback.idempotencyKey)
         decision: \(feedback.decision.rawValue)
         feedback: \(feedback.feedback)
+        review_result: \(reviewResultJSON(request: request, feedback: feedback))
         Process this decision for the exact revision above. Do not assume approval for later revisions.
         """
+    }
+
+    private static func reviewResultJSON(request: MarkcutReviewRequest, feedback: MarkcutReviewFeedback) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: feedback.reviewResult(request: request), options: [.sortedKeys]) else { return "{}" }
+        return String(decoding: data, as: UTF8.self)
     }
 
     static func requireChatGPTReceipt(_ receipt: [String: Any]) throws {
@@ -123,6 +203,8 @@ final class MarkcutReviewInboxStore: ObservableObject {
     private let requestsKey = "markcut.review.inbox.v2"
     private let feedbackKey = "markcut.review.feedback.v2"
     private let dismissedKey = "markcut.review.dismissed.v1"
+    private let latestGroupKey = "markcut.review.latest-group.v1"
+    private var latestGroupRequestIDs: [String: String]
     private var dismissedIDs: [String]
     private let defaults: UserDefaults
     @Published private(set) var requests: [MarkcutReviewRequest]
@@ -135,6 +217,15 @@ final class MarkcutReviewInboxStore: ObservableObject {
             from: defaults.data(forKey: requestsKey) ?? Data())) ?? []
         feedbackQueue = (try? JSONDecoder().decode([MarkcutReviewFeedback].self,
             from: defaults.data(forKey: feedbackKey) ?? Data())) ?? []
+        latestGroupRequestIDs = defaults.dictionary(forKey: latestGroupKey) as? [String: String] ?? [:]
+        // On upgrade, recover the newest request for each group without losing
+        // tombstones that already outlived their acknowledged requests.
+        for request in requests {
+            if let groupID = request.groupID, latestGroupRequestIDs[groupID] == nil {
+                latestGroupRequestIDs[groupID] = request.id
+            }
+        }
+        defaults.set(latestGroupRequestIDs, forKey: latestGroupKey)
     }
 
     @discardableResult
@@ -142,6 +233,10 @@ final class MarkcutReviewInboxStore: ObservableObject {
         guard !dismissedIDs.contains(request.id),
               !requests.contains(where: { $0.id == request.id }) else { return false }
         requests.insert(request, at: 0)
+        if let groupID = request.groupID {
+            latestGroupRequestIDs[groupID] = request.id
+            defaults.set(latestGroupRequestIDs, forKey: latestGroupKey)
+        }
         saveRequests()
         if notify { notifyForNewRequest(request) }
         return true
@@ -171,6 +266,21 @@ final class MarkcutReviewInboxStore: ObservableObject {
     }
 
     func request(id: String) -> MarkcutReviewRequest? { requests.first { $0.id == id } }
+
+    // A newer accepted review for the same video supersedes older revisions.
+    // Keep historical requests visible, but never let them submit as current.
+    func isCurrent(_ request: MarkcutReviewRequest) -> Bool {
+        guard let groupID = request.groupID else { return true }
+        return latestGroupRequestIDs[groupID] == request.id
+    }
+
+    var groupedSessions: [[String: Any]] {
+        requests.map { request in
+            var item = request.groupingValue
+            if !isCurrent(request) { item["status"] = "superseded" }
+            return item
+        }
+    }
 
     private func rememberDismissed(_ id: String) {
         // Client-owned, bounded dedup tombstones prevent a delayed APNs alert

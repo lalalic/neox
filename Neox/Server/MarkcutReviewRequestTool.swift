@@ -12,6 +12,18 @@ enum MarkcutReviewRequestTool {
                 "groupId": MediaTools.stringProp("Optional stable grouping identifier"),
                 "groupTitle": MediaTools.stringProp("Optional title for a grouped set of revisions"),
                 "jobId": MediaTools.stringProp("Optional originating job identifier"),
+                "delivery": MediaTools.stringProp("Review delivery: text or event"),
+                "previewId": MediaTools.stringProp("Provider-bound immutable preview identifier"),
+                "eventTemplate": .object([
+                    "type": .string("object"),
+                    "description": .string("Caller-bound Events MCP envelope; type/source/data are immutable"),
+                    "properties": .object([
+                        "type": .object(["type": .string("string")]),
+                        "source": .object(["type": .string("string")]),
+                        "data": .object(["type": .string("object")])
+                    ]),
+                    "required": .array([.string("type"), .string("source"), .string("data")])
+                ]),
                 "ownerCallbackTool": MediaTools.stringProp("Owner callback: chatgpt for a thread, or an approved review.feedback MCP tool"),
                 "ownerThreadId": MediaTools.stringProp("Required for chatgpt callback: originating ChatGPT thread ID"),
                 "playerUrl": MediaTools.stringProp("Optional immutable HTTPS player bundle URL")

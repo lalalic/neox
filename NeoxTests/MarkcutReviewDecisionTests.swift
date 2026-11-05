@@ -117,6 +117,96 @@ final class MarkcutReviewDecisionTests: XCTestCase {
         XCTAssertTrue(afterAcknowledgement.isEmpty)
     }
 
+    @MainActor
+    func testEventDeliveryTemplateValidationAndReviewResultSerialization() throws {
+        let template = MarkcutReviewEventTemplate(type: "markcut.review.submitted",
+            source: "job/j123/task/producer/execution/e456",
+            data: ["correlation": .object(["jobId": .string("j123")])])
+        let request = try MarkcutReviewRequest(id: UUID().uuidString,
+            contentHash: String(repeating: "b", count: 64), revisionID: "rev-42",
+            title: "Review scene", delivery: "event", eventTemplate: template,
+            previewID: "preview-42")
+        let comment = MarkcutReviewComment(sceneId: "intro", timeSeconds: 4.25,
+            text: "Remove second pause", scope: "spot")
+        let feedback = MarkcutReviewFeedback(requestId: request.id, decision: .changesRequested,
+            feedback: "Remove second pause", idempotencyKey: "stable-retry-key", comments: [comment])
+        let result = feedback.reviewResult(request: request)
+        let event = try template.event(review: result)
+        XCTAssertEqual(event["source"] as? String, template.source)
+        XCTAssertEqual(event["type"] as? String, "markcut.review.submitted")
+        let data = try XCTUnwrap(event["data"] as? [String: Any])
+        XCTAssertEqual((data["correlation"] as? [String: String])?["jobId"], "j123")
+        let review = try XCTUnwrap(data["review"] as? [String: Any])
+        XCTAssertEqual(review["previewId"] as? String, "preview-42")
+        XCTAssertEqual(review["contentHash"] as? String, request.contentHash)
+        XCTAssertEqual(review["idempotencyKey"] as? String, "stable-retry-key")
+        let comments = try XCTUnwrap(review["comments"] as? [[String: Any]])
+        XCTAssertEqual(comments.first?["sceneId"] as? String, "intro")
+        XCTAssertEqual(comments.first?["timeSeconds"] as? Double, 4.25)
+        let restored = try JSONDecoder().decode(MarkcutReviewRequest.self,
+            from: JSONEncoder().encode(request))
+        XCTAssertEqual(restored.eventTemplate, template)
+        XCTAssertTrue(restored.canDeliver)
+        XCTAssertThrowsError(try MarkcutReviewRequest(id: UUID().uuidString,
+            contentHash: request.contentHash, revisionID: "rev", title: "Bad",
+            delivery: "event", eventTemplate: MarkcutReviewEventTemplate(
+                type: "task.completed", source: template.source, data: [:])))
+        XCTAssertThrowsError(try MarkcutReviewRequest(id: UUID().uuidString,
+            contentHash: request.contentHash, revisionID: "rev", title: "Bad",
+            delivery: "event", eventTemplate: nil))
+    }
+
+    @MainActor
+    func testEventFeedbackRetryPreservesRequestAndIdempotencyAcrossRelaunch() throws {
+        let suite = "MarkcutReviewEventRetry.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let request = try MarkcutReviewRequest(id: UUID().uuidString,
+            contentHash: String(repeating: "c", count: 64), revisionID: "r8", title: "Review",
+            delivery: "event", eventTemplate: MarkcutReviewEventTemplate(
+                type: "markcut.review.submitted",
+                source: "job/j8/task/review/execution/e8", data: [:]))
+        let queued = MarkcutReviewFeedback(requestId: request.id, decision: .approved,
+            feedback: "", idempotencyKey: "retry-key-preserved")
+        let inbox = MarkcutReviewInboxStore(defaults: defaults)
+        XCTAssertTrue(inbox.accept(request, notify: false))
+        inbox.queue(queued)
+        let restored = MarkcutReviewInboxStore(defaults: defaults)
+        XCTAssertEqual(restored.requests, [request])
+        XCTAssertEqual(restored.feedbackQueue, [queued])
+        XCTAssertEqual(restored.feedbackQueue[0].reviewResult(request: request)["idempotencyKey"] as? String,
+                       "retry-key-preserved")
+        XCTAssertEqual(restored.feedbackQueue[0].reviewResult(request: request)["comments"] as? [[String: String]], [])
+        restored.acknowledge(queued)
+        XCTAssertEqual(MarkcutReviewInboxStore(defaults: defaults).requests.count, 0)
+    }
+
+    @MainActor
+    func testNewVideoRevisionMakesOldMobileRequestReadonly() throws {
+        let suite = "MarkcutReviewStale.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let inbox = MarkcutReviewInboxStore(defaults: defaults)
+        let old = try MarkcutReviewRequest(id: UUID().uuidString,
+            contentHash: String(repeating: "1", count: 64), revisionID: "r1",
+            title: "Cut v1", groupID: "same-video", ownerCallbackTool: "review.feedback")
+        let new = try MarkcutReviewRequest(id: UUID().uuidString,
+            contentHash: String(repeating: "2", count: 64), revisionID: "r2",
+            title: "Cut v2", groupID: "same-video", ownerCallbackTool: "review.feedback")
+        XCTAssertTrue(inbox.accept(old, notify: false))
+        XCTAssertTrue(inbox.isCurrent(old))
+        XCTAssertTrue(inbox.accept(new, notify: false))
+        XCTAssertFalse(inbox.isCurrent(old))
+        XCTAssertTrue(inbox.isCurrent(new))
+        // Acknowledging the latest review must not reactivate an older revision.
+        inbox.acknowledge(MarkcutReviewFeedback(requestId: new.id,
+            decision: .approved, feedback: "", idempotencyKey: "ack-new"))
+        XCTAssertFalse(inbox.isCurrent(old))
+        XCTAssertFalse(MarkcutReviewInboxStore(defaults: defaults).isCurrent(old))
+        XCTAssertEqual(inbox.groupedSessions.first(where: {$0["id"] as? String == old.id})?["status"] as? String,
+                       "superseded")
+    }
+
     func testReviewGroupingKeepsJobSessionsTogetherAndSeparatesJobs() {
         let sessions: [[String: Any]] = [
             ["id":"a", "label":"video-a-v1", "status":"ready", "createdAt":"2026-11-01T10:00:00Z",

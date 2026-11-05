@@ -17,9 +17,10 @@ struct MarkcutReviewInboxView: View {
     @State private var previewRetry = 0
     @State private var landscapeExpanded = false
     @State private var feedback = ""
+    @State private var playbackPosition: MarkcutPlaybackPosition?
     @State private var message: String?
     @State private var syncing = false
-    private var sessions: [[String: Any]] { fixtureSessions ?? inbox.requests.map(\.groupingValue) }
+    private var sessions: [[String: Any]] { fixtureSessions ?? inbox.groupedSessions }
 
     private var groups: [MarkcutReviewGroup] { MarkcutReviewGrouping.groups(from: sessions) }
     private func selectedItem(in group: MarkcutReviewGroup) -> [String: Any]? {
@@ -94,7 +95,7 @@ struct MarkcutReviewInboxView: View {
                 while !Task.isCancelled {
                     await retryQueuedFeedback()
                     guard inbox.feedbackQueue.contains(where: { feedback in
-                        inbox.request(id: feedback.requestId)?.ownerCallbackTool != nil
+                        inbox.request(id: feedback.requestId)?.canDeliver == true
                     }) else { return }
                     do { try await Task.sleep(for: .seconds(30)) } catch { return }
                 }
@@ -185,6 +186,7 @@ struct MarkcutReviewInboxView: View {
                         ForEach(group.sessions, id: \.reviewSessionID) { revision in
                             Button {
                                 guard revision.reviewSessionID != selectedSessionID else { return }
+                                playbackPosition = nil
                                 selectedSessionID = revision.reviewSessionID
                                 html = nil
                                 previewError = nil
@@ -240,7 +242,7 @@ struct MarkcutReviewInboxView: View {
             let availableHeight = proxy.size.width - 22
             ZStack {
                 Color.black.ignoresSafeArea()
-                MarkcutReviewSurface(html: $html, origin: $previewOrigin,
+                MarkcutReviewSurface(html: $html, origin: $previewOrigin, playbackPosition: $playbackPosition,
                     error: $previewError, loadingStage: $loadingStage, retry: $previewRetry) {
                     if let group = selectedGroup, let item = selectedItem(in: group) {
                         Task { await loadPreview(item) }
@@ -270,7 +272,7 @@ struct MarkcutReviewInboxView: View {
     private func preview(for item: [String: Any]) -> some View {
         // The sheet closure can outlive the parent View's captured @State values.
         // Let a dedicated Binding-backed child observe the asynchronous preview.
-        MarkcutReviewSurface(html: $html, origin: $previewOrigin,
+        MarkcutReviewSurface(html: $html, origin: $previewOrigin, playbackPosition: $playbackPosition,
             error: $previewError, loadingStage: $loadingStage, retry: $previewRetry) {
             Task { await loadPreview(item) }
         }
@@ -278,14 +280,14 @@ struct MarkcutReviewInboxView: View {
 
     private func cannotDeliver(_ item: [String: Any]) -> Bool {
         guard let id = item["id"] as? String, let request = inbox.request(id: id) else { return false }
-        return request.ownerCallbackTool == nil
+        return !request.canDeliver || !inbox.isCurrent(request)
     }
 
     private func decisionControls(for item: [String: Any]) -> some View {
         VStack(spacing: 7) {
             if let requestID = item["id"] as? String,
-               inbox.request(id: requestID)?.ownerCallbackTool == nil {
-                Label("No owner callback configured; feedback cannot be delivered",
+               inbox.request(id: requestID)?.canDeliver == false {
+                Label("Review delivery destination is not configured",
                       systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -315,6 +317,7 @@ struct MarkcutReviewInboxView: View {
     }
 
     private func clearSelection() {
+        playbackPosition = nil
         selectedSessionID = nil
         landscapeExpanded = false
         html = nil
@@ -324,6 +327,7 @@ struct MarkcutReviewInboxView: View {
     }
 
     private func open(_ group: MarkcutReviewGroup) {
+        playbackPosition = nil
         selectedGroup = group
         let first = group.sessions.first
         selectedSessionID = first?.reviewSessionID
@@ -448,6 +452,18 @@ struct MarkcutReviewInboxView: View {
               setInterval(updateSceneNav,700);
             })();
 
+            // The native submit button receives a snapshot of the current scene/time.
+            // This is observational only: it cannot change the bound review identity.
+            let lastPosition='';
+            setInterval(function(){
+              const p=window.__markcutPlaybackContext;
+              if(!p)return;
+              const value={sceneId:p.sceneId||null,timeSeconds:Number(p.timeSeconds)||0};
+              const key=JSON.stringify(value);
+              if(key===lastPosition)return;
+              lastPosition=key;
+              window.webkit.messageHandlers.markcutPlaybackPosition.postMessage(value);
+            },400);
             window.onerror=function(message){window.webkit.messageHandlers.markcutPreviewError.postMessage(String(message));};
             window.addEventListener('unhandledrejection',function(e){window.webkit.messageHandlers.markcutPreviewError.postMessage(String(e.reason||'Preview playback failed'));});
             window.addEventListener('error',function(e){if(e.target instanceof HTMLMediaElement)window.webkit.messageHandlers.markcutPreviewError.postMessage('Video or audio could not be loaded or decoded.');},true);
@@ -468,14 +484,19 @@ struct MarkcutReviewInboxView: View {
         guard !syncing else { return }
         guard let requestID = item["id"] as? String,
               let request = inbox.request(id: requestID) else { return }
-        guard request.ownerCallbackTool != nil else {
-            message = "Cannot deliver feedback without an owner callback. Remove this request or ask the owner to reissue it."
+        guard request.canDeliver && inbox.isCurrent(request) else {
+            message = "This review is historical or the delivery destination is unavailable."
             return
         }
         let choice: MarkcutReviewChoice = decision == "approved" ? .approved : .changesRequested
+        let note = feedback.trimmingCharacters(in: .whitespacesAndNewlines)
+        let comments: [MarkcutReviewComment] = choice == .changesRequested ?
+            [MarkcutReviewComment(sceneId: playbackPosition?.sceneID,
+                                  timeSeconds: playbackPosition?.timeSeconds ?? 0,
+                                  text: note, scope: playbackPosition?.sceneID == nil ? "overall" : "spot")] : []
         let pending = MarkcutReviewFeedback(requestId: request.id, decision: choice,
-            feedback: choice == .changesRequested ? feedback.trimmingCharacters(in: .whitespacesAndNewlines) : "",
-            idempotencyKey: UUID().uuidString)
+            feedback: choice == .changesRequested ? note : "",
+            idempotencyKey: UUID().uuidString, comments: comments)
         inbox.queue(pending)
         await retryQueuedFeedback()
     }
@@ -487,18 +508,21 @@ struct MarkcutReviewInboxView: View {
         var failures = 0
         for pending in inbox.feedbackQueue {
             guard let request = inbox.request(id: pending.requestId) else { continue }
+            guard inbox.isCurrent(request) else {
+                failures += 1
+                message = "Historical revision cannot be submitted. Feedback remains on this phone."
+                continue
+            }
             do {
                 try await remote.deliverMarkcutReviewFeedback(request: request, feedback: pending)
                 inbox.acknowledge(pending)
                 // Never leave the reviewed (now removed) revision in an open sheet.
                 if selectedSessionID == pending.requestId { selectedGroup = nil }
                 if inbox.requests.isEmpty { dismiss() }
-                message = pending.decision == .approved ? "Feedback acknowledged by the owner" : "Changes acknowledged by the owner"
+                message = "Review submitted (transport accepted; consumer processing is separate)."
             } catch {
                 failures += 1
-                message = request.ownerCallbackTool == nil
-                    ? "Cannot deliver: no owner callback is configured. This review remains pending."
-                    : "Feedback is queued on this phone and will retry when the owner is reachable."
+                message = "Review not submitted: " + error.localizedDescription + ". It remains queued with the original idempotency key."
             }
         }
         if failures == 0, inbox.feedbackQueue.isEmpty { message = nil }
@@ -541,6 +565,7 @@ private struct ReviewGroupRow: View {
 private struct MarkcutReviewSurface: View {
     @Binding var html: String?
     @Binding var origin: URL?
+    @Binding var playbackPosition: MarkcutPlaybackPosition?
     @Binding var error: String?
     @Binding var loadingStage: String
     @Binding var retry: Int
@@ -549,7 +574,7 @@ private struct MarkcutReviewSurface: View {
     var body: some View {
         Group {
             if let html {
-                MarkcutWebPreview(html: html, baseURL: origin, failure: $error, retry: retry)
+                MarkcutWebPreview(html: html, baseURL: origin, failure: $error, playbackPosition: $playbackPosition, retry: retry)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)

@@ -44,3 +44,17 @@ test('register saves only device metadata and APNs status is not delivery',async
  assert.equal(result.status,'apns_submission');
  assert.ok(!JSON.stringify(result).includes('bbbb'));
 });
+
+test('event review push retains bound metadata and rejects forged destinations',()=>{
+ const t={type:'markcut.review.submitted',source:'job/j8/task/producer/execution/e8',data:{correlation:{jobId:'j8'}}};
+ const event={...r,ownerCallbackTool:undefined,ownerThreadId:undefined,
+   delivery:'event',eventTemplate:t,previewId:'rev-preview-8'};
+ const validated=validateReview(event);
+ assert.equal(validated.delivery,'event');
+ assert.deepEqual(payloadForReview(event).neoReview.eventTemplate,t);
+ assert.equal(validated.previewId,'rev-preview-8');
+ assert.throws(()=>validateReview({...event,eventTemplate:{...t,type:'task.completed'}}));
+ assert.throws(()=>validateReview({...event,eventTemplate:{...t,source:'job/j8/task/x/execution/forged/more'}}));
+ assert.throws(()=>validateReview({...event,eventTemplate:{...t,data:{review:{decision:'approved'}}}}));
+ assert.throws(()=>validateReview({...event,delivery:'unknown'}));
+});

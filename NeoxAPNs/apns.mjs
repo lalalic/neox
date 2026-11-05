@@ -28,9 +28,31 @@ export function validateReview(a) {
   assertValid(typeof a.contentHash === 'string' && SHA.test(a.contentHash),'Invalid content hash');
   assertValid(typeof a.revisionId === 'string' && a.revisionId.length >= 1 && a.revisionId.length <= 256,'Invalid revision');
   assertValid(typeof a.title === 'string' && a.title.trim().length >= 1 && a.title.length <= 180,'Invalid title');
-  assertValid(typeof a.ownerCallbackTool === 'string' && callback(a.ownerCallbackTool),'Invalid owner callback');
-  if (a.ownerCallbackTool === 'chatgpt') assertValid(typeof a.ownerThreadId === 'string' && THREAD.test(a.ownerThreadId),'ChatGPT owner thread required');
-  const result={id:a.id.toLowerCase(),contentHash:a.contentHash,revisionId:a.revisionId,title:a.title,ownerCallbackTool:a.ownerCallbackTool};
+  const delivery=a.delivery||'text';
+  assertValid(delivery==='text'||delivery==='event','Unsupported review delivery');
+  if(a.delivery==='event'){
+    const t=a.eventTemplate;
+    assertValid(t && typeof t==='object' && !Array.isArray(t),'Missing event template');
+    assertValid(t.type==='markcut.review.submitted','Unsafe review event type');
+    assertValid(typeof t.source==='string' && /^job\/[A-Za-z0-9_-]+\/task\/[A-Za-z0-9_-]+\/execution\/[A-Za-z0-9_-]+$/.test(t.source),'Invalid event source');
+    assertValid(t.data && typeof t.data==='object' && !Array.isArray(t.data) && !Object.hasOwn(t.data,'review'),'Invalid fixed event data');
+    assertValid(Object.keys(t).every(k=>['type','source','data'].includes(k)),'Invalid event template fields');
+    assertValid(a.ownerCallbackTool===undefined,'Event cannot carry owner callback');
+  }else{
+    assertValid(a.eventTemplate===undefined,'Text mode cannot carry event template');
+    assertValid(typeof a.ownerCallbackTool==='string' && callback(a.ownerCallbackTool),'Invalid owner callback');
+    if(a.ownerCallbackTool==='chatgpt' || a.delivery==='text'){
+      assertValid(typeof a.ownerThreadId==='string' && THREAD.test(a.ownerThreadId),'ChatGPT owner thread required');
+    }
+  }
+  const result={id:a.id.toLowerCase(),contentHash:a.contentHash,revisionId:a.revisionId,title:a.title};
+  if(a.delivery)result.delivery=delivery;
+  if(a.ownerCallbackTool)result.ownerCallbackTool=a.ownerCallbackTool;
+  if(a.eventTemplate)result.eventTemplate=JSON.parse(JSON.stringify(a.eventTemplate));
+  if(a.previewId){
+    assertValid(typeof a.previewId==='string' && a.previewId.length<=256,'Invalid previewId');
+    result.previewId=a.previewId;
+  }
   for(const k of ['ownerThreadId','groupId','groupTitle','jobId']) {
     if(a[k]===undefined || a[k]===null) continue;
     assertValid(typeof a[k]==='string' && a[k].length<=256,`Invalid ${k}`);

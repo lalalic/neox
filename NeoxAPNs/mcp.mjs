@@ -6,8 +6,9 @@ const descriptors=[
   {name:'review.push.register',description:'Register the calling Neo Mobile app APNs token with Neo Master. No Review Session is persisted.',
     inputSchema:{type:'object',additionalProperties:false,required:['deviceId','token','environment'],properties:{deviceId:{type:'string'},token:{type:'string'},environment:{type:'string',enum:['sandbox','production']}}}},
   {name:'review.push.notify',description:'Push an immutable Markcut review request to registered iPhones through Apple APNs. APNs acceptance is not device delivery; client maintains its own inbox.',
-    inputSchema:{type:'object',additionalProperties:false,required:['id','contentHash','revisionId','title','ownerCallbackTool'],properties:{
+    inputSchema:{type:'object',additionalProperties:false,required:['id','contentHash','revisionId','title'],properties:{
       id:{type:'string'},contentHash:{type:'string'},revisionId:{type:'string'},title:{type:'string'},
+      delivery:{type:'string',enum:['text','event']},previewId:{type:'string'},eventTemplate:{type:'object'},
       ownerCallbackTool:{type:'string'},ownerThreadId:{type:'string'},groupId:{type:'string'},groupTitle:{type:'string'},jobId:{type:'string'},deviceId:{type:'string'}}}},
   {name:'review.push.status',description:'Read APNs configuration and registered device count without exposing tokens or private keys.',inputSchema:{type:'object',properties:{},additionalProperties:false}}
 ];
