@@ -147,6 +147,28 @@ final class MarkcutReviewDecisionTests: XCTestCase {
             from: JSONEncoder().encode(request))
         XCTAssertEqual(restored.eventTemplate, template)
         XCTAssertTrue(restored.canDeliver)
+        let relayTemplate = MarkcutReviewEventTemplate(type: "task.interactive_decision",
+            source: "job/j123/task/producer/execution/e456",
+            data: ["interactive": .object([
+                "jobId": .string("j123"), "taskId": .string("producer"),
+                "executionId": .string("e456"), "invocationId": .string("video-preview-42")
+            ])])
+        let relayEvent = try relayTemplate.event(review: result)
+        XCTAssertEqual(relayEvent["type"] as? String, "task.interactive_decision")
+        let relayData = try XCTUnwrap(relayEvent["data"] as? [String: Any])
+        let interactive = try XCTUnwrap(relayData["interactive"] as? [String: Any])
+        XCTAssertEqual(interactive["revision"] as? String, request.contentHash)
+        XCTAssertEqual(interactive["revisionId"] as? String, request.revisionID)
+        XCTAssertEqual(interactive["decision"] as? String, "changes_requested")
+        XCTAssertEqual(interactive["feedback"] as? String, "Remove second pause")
+        XCTAssertEqual(interactive["idempotencyKey"] as? String, "stable-retry-key")
+        XCTAssertEqual((interactive["comments"] as? [[String: Any]])?.first?["sceneId"] as? String, "intro")
+        XCTAssertThrowsError(try MarkcutReviewEventTemplate(
+            type: "task.interactive_decision", source: relayTemplate.source,
+            data: ["interactive": .object([
+                "jobId": .string("j123"), "taskId": .string("producer"), "executionId": .string("e456"),
+                "invocationId": .string("video-preview-42"), "decision": .string("approved")
+            ])]).validate())
         XCTAssertThrowsError(try MarkcutReviewRequest(id: UUID().uuidString,
             contentHash: request.contentHash, revisionID: "rev", title: "Bad",
             delivery: "event", eventTemplate: MarkcutReviewEventTemplate(

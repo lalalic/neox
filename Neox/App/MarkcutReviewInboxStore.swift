@@ -8,10 +8,26 @@ struct MarkcutReviewEventTemplate: Codable, Equatable {
 
     func validate() throws {
         let jobSource = #"^job/[A-Za-z0-9_-]+/task/[A-Za-z0-9_-]+/execution/[A-Za-z0-9_-]+$"#
-        guard type == "markcut.review.submitted",
-              (source.range(of: jobSource, options: .regularExpression) != nil),
-              data["review"] == nil,
+        guard source.range(of: jobSource, options: .regularExpression) != nil,
               !data.keys.contains(where: { ["__proto__", "constructor", "prototype"].contains($0) }) else {
+            throw CocoaError(.validationMissingMandatoryProperty)
+        }
+        if type == "markcut.review.submitted" {
+            guard data["review"] == nil else { throw CocoaError(.validationMissingMandatoryProperty) }
+        } else if type == "task.interactive_decision" {
+            let sourceParts = source.split(separator: "/").map(String.init)
+            guard sourceParts.count == 6,
+                  case let .object(fixed)? = data["interactive"],
+                  case let .string(jobID)? = fixed["jobId"], jobID == sourceParts[1],
+                  case let .string(taskID)? = fixed["taskId"], taskID == sourceParts[3],
+                  case let .string(executionID)? = fixed["executionId"], executionID == sourceParts[5],
+                  case let .string(invocationID)? = fixed["invocationId"], !invocationID.isEmpty,
+                  invocationID.range(of: #"^[A-Za-z0-9_-]{1,128}$"#, options: .regularExpression) != nil,
+                  !["decision", "feedback", "comments", "revision", "revisionId", "contentHash",
+                    "previewId", "requestId", "idempotencyKey"].contains(where: { fixed[$0] != nil }) else {
+                throw CocoaError(.validationMissingMandatoryProperty)
+            }
+        } else {
             throw CocoaError(.validationMissingMandatoryProperty)
         }
     }
@@ -20,6 +36,23 @@ struct MarkcutReviewEventTemplate: Codable, Equatable {
         try validate()
         let encoded = try JSONEncoder().encode(data)
         var fixed = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] ?? [:]
+        if type == "task.interactive_decision" {
+            guard var interactive = fixed["interactive"] as? [String: Any],
+                  let decision = review["decision"] as? String,
+                  let revision = review["contentHash"] as? String else {
+                throw CocoaError(.validationMissingMandatoryProperty)
+            }
+            let comments = review["comments"] as? [[String: Any]] ?? []
+            interactive["decision"] = decision
+            interactive["feedback"] = (review["feedback"] as? String) ?? comments.compactMap { $0["text"] as? String }.joined(separator: "\n")
+            interactive["comments"] = comments
+            interactive["revision"] = revision
+            for field in ["revisionId", "contentHash", "previewId", "requestId", "idempotencyKey"] {
+                interactive[field] = review[field]
+            }
+            fixed["interactive"] = interactive
+            return ["type": type, "source": source, "data": fixed]
+        }
         fixed["review"] = review
         return ["type": type, "source": source, "data": fixed]
     }
@@ -149,6 +182,7 @@ struct MarkcutReviewFeedback: Codable, Equatable, Identifiable {
                 "revisionId": request.revisionID,
                 "contentHash": request.contentHash,
                 "decision": decision.rawValue,
+                "feedback": feedback,
                 "comments": resolvedComments.map { comment in
                     ["sceneId": comment.sceneId as Any? ?? NSNull(),
                      "timeSeconds": comment.timeSeconds, "text": comment.text, "scope": comment.scope] as [String: Any]
