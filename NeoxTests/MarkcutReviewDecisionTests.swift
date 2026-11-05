@@ -119,9 +119,12 @@ final class MarkcutReviewDecisionTests: XCTestCase {
 
     @MainActor
     func testEventDeliveryTemplateValidationAndReviewResultSerialization() throws {
-        let template = MarkcutReviewEventTemplate(type: "markcut.review.submitted",
+        let template = MarkcutReviewEventTemplate(type: "task.interactive_decision",
             source: "job/j123/task/producer/execution/e456",
-            data: ["correlation": .object(["jobId": .string("j123")])])
+            data: ["interactive": .object([
+                "jobId": .string("j123"), "taskId": .string("producer"),
+                "executionId": .string("e456"), "invocationId": .string("video-preview-42")
+            ])])
         let request = try MarkcutReviewRequest(id: UUID().uuidString,
             contentHash: String(repeating: "b", count: 64), revisionID: "rev-42",
             title: "Review scene", delivery: "event", eventTemplate: template,
@@ -133,42 +136,30 @@ final class MarkcutReviewDecisionTests: XCTestCase {
         let result = feedback.reviewResult(request: request)
         let event = try template.event(review: result)
         XCTAssertEqual(event["source"] as? String, template.source)
-        XCTAssertEqual(event["type"] as? String, "markcut.review.submitted")
+        XCTAssertEqual(event["type"] as? String, "task.interactive_decision")
         let data = try XCTUnwrap(event["data"] as? [String: Any])
-        XCTAssertEqual((data["correlation"] as? [String: String])?["jobId"], "j123")
-        let review = try XCTUnwrap(data["review"] as? [String: Any])
-        XCTAssertEqual(review["previewId"] as? String, "preview-42")
-        XCTAssertEqual(review["contentHash"] as? String, request.contentHash)
-        XCTAssertEqual(review["idempotencyKey"] as? String, "stable-retry-key")
-        let comments = try XCTUnwrap(review["comments"] as? [[String: Any]])
+        let interactive = try XCTUnwrap(data["interactive"] as? [String: Any])
+        XCTAssertEqual(interactive["revision"] as? String, request.contentHash)
+        XCTAssertEqual(interactive["revisionId"] as? String, request.revisionID)
+        XCTAssertEqual(interactive["previewId"] as? String, "preview-42")
+        XCTAssertEqual(interactive["decision"] as? String, "changes_requested")
+        XCTAssertEqual(interactive["feedback"] as? String, "Remove second pause")
+        XCTAssertEqual(interactive["idempotencyKey"] as? String, "stable-retry-key")
+        let comments = try XCTUnwrap(interactive["comments"] as? [[String: Any]])
         XCTAssertEqual(comments.first?["sceneId"] as? String, "intro")
         XCTAssertEqual(comments.first?["timeSeconds"] as? Double, 4.25)
         let restored = try JSONDecoder().decode(MarkcutReviewRequest.self,
             from: JSONEncoder().encode(request))
         XCTAssertEqual(restored.eventTemplate, template)
         XCTAssertTrue(restored.canDeliver)
-        let relayTemplate = MarkcutReviewEventTemplate(type: "task.interactive_decision",
-            source: "job/j123/task/producer/execution/e456",
-            data: ["interactive": .object([
-                "jobId": .string("j123"), "taskId": .string("producer"),
-                "executionId": .string("e456"), "invocationId": .string("video-preview-42")
-            ])])
-        let relayEvent = try relayTemplate.event(review: result)
-        XCTAssertEqual(relayEvent["type"] as? String, "task.interactive_decision")
-        let relayData = try XCTUnwrap(relayEvent["data"] as? [String: Any])
-        let interactive = try XCTUnwrap(relayData["interactive"] as? [String: Any])
-        XCTAssertEqual(interactive["revision"] as? String, request.contentHash)
-        XCTAssertEqual(interactive["revisionId"] as? String, request.revisionID)
-        XCTAssertEqual(interactive["decision"] as? String, "changes_requested")
-        XCTAssertEqual(interactive["feedback"] as? String, "Remove second pause")
-        XCTAssertEqual(interactive["idempotencyKey"] as? String, "stable-retry-key")
-        XCTAssertEqual((interactive["comments"] as? [[String: Any]])?.first?["sceneId"] as? String, "intro")
         XCTAssertThrowsError(try MarkcutReviewEventTemplate(
-            type: "task.interactive_decision", source: relayTemplate.source,
+            type: "task.interactive_decision", source: template.source,
             data: ["interactive": .object([
                 "jobId": .string("j123"), "taskId": .string("producer"), "executionId": .string("e456"),
                 "invocationId": .string("video-preview-42"), "decision": .string("approved")
             ])]).validate())
+        XCTAssertThrowsError(try MarkcutReviewEventTemplate(
+            type: "markcut.review.submitted", source: template.source, data: template.data).validate())
         XCTAssertThrowsError(try MarkcutReviewRequest(id: UUID().uuidString,
             contentHash: request.contentHash, revisionID: "rev", title: "Bad",
             delivery: "event", eventTemplate: MarkcutReviewEventTemplate(
@@ -186,8 +177,12 @@ final class MarkcutReviewDecisionTests: XCTestCase {
         let request = try MarkcutReviewRequest(id: UUID().uuidString,
             contentHash: String(repeating: "c", count: 64), revisionID: "r8", title: "Review",
             delivery: "event", eventTemplate: MarkcutReviewEventTemplate(
-                type: "markcut.review.submitted",
-                source: "job/j8/task/review/execution/e8", data: [:]))
+                type: "task.interactive_decision",
+                source: "job/j8/task/review/execution/e8",
+                data: ["interactive": .object([
+                    "jobId": .string("j8"), "taskId": .string("review"),
+                    "executionId": .string("e8"), "invocationId": .string("review-r8")
+                ])]))
         let queued = MarkcutReviewFeedback(requestId: request.id, decision: .approved,
             feedback: "", idempotencyKey: "retry-key-preserved")
         let inbox = MarkcutReviewInboxStore(defaults: defaults)
