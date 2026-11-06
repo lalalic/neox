@@ -8,11 +8,14 @@ import http2 from 'node:http2';
 const BASE = process.env.NEOX_APNS_HOME ?? path.join(os.homedir(),'Library','Application Support','NeoY','apns');
 const CONFIG_FILE = path.join(BASE,'config.json');
 const TOKENS_FILE = path.join(BASE,'devices.json');
+const REVIEWS_FILE = path.join(BASE,'reviews.json');
 const HEX = /^[0-9a-f]{64,512}$/;
 const SHA = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const THREAD = /^[a-zA-Z0-9_-]{8,160}$/;
 const callback = x => x === 'chatgpt' || x === 'review.feedback' || /^[a-z0-9_-]+\.review\.feedback$/.test(x);
+const SOURCE=/^job\/([A-Za-z0-9_-]+)\/task\/([A-Za-z0-9_-]+)\/execution\/([A-Za-z0-9_-]+)$/;
+const RESERVED=['decision','feedback','comments','revision','revisionId','contentHash','previewId','requestId','idempotencyKey'];
 
 function assertValid(ok, message) { if (!ok) throw new Error(message); }
 export function validateRegistration(a) {
@@ -30,18 +33,26 @@ export function validateReview(a) {
   assertValid(typeof a.title === 'string' && a.title.trim().length >= 1 && a.title.length <= 180,'Invalid title');
   const delivery=a.delivery||'text';
   assertValid(delivery==='text'||delivery==='event','Unsupported review delivery');
-  if(a.delivery==='event'){
+  if(delivery==='event'){
     const t=a.eventTemplate;
     assertValid(t && typeof t==='object' && !Array.isArray(t),'Missing event template');
-    assertValid(t.type==='markcut.review.submitted','Unsafe review event type');
-    assertValid(typeof t.source==='string' && /^job\/[A-Za-z0-9_-]+\/task\/[A-Za-z0-9_-]+\/execution\/[A-Za-z0-9_-]+$/.test(t.source),'Invalid event source');
-    assertValid(t.data && typeof t.data==='object' && !Array.isArray(t.data) && !Object.hasOwn(t.data,'review'),'Invalid fixed event data');
+    assertValid(t.type==='task.interactive_decision','Unsafe review event type');
+    const match=typeof t.source==='string' ? t.source.match(SOURCE) : null;
+    assertValid(Boolean(match),'Invalid event source');
+    assertValid(t.data && typeof t.data==='object' && !Array.isArray(t.data),'Invalid event data');
+    const fixed=t.data.interactive;
+    assertValid(fixed && typeof fixed==='object' && !Array.isArray(fixed) &&
+      fixed.jobId===match[1] && fixed.taskId===match[2] && fixed.executionId===match[3] &&
+      typeof fixed.invocationId==='string' && /^[A-Za-z0-9_-]{1,128}$/.test(fixed.invocationId) &&
+      RESERVED.every(k=>!Object.hasOwn(fixed,k)),'Invalid interactive identity or reserved fields');
     assertValid(Object.keys(t).every(k=>['type','source','data'].includes(k)),'Invalid event template fields');
-    assertValid(a.ownerCallbackTool===undefined,'Event cannot carry owner callback');
+    assertValid(a.ownerCallbackTool===undefined && a.ownerThreadId===undefined,'Event cannot carry owner callback');
   }else{
     assertValid(a.eventTemplate===undefined,'Text mode cannot carry event template');
-    assertValid(typeof a.ownerCallbackTool==='string' && callback(a.ownerCallbackTool),'Invalid owner callback');
-    if(a.ownerCallbackTool==='chatgpt' || a.delivery==='text'){
+    // Standalone ChatGPT text previews are still mirrored to iPhone for viewing;
+    // without an owner thread they are read-only in the mobile inbox.
+    assertValid(a.ownerCallbackTool===undefined || callback(a.ownerCallbackTool),'Invalid owner callback');
+    if(a.ownerCallbackTool==='chatgpt'){
       assertValid(typeof a.ownerThreadId==='string' && THREAD.test(a.ownerThreadId),'ChatGPT owner thread required');
     }
   }
@@ -62,10 +73,13 @@ export function validateReview(a) {
 }
 export function payloadForReview(a) {
   const request=validateReview(a);
-  const message={aps:{alert:{title:'Video ready for review',body:request.title},sound:'default'},neoReview:request};
+  // APNs is a wake-up hint; the full request and immutable template are stored
+  // on Neo Master and fetched via the phone's authenticated MCP connection.
+  const message={aps:{alert:{title:'Video ready for review',body:request.title},sound:'default'},neoReviewRequestId:request.id};
   assertValid(Buffer.byteLength(JSON.stringify(message))<=4096,'APNs payload too large');
   return message;
 }
+
 export function signingJWT(keyId, teamId, key, now=Math.floor(Date.now()/1000)) {
   assertValid(/^[A-Z0-9]{10}$/.test(keyId) && /^[A-Z0-9]{10}$/.test(teamId),'Invalid APNs key/team ID');
   const b64=obj=>Buffer.from(JSON.stringify(obj)).toString('base64url');
@@ -107,7 +121,7 @@ export async function sendAPNs(token,environment,body,c,transport) {
   const headers={':method':'POST',':path':'/3/device/'+token,'authorization':'bearer '+jwt,
     'apns-topic':c.topic,'apns-push-type':'alert','apns-priority':'10',
     'apns-expiration':String(Math.floor(Date.now()/1000)+86400),
-    'apns-id':body.neoReview.id,'content-type':'application/json'};
+    'apns-id':body.neoReviewRequestId,'content-type':'application/json'};
   if(transport) return transport({host,headers,bytes});
   return await new Promise((resolve,reject)=>{
     const conn=http2.connect('https://'+host);let responseStatus=0,apnsId='',data='';
@@ -124,20 +138,93 @@ export async function sendAPNs(token,environment,body,c,transport) {
     stream.end(bytes);
   });
 }
-export async function notifyReview(args,transport) {
-  const body=payloadForReview(args), c=config(), all=devices();
+// MCP provider and Codex CLI can enqueue concurrently: serialize all mutations.
+function withReviewLock(action){
+  fs.mkdirSync(BASE,{recursive:true,mode:0o700});
+  const lock=REVIEWS_FILE+'.lock';
+  let fd;
+  for(let i=0;i<100;i++){
+    try{fd=fs.openSync(lock,'wx',0o600);break;}
+    catch(error){
+      if(error.code!=='EEXIST')throw error;
+      try{if(Date.now()-fs.statSync(lock).mtimeMs>30000)fs.unlinkSync(lock);}catch{}
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,20);
+    }
+  }
+  if(fd===undefined)throw new Error('Review inbox is busy');
+  try{return action();}
+  finally{fs.closeSync(fd);try{fs.unlinkSync(lock);}catch{}}
+}
+function reviewStore(){
+  const value=readJSON(REVIEWS_FILE,{version:1,requests:{},completed:{}});
+  assertValid(value && value.version===1 && value.requests && typeof value.requests==='object', 'Corrupt persisted reviews');
+  value.completed??={};
+  return value;
+}
+// One Neo Master account owns its review inbox. All registered devices can
+// synchronize it; the existing authenticated MCP gateway controls access.
+export function pendingReviews(){
+  const store=reviewStore();
+  const cutoff=Date.now()-30*86400000;
+  return {requests:Object.values(store.requests)
+    .filter(x=>Date.parse(x.createdAt)>=cutoff)
+    .sort((a,b)=>b.createdAt.localeCompare(a.createdAt))
+    .slice(0,500).map(x=>x.review)};
+}
+export function completeReview({id}){
+  assertValid(typeof id==='string' && UUID.test(id),'Invalid review request ID');
+  return withReviewLock(()=>{
+    const store=reviewStore(),key=id.toLowerCase();
+    const existed=Boolean(store.requests[key]);
+    if(existed){
+      delete store.requests[key];
+      store.completed[key]=new Date().toISOString();
+      const cutoff=Date.now()-30*86400000;
+      for(const [old,date] of Object.entries(store.completed)){
+        if(Date.parse(date)<cutoff)delete store.completed[old];
+      }
+      atomicJSON(REVIEWS_FILE,store);
+    }
+    return {acknowledged:true,id:key,wasPending:existed};
+  });
+}
+export async function notifyReview(args,transport){
+  const review=validateReview(args), body=payloadForReview(review);
+  const duplicate=withReviewLock(()=>{
+    const store=reviewStore();
+    assertValid(!store.completed[review.id], 'Review request was already completed');
+    const prior=store.requests[review.id];
+    if(prior){
+      assertValid(JSON.stringify(prior.review)===JSON.stringify(review),'Conflicting request ID');
+    }else{
+      store.requests[review.id]={createdAt:new Date().toISOString(),review};
+      const cutoff=Date.now()-30*86400000;
+      for(const [id,record] of Object.entries(store.requests)){
+        if(Date.parse(record.createdAt)<cutoff)delete store.requests[id];
+      }
+      atomicJSON(REVIEWS_FILE,store);
+    }
+    return Boolean(prior);
+  });
+  // A repeated request ID after an uncertain ACK retries the wake-up only;
+  // the durable inbox never duplicates the request.
+  let c,all;
+  try{c=config();all=devices();}catch(error){
+    return {stored:true,accepted:false,duplicate,reason:String(error.message).slice(0,150),requestId:review.id};
+  }
   const ids=Object.keys(all.devices).filter(id=>!args.deviceId||id===args.deviceId.toLowerCase());
-  if(ids.length===0) return {accepted:false,reason:'no registered device',deviceCount:0};
+  if(ids.length===0)return {stored:true,accepted:false,duplicate,reason:'no registered device',deviceCount:0,requestId:review.id};
   const results=[];
   for(const id of ids){
     const dev=all.devices[id];
-    try {
+    try{
       const result=await sendAPNs(dev.token,dev.environment,body,c,transport);
       results.push({deviceId:id,accepted:result.accepted,status:result.status,reason:result.reason||undefined,apnsId:result.apnsId||undefined});
-      if(result.status===410 || (result.status===400 && ['BadDeviceToken','DeviceTokenNotForTopic'].includes(result.reason))) {
+      if(result.status===410 || (result.status===400 && ['BadDeviceToken','DeviceTokenNotForTopic'].includes(result.reason))){
         delete all.devices[id];atomicJSON(TOKENS_FILE,all);
       }
-    } catch (error) {results.push({deviceId:id,accepted:false,reason:String(error.message).slice(0,150)});}
+    }catch(error){results.push({deviceId:id,accepted:false,reason:String(error.message).slice(0,150)});}
   }
-  return {accepted:results.some(x=>x.accepted),status:'apns_submission',results};
+  return {stored:true,accepted:results.some(x=>x.accepted),duplicate,
+    requestId:review.id,status:'apns_submission',results};
 }

@@ -264,15 +264,6 @@ Neox is on the App Store. If the phone doesn't have it, ask the user to
 install it from there and grant Local Network and Photos permission on first
 launch — no other setup is needed.
 
-## Push a Markcut review while Neo Mobile is backgrounded
+## Markcut Preview delivery and result Event
 
-Use Neo Master's authenticated `mcp.neox-apns` facade, command
-`review.push.notify`, with a stable UUID, `contentHash`/`revisionId` from
-`markcut.preview`, a short title and the original `ownerThreadId` with
-`ownerCallbackTool: "chatgpt"`. The iPhone registers its APNs device token
-at launch and manages its own Inbox; the Master retains no review sessions.
-An APNs accepted response means only Apple accepted the alert. If the user
-opens Neo via the app icon instead of tapping a notification, Neo imports
-still-delivered review alerts locally. See `NeoxAPNs/README.md` for the
-validated API and operational limits. Keep the existing direct
-`review.request` path for connected foreground testing.
+All Markcut Preview origins (hosted ChatGPT MCP and Codex CLI) submit a **durable review request on Neo Master** through `mcp.neox-apns` `review.push.notify` or the same local `NeoxAPNs/review-cli.mjs` adapter. Master sends an APNs wake-up with request ID only. iPhone imports `review.push.pending` over the saved authenticated MCP connection whenever it opens; it need not expose its own MCP listener. After human approval or change request, Neo Mobile fills the caller-owned Relay Event Template and publishes `task.interactive_decision` via Events MCP, then retires the pending request. No Markcut-specific legacy event is accepted. See `NeoxAPNs/README.md` for contracts, retry, and status verification. The old direct phone `review.request` MCP tool has been removed; all Preview requests enter through Neo Master.

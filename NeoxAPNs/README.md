@@ -1,40 +1,12 @@
-# Neo Mobile review notifications — Apple APNs
+# Neo Mobile review delivery — Neo Master APNs
 
-**Owner:** Neo Mobile owns pending reviews and feedback retries. This provider
-stores **only APNs device tokens**, never review sessions, comments, decisions or
-an inbox. It federates through Neo Master's authenticated MCP gateway.
+**Two separate contracts:**
 
-After `markcut.preview` returns the immutable `contentHash`, the requesting
-ChatGPT thread or worker invokes `mcp.neox-apns` with command
-`review.push.notify` and args:
+1. **Preview request delivery:** Markcut MCP and Codex CLI publish immutable previews, then submit the same metadata to Neo Master's durable `review.push.notify`. Master stores the request in its private `~/Library/Application Support/NeoY/apns/reviews.json`; Apple APNs receives only the UUID as `neoReviewRequestId`. iPhone does **not** need to expose MCP or be online. App foreground/notification taps trigger authenticated `review.push.pending` to recover complete requests.
+2. **Review result delivery:** Neo Mobile user opens the compiled video in Review Inbox and submits `approved` or `changes_requested`. With caller-supplied Event Template, phone fills fixed `data.interactive` review fields and publishes `task.interactive_decision` through Events MCP. Then `review.push.complete` retires the durable request. Bus ACK is transport acceptance only; Relay Graph owns Task continuation.
 
-```json
-{
-  "id": "<unique review request UUID>",
-  "contentHash": "<64 lowercase SHA-256 hex characters>",
-  "revisionId": "<immutable revision ID>",
-  "title": "<video review title>",
-  "ownerCallbackTool": "chatgpt",
-  "ownerThreadId": "<existing originating ChatGPT thread ID>"
-}
-```
+**Unified Preview ingress:** `NeoxAPNs/review-cli.mjs notify` reads one JSON review request from stdin and returns a `{stored:true,requestId,accepted:<APNs status>}` JSON receipt. This is the local, Neo-Master-only integration used by the Markcut hosted compiler in both MCP and CLI. Neo's authenticated `mcp.neox-apns` facade exposes the same `review.push.notify` plus `review.push.register`, `review.push.pending`, `review.push.complete` and `review.push.status`. The private key/device token remain in the 0700 APNs data directory. Do not create a new public listener or send a bearer token to an arbitrary phone address.
 
-The iPhone registers its current token with the same authenticated Master using
-`mcp.neox-apns` → `review.push.register`. The app decodes the notification,
-adds a request to its local Inbox (or imports delivered notifications on next
-launch), and returns feedback to the original owner. Its own local dedup prevents
-old alert retries from recreating removed or completed requests.
+**Important:** Master persistence and APNs acceptance are separate. A failed/expired APNs push does not discard the pending review; the phone retrieves it on the next authenticated foreground sync. Push payload contains only a request UUID, never event templates or credentials. A default ChatGPT Text-mode Preview with no owner thread is mirrored to the phone for **viewing only**; only explicit `task.interactive_decision` Event templates authorize phone result submission. Legacy `markcut.review.submitted` templates are rejected.
 
-APNs `200` means **Apple accepted the push**, not that the user saw it, nor that
-feedback was processed. Alert delivery is best-effort, and APNs can replace or
-expire notifications while a phone is offline. Do not infer a completed review
-from a push submission. To support devices without APNs, the existing phone MCP
-`review.request` works while the app is reachable.
-
-For deployment, register `NeoxAPNs/mcp.mjs` as the `neox-apns` stdio provider in
-NeoY and enable its remote provider exposure. Set the configuration and key in
-Neo Master's `~/Library/Application Support/NeoY/apns/` (directory `0700`,
-files `0600`); never commit APNs keys or device tokens. Run
-`node --test NeoxAPNs/apns.test.mjs` to verify request validation, JWT signing,
-and the mocked APNs contract. The owner callback uses authenticated Neo MCP,
-not a separate public service.
+Run `node --test NeoxAPNs/apns.test.mjs` and a real device review to verify the two contracts independently. APNs send uses the existing Apple credentials/config and registered devices under NeoY/apns.

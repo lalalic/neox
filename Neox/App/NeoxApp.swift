@@ -26,6 +26,7 @@ struct NeoxApp: App {
                         Task {
                             await ReviewPushCoordinator.shared.retryRegistration()
                             await ReviewPushCoordinator.shared.recoverDeliveredNotifications()
+                            await ReviewPushCoordinator.shared.syncPending()
                         }
                         if enteredBackground {
                             enteredBackground = false

@@ -32,7 +32,11 @@ final class MarkcutReviewNotificationDelegate: NSObject, UIApplicationDelegate, 
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        _ = await ReviewPushCoordinator.shared.receive(notification.request.content.userInfo)
+        // The APNs payload contains only the request UUID, never the review template.
+        if let id = notification.request.content.userInfo["neoReviewRequestId"] as? String,
+           UUID(uuidString: id) != nil {
+            await ReviewPushCoordinator.shared.syncPending()
+        }
         return [.banner, .sound]
     }
 
@@ -40,8 +44,10 @@ final class MarkcutReviewNotificationDelegate: NSObject, UIApplicationDelegate, 
                                 didReceive response: UNNotificationResponse) async {
         let info = response.notification.request.content.userInfo
         let isLocal = info["reviewRequestId"] as? String != nil
-        let isRemote = await ReviewPushCoordinator.shared.receive(info)
+        let isRemote = (info["neoReviewRequestId"] as? String)
+            .flatMap(UUID.init(uuidString:)) != nil
         guard isLocal || isRemote else { return }
+        if isRemote { await ReviewPushCoordinator.shared.syncPending() }
         await MainActor.run {
             NotificationCenter.default.post(name: .markcutReviewNotificationTapped, object: nil)
         }

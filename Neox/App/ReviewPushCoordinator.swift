@@ -2,11 +2,21 @@ import Foundation
 import UIKit
 import UserNotifications
 
-/// APNs is a transport, not the owner of the review lifecycle. The phone alone
-/// owns pending requests and submits feedback to the original ChatGPT thread.
+/// Neo Master persists review requests; APNs is only a wake-up notification.
+/// The phone mirrors pending requests and emits human decisions via Events MCP.
 @MainActor
 final class ReviewPushCoordinator {
     static let shared = ReviewPushCoordinator()
+
+    static func apnsEnvironment(from provisioning: Data?) -> String {
+        guard let provisioning else { return "production" } // App Store / TestFlight
+        // CMS profile contains the embedded XML entitlement plist. Only its
+        // non-secret aps-environment string is read; no signature is replaced.
+        let text = String(decoding: provisioning, as: UTF8.self)
+        guard let range = text.range(of: "<key>aps-environment</key>") else { return "production" }
+        let value = text[range.upperBound...].prefix(200)
+        return value.contains("<string>development</string>") ? "sandbox" : "production"
+    }
     private let master = RemoteMCPClient()
     private var deviceToken: String?
     private var registrationInFlight = false
@@ -25,11 +35,12 @@ final class ReviewPushCoordinator {
         guard let deviceID = UIDevice.current.identifierForVendor?.uuidString else { return }
         registrationInFlight = true
         defer { registrationInFlight = false }
-        #if DEBUG
-        let environment = "sandbox"
-        #else
-        let environment = "production"
-        #endif
+        // A Release-built app installed via Xcode can carry a development
+        // entitlement. Infer APNs environment from its signed provisioning
+        // profile, not from the DEBUG compilation flag.
+        let profile = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision")
+            .flatMap { try? Data(contentsOf: $0) }
+        let environment = Self.apnsEnvironment(from: profile)
         do {
             try await master.registerAPNsDevice(deviceID: deviceID, token: token, environment: environment)
             lastRegistration = (token, address)
@@ -39,6 +50,34 @@ final class ReviewPushCoordinator {
         }
     }
 
+    func syncPending() async {
+        guard master.hasCredential, master.hasConfiguredAddress else { return }
+        do {
+            let requests = try await master.pendingMarkcutReviews()
+            // Master returns newest-first; local accept inserts at index 0.
+            // Import oldest-first so the newest revision remains the current
+            // request for each video group (older revisions read-only).
+            for request in requests.reversed() {
+                _ = MarkcutReviewInboxStore.shared.accept(request, notify: false)
+            }
+        } catch {
+            // A missed APNs or temporarily unreachable Master is retried on
+            // next foreground / Review Inbox entry, without losing local rows.
+        }
+    }
+
+    func complete(_ id: String) async {
+        // The human event has already been accepted by Events MCP. If this
+        // acknowledgement fails, the local dedup tombstone prevents replay.
+        try? await master.completeMarkcutReview(id)
+    }
+
+    static func reviewRequestID(_ userInfo: [AnyHashable: Any]) -> String? {
+        guard let id = userInfo["neoReviewRequestId"] as? String,
+              UUID(uuidString: id) != nil else { return nil }
+        return id
+    }
+
     static func decodeReview(_ userInfo: [AnyHashable: Any]) -> MarkcutReviewRequest? {
         guard let raw = userInfo["neoReview"] as? [String: Any],
               JSONSerialization.isValidJSONObject(raw),
@@ -46,13 +85,6 @@ final class ReviewPushCoordinator {
         return try? JSONDecoder().decode(MarkcutReviewRequest.self, from: bytes)
     }
 
-    @discardableResult
-    func receive(_ userInfo: [AnyHashable: Any]) -> Bool {
-        guard let request = Self.decodeReview(userInfo) else { return false }
-        let inbox = MarkcutReviewInboxStore.shared
-        let inserted = inbox.accept(request, notify: false)
-        return inserted || inbox.request(id: request.id) != nil
-    }
 
     /// Import delivered APNs alerts even when the user opens Neo from its icon
     /// instead of tapping the notification. Apple does not promise background
@@ -61,6 +93,7 @@ final class ReviewPushCoordinator {
         let matching: [String] = await withCheckedContinuation { continuation in
             UNUserNotificationCenter.current().getDeliveredNotifications { notifications in
                 let ids = notifications.filter { note in
+                    if note.request.content.userInfo["neoReviewRequestId"] as? String == id { return true }
                     guard let raw = note.request.content.userInfo["neoReview"] as? [String: Any] else { return false }
                     return raw["id"] as? String == id
                 }.map { $0.request.identifier }
@@ -90,5 +123,6 @@ final class ReviewPushCoordinator {
                 _ = MarkcutReviewInboxStore.shared.accept(request, notify: false)
             }
         }
+        await syncPending()
     }
 }

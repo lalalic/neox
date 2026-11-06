@@ -89,7 +89,7 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
               !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               delivery.map({ $0 == "text" || $0 == "event" }) ?? true,
               (delivery == "event" ? eventTemplate != nil : eventTemplate == nil),
-              (delivery != "text" || ownerThreadID != nil),
+
               ownerCallbackTool.map({ $0 == "chatgpt" || $0 == "review.feedback" || $0.hasSuffix(".review.feedback") }) ?? true,
               ownerThreadID.map({ $0.range(of: "^[A-Za-z0-9_-]{8,160}$", options: .regularExpression) != nil }) ?? true,
               (ownerCallbackTool != "chatgpt" || ownerThreadID != nil),

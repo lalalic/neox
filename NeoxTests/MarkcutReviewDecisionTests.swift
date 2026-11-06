@@ -50,9 +50,8 @@ final class MarkcutReviewDecisionTests: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(MarkcutReviewRequest.self,
             from: Data(unsafeCallbackJSON.utf8)))
         let server = MCPServer()
-        server.register(tools: MarkcutReviewRequestTool.tools())
-        let registeredTools = server.toolNames
-        XCTAssertEqual(registeredTools, ["review.request"])
+        XCTAssertFalse(server.toolNames.contains("review.request"),
+                       "Neo Mobile review ingress belongs to Neo Master APNs, not the phone MCP")
     }
 
     @MainActor

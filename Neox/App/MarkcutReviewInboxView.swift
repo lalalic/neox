@@ -87,6 +87,7 @@ struct MarkcutReviewInboxView: View {
                 .background(Color(uiColor: .systemBackground))
             }
             .task(id: inbox.feedbackQueue.count) {
+                await ReviewPushCoordinator.shared.syncPending()
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("-markcut-review-ui-fixture") {
                     fixtureSessions = MarkcutReviewGrouping.uiFixture
@@ -287,7 +288,7 @@ struct MarkcutReviewInboxView: View {
         VStack(spacing: 7) {
             if let requestID = item["id"] as? String,
                inbox.request(id: requestID)?.canDeliver == false {
-                Label("Review delivery destination is not configured",
+                Label("Preview only · submit text review in ChatGPT",
                       systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -516,6 +517,7 @@ struct MarkcutReviewInboxView: View {
             do {
                 try await remote.deliverMarkcutReviewFeedback(request: request, feedback: pending)
                 inbox.acknowledge(pending)
+                await ReviewPushCoordinator.shared.complete(request.id)
                 // Never leave the reviewed (now removed) revision in an open sheet.
                 if selectedSessionID == pending.requestId { selectedGroup = nil }
                 if inbox.requests.isEmpty { dismiss() }

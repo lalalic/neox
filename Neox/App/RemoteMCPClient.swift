@@ -308,6 +308,31 @@ final class RemoteMCPClient: ObservableObject {
         }
     }
 
+    /// All Markcut Preview requests (MCP and CLI) are queued on Neo Master.
+    /// APNs wakes the app; the authenticated pending list is authoritative.
+    func pendingMarkcutReviews() async throws -> [MarkcutReviewRequest] {
+        let result = try await callAuthenticatedTool("mcp.neox-apns", [
+            "command": "review.push.pending", "args": [:]
+        ])
+        guard let items = result["requests"] as? [[String: Any]] else {
+            throw RemoteError.toolFailure("Neo Master returned no review request list")
+        }
+        return items.compactMap { dictionary in
+            guard JSONSerialization.isValidJSONObject(dictionary),
+                  let encoded = try? JSONSerialization.data(withJSONObject: dictionary) else { return nil }
+            return try? JSONDecoder().decode(MarkcutReviewRequest.self, from: encoded)
+        }
+    }
+
+    func completeMarkcutReview(_ id: String) async throws {
+        let receipt = try await callAuthenticatedTool("mcp.neox-apns", [
+            "command": "review.push.complete", "args": ["id": id]
+        ])
+        guard receipt["acknowledged"] as? Bool == true else {
+            throw RemoteError.toolFailure("Neo Master did not acknowledge completed review")
+        }
+    }
+
     /// Review media and feedback always use the saved Master's authenticated
     /// HTTPS gateway. The request list itself is owned and stored by this phone.
     func markcutPreviewMedia(contentHash: String) async throws -> [String: Any] {
