@@ -295,11 +295,11 @@ final class RemoteMCPClient: ObservableObject {
         return response
     }
 
-    /// APNs device registration goes through Neo Master's existing authenticated
-    /// HTTPS MCP gateway. The token is never stored on this phone.
+    /// APNs token registration automatically follows a saved Master Access Code
+    /// connection through Neo.app Core's authenticated review service.
     func registerAPNsDevice(deviceID: String, token: String, environment: String) async throws {
-        let result = try await callAuthenticatedTool("mcp.neox-apns", [
-            "command": "review.push.register", "args": [
+        let result = try await callAuthenticatedTool("review", [
+            "command": "register", "args": [
                 "deviceId": deviceID, "token": token, "environment": environment
             ]
         ])
@@ -311,8 +311,8 @@ final class RemoteMCPClient: ObservableObject {
     /// All Markcut Preview requests (MCP and CLI) are queued on Neo Master.
     /// APNs wakes the app; the authenticated pending list is authoritative.
     func pendingMarkcutReviews() async throws -> [MarkcutReviewRequest] {
-        let result = try await callAuthenticatedTool("mcp.neox-apns", [
-            "command": "review.push.pending", "args": [:]
+        let result = try await callAuthenticatedTool("review", [
+            "command": "pending", "args": [:]
         ])
         guard let items = result["requests"] as? [[String: Any]] else {
             throw RemoteError.toolFailure("Neo Master returned no review request list")
@@ -325,8 +325,8 @@ final class RemoteMCPClient: ObservableObject {
     }
 
     func completeMarkcutReview(_ id: String) async throws {
-        let receipt = try await callAuthenticatedTool("mcp.neox-apns", [
-            "command": "review.push.complete", "args": ["id": id]
+        let receipt = try await callAuthenticatedTool("review", [
+            "command": "complete", "args": ["id": id]
         ])
         guard receipt["acknowledged"] as? Bool == true else {
             throw RemoteError.toolFailure("Neo Master did not acknowledge completed review")

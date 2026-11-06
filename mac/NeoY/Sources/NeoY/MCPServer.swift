@@ -615,6 +615,8 @@ public final class MCPServer {
                 connection: connection,
                 isLocal: isDirectLoopback,
                 authorized: isPrivileged,
+                masterAccessCodeAuthorized: bearerToken != nil &&
+                    (_snapshotPrivilegedAccessToken != nil && bearerToken == _snapshotPrivilegedAccessToken),
                 principal: presentedToken.map { token in SHA256.hash(data: Data(token.utf8)).map { String(format: "%02x", $0) }.joined() }
             )
 
@@ -667,10 +669,17 @@ public final class MCPServer {
         return value.contains("127.0.0.1") || value.contains("::1") || value.contains("localhost")
     }
 
+    // Only the existing Master Access Code can access a paired phone's
+    // review Inbox. Other authorized OAuth clients must not see this Core tool.
+    nonisolated static func mobileReviewAllowed(isLocal: Bool, masterAccessCodeAuthorized: Bool) -> Bool {
+        isLocal || masterAccessCodeAuthorized
+    }
+
     // MARK: - MCP JSON-RPC Handler (nonisolated)
 
     nonisolated private func handleMCPPostNonisolated(
-        body: Data?, connection: NWConnection, isLocal: Bool, authorized: Bool, principal: String?
+        body: Data?, connection: NWConnection, isLocal: Bool, authorized: Bool,
+        masterAccessCodeAuthorized: Bool, principal: String?
     ) {
         guard let body,
               let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
@@ -778,6 +787,12 @@ public final class MCPServer {
                 visibleTools = _snapshotTools.filter {
                     guard let name = $0["name"] as? String else { return false }
                     guard !_snapshotDisabledFeatureTools.contains(name) else { return false }
+                    // A paired iPhone uses the existing Master Access Code.
+                    // Review Inbox/registration is not an OAuth/Agent capability.
+                    if name == "review" {
+                        return Self.mobileReviewAllowed(isLocal: isLocal,
+                                                        masterAccessCodeAuthorized: masterAccessCodeAuthorized)
+                    }
                     return _snapshotRemoteAllowedTools.contains(name)
                         || Self.remoteProvider(forToolName: name, ownership: _snapshotFederatedToolProviders).map { _snapshotRemoteAllowedProviders.contains($0) } == true
                 }.map(Self.normalizeRemoteTool)
@@ -818,6 +833,12 @@ public final class MCPServer {
                 return
             }
             if !isLocal {
+                if toolName == "review" && !Self.mobileReviewAllowed(
+                    isLocal: isLocal, masterAccessCodeAuthorized: masterAccessCodeAuthorized) {
+                    sendJSONRPCError(connection: connection, id: id, code: -32003,
+                                     message: "Mobile review requires Master Access Code")
+                    return
+                }
                 guard authorized else {
                     toolCallAudit.record(
                         callID: callID,
@@ -830,7 +851,9 @@ public final class MCPServer {
                         message: "Remote MCP requires a valid Neo token")
                     return
                 }
-                let toolAllowed = _snapshotRemoteAllowedTools.contains(toolName)
+                let toolAllowed = _snapshotRemoteAllowedTools.contains(toolName) ||
+                    (toolName == "review" && Self.mobileReviewAllowed(
+                        isLocal: isLocal, masterAccessCodeAuthorized: masterAccessCodeAuthorized))
                 let providerAllowed = Self.remoteProvider(forToolName: toolName, ownership: _snapshotFederatedToolProviders).map { _snapshotRemoteAllowedProviders.contains($0) } ?? false
                 guard toolAllowed || providerAllowed else {
                     toolCallAudit.record(

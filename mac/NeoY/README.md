@@ -252,3 +252,28 @@ Mount definitions live in `~/Library/Application Support/NeoY/file-mounts.json` 
 ## Service identity
 
 NeoY publishes the logical service ID `neoy/app` under the shared `<skillname>/<service-name>` convention. Its native launchd label remains `com.neox.neoy.keepalive` for existing installations, watchdog rollback, and macOS service continuity. Do not rename the signed bundle identifier or launchd label as part of logical service naming.
+
+## Neo Mobile review Core Service
+
+Neo.app's bundled, independently upgradeable Node Core owns the APNs device
+registry, durable Review Inbox, and notification sender in one module:
+`Runtime/src/core/tools/review.mjs`. No `NeoxAPNs/` directory, separate mobile
+notification MCP Provider, or APNs compatibility entrypoint remains.
+
+Neo Mobile discovers Neo Master through the existing Bonjour service. The
+existing **Master Access Code** is stored in the iPhone Keychain and authorizes
+its connection. After that connection is saved, the app automatically registers
+its APNs Token with Core `review.register` and periodically synchronizes Core
+`review.pending`; after an acknowledged human decision it calls `review.complete`.
+The Core `review` MCP Tool is accessible remotely **only using the Master Access
+Code**, not a generic OAuth Agent bearer token. It does not expose `notify`.
+
+Markcut Preview's Neo-owned wrapper calls the Core module through its **local
+only** `review.mjs notify` CLI. The notification includes only a request UUID;
+full content stays in the durable Core Inbox at
+`~/Library/Application Support/NeoY/apns/`. Core upgrades must be installed
+before switching the Markcut wrapper's Federation URL. The separate Neo
+repository owns integration, and Agents Relay is called through its CLI.
+
+Verify with `npm test --prefix Runtime`, native NeoY security tests, and iPhone
+registration → notification → pending → decision → complete E2E.

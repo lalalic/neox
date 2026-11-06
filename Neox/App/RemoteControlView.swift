@@ -187,7 +187,10 @@ struct RemoteControlView: View {
                         password = ""
                         Task {
                             await remote.connect()
-                            if remote.connected { showSettings = false }
+                            if remote.connected {
+                                await ReviewPushCoordinator.shared.retryRegistration()
+                                showSettings = false
+                            }
                         }
                     } catch {
                         remote.error = error.localizedDescription

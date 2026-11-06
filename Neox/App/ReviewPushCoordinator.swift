@@ -17,7 +17,6 @@ final class ReviewPushCoordinator {
         let value = text[range.upperBound...].prefix(200)
         return value.contains("<string>development</string>") ? "sandbox" : "production"
     }
-    private let master = RemoteMCPClient()
     private var deviceToken: String?
     private var registrationInFlight = false
     private var lastRegistration: (token: String, master: String)?
@@ -28,6 +27,9 @@ final class ReviewPushCoordinator {
     }
 
     func retryRegistration() async {
+        // Re-read the latest Master Access Code; first pairing may happen after
+        // this coordinator was initialized when the app launched.
+        let master = RemoteMCPClient()
         guard let token = deviceToken, !registrationInFlight,
               master.hasCredential, master.hasConfiguredAddress else { return }
         let address = master.endpoint
@@ -51,6 +53,7 @@ final class ReviewPushCoordinator {
     }
 
     func syncPending() async {
+        let master = RemoteMCPClient()
         guard master.hasCredential, master.hasConfiguredAddress else { return }
         do {
             let requests = try await master.pendingMarkcutReviews()
@@ -67,6 +70,7 @@ final class ReviewPushCoordinator {
     }
 
     func complete(_ id: String) async {
+        let master = RemoteMCPClient()
         // The human event has already been accepted by Events MCP. If this
         // acknowledgement fails, the local dedup tombstone prevents replay.
         try? await master.completeMarkcutReview(id)
