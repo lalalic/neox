@@ -52,6 +52,21 @@ final class ManagedCoreRuntimeTests: XCTestCase {
         XCTAssertEqual(NeoYManagedCoreRuntime.active(in: root)?.lastPathComponent, "1.0.1")
     }
 
+    func testNewSignedBundleUpgradesExistingHealthyManagedCore() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let root = base.appendingPathComponent("managed")
+        let old = try fixture("0.1.16-local.20261029", under: base)
+        let newer = try fixture("0.1.17-local.20261106", under: base)
+        try NeoYManagedCoreRuntime.install(source: old, version: "0.1.16-local.20261029", root: root)
+        let selected = try NeoYManagedCoreRuntime.reconcileStartup(bundle: newer, root: root, probe: { _ in true })
+        XCTAssertEqual(selected, "0.1.17-local.20261106")
+        XCTAssertEqual(NeoYManagedCoreRuntime.active(in: root)?.lastPathComponent, selected)
+        let previous = try String(contentsOf: root.appendingPathComponent("previous-version"), encoding: .utf8)
+        XCTAssertEqual(previous, "0.1.16-local.20261029")
+        XCTAssertTrue(NeoYManagedCoreRuntime.valid(root.appendingPathComponent("versions/0.1.16-local.20261029")))
+    }
+
     func testStartupReturnsToHealthyPreviousCoreOnProbeFailure() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: base) }

@@ -6,7 +6,6 @@ import { handleCodex, CODEX_TOOLS } from "./codex.mjs";
 import { handleDiscord, DISCORD_TOOLS } from "./discord.mjs";
 import { configurePty, handlePty, ptyReady, ptyStatus, teardownPty, PTY_TOOLS } from "./pty.mjs";
 import { commandFacade } from "./command-facade.mjs";
-import { REVIEW_COMMANDS, handleReviewCommand } from "./review.mjs";
 import { XCHAT_LIFECYCLE_TOOLS, scheduleXChatLifecycle } from "./xchat.mjs";
 
 import { execFileSync, spawn } from "node:child_process";
@@ -647,12 +646,6 @@ const codexFacade = commandFacade({
     codex_thread_turns_list: "thread.turns.list",
   })[name] || name,
 });
-const reviewFacade = commandFacade({
-  name: "review",
-  description: "Authenticated paired iPhone review registration and durable Inbox. No notification-sending MCP command.",
-  commands: REVIEW_COMMANDS,
-  commandName: (name) => name.replace(/^review\./, ""),
-});
 const discordFacade = commandFacade({
   name: "discord",
   description: "Send replies only to verified Discord-originated turns using an opaque correlation ID.",
@@ -685,7 +678,6 @@ const BASE_TOOLS = [
   ...PATCH_TOOLS,
   codexFacade.tool,
   discordFacade.tool,
-  reviewFacade.tool,
   ...XCHAT_LIFECYCLE_TOOLS,
 ];
 
@@ -898,7 +890,6 @@ async function dispatchTool(name, args) {
     case "apply_file_patch": return handlePatch(name, args, context);
     case "codex": return codexFacade.execute(args, (tool, commandArgs) => handleCodex(tool, commandArgs, context));
     case "discord": return discordFacade.execute(args, (tool, commandArgs) => handleDiscord(tool, commandArgs));
-    case "review": return reviewFacade.execute(args, (tool, commandArgs) => handleReviewCommand(tool, commandArgs));
     case "terminal": return terminalFacade.execute(args, (tool, commandArgs) => handlePty(tool, commandArgs, context));
     case "chatgpt": {
       const result = scheduleXChatLifecycle(name, args);

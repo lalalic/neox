@@ -243,35 +243,24 @@ export async function notifyReview(args,transport){
     requestId:review.id,status:'apns_submission',results};
 }
 
-// Neo.app Core remote mobile review API. Notification sending remains private.
-export const REVIEW_COMMANDS = [
-  {name:'review.register',description:'Automatically register this paired iPhone APNs token with Neo Master.',
-    inputSchema:{type:'object',additionalProperties:false,required:['deviceId','token','environment'],properties:{
-      deviceId:{type:'string'},token:{type:'string'},environment:{type:'string',enum:['sandbox','production']}}}},
-  {name:'review.pending',description:'Retrieve pending durable human review requests for the paired iPhone.',
-    inputSchema:{type:'object',additionalProperties:false,properties:{}}},
-  {name:'review.complete',description:'Retire one review after its decision has been acknowledged.',
-    inputSchema:{type:'object',additionalProperties:false,required:['id'],properties:{id:{type:'string'}}}},
-];
-export function handleReviewCommand(name,arguments_){
-  switch(name){
-    case 'review.register': return registerDevice(arguments_);
-    case 'review.pending': return pendingReviews();
-    case 'review.complete': return completeReview(arguments_);
-    default: throw Error('Unsupported mobile review command');
-  }
-}
-// Internal local integration: neo/skills/mcp-wrapper invokes this single Core
-// service module as a CLI. Never add notify to the remote MCP command table.
+// Private Core service driver. Neo.app's HTTP router owns transport and auth.
+// This script is never federated or exposed as an MCP Tool.
 if(process.argv[1] && path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
-  if(process.argv[2]!=='notify'){
-    process.stderr.write('Usage: node review.mjs notify < request.json\n');
+  const action=process.argv[2];
+  if(!['register','pending','complete','notify'].includes(action)){
+    process.stderr.write('Unknown Core mobile review service action\n');
     process.exitCode=2;
   }else{
     try{
-      const review=JSON.parse(fs.readFileSync(0,'utf8'));
-      const result=await notifyReview(review);
+      const input=action==='pending'?{}:JSON.parse(fs.readFileSync(0,'utf8'));
+      const result=action==='register' ? registerDevice(input)
+        : action==='pending' ? pendingReviews()
+        : action==='complete' ? completeReview(input)
+        : await notifyReview(input);
       process.stdout.write(JSON.stringify(result)+'\n');
-    }catch(error){process.stderr.write('Neo Core review notification: '+String(error.message||error)+'\n');process.exitCode=1;}
+    }catch(error){
+      process.stderr.write('Core mobile review: '+String(error?.message||error).slice(0,300)+'\n');
+      process.exitCode=1;
+    }
   }
 }

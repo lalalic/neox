@@ -581,6 +581,32 @@ public final class MCPServer {
             }
         }
 
+        // Review REST API is not an MCP capability. Enforce authorization
+        // before dispatch: the endpoint remains private even for OAuth clients.
+        if path.hasPrefix(NeoYMobileReviewREST.prefix) {
+            guard NeoYMobileReviewREST.actions.contains(where: { $0.0 == method && $0.1 == path }) else {
+                sendHTTP(connection: connection, status: 404, body: nil)
+                return
+            }
+            let masterCode = _snapshotPrivilegedAccessToken
+            guard NeoYMobileReviewREST.allowed(path: path, isLocal: isDirectLoopback,
+                                                 headers: headers, masterAccessCode: masterCode) else {
+                sendHTTP(connection: connection, status: 403, body: nil,
+                         extraHeaders: ["Cache-Control": "no-store"])
+                return
+            }
+            if method == "POST" && headers["content-type"]?.lowercased().hasPrefix("application/json") != true {
+                sendHTTP(connection: connection, status: 415, body: nil,
+                         extraHeaders: ["Cache-Control": "no-store"])
+                return
+            }
+            if (body?.count ?? 0) > 524_288 {
+                sendHTTP(connection: connection, status: 413, body: nil,
+                         extraHeaders: ["Cache-Control": "no-store"])
+                return
+            }
+        }
+
         if let route = _snapshotHTTPRoutes["\(method) \(path)"] {
             let query = URLComponents(string: "http://localhost\(requestTarget)")?.queryItems ?? []
             var queryValues: [String: String] = [:]
@@ -591,7 +617,8 @@ public final class MCPServer {
                 let response = await route(method, headers, queryValues, body)
                 sendHTTP(connection: connection, status: response.status, body: response.body,
                           contentType: response.contentType ?? "application/json",
-                          extraHeaders: path == "/xchat/bootstrap" ? ["Cache-Control": "no-store"] : [:])
+                          extraHeaders: (path == "/xchat/bootstrap" || path.hasPrefix(NeoYMobileReviewREST.prefix))
+                            ? ["Cache-Control": "no-store"] : [:])
             }
             return
         }
@@ -615,8 +642,6 @@ public final class MCPServer {
                 connection: connection,
                 isLocal: isDirectLoopback,
                 authorized: isPrivileged,
-                masterAccessCodeAuthorized: bearerToken != nil &&
-                    (_snapshotPrivilegedAccessToken != nil && bearerToken == _snapshotPrivilegedAccessToken),
                 principal: presentedToken.map { token in SHA256.hash(data: Data(token.utf8)).map { String(format: "%02x", $0) }.joined() }
             )
 
@@ -669,17 +694,10 @@ public final class MCPServer {
         return value.contains("127.0.0.1") || value.contains("::1") || value.contains("localhost")
     }
 
-    // Only the existing Master Access Code can access a paired phone's
-    // review Inbox. Other authorized OAuth clients must not see this Core tool.
-    nonisolated static func mobileReviewAllowed(isLocal: Bool, masterAccessCodeAuthorized: Bool) -> Bool {
-        isLocal || masterAccessCodeAuthorized
-    }
-
     // MARK: - MCP JSON-RPC Handler (nonisolated)
 
     nonisolated private func handleMCPPostNonisolated(
-        body: Data?, connection: NWConnection, isLocal: Bool, authorized: Bool,
-        masterAccessCodeAuthorized: Bool, principal: String?
+        body: Data?, connection: NWConnection, isLocal: Bool, authorized: Bool, principal: String?
     ) {
         guard let body,
               let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
@@ -787,12 +805,6 @@ public final class MCPServer {
                 visibleTools = _snapshotTools.filter {
                     guard let name = $0["name"] as? String else { return false }
                     guard !_snapshotDisabledFeatureTools.contains(name) else { return false }
-                    // A paired iPhone uses the existing Master Access Code.
-                    // Review Inbox/registration is not an OAuth/Agent capability.
-                    if name == "review" {
-                        return Self.mobileReviewAllowed(isLocal: isLocal,
-                                                        masterAccessCodeAuthorized: masterAccessCodeAuthorized)
-                    }
                     return _snapshotRemoteAllowedTools.contains(name)
                         || Self.remoteProvider(forToolName: name, ownership: _snapshotFederatedToolProviders).map { _snapshotRemoteAllowedProviders.contains($0) } == true
                 }.map(Self.normalizeRemoteTool)
@@ -833,12 +845,6 @@ public final class MCPServer {
                 return
             }
             if !isLocal {
-                if toolName == "review" && !Self.mobileReviewAllowed(
-                    isLocal: isLocal, masterAccessCodeAuthorized: masterAccessCodeAuthorized) {
-                    sendJSONRPCError(connection: connection, id: id, code: -32003,
-                                     message: "Mobile review requires Master Access Code")
-                    return
-                }
                 guard authorized else {
                     toolCallAudit.record(
                         callID: callID,
@@ -851,9 +857,7 @@ public final class MCPServer {
                         message: "Remote MCP requires a valid Neo token")
                     return
                 }
-                let toolAllowed = _snapshotRemoteAllowedTools.contains(toolName) ||
-                    (toolName == "review" && Self.mobileReviewAllowed(
-                        isLocal: isLocal, masterAccessCodeAuthorized: masterAccessCodeAuthorized))
+                let toolAllowed = _snapshotRemoteAllowedTools.contains(toolName)
                 let providerAllowed = Self.remoteProvider(forToolName: toolName, ownership: _snapshotFederatedToolProviders).map { _snapshotRemoteAllowedProviders.contains($0) } ?? false
                 guard toolAllowed || providerAllowed else {
                     toolCallAudit.record(

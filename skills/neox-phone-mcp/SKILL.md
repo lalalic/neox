@@ -264,6 +264,18 @@ Neox is on the App Store. If the phone doesn't have it, ask the user to
 install it from there and grant Local Network and Photos permission on first
 launch — no other setup is needed.
 
-## Markcut Preview delivery and result Event
+## Markcut Preview delivery and decision
 
-All Markcut Preview origins submit durable review requests through the Neo integration wrapper (`neo/skills/mcp-wrapper/markcut.mjs`) to the Neo.app Core review service (`mac/NeoY/Runtime/src/core/tools/review.mjs`). No notification-sending MCP Tool exists. Master sends an APNs wake-up with request ID only. iPhone imports Core `review.pending` over the saved authenticated MCP connection whenever it opens; it need not expose its own MCP listener. After human approval or change request, Neo Mobile fills the caller-owned Relay Event Template and publishes `task.interactive_decision` via Events MCP, then retires the pending request. No Markcut-specific legacy event is accepted. The Neo.app Core review service lives at `mac/NeoY/Runtime/src/core/tools/review.mjs`. No separate APNs MCP Provider is installed. The old direct phone `review.request` MCP tool has been removed; all Preview requests enter through Neo Master.
+Markcut Preview is invoked once through Neo's `mcp-wrapper` Skill. The wrapper
+uses Neo.app Core's **local-only HTTP REST** `POST /mobile/review/notify` for
+APNs delivery, retaining immutable request content in Core's durable Inbox.
+Agents should not call review REST endpoints themselves. Neo Mobile uses the
+existing Master Access Code in Keychain to access the same Neo.app HTTPS origin:
+`POST /mobile/review/register`, `GET /mobile/review/pending`, and
+`POST /mobile/review/complete`. No Review MCP Tool, APNs MCP Provider, or
+separate notification CLI exists. A notification contains only the review ID.
+
+Once an owner decision is accepted by Events MCP, Neo Mobile acknowledges the
+Inbox entry through REST. For the current Relay event contract, the phone
+publishes `task.interactive_decision` with the caller-owned Event Template.
+See `mac/NeoY/README.md` for the authenticated REST contract.

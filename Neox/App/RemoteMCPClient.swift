@@ -298,10 +298,8 @@ final class RemoteMCPClient: ObservableObject {
     /// APNs token registration automatically follows a saved Master Access Code
     /// connection through Neo.app Core's authenticated review service.
     func registerAPNsDevice(deviceID: String, token: String, environment: String) async throws {
-        let result = try await callAuthenticatedTool("review", [
-            "command": "register", "args": [
-                "deviceId": deviceID, "token": token, "environment": environment
-            ]
+        let result = try await mobileReviewREST(method: "POST", path: "/mobile/review/register", body: [
+            "deviceId": deviceID, "token": token, "environment": environment
         ])
         guard result["registered"] as? Bool == true else {
             throw RemoteError.toolFailure("APNs device registration was not acknowledged")
@@ -311,9 +309,7 @@ final class RemoteMCPClient: ObservableObject {
     /// All Markcut Preview requests (MCP and CLI) are queued on Neo Master.
     /// APNs wakes the app; the authenticated pending list is authoritative.
     func pendingMarkcutReviews() async throws -> [MarkcutReviewRequest] {
-        let result = try await callAuthenticatedTool("review", [
-            "command": "pending", "args": [:]
-        ])
+        let result = try await mobileReviewREST(method: "GET", path: "/mobile/review/pending")
         guard let items = result["requests"] as? [[String: Any]] else {
             throw RemoteError.toolFailure("Neo Master returned no review request list")
         }
@@ -325,9 +321,7 @@ final class RemoteMCPClient: ObservableObject {
     }
 
     func completeMarkcutReview(_ id: String) async throws {
-        let receipt = try await callAuthenticatedTool("review", [
-            "command": "complete", "args": ["id": id]
-        ])
+        let receipt = try await mobileReviewREST(method: "POST", path: "/mobile/review/complete", body: ["id": id])
         guard receipt["acknowledged"] as? Bool == true else {
             throw RemoteError.toolFailure("Neo Master did not acknowledge completed review")
         }
@@ -384,6 +378,39 @@ final class RemoteMCPClient: ObservableObject {
             "idempotencyKey": feedback.idempotencyKey
         ])
         try MarkcutReviewFeedback.requireAcknowledgement(result)
+    }
+
+    /// Review operations use Neo.app's protected REST service, never Agent MCP.
+    /// Use the saved HTTPS identity (not a URL received in review content).
+    private func mobileReviewREST(method: String, path: String,
+                                  body: [String: Any]? = nil) async throws -> [String: Any] {
+        guard let source = URL(string: endpoint), source.scheme == "https", !bearer.isEmpty,
+              ["/mobile/review/register", "/mobile/review/pending", "/mobile/review/complete"].contains(path),
+              var components = URLComponents(url: source, resolvingAgainstBaseURL: false) else {
+            throw RemoteError.missingCredential
+        }
+        components.path = path
+        components.query = nil
+        components.fragment = nil
+        guard let url = components.url else { throw RemoteError.invalidEndpoint }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 30
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              http.statusCode == 200 else {
+            throw RemoteError.http((response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        guard let result = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw RemoteError.invalidResponse
+        }
+        return result
     }
 
     private func callAuthenticatedTool(_ toolName: String, _ arguments: [String: Any]) async throws -> [String: Any] {

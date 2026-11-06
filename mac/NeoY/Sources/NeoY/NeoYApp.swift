@@ -301,6 +301,7 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         )
         value.setRemoteAllowedTools(NeoYRemoteToolCatalog.remoteTools(for: deployment.enabledRemoteTools))
         value.setRemoteAllowedProviders(deployment.enabledRemoteProviders)
+        NeoYMobileReviewREST.register(on: value)
         NativeUISmoke.register(on: value)
         let featureConfiguration = (try? NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory).loadOrCreate().document.configuration)
             ?? NeoYControlPlaneConfiguration()

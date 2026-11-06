@@ -8,7 +8,7 @@ import {fileURLToPath} from 'node:url';
 const runtime=fileURLToPath(new URL('../src/core/tools/index.mjs',import.meta.url));
 const review=fileURLToPath(new URL('../src/core/tools/review.mjs',import.meta.url));
 const UID='5d79c254-92e0-4b93-9b42-8d8d5f5830c3', HASH='d'.repeat(64);
-test('Core review supports paired phone registration, Inbox and completion; notify stays private',async()=>{
+test('Core review operations are REST-only, never published as Agent MCP tools',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'neo-core-mobile-review-'));
  const env={...process.env,NEO_APNS_HOME:dir,NEO_CORE_DATA_DIR:join(dir,'core'),NEO_CORE_FULL_ACCESS_ACK:'I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS'};
  const child=spawn(process.execPath,[runtime],{env,stdio:['pipe','pipe','pipe']});
@@ -31,29 +31,22 @@ test('Core review supports paired phone registration, Inbox and completion; noti
     child.stdin.write(JSON.stringify({jsonrpc:'2.0',id,method,params})+'\n');
   });
  }
- function call(command,args={}){return rpc('tools/call',{name:'review',arguments:{command,args}})}
+ const service=(action,args={})=>JSON.parse(execFileSync(process.execPath,[review,action],{
+   input:JSON.stringify(args),env,encoding:'utf8'}));
  try{
-   await rpc('initialize',{protocolVersion:'2025-06-18',clientInfo:{name:'neo-mobile-test',version:'1'},capabilities:{}});
+   await rpc('initialize',{protocolVersion:'2025-06-18'});
    child.stdin.write(JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'})+'\n');
    const list=(await rpc('tools/list')).result.tools.map(x=>x.name);
-   assert.ok(list.includes('review'));
-   assert.ok(!list.includes('review.push.notify'));
-   const help=(await call('help')).result.structuredContent;
-   assert.deepEqual(help.commands.map(c=>c.command),['complete','pending','register']);
-   const reg=await call('register',{deviceId:UID,token:'b'.repeat(64),environment:'sandbox'});
-   assert.equal(reg.result.structuredContent.registered,true);
+   assert.ok(!list.includes('review'));
+   assert.ok(!list.some(name=>name.startsWith('review.')));
+   assert.equal((await rpc('tools/call',{name:'review',arguments:{command:'pending'}})).error.code,-32601);
+   assert.equal(service('register',{deviceId:UID,token:'b'.repeat(64),environment:'sandbox'}).registered,true);
    const obj={id:UID,title:'Core Test Preview',contentHash:HASH,revisionId:HASH,delivery:'text'};
-   const stored=JSON.parse(execFileSync(process.execPath,[review,'notify'],{input:JSON.stringify(obj),env,encoding:'utf8'}));
+   const stored=service('notify',obj);
    assert.equal(stored.stored,true);
    assert.equal(stored.requestId,UID);
-   assert.equal(stored.accepted,false);
-   const pending=await call('pending');
-   assert.equal(pending.result.structuredContent.requests.length,1);
-   assert.equal(pending.result.structuredContent.requests[0].id,UID);
-   const done=await call('complete',{id:UID});
-   assert.equal(done.result.structuredContent.acknowledged,true);
-   assert.deepEqual((await call('pending')).result.structuredContent.requests,[]);
-   const attempt=await call('notify',{id:UID});
-   assert.equal(attempt.result.isError,true);
+   assert.equal(service('pending').requests[0].id,UID);
+   assert.equal(service('complete',{id:UID}).acknowledged,true);
+   assert.deepEqual(service('pending').requests,[]);
  }finally{child.kill();rmSync(dir,{recursive:true,force:true});}
 });

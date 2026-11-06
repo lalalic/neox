@@ -59,10 +59,7 @@ actor NeoYNodeStore {
 
 actor NeoYNodeService {
     private let store: NeoYNodeStore
-    // Mobile Review is a Master-Access-Code-only local Core capability.
-    // A generic cluster invocation can carry another peer's stored credential
-    // and must never proxy access to that peer's private Review Inbox.
-    static var allowedRemoteCoreTools: Set<String> { NeoYCoreRuntime.toolNames.subtracting(["review"]) }
+    private static var allowedRemoteCoreTools: Set<String> { NeoYCoreRuntime.toolNames }
     private static let clusterAliases: Set<String> = ["exec", "fs"]
 
     init(store: NeoYNodeStore = NeoYNodeStore()) {

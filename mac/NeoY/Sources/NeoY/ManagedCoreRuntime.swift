@@ -226,7 +226,33 @@ enum NeoYManagedCoreRuntime {
     static func reconcileStartup(bundle: URL = NeoYBundledRuntime.packagedRuntimeURL,
                                  root: URL = root,
                                  probe: (URL) -> Bool = probeMCP) throws -> String {
-        if let current = active(in: root), probe(current) { return current.lastPathComponent }
+        if let current = active(in: root), probe(current) {
+            // A newly signed Neo.app may ship a newer Core than the currently
+            // selected managed version. The existing healthy Core must not
+            // permanently shadow a reviewed, newer bundled release.
+            if valid(bundle),
+               let data = try? Data(contentsOf: bundle.appendingPathComponent("package.json")),
+               let info = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let bundledVersion = info["version"] as? String,
+               isOlder(current.lastPathComponent, than: bundledVersion), probe(bundle) {
+                let candidate = root.appendingPathComponent("versions/\(bundledVersion)")
+                if FileManager.default.fileExists(atPath: candidate.path), !probe(candidate) {
+                    let quarantine = root.appendingPathComponent(
+                        "versions/.damaged-\(bundledVersion)-\(UUID().uuidString)")
+                    try FileManager.default.moveItem(at: candidate, to: quarantine)
+                }
+                try install(source: bundle, version: bundledVersion, root: root)
+                guard let upgraded = active(in: root), probe(upgraded) else {
+                    try? rollback(to: current.lastPathComponent, root: root)
+                    throw NSError(domain: "NeoYCore", code: 20,
+                                  userInfo: [NSLocalizedDescriptionKey: "New bundled Core failed post-activation probe"])
+                }
+                try? current.lastPathComponent.write(to: root.appendingPathComponent("previous-version"),
+                                                     atomically: true, encoding: .utf8)
+                return bundledVersion
+            }
+            return current.lastPathComponent
+        }
 
         let previousFile = root.appendingPathComponent("previous-version")
         if let previous = try? String(contentsOf: previousFile, encoding: .utf8)

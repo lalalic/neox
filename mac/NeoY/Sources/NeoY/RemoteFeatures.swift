@@ -3,7 +3,7 @@ import Foundation
 enum NeoYRemoteToolCatalog {
     static let coreToolNames: Set<String> = [
         "setup", "cluster", "status", "shell", "fs", "apply_file_patch",
-        "codex", "terminal", "chatgpt", "review",
+        "codex", "terminal", "chatgpt",
     ]
 
     static let askQuestionsToolNames: Set<String> = [
