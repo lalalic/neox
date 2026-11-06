@@ -3,9 +3,9 @@
 import readline from 'node:readline';
 import {registerDevice, notifyReview, pendingReviews, completeReview, status} from './apns.mjs';
 const descriptors=[
-  {name:'review.push.register',description:'Register the calling Neo Mobile app APNs token with Neo Master. No Review Session is persisted.',
+  {name:'review.push.register',description:'Register the calling Neo Mobile app APNs token with Neo Master.',
     inputSchema:{type:'object',additionalProperties:false,required:['deviceId','token','environment'],properties:{deviceId:{type:'string'},token:{type:'string'},environment:{type:'string',enum:['sandbox','production']}}}},
-  {name:'review.push.notify',description:'Push an immutable Markcut review request to registered iPhones through Apple APNs. APNs acceptance is not device delivery; client maintains its own inbox.',
+  {name:'review.push.notify',description:'Persist an immutable Markcut review on Neo Master, then notify registered iPhones through Apple APNs. Push receipt is not user delivery.',
     inputSchema:{type:'object',additionalProperties:false,required:['id','contentHash','revisionId','title'],properties:{
       id:{type:'string'},contentHash:{type:'string'},revisionId:{type:'string'},title:{type:'string'},
       delivery:{type:'string',enum:['text','event']},previewId:{type:'string'},eventTemplate:{type:'object'},

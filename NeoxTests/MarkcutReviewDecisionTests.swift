@@ -80,15 +80,15 @@ final class MarkcutReviewDecisionTests: XCTestCase {
     }
 
     @MainActor
-    func testAPNsPayloadDecodingRejectsInvalidRequests() throws {
-        let valid: [AnyHashable: Any] = ["neoReview": [
-            "id": UUID().uuidString, "contentHash": String(repeating: "a", count: 64),
-            "revisionId": "rev-1", "title": "Push review", "ownerCallbackTool": "chatgpt",
-            "ownerThreadId": "6ae92acc-cd28-83ea-8dc6-224653c9b433"
-        ]]
-        XCTAssertEqual(ReviewPushCoordinator.decodeReview(valid)?.title, "Push review")
-        XCTAssertNil(ReviewPushCoordinator.decodeReview(["neoReview": ["id": "bad"]]))
-        XCTAssertNil(ReviewPushCoordinator.decodeReview(["unrelated": "data"]))
+    func testAPNsCarriesOnlyRequestIdentityAndTextPreviewCanBeReadOnly() throws {
+        let id = UUID().uuidString
+        XCTAssertEqual(ReviewPushCoordinator.reviewRequestID(["neoReviewRequestId": id]), id)
+        XCTAssertNil(ReviewPushCoordinator.reviewRequestID(["neoReviewRequestId": "invalid"]))
+        XCTAssertNil(ReviewPushCoordinator.reviewRequestID(["neoReview": ["id": id]]))
+        let preview = try MarkcutReviewRequest(id: id,
+            contentHash: String(repeating: "a", count: 64), revisionID: "r1",
+            title: "Read-only Text Preview", delivery: "text")
+        XCTAssertFalse(preview.canDeliver)
     }
 
     @MainActor

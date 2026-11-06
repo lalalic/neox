@@ -78,24 +78,14 @@ final class ReviewPushCoordinator {
         return id
     }
 
-    static func decodeReview(_ userInfo: [AnyHashable: Any]) -> MarkcutReviewRequest? {
-        guard let raw = userInfo["neoReview"] as? [String: Any],
-              JSONSerialization.isValidJSONObject(raw),
-              let bytes = try? JSONSerialization.data(withJSONObject: raw) else { return nil }
-        return try? JSONDecoder().decode(MarkcutReviewRequest.self, from: bytes)
-    }
-
-
     /// Import delivered APNs alerts even when the user opens Neo from its icon
     /// instead of tapping the notification. Apple does not promise background
     /// execution for ordinary alert pushes.
     func clearDeliveredReview(_ id: String) async {
         let matching: [String] = await withCheckedContinuation { continuation in
             UNUserNotificationCenter.current().getDeliveredNotifications { notifications in
-                let ids = notifications.filter { note in
-                    if note.request.content.userInfo["neoReviewRequestId"] as? String == id { return true }
-                    guard let raw = note.request.content.userInfo["neoReview"] as? [String: Any] else { return false }
-                    return raw["id"] as? String == id
+                let ids = notifications.filter { notification in
+                    notification.request.content.userInfo["neoReviewRequestId"] as? String == id
                 }.map { $0.request.identifier }
                 continuation.resume(returning: ids)
             }
@@ -105,24 +95,9 @@ final class ReviewPushCoordinator {
         }
     }
 
+    /// APNs may be missed or cleared, so the authenticated Master inbox is
+    /// authoritative on every app foreground, not only notification taps.
     func recoverDeliveredNotifications() async {
-        // Move only Sendable Data across the notification-center callback;
-        // UNNotification is a mutable, non-Sendable Objective-C object.
-        let payloads: [Data] = await withCheckedContinuation { continuation in
-            UNUserNotificationCenter.current().getDeliveredNotifications { notifications in
-                let blobs = notifications.compactMap { notification -> Data? in
-                    guard let payload = notification.request.content.userInfo["neoReview"] as? [String: Any],
-                          JSONSerialization.isValidJSONObject(payload) else { return nil }
-                    return try? JSONSerialization.data(withJSONObject: payload)
-                }
-                continuation.resume(returning: blobs)
-            }
-        }
-        for payload in payloads {
-            if let request = try? JSONDecoder().decode(MarkcutReviewRequest.self, from: payload) {
-                _ = MarkcutReviewInboxStore.shared.accept(request, notify: false)
-            }
-        }
         await syncPending()
     }
 }

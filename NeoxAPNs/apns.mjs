@@ -1,4 +1,4 @@
-// Neo Mobile APNs sender. Stateless review messages, durable device tokens only.
+// Neo Master durable review inbox and APNs pointer-only notification transport.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
