@@ -1,3 +1,4 @@
+import AppCopilotKit
 import Foundation
 import Photos
 

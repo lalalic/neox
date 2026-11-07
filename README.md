@@ -227,7 +227,7 @@ call media.clear '{}'
 ## Building
 
 Requirements: Xcode 16+ (Swift 6), [XcodeGen](https://github.com/yonaskolb/XcodeGen),
-an Apple Developer team for device signing. No external SPM dependencies.
+an Apple Developer team for device signing. UI automation and demo tools use the public AppCopilotKit Swift Package (`https://github.com/lalalic/app-copilot-kit`).
 
 ```bash
 xcodegen generate          # → Neox.xcodeproj

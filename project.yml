@@ -8,6 +8,9 @@ options:
   defaultConfig: Debug
 
 packages:
+  AppCopilotKit:
+    url: https://github.com/lalalic/app-copilot-kit.git
+    from: 0.2.1
   RoyalVNCKit:
     url: https://github.com/royalapplications/royalvnc.git
     revision: 92d4427c73817d8f849bb289ff190aa4b40c44ea
@@ -19,6 +22,8 @@ targets:
     sources:
       - Neox
     dependencies:
+      - package: AppCopilotKit
+        product: AppCopilotKit
       - package: RoyalVNCKit
         product: RoyalVNCKit
         embed: true

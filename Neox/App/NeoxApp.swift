@@ -1,3 +1,4 @@
+import AppCopilotKit
 import SwiftUI
 
 /// Neox — headless MCP server exposing the phone's photo library

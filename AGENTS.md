@@ -5,8 +5,8 @@ Instructions for coding agents (and humans) modifying this repo.
 ## What this is
 
 `Neox` — a headless iPhone app that serves the phone's photo/video library to
-desktop agents over MCP. One app target, zero external SPM dependencies,
-27 tracked files (18 Swift). Source of truth for behavior: `Neox/Server/`.
+desktop agents over MCP. The app consumes `AppCopilotKit` for reusable UI
+automation and demo tools; domain MCP behavior remains in `Neox/Server/`.
 
 ## Neo Mobile online status
 
@@ -130,17 +130,8 @@ Neox/
                              (instruction + MCP URL; no reasoning here)
     NeoxShortcuts.swift      Siri phrases ("create a vlog with Neox",
                              "analyze my media with Neox", …)
-  AgentKit/                  vendored from copilot-ios/AppAgent (NOT an SPM
-                             dependency) — remote UI automation for agent-driven
-                             self-testing on the device:
-    AppAgentToolProvider.swift  `agent.pilot` tool: snapshot/tap/type/swipe/find/
-                             scroll_to/pick/screenshot of THIS app's UI
-    DemoToolProvider.swift      `agent.demo` tool: spotlight/annotate/caption/say(TTS)/
-                             step/cursor/highlight overlays
-    DemoRuntime.swift           overlay state machine (+ event recording)
-    DemoOverlayView.swift       SwiftUI overlay rendering demo visuals
-    AccessibilityScanner.swift  UIKit accessibility tree → refs (r0, r1, …)
-    InteractionEngine.swift     tap/type/swipe via UIKit APIs
+  (AppCopilotKit Swift Package) `agent.pilot`, `agent.demo`, UI scanner,
+                             demo runtime/overlay; never vendor copies here.
   Info.plist                 display name, Bonjour service, permission strings
   Neox.entitlements          intentionally empty dict — real entitlements come
                              from the provisioning profile at signing
@@ -155,14 +146,18 @@ scripts/remote-deploy.sh     sync + build on mac111 + install on iPhone
 
 Hard rules:
 
-- **No third-party dependencies.** Everything is Foundation/AVFoundation/
-  Photos/Vision/Speech/Network. Do not add SPM packages. (`AgentKit/` is
-  vendored source copied from `copilot-ios/AppAgent` — edit it in place; do
-  not re-import the package.)
+- **Use the public AppCopilotKit Swift Package** at
+  `https://github.com/lalalic/app-copilot-kit` for UI testing and demo support.
+  Import it through the XcodeGen `project.yml` SPM dependency; do not duplicate
+  the `AgentKit` sources. Neox keeps its existing media MCP server (files/ranges)
+  and registers `AppAgentToolProvider().tools` from the shared package.
+  `RoyalVNCKit` is a separate existing dependency; avoid unnecessary packages.
+- **Only expose UI control in trusted development/demo conditions.** Do not
+  advertise an unauthenticated agent.pilot endpoint on untrusted networks.
 - **No base64 media in tool results.** Write files into `exportsDir` and return
   `/files/<name>` URLs; the server range-streams them.
 - **English + Swifty naming**, dot-namespaced tool names (`media.search`).
-- Keep the app target self-contained: nothing may import `copilot-ios`.
+- Do not import or vendor obsolete `copilot-ios` sources; use `AppCopilotKit`.
 
 ## Self-testing on the device
 
