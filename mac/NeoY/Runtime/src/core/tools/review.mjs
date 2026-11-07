@@ -179,10 +179,18 @@ function reviewStore(){
 export function pendingReviews(){
   const store=reviewStore();
   const cutoff=Date.now()-30*86400000;
-  return {requests:Object.values(store.requests)
-    .filter(x=>Date.parse(x.createdAt)>=cutoff)
+  const active=Object.values(store.requests)
+    .filter(x=>Date.parse(x.createdAt)>=cutoff);
+  // Old Event records without a verifiable Git SHA stay in the durable store,
+  // untouched. They are not actionable under the current protocol and must
+  // never break sync of other reviews or be assigned a synthetic SHA.
+  const supported=active.filter(x=>x.review?.delivery!=='event' || (
+    GIT_SHA.test(x.review.commitSha??'') && SHA.test(x.review.mediaHash??'') &&
+    x.review.contentHash===undefined && x.review.revisionId===undefined));
+  return {requests:supported
     .sort((a,b)=>b.createdAt.localeCompare(a.createdAt))
-    .slice(0,500).map(x=>({...x.review,createdAt:x.createdAt}))};
+    .slice(0,500).map(x=>({...x.review,createdAt:x.createdAt})),
+    unsupportedCount:active.length-supported.length};
 }
 export function completeReview({id}){
   assertValid(typeof id==='string' && UUID.test(id),'Invalid review request ID');

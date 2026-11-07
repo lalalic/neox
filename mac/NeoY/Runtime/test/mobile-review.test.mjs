@@ -110,3 +110,31 @@ test('APNs stale-token cleanup never overwrites a concurrently renewed device to
  assert.equal(store.devices[deviceId].environment,'production');
  completeReview({id:req.id});
 });
+
+test('old Event records remain durable but cannot block active Git-SHA inbox sync',()=>{
+ const file=path.join(temp,'reviews.json');
+ const before=fs.existsSync(file)?fs.readFileSync(file):null;
+ const legacy={id:'c7a9a9fe-8892-4f88-8c58-4459197afb29',title:'Legacy Event',
+   contentHash:H,revisionId:'old-review',delivery:'event',eventTemplate:template};
+ const current={...event,id:'d7a9a9fe-8892-4f88-8c58-4459197afb29'};
+ const text={...r,id:'e7a9a9fe-8892-4f88-8c58-4459197afb29'};
+ const now=new Date().toISOString();
+ const store={version:1,requests:{
+  [legacy.id]:{review:legacy,createdAt:now},
+  [current.id]:{review:current,createdAt:now},
+  [text.id]:{review:text,createdAt:now}
+ },completed:{}};
+ try{
+  fs.writeFileSync(file,JSON.stringify(store),{mode:0o600});
+  const result=pendingReviews();
+  assert.equal(result.unsupportedCount,1);
+  assert.equal(result.requests.length,2);
+  assert.ok(!result.requests.some(x=>x.id===legacy.id));
+  assert.ok(result.requests.some(x=>x.id===current.id&&x.commitSha===current.commitSha));
+  assert.ok(result.requests.some(x=>x.id===text.id&&x.contentHash===H));
+  for(const item of result.requests)assert.doesNotThrow(()=>validateReview(item));
+  assert.deepEqual(JSON.parse(fs.readFileSync(file,'utf8')),store,'All raw review records remain unchanged');
+ }finally{
+  if(before===null)fs.rmSync(file,{force:true});else fs.writeFileSync(file,before);
+ }
+});
