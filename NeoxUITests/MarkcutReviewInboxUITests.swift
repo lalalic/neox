@@ -2,14 +2,16 @@ import XCTest
 
 final class MarkcutReviewInboxUITests: XCTestCase {
     @MainActor
-    func testReviewInboxCanOpenWithEmptyLocalInbox() {
+    func testReviewInboxCanOpenWithExistingOrEmptyLocalInbox() {
         let app = XCUIApplication()
         app.launch()
         let inbox = app.buttons["markcutReviewInboxOpen"]
         XCTAssertTrue(inbox.waitForExistence(timeout: 5))
         XCTAssertTrue(inbox.isEnabled)
         inbox.tap()
-        XCTAssertTrue(app.staticTexts["No previews yet"].waitForExistence(timeout: 5))
+        // A real iPhone may already have durable local Review items. The
+        // UI must open regardless of whether the inbox is empty or populated.
+        XCTAssertTrue(app.staticTexts["Review Inbox"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Refresh local reviews"].exists)
     }
 
