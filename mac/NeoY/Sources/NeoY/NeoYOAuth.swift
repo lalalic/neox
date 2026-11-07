@@ -237,10 +237,14 @@ final class NeoYOAuthService: @unchecked Sendable {
         let safeRID = Self.htmlEscape(rid)
         let safeIssuer = Self.htmlEscape(origin)
         let safeRedirect = Self.htmlEscape(redirect)
-        let redirectOrigin = URLComponents(string: redirect).flatMap { parts -> String? in
-            guard let scheme = parts.scheme, let host = parts.host else { return nil }
-            return "\(scheme)://\(host)"
-        } ?? ""
+        // A trusted callback may redirect to another configured origin (Meta Muse
+        // uses agent.meta.ai then muse.ai). Keep CSP in sync with operator config.
+        let trustedOrigins = Set(([redirect] + ((try? redirectStore.list()) ?? [])).compactMap { value -> String? in
+            guard let parts = URLComponents(string: value), let scheme = parts.scheme,
+                  let host = parts.host else { return nil }
+            let port = parts.port.map { ":\($0)" } ?? ""
+            return "\(scheme)://\(host)\(port)"
+        }).sorted().joined(separator: " ")
         let page = """
         <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
         <title>Authorize Neo</title><style>body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:34rem;margin:3rem auto;padding:0 1.25rem}code{background:#f2f2f2;padding:.1rem .3rem;border-radius:3px;word-break:break-all}input{width:100%;padding:.5rem;box-sizing:border-box}button{margin-top:1rem;padding:.6rem 1.2rem}</style></head><body>
@@ -251,7 +255,7 @@ final class NeoYOAuthService: @unchecked Sendable {
         """
         return NeoYOAuthHTTPResponse(status: 200, body: Data(page.utf8), contentType: "text/html; charset=utf-8", headers: [
             "Cache-Control": "no-store",
-            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' \(redirectOrigin); base-uri 'none'; frame-ancestors 'none'",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' \(trustedOrigins); base-uri 'none'; frame-ancestors 'none'",
             "X-Frame-Options": "DENY",
             "Referrer-Policy": "no-referrer"
         ])

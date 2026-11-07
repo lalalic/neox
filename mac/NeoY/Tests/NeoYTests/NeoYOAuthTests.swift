@@ -285,6 +285,10 @@ final class NeoYOAuthTests: XCTestCase {
             let authorization = service.handle(method: "GET", path: "/authorize",
                 requestTarget: try XCTUnwrap(query.string), headers: headers, body: nil)
             XCTAssertEqual(authorization?.status, 200, callback)
+            let policy = authorization?.headers["Content-Security-Policy"] ?? ""
+            XCTAssertTrue(policy.contains("https://agent.meta.ai"), callback)
+            XCTAssertTrue(policy.contains("https://muse.ai"), callback)
+            XCTAssertFalse(policy.contains("https://muse.ai.evil.example"), callback)
         }
         for invalid in [
             "http://muse.ai/api/hatch/oauth/callback",
