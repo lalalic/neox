@@ -265,6 +265,8 @@ final class NeoYOAuthTests: XCTestCase {
             "https://muse.ai/api/hatch/oauth/callback",
             "https://agent.meta.ai/api/hatch/oauth/callback",
         ]
+        let store = NeoYOAuthRedirectStore(directory: directory)
+        for callback in callbacks { try store.add(callback) }
         for callback in callbacks {
             let registration = try register(callback)
             XCTAssertEqual(registration?.status, 201, callback)
@@ -293,6 +295,69 @@ final class NeoYOAuthTests: XCTestCase {
         ] {
             XCTAssertEqual(try register(invalid)?.status, 400, invalid)
         }
+    }
+
+    func testConfiguredOAuthCallbacksPersistAndRegisterWithoutRebuild() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("neoy-oauth-configurable-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = NeoYOAuthRedirectStore(directory: directory)
+        let service = NeoYOAuthService(
+            clientID: "configured-client", consentToken: "test-static-token-0123456789abcdef",
+            stateURL: directory.appendingPathComponent("state.json")
+        )
+        let callback = "https://example.app/oauth/callback"
+        let body = try JSONSerialization.data(withJSONObject: [
+            "client_name": "Future Agent", "redirect_uris": [callback],
+            "token_endpoint_auth_method": "none",
+        ])
+        let headers = ["host": "neoy.example", "x-forwarded-proto": "https"]
+        func register() -> NeoYOAuthHTTPResponse? {
+            service.handle(method: "POST", path: "/register", requestTarget: "/register",
+                headers: headers, body: body)
+        }
+        XCTAssertEqual(register()?.status, 400)
+        XCTAssertEqual(try store.add(callback), [callback])
+        XCTAssertEqual(try NeoYOAuthRedirectStore(directory: directory).list(), [callback])
+        let created = try XCTUnwrap(register())
+        XCTAssertEqual(created.status, 201)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(created.body)) as? [String: Any])
+        let clientID = try XCTUnwrap(json["client_id"] as? String)
+        let target = "/authorize?response_type=code&client_id=\(clientID)"
+            + "&redirect_uri=https%3A%2F%2Fexample.app%2Foauth%2Fcallback"
+            + "&code_challenge=\(String(repeating: "a", count: 43))&code_challenge_method=S256"
+        let authorized = service.handle(method: "GET", path: "/authorize", requestTarget: target,
+            headers: headers, body: nil)
+        XCTAssertEqual(authorized?.status, 200)
+        XCTAssertTrue(authorized?.headers["Content-Security-Policy"]?.contains("form-action 'self' https://example.app;") == true)
+        XCTAssertEqual(try store.remove(callback), [])
+        XCTAssertEqual(register()?.status, 400)
+        XCTAssertEqual(service.handle(method: "GET", path: "/authorize", requestTarget: target,
+            headers: headers, body: nil)?.status, 400)
+    }
+
+    func testConfiguredOAuthCallbacksRejectUnsafeURLsAndMalformedState() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("neoy-oauth-config-security-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = NeoYOAuthRedirectStore(directory: directory)
+        for bad in [
+            "http://example.com/oauth/callback", "https://example.com/",
+            "https://example.com/oauth/callback?next=x", "https://example.com/oauth/callback#fragment",
+            "https://example.com.evil.test:8443/oauth/callback", "https://*.example.com/oauth/callback",
+            "https://user:password@example.com/oauth/callback", "https://localhost/oauth/callback",
+        ] {
+            XCTAssertThrowsError(try store.add(bad), bad)
+        }
+        XCTAssertEqual(try store.list(), [])
+        let file = directory.appendingPathComponent("oauth-redirects.json")
+        try Data(#"{"version":1,"redirects":["https://*.example.com/oauth/callback"]}"#.utf8).write(to: file)
+        XCTAssertThrowsError(try store.list())
+        XCTAssertThrowsError(try store.add("https://example.app/oauth/callback"))
+        XCTAssertTrue(try String(contentsOf: file, encoding: .utf8).contains("*.example.com"),
+                      "Invalid config must be preserved, not silently overwritten")
     }
 
     func testInteractiveAccessTokenSelfRenewsWithoutRefreshSecret() throws {

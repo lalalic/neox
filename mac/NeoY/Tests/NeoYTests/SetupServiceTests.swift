@@ -3,6 +3,45 @@ import XCTest
 @testable import NeoY
 
 final class SetupServiceTests: XCTestCase {
+    func testAuthCallbackCommandsAreTyped() throws {
+        let url = "https://example.app/oauth/callback"
+        XCTAssertEqual(try NeoYSetupParser.parse("auth callback list"), .authCallbackList)
+        XCTAssertEqual(try NeoYSetupParser.parse("auth callback add " + url), .authCallbackAdd(url))
+        XCTAssertEqual(try NeoYSetupParser.parse("auth callback remove " + url), .authCallbackRemove(url))
+        XCTAssertThrowsError(try NeoYSetupParser.parse("auth callback add"))
+        XCTAssertThrowsError(try NeoYSetupParser.parse("auth callback replace " + url))
+    }
+
+    func testAuthCallbackSetupMutationsApplyToLiveOAuthAndPersist() async throws {
+        let directory = Self.makeDirectory()
+        let store = NeoYFileControlPlaneStore(directory: directory)
+        let setup = NeoYSetupService(
+            makeStatus: { Self.makeStatus() },
+            controlPlane: NeoYControlPlaneService(store: store),
+            oauthRedirectDirectory: directory
+        )
+        let callback = "https://next-agent.example/oauth/return"
+        let initial = await setup.execute(.authCallbackList)
+        XCTAssertEqual(initial, #"{"callbacks":[]}"#)
+        let added = await setup.execute(.authCallbackAdd(callback))
+        XCTAssertEqual(added, #"{"callbacks":["https://next-agent.example/oauth/return"]}"#)
+        let oauth = NeoYOAuthService(clientID: "configured-client", consentToken: "test-token-for-tests",
+                                     stateURL: directory.appendingPathComponent("native-oauth-state.json"))
+        let body = try JSONSerialization.data(withJSONObject: [
+            "client_name": "Future Connector", "redirect_uris": [callback],
+            "token_endpoint_auth_method": "none",
+        ])
+        func register() -> Int? {
+            oauth.handle(method: "POST", path: "/register", requestTarget: "/register",
+                headers: ["host": "neoy.example", "x-forwarded-proto": "https"], body: body)?.status
+        }
+        XCTAssertEqual(register(), 201)
+        let removed = await setup.execute(.authCallbackRemove(callback))
+        XCTAssertEqual(removed, #"{"callbacks":[]}"#)
+        XCTAssertEqual(register(), 400)
+        XCTAssertEqual(try NeoYOAuthRedirectStore(directory: directory).list(), [])
+    }
+
     func testCoreUpgradeCommands() throws {
         XCTAssertEqual(try NeoYSetupParser.parse("core status"), .coreStatus)
         XCTAssertEqual(try NeoYSetupParser.parse("core upgrade latest"), .coreUpgrade("latest"))

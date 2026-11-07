@@ -44,6 +44,9 @@ enum NeoYSetupCommand: Equatable, Sendable {
     case capabilitySet(NeoYOptionalCapability, enabled: Bool)
     case authShow
     case authRotate
+    case authCallbackList
+    case authCallbackAdd(String)
+    case authCallbackRemove(String)
 }
 
 enum NeoYSetupError: LocalizedError {
@@ -291,6 +294,11 @@ enum NeoYSetupParser {
 
     private static func auth(_ tokens: [String]) throws -> NeoYSetupCommand {
         if tokens == ["auth", "show"] { return .authShow }
+        if tokens == ["auth", "callback", "list"] { return .authCallbackList }
+        if tokens.count == 4, tokens.prefix(2) == ["auth", "callback"] {
+            if tokens[2] == "add" { return .authCallbackAdd(tokens[3]) }
+            if tokens[2] == "remove" { return .authCallbackRemove(tokens[3]) }
+        }
         if tokens == ["auth", "rotate"] || tokens == ["auth", "revoke"] { return .authRotate }
         throw NeoYSetupError.unknownCommand(tokens.joined(separator: " "))
     }
@@ -371,6 +379,7 @@ actor NeoYSetupService {
     private let controlPlane: NeoYControlPlaneService
     private let runtime: NeoYRuntimeControl?
     private let onDeploymentChanged: (@Sendable () async -> Void)?
+    private let oauthRedirectStore: NeoYOAuthRedirectStore
     private let onCapabilitiesChanged: (@Sendable (NeoYControlPlaneConfiguration) async -> Void)?
 
     init(
@@ -379,12 +388,14 @@ actor NeoYSetupService {
             store: NeoYFileControlPlaneStore(directory: NeoYPaths.supportDirectory)
         ),
         runtime: NeoYRuntimeControl? = nil,
+        oauthRedirectDirectory: URL = NeoYPaths.supportDirectory,
         onDeploymentChanged: (@Sendable () async -> Void)? = nil,
         onCapabilitiesChanged: (@Sendable (NeoYControlPlaneConfiguration) async -> Void)? = nil
     ) {
         self.makeStatus = makeStatus
         self.controlPlane = controlPlane
         self.runtime = runtime
+        self.oauthRedirectStore = NeoYOAuthRedirectStore(directory: oauthRedirectDirectory)
         self.onDeploymentChanged = onDeploymentChanged
         self.onCapabilitiesChanged = onCapabilitiesChanged
     }
@@ -532,6 +543,19 @@ actor NeoYSetupService {
                 "public_core_url": settings.publicMCPURL.map(NeoYCoreAuth.url) ?? "",
                 "token": NeoYCoreAuth.token()
             ])
+        case .authCallbackList, .authCallbackAdd, .authCallbackRemove:
+            do {
+                let callbacks: [String]
+                switch command {
+                case .authCallbackList: callbacks = try oauthRedirectStore.list()
+                case .authCallbackAdd(let uri): callbacks = try oauthRedirectStore.add(uri)
+                case .authCallbackRemove(let uri): callbacks = try oauthRedirectStore.remove(uri)
+                default: callbacks = []
+                }
+                return Self.json(["callbacks": callbacks])
+            } catch {
+                return Self.json(["error": error.localizedDescription])
+            }
         case .authRotate:
             let token = NeoYCoreAuth.rotateToken()
             if let onDeploymentChanged {
@@ -678,6 +702,9 @@ actor NeoYSetupService {
             auth show — return the current Core token and tokenized local/public MCP URLs.
             auth rotate — revoke the current token and issue a replacement immediately.
             auth revoke — alias for auth rotate.
+            auth callback list — list configured OAuth callback URLs.
+            auth callback add <exact-https-url> — allow an additional remote OAuth callback, effective immediately.
+            auth callback remove <exact-https-url> — remove a configured callback; already-issued tokens remain valid until expiry/revocation.
             """
         case .roadmap:
             "v2 core is implemented around typed persistence, native permission guidance, HTTP/stdio MCP federation, and pairing-aware NeoX important-event delivery. Signed installed-app permission/login E2E still requires the actual installed identity and human TCC approvals."
@@ -696,7 +723,7 @@ actor NeoYSetupService {
               feature list|status|install|enable|disable|uninstall|configure|start|stop|restart|doctor|setup|complete ...
               events status|enable|disable|notify ...
               capability list|enable|disable ...
-              auth show|rotate|revoke
+              auth show|rotate|revoke|callback ...
 
             Run 'help <topic>' for exact grammar. Runtime help is authoritative for the installed Neo version.
             """

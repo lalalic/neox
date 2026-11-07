@@ -19,6 +19,25 @@ and principle-level review requirements.
 
 NeoY replaces the old Neox Tour Mac app and standalone Python `neoy-bridge.py`.
 
+## Configurable OAuth callbacks (remote MCP clients)
+
+Neo's HTTPS MCP gateway uses OAuth 2.1 dynamic client registration and PKCE. To connect a new
+third-party agent without modifying Swift or reinstalling Neo, register the agent's exact
+HTTPS redirect URI through the authenticated `setup` tool:
+
+```text
+auth callback list
+auth callback add https://agent.example/oauth/callback
+auth callback remove https://agent.example/oauth/callback
+```
+
+Callbacks persist in `oauth-redirects.json` under NeoY's private Application Support directory
+and apply immediately to new client registrations and authorizations. Exact HTTPS DNS URLs
+are required; wildcard hosts, root-only paths, query strings, URL fragments, credentials,
+and custom ports are rejected. Built-in trusted client callbacks remain supported for backward
+compatibility. Removing a configured callback blocks new OAuth grants but does **not**
+revoke already-issued access/refresh tokens; revoke the client's credential separately if needed.
+
 ## One setup surface
 
 Agent-facing runtime configuration is intentionally concentrated in one MCP tool:

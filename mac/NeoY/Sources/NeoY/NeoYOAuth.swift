@@ -85,6 +85,7 @@ final class NeoYOAuthService: @unchecked Sendable {
     private let consentToken: String
     private let tokenEpoch: String
     private let stateURL: URL
+    private let redirectStore: NeoYOAuthRedirectStore
     private var pendingAuth: [String: PendingAuth] = [:]
     private var codes: [String: PendingCode] = [:]
     private var access: [String: StoredToken] = [:]
@@ -105,6 +106,7 @@ final class NeoYOAuthService: @unchecked Sendable {
         self.consentToken = consentToken
         self.tokenEpoch = Self.sha256(Self.sha256(consentToken))
         self.stateURL = stateURL
+        self.redirectStore = NeoYOAuthRedirectStore(directory: stateURL.deletingLastPathComponent())
         loadStore()
         if let gatewayStateURL { importGatewayStoreIfNeeded(from: gatewayStateURL) }
     }
@@ -235,6 +237,10 @@ final class NeoYOAuthService: @unchecked Sendable {
         let safeRID = Self.htmlEscape(rid)
         let safeIssuer = Self.htmlEscape(origin)
         let safeRedirect = Self.htmlEscape(redirect)
+        let redirectOrigin = URLComponents(string: redirect).flatMap { parts -> String? in
+            guard let scheme = parts.scheme, let host = parts.host else { return nil }
+            return "\(scheme)://\(host)"
+        } ?? ""
         let page = """
         <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
         <title>Authorize Neo</title><style>body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:34rem;margin:3rem auto;padding:0 1.25rem}code{background:#f2f2f2;padding:.1rem .3rem;border-radius:3px;word-break:break-all}input{width:100%;padding:.5rem;box-sizing:border-box}button{margin-top:1rem;padding:.6rem 1.2rem}</style></head><body>
@@ -245,7 +251,7 @@ final class NeoYOAuthService: @unchecked Sendable {
         """
         return NeoYOAuthHTTPResponse(status: 200, body: Data(page.utf8), contentType: "text/html; charset=utf-8", headers: [
             "Cache-Control": "no-store",
-            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://chatgpt.com https://claude.ai https://grok.com; base-uri 'none'; frame-ancestors 'none'",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' \(redirectOrigin); base-uri 'none'; frame-ancestors 'none'",
             "X-Frame-Options": "DENY",
             "Referrer-Policy": "no-referrer"
         ])
@@ -260,7 +266,10 @@ final class NeoYOAuthService: @unchecked Sendable {
             return html(status: 400, title: "Authorization failed", body: "This approval link expired. Start again from ChatGPT.")
         }
         guard Self.constantTimeEqual(form["token"] ?? "", consentToken) else {
-            return html(status: 403, title: "Authorization failed", body: "The Neo token did not match. Start again from ChatGPT.")
+            return html(status: 403, title: "Authorization failed", body: "The Neo token did not match. Start the authorization flow again.")
+        }
+        guard let client = knownClient(pending.clientID), redirectAllowed(pending.redirectURI, for: client) else {
+            return html(status: 403, title: "Authorization failed", body: "This callback is no longer configured. Start the authorization flow again.")
         }
         let code = Self.randomToken(bytes: 32)
         let codeDigest = Self.sha256(code)
@@ -296,6 +305,9 @@ final class NeoYOAuthService: @unchecked Sendable {
             }
             guard record.clientID == requestedClientID else {
                 return oauthError(status: 400, code: "invalid_grant", description: "client_id mismatch")
+            }
+            guard let client = knownClient(record.clientID), redirectAllowed(record.redirectURI, for: client) else {
+                return oauthError(status: 400, code: "invalid_grant", description: "callback is no longer configured")
             }
             if let redirect = form["redirect_uri"], redirect != record.redirectURI {
                 return oauthError(status: 400, code: "invalid_grant", description: "redirect_uri mismatch")
@@ -385,7 +397,7 @@ final class NeoYOAuthService: @unchecked Sendable {
             return oauthError(status: 400, code: "invalid_client_metadata", description: "registration body must be JSON")
         }
         guard let redirectUris = object["redirect_uris"] as? [String], !redirectUris.isEmpty,
-              redirectUris.allSatisfy(Self.allowedRedirect) else {
+              redirectUris.allSatisfy(allowedRedirect) else {
             return oauthError(status: 400, code: "invalid_redirect_uri",
                               description: "all redirect_uris must be approved OAuth callback URLs")
         }
@@ -438,7 +450,7 @@ final class NeoYOAuthService: @unchecked Sendable {
     }
 
     private func redirectAllowed(_ value: String, for client: RegisteredClient) -> Bool {
-        guard Self.allowedRedirect(value) else { return false }
+        guard allowedRedirect(value) else { return false }
         return client.redirectUris?.contains(value) ?? true
     }
 
@@ -541,7 +553,7 @@ final class NeoYOAuthService: @unchecked Sendable {
         let now = Date().timeIntervalSince1970
         lock.withLock {
             guard gatewayMigrationVersion < 2 else { return }
-            for client in gateway.clients ?? [] where Self.validRegisteredClient(client) {
+            for client in gateway.clients ?? [] where validRegisteredClient(client) {
                 clients[client.id] = client
             }
             let knownClientIDs = Set(clients.keys).union([clientID])
@@ -568,7 +580,7 @@ final class NeoYOAuthService: @unchecked Sendable {
         value.range(of: #"^[0-9a-f]{64}$"#, options: .regularExpression) != nil
     }
 
-    private static func validRegisteredClient(_ client: RegisteredClient) -> Bool {
+    private func validRegisteredClient(_ client: RegisteredClient) -> Bool {
         client.id.range(of: #"^neo-dcr-[0-9a-f]{32}$"#, options: .regularExpression) != nil
             && !(client.redirectUris ?? []).isEmpty
             && (client.redirectUris ?? []).allSatisfy(allowedRedirect)
@@ -607,15 +619,14 @@ final class NeoYOAuthService: @unchecked Sendable {
         return result
     }
 
-    private static func allowedRedirect(_ value: String) -> Bool {
+    private func allowedRedirect(_ value: String) -> Bool {
+        if (try? redirectStore.list().contains(value)) == true { return true }
         if let url = URLComponents(string: value), url.scheme == "http", url.host == "127.0.0.1",
            let port = url.port, (1024...65535).contains(port), url.path == "/neo/oauth/callback",
            url.user == nil, url.password == nil, url.query == nil, url.fragment == nil { return true }
         if value == "https://chatgpt.com/connector_platform_oauth_redirect" { return true }
         if value == "https://claude.ai/api/mcp/auth_callback" { return true }
         if value == "https://grok.com/connectors-oauth-exchange-code/" { return true }
-        if value == "https://muse.ai/api/hatch/oauth/callback" { return true }
-        if value == "https://agent.meta.ai/api/hatch/oauth/callback" { return true }
         guard let url = URL(string: value), url.scheme == "https", url.host == "chatgpt.com", url.user == nil, url.password == nil,
               url.port == nil, url.query == nil, url.fragment == nil else { return false }
         return url.path.range(of: #"^/connector/oauth/[A-Za-z0-9_-]{1,128}$"#, options: .regularExpression) != nil
@@ -660,5 +671,95 @@ final class NeoYOAuthService: @unchecked Sendable {
 private extension NSLock {
     func withLock<T>(_ body: () throws -> T) rethrows -> T {
         lock(); defer { unlock() }; return try body()
+    }
+}
+
+
+enum NeoYOAuthRedirectError: LocalizedError {
+    case invalidURL, capacity, invalidConfiguration
+    var errorDescription: String? {
+        switch self {
+        case .invalidURL: "OAuth callback must be an exact HTTPS URL with a DNS hostname and non-root path, without query, fragment, or wildcard"
+        case .capacity: "OAuth callback limit (64) reached"
+        case .invalidConfiguration: "Invalid OAuth callback configuration; refusing to use it"
+        }
+    }
+}
+
+/// Operator-managed exact HTTPS callbacks for remote OAuth MCP clients.
+/// Kept separate from active token state so setup changes take effect immediately.
+struct NeoYOAuthRedirectStore: Sendable {
+    private struct Document: Codable {
+        var version = 1
+        var redirects: [String] = []
+    }
+
+    private static let fileLock = NSLock()
+    private let file: URL
+    init(directory: URL) {
+        file = directory.appendingPathComponent("oauth-redirects.json")
+    }
+
+    func list() throws -> [String] {
+        try Self.fileLock.withLock { try read().redirects }
+    }
+
+    @discardableResult
+    func add(_ uri: String) throws -> [String] {
+        guard Self.valid(uri) else {
+            throw NeoYOAuthRedirectError.invalidURL
+        }
+        return try Self.fileLock.withLock {
+            var doc = try read()
+            if !doc.redirects.contains(uri) {
+                guard doc.redirects.count < 64 else { throw NeoYOAuthRedirectError.capacity }
+                doc.redirects.append(uri)
+                doc.redirects.sort()
+                try write(doc)
+            }
+            return doc.redirects
+        }
+    }
+
+    @discardableResult
+    func remove(_ uri: String) throws -> [String] {
+        return try Self.fileLock.withLock {
+            var doc = try read()
+            let oldCount = doc.redirects.count
+            doc.redirects.removeAll { $0 == uri }
+            if doc.redirects.count != oldCount { try write(doc) }
+            return doc.redirects
+        }
+    }
+
+    private func read() throws -> Document {
+        guard FileManager.default.fileExists(atPath: file.path) else { return Document() }
+        let document = try JSONDecoder().decode(Document.self, from: Data(contentsOf: file))
+        guard document.version == 1, document.redirects.count <= 64,
+              Set(document.redirects).count == document.redirects.count,
+              document.redirects.allSatisfy(Self.valid) else {
+            throw NeoYOAuthRedirectError.invalidConfiguration
+        }
+        return document
+    }
+
+    private func write(_ doc: Document) throws {
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        try JSONEncoder().encode(doc).write(to: file, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+    }
+
+    private static func valid(_ value: String) -> Bool {
+        guard value.count <= 2048, let uri = URLComponents(string: value), uri.string == value,
+              uri.scheme == "https", let host = uri.host, uri.port == nil,
+              uri.user == nil, uri.password == nil, uri.query == nil, uri.fragment == nil,
+              !uri.path.isEmpty, uri.path != "/", !uri.path.hasPrefix("//") else { return false }
+        let labels = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.count >= 2, labels.allSatisfy({ label in
+            label.count >= 1 && label.count <= 63 && label.first != "-" && label.last != "-" &&
+            label.unicodeScalars.allSatisfy { CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-").contains($0) }
+        }) else { return false }
+        return true
     }
 }
