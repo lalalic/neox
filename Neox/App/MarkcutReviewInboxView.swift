@@ -394,8 +394,8 @@ struct MarkcutReviewInboxView: View {
 
     private func loadPreview(_ item: [String: Any]) async {
         guard let requestID = item["id"] as? String,
-              let request = inbox.request(id: requestID),
-              let hash = item["contentHash"] as? String,
+              inbox.request(id: requestID) != nil,
+              let hash = (item["mediaHash"] ?? item["contentHash"]) as? String,
               ["ready", "decided", "superseded"].contains(item["status"] as? String ?? "") else {
             previewError = "This revision has no compiled preview yet. Refresh after compilation finishes."
             return

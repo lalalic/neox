@@ -12,11 +12,12 @@ const TOKENS_FILE = path.join(BASE,'devices.json');
 const REVIEWS_FILE = path.join(BASE,'reviews.json');
 const HEX = /^[0-9a-f]{64,512}$/;
 const SHA = /^[0-9a-f]{64}$/;
+const GIT_SHA = /^[0-9a-f]{40}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const THREAD = /^[a-zA-Z0-9_-]{8,160}$/;
 const callback = x => x === 'chatgpt' || x === 'review.feedback' || /^[a-z0-9_-]+\.review\.feedback$/.test(x);
 const SOURCE=/^job\/([A-Za-z0-9_-]+)\/task\/([A-Za-z0-9_-]+)\/execution\/([A-Za-z0-9_-]+)$/;
-const RESERVED=['decision','feedback','comments','revision','revisionId','contentHash','previewId','requestId','idempotencyKey'];
+const RESERVED=['decision','feedback','comments','revision','revisionId','contentHash','commitSha','previewId','requestId','idempotencyKey'];
 
 function assertValid(ok, message) { if (!ok) throw new Error(message); }
 export function validateRegistration(a) {
@@ -29,12 +30,13 @@ export function validateRegistration(a) {
 export function validateReview(a) {
   assertValid(a && typeof a === 'object','Review request required');
   assertValid(typeof a.id === 'string' && UUID.test(a.id),'Invalid request UUID');
-  assertValid(typeof a.contentHash === 'string' && SHA.test(a.contentHash),'Invalid content hash');
-  assertValid(typeof a.revisionId === 'string' && a.revisionId.length >= 1 && a.revisionId.length <= 256,'Invalid revision');
   assertValid(typeof a.title === 'string' && a.title.trim().length >= 1 && a.title.length <= 180,'Invalid title');
   const delivery=a.delivery||'text';
   assertValid(delivery==='text'||delivery==='event','Unsupported review delivery');
   if(delivery==='event'){
+    assertValid(typeof a.commitSha==='string' && GIT_SHA.test(a.commitSha),'Invalid Git Commit SHA');
+    assertValid(typeof a.mediaHash==='string' && SHA.test(a.mediaHash),'Invalid compiled media hash');
+    assertValid(a.contentHash===undefined && a.revisionId===undefined,'Event review must use Git SHA only');
     const t=a.eventTemplate;
     assertValid(t && typeof t==='object' && !Array.isArray(t),'Missing event template');
     assertValid(t.type==='task.interactive_decision','Unsafe review event type');
@@ -49,6 +51,9 @@ export function validateReview(a) {
     assertValid(Object.keys(t).every(k=>['type','source','data'].includes(k)),'Invalid event template fields');
     assertValid(a.ownerCallbackTool===undefined && a.ownerThreadId===undefined,'Event cannot carry owner callback');
   }else{
+    assertValid(typeof a.contentHash === 'string' && SHA.test(a.contentHash),'Invalid content hash');
+    assertValid(typeof a.revisionId === 'string' && a.revisionId.length >= 1 && a.revisionId.length <= 256,'Invalid revision');
+    assertValid(a.commitSha===undefined && a.mediaHash===undefined,'Text reviews use standalone preview identity');
     assertValid(a.eventTemplate===undefined,'Text mode cannot carry event template');
     // Standalone ChatGPT text previews are still mirrored to iPhone for viewing;
     // without an owner thread they are read-only in the mobile inbox.
@@ -57,7 +62,8 @@ export function validateReview(a) {
       assertValid(typeof a.ownerThreadId==='string' && THREAD.test(a.ownerThreadId),'ChatGPT owner thread required');
     }
   }
-  const result={id:a.id.toLowerCase(),contentHash:a.contentHash,revisionId:a.revisionId,title:a.title};
+  const result={id:a.id.toLowerCase(),title:a.title,
+    ...(delivery==='event'?{commitSha:a.commitSha,mediaHash:a.mediaHash}:{contentHash:a.contentHash,revisionId:a.revisionId})};
   if(a.delivery)result.delivery=delivery;
   if(a.ownerCallbackTool)result.ownerCallbackTool=a.ownerCallbackTool;
   if(a.eventTemplate)result.eventTemplate=JSON.parse(JSON.stringify(a.eventTemplate));

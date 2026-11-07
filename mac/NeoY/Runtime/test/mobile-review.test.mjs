@@ -8,7 +8,7 @@ const ID='8aad68fe-8892-4f88-8c58-4459197afb29',H='a'.repeat(64);
 const r={id:ID,title:'Review E2E',contentHash:H,revisionId:H,delivery:'text'};
 const template={type:'task.interactive_decision',source:'job/j8/task/producer/execution/e8',
   data:{interactive:{jobId:'j8',taskId:'producer',executionId:'e8',invocationId:'review-r8'}}};
-const event={...r,delivery:'event',eventTemplate:template,previewId:H};
+const event={id:ID,title:r.title,commitSha:'c'.repeat(40),mediaHash:H,delivery:'event',eventTemplate:template,previewId:H};
 const temp=fs.mkdtempSync(path.join(os.tmpdir(),'neox-apns-test-'));
 process.env.NEO_APNS_HOME=temp;
 const {validateRegistration,validateReview,payloadForReview,signingJWT,registerDevice,
@@ -25,6 +25,8 @@ test('event validation accepts generic Relay contract, rejects old types and for
  assert.throws(()=>validateReview({...event,eventTemplate:{...template,data:{interactive:{...template.data.interactive,decision:'approved'}}}}));
  assert.throws(()=>validateReview({...event,ownerCallbackTool:'chatgpt'}));
  assert.throws(()=>validateReview({...event,delivery:'other'}));
+ assert.throws(()=>validateReview({...event,commitSha:'f'.repeat(64)}));
+ assert.throws(()=>validateReview({...event,revisionId:'old'}));
  assert.throws(()=>validateReview({...r,contentHash:'bad'}));
  assert.throws(()=>validateRegistration({deviceId:ID,token:'bad',environment:'sandbox'}));
 });
