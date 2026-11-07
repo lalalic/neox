@@ -614,6 +614,8 @@ final class NeoYOAuthService: @unchecked Sendable {
         if value == "https://chatgpt.com/connector_platform_oauth_redirect" { return true }
         if value == "https://claude.ai/api/mcp/auth_callback" { return true }
         if value == "https://grok.com/connectors-oauth-exchange-code/" { return true }
+        if value == "https://muse.ai/api/hatch/oauth/callback" { return true }
+        if value == "https://agent.meta.ai/api/hatch/oauth/callback" { return true }
         guard let url = URL(string: value), url.scheme == "https", url.host == "chatgpt.com", url.user == nil, url.password == nil,
               url.port == nil, url.query == nil, url.fragment == nil else { return false }
         return url.path.range(of: #"^/connector/oauth/[A-Za-z0-9_-]{1,128}$"#, options: .regularExpression) != nil

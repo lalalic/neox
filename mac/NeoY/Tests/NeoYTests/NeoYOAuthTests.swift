@@ -244,6 +244,57 @@ final class NeoYOAuthTests: XCTestCase {
         XCTAssertTrue(authorization?.headers["Content-Security-Policy"]?.contains("https://grok.com") == true)
     }
 
+    func testMuseOAuthCallbackRegistrationAllowsOnlyExactMetaURLs() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("neoy-oauth-muse-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = NeoYOAuthService(
+            clientID: "configured-client", consentToken: "test-static-token-0123456789abcdef",
+            stateURL: directory.appendingPathComponent("native-oauth-state.json")
+        )
+        let headers = ["host": "neoy.example", "x-forwarded-proto": "https"]
+        func register(_ redirect: String) throws -> NeoYOAuthHTTPResponse? {
+            service.handle(method: "POST", path: "/register", requestTarget: "/register",
+                headers: headers, body: try JSONSerialization.data(withJSONObject: [
+                    "client_name": "Meta Muse", "redirect_uris": [redirect],
+                    "token_endpoint_auth_method": "none",
+                ]))
+        }
+        let callbacks = [
+            "https://muse.ai/api/hatch/oauth/callback",
+            "https://agent.meta.ai/api/hatch/oauth/callback",
+        ]
+        for callback in callbacks {
+            let registration = try register(callback)
+            XCTAssertEqual(registration?.status, 201, callback)
+            let data = try XCTUnwrap(registration?.body)
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            let clientID = try XCTUnwrap(object["client_id"] as? String)
+            var query = URLComponents()
+            query.path = "/authorize"
+            query.queryItems = [
+                URLQueryItem(name: "response_type", value: "code"),
+                URLQueryItem(name: "client_id", value: clientID),
+                URLQueryItem(name: "redirect_uri", value: callback),
+                URLQueryItem(name: "code_challenge", value: String(repeating: "a", count: 43)),
+                URLQueryItem(name: "code_challenge_method", value: "S256"),
+            ]
+            let authorization = service.handle(method: "GET", path: "/authorize",
+                requestTarget: try XCTUnwrap(query.string), headers: headers, body: nil)
+            XCTAssertEqual(authorization?.status, 200, callback)
+        }
+        for invalid in [
+            "http://muse.ai/api/hatch/oauth/callback",
+            "https://muse.ai.evil.example/api/hatch/oauth/callback",
+            "https://muse.ai/api/hatch/oauth/callback?next=evil",
+            "https://muse.ai/api/hatch/oauth/callback/",
+            "https://agent.meta.ai.evil.example/api/hatch/oauth/callback",
+        ] {
+            XCTAssertEqual(try register(invalid)?.status, 400, invalid)
+        }
+    }
+
     func testInteractiveAccessTokenSelfRenewsWithoutRefreshSecret() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("neoy-oauth-interactive-\(UUID().uuidString)", isDirectory: true)
