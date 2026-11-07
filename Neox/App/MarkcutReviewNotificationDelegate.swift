@@ -43,13 +43,15 @@ final class MarkcutReviewNotificationDelegate: NSObject, UIApplicationDelegate, 
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
         let info = response.notification.request.content.userInfo
-        let isLocal = info["reviewRequestId"] as? String != nil
-        let isRemote = (info["neoReviewRequestId"] as? String)
-            .flatMap(UUID.init(uuidString:)) != nil
-        guard isLocal || isRemote else { return }
-        if isRemote { await ReviewPushCoordinator.shared.syncPending() }
+        let remote = ReviewPushCoordinator.reviewRequestID(info)
+        let local = (info["reviewRequestId"] as? String)
+            .flatMap { UUID(uuidString: $0) == nil ? nil : $0 }
+        guard let id = remote ?? local else { return }
+        // Save navigation intent before network I/O, including cold launches.
         await MainActor.run {
+            ReviewPushCoordinator.shared.notificationTapped(id)
             NotificationCenter.default.post(name: .markcutReviewNotificationTapped, object: nil)
         }
+        if remote != nil { await ReviewPushCoordinator.shared.syncPending() }
     }
 }

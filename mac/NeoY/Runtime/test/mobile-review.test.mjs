@@ -32,6 +32,8 @@ test('text without a thread can mirror preview to phone as view-only',()=>{
  assert.equal(validateReview(r).delivery,'text');
  assert.equal(payloadForReview(r).neoReviewRequestId,ID);
  assert.equal(payloadForReview(r).neoReview,undefined);
+ assert.equal(payloadForReview(r).aps.alert.title,'Video preview ready');
+ assert.equal(payloadForReview(event).aps.alert.title,'Video ready for review');
 });
 test('jwt ES256 signs APNs authorization',()=>{
  const jwt=signingJWT('Z4YUMQ3P42','JABNLDLN8G',privateKey,1700000000);
@@ -68,6 +70,21 @@ test('Master persists full review; APNs sends pointer only; phone fetches and co
  assert.equal(pendingReviews().requests.length,0);
  assert.equal(completeReview({id:ID}).wasPending,false);
  await assert.rejects(()=>notifyReview(event,transport),/already completed/);
+});
+test('pending previews expose persisted creation times in newest-first order',async()=>{
+ const older={...r,id:'acdd68fe-8892-4f88-8c58-4459197afb29',title:'Earlier Vlog'};
+ const newer={...r,id:'bdd68afe-8892-4f88-8c58-4459197afb29',title:'Later Vlog'};
+ const noAPNs=async()=>({accepted:false,status:503,reason:'offline'});
+ await notifyReview(older,noAPNs);
+ await new Promise(resolve=>setTimeout(resolve,10));
+ await notifyReview(newer,noAPNs);
+ const requests=pendingReviews().requests;
+ assert.deepEqual(requests.slice(0,2).map(x=>x.id),[newer.id,older.id]);
+ assert.ok(Date.parse(requests[0].createdAt) > Date.parse(requests[1].createdAt));
+ assert.equal(requests[0].title,'Later Vlog');
+ assert.equal(requests[0].delivery,'text');
+ completeReview({id:older.id});
+ completeReview({id:newer.id});
 });
 test('offline APNs still yields a durable review for later phone sync',async()=>{
  const req={...event,id:'c1ad68fe-8892-4f88-8c58-4459197afb29'};

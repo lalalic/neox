@@ -1,12 +1,17 @@
 import Foundation
 import UIKit
 import UserNotifications
+import Combine
 
 /// Neo Master persists review requests; APNs is only a wake-up notification.
-/// The phone mirrors pending requests and emits human decisions via Events MCP.
+/// The phone mirrors previews and pending reviews; APNs is a pointer, not the inbox.
 @MainActor
-final class ReviewPushCoordinator {
+final class ReviewPushCoordinator: ObservableObject {
     static let shared = ReviewPushCoordinator()
+    @Published private(set) var tappedRequestID: String?
+    @Published private(set) var syncError: String?
+
+    func notificationTapped(_ id: String) { tappedRequestID = id }
 
     static func apnsEnvironment(from provisioning: Data?) -> String {
         guard let provisioning else { return "production" } // App Store / TestFlight
@@ -54,18 +59,22 @@ final class ReviewPushCoordinator {
 
     func syncPending() async {
         let master = RemoteMCPClient()
-        guard master.hasCredential, master.hasConfiguredAddress else { return }
+        guard master.hasCredential, master.hasConfiguredAddress else {
+            syncError = "Connect to Neo Master with its Master Access Code to load previews."
+            return
+        }
         do {
             let requests = try await master.pendingMarkcutReviews()
-            // Master returns newest-first; local accept inserts at index 0.
-            // Import oldest-first so the newest revision remains the current
-            // request for each video group (older revisions read-only).
+            // Import oldest-first so newer revisions stay current. This also
+            // includes read-only text-mode previews with no human decision.
             for request in requests.reversed() {
                 _ = MarkcutReviewInboxStore.shared.accept(request, notify: false)
             }
+            syncError = nil
         } catch {
-            // A missed APNs or temporarily unreachable Master is retried on
-            // next foreground / Review Inbox entry, without losing local rows.
+            // Never turn an HTTP/auth/decoding failure into a misleading empty
+            // inbox. The user can retry from the Inbox or on next foreground.
+            syncError = "Cannot load Neo Master previews: " + error.localizedDescription
         }
     }
 

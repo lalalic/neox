@@ -1,12 +1,19 @@
 import SwiftUI
 import UIKit
 
-/// Phone-owned local inbox. Refresh only retries feedback delivery; requests
-/// are never reconstructed from a remote Markcut list.
+/// Phone-owned local inbox mirrored from Neo Master. Text-mode previews remain
+/// view-only; event-mode requests allow explicit human review.
 struct MarkcutReviewInboxView: View {
+    let requestedPreviewID: String?
+
+    init(requestedPreviewID: String? = nil) {
+        self.requestedPreviewID = requestedPreviewID
+    }
+
     @Environment(\.dismiss) private var dismiss
     @StateObject private var remote = RemoteMCPClient()
     @ObservedObject private var inbox = MarkcutReviewInboxStore.shared
+    @ObservedObject private var reviewPush = ReviewPushCoordinator.shared
     @State private var fixtureSessions: [[String: Any]]?
     @State private var selectedGroup: MarkcutReviewGroup?
     @State private var selectedSessionID: String?
@@ -31,6 +38,16 @@ struct MarkcutReviewInboxView: View {
     var body: some View {
         NavigationStack {
             List {
+                if let error = reviewPush.syncError {
+                    HStack {
+                        Text(error).font(.caption).foregroundStyle(.orange)
+                        Spacer()
+                        Button("Retry sync") {
+                            Task { await reviewPush.syncPending() }
+                        }
+                        .accessibilityIdentifier("markcutReviewRetrySync")
+                    }
+                }
                 if let message, message != "Synced with Neo Master" {
                     Text(message).font(.caption).foregroundStyle(.secondary)
                 }
@@ -66,8 +83,8 @@ struct MarkcutReviewInboxView: View {
             .listStyle(.insetGrouped)
             .overlay {
                 if sessions.isEmpty && !syncing {
-                    ContentUnavailableView("No video reviews", systemImage: "film",
-                        description: Text("Review requests sent to this phone will appear here."))
+                    ContentUnavailableView("No previews yet", systemImage: "film",
+                        description: Text("Previews and pending reviews from Neo Master appear here. Use Retry sync if the connection fails."))
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -87,9 +104,11 @@ struct MarkcutReviewInboxView: View {
                 .background(Color(uiColor: .systemBackground))
             }
             .task(id: inbox.feedbackQueue.count) {
-                await ReviewPushCoordinator.shared.syncPending()
+                await reviewPush.syncPending()
                 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("-markcut-review-ui-fixture") {
+                if ProcessInfo.processInfo.arguments.contains("-markcut-review-ui-multi-fixture") {
+                    fixtureSessions = MarkcutReviewGrouping.multiModeFixture
+                } else if ProcessInfo.processInfo.arguments.contains("-markcut-review-ui-fixture") {
                     fixtureSessions = MarkcutReviewGrouping.uiFixture
                 }
                 #endif
@@ -103,6 +122,15 @@ struct MarkcutReviewInboxView: View {
             }
             .sheet(item: $selectedGroup, onDismiss: clearSelection) { group in
                 reviewSheet(group)
+            }
+            .onChange(of: inbox.requests, initial: true) { _, _ in
+                openRequestedPreviewIfAvailable()
+            }
+            .onChange(of: requestedPreviewID) { _, _ in
+                openRequestedPreviewIfAvailable()
+            }
+            .onChange(of: reviewPush.tappedRequestID) { _, _ in
+                openRequestedPreviewIfAvailable()
             }
         }
     }
@@ -160,10 +188,17 @@ struct MarkcutReviewInboxView: View {
                 if let item = selectedItem(in: group), item["status"] as? String == "ready",
                    !(item["decision"] is [String: Any]) {
                     Divider()
-                    decisionControls(for: item)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(.bar)
+                    if (item["reviewActionable"] as? Bool) ?? true {
+                        decisionControls(for: item)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(.bar)
+                    } else {
+                        Label("Preview only · no approval requested", systemImage: "eye")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .padding(12)
+                            .accessibilityIdentifier("markcutPreviewOnly")
+                    }
                 }
                 if let message, message != "Synced with Neo Master" {
                     Text(message).font(.caption2).foregroundStyle(.secondary)
@@ -327,10 +362,19 @@ struct MarkcutReviewInboxView: View {
         feedback = ""
     }
 
-    private func open(_ group: MarkcutReviewGroup) {
+    private func openRequestedPreviewIfAvailable() {
+        guard let id = reviewPush.tappedRequestID ?? requestedPreviewID, selectedSessionID != id,
+              let group = groups.first(where: { group in
+                  group.sessions.contains { $0.reviewSessionID == id }
+              }) else { return }
+        open(group, preferredSessionID: id)
+    }
+
+    private func open(_ group: MarkcutReviewGroup, preferredSessionID: String? = nil) {
         playbackPosition = nil
         selectedGroup = group
-        let first = group.sessions.first
+        let first = group.sessions.first(where: { $0.reviewSessionID == preferredSessionID })
+            ?? group.sessions.first
         selectedSessionID = first?.reviewSessionID
         html = nil
         previewError = nil
@@ -544,7 +588,9 @@ private struct ReviewGroupRow: View {
                 HStack(spacing: 7) {
                     Text("\(group.sessions.count) \(group.sessions.count == 1 ? "revision" : "revisions")")
                     Text("·")
-                    Text(group.pendingCount == 0 ? "No pending reviews" : "\(group.pendingCount) pending")
+                    Text(group.pendingCount > 0 ? "\(group.pendingCount) pending review" :
+                         (group.sessions.contains { ($0.value["reviewActionable"] as? Bool) == true }
+                          ? "No pending reviews" : "Preview only"))
                 }
                 .font(.caption).foregroundStyle(.secondary)
             }

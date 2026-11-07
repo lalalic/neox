@@ -17,13 +17,24 @@ struct MarkcutReviewGroup: Identifiable {
 enum MarkcutReviewGrouping {
     #if DEBUG
     static var uiFixture: [[String: Any]] { [
-        ["id":"fixture-current", "label":"video-a-v2", "status":"ready", "createdAt":"2026-11-02T12:00:00Z",
+        ["id":"fixture-current", "label":"video-a-v2", "status":"ready", "reviewActionable":true, "createdAt":"2026-11-02T12:00:00Z",
          "updatedAt":"2026-11-02T12:00:00Z",
          "relayCorrelations":[["jobId":"review-fixture-job"]]],
         ["id":"fixture-old", "label":"video-a-v1", "status":"superseded", "createdAt":"2026-11-02T11:00:00Z",
          "updatedAt":"2026-11-02T11:00:00Z",
          "relayCorrelations":[["jobId":"review-fixture-job"]]]
     ] }
+    static var multiModeFixture: [[String: Any]] {
+        uiFixture + [[
+            "id": "fixture-standalone-preview",
+            "title": "Standalone text preview",
+            "status": "ready",
+            "delivery": "text",
+            "reviewActionable": false,
+            "videoGroupKey": "fixture-standalone-video",
+            "createdAt": "2026-11-02T13:00:00Z"
+        ]]
+    }
     #endif
 
     static func groups(from sessions: [[String: Any]]) -> [MarkcutReviewGroup] {
@@ -65,7 +76,7 @@ enum MarkcutReviewGrouping {
         }
         let status = item["status"] as? String ?? "pending"
         switch status {
-        case "ready": return "Ready for review"
+        case "ready": return (item["reviewActionable"] as? Bool ?? true) ? "Pending review" : "Preview only"
         case "compiling": return "Compiling"
         case "superseded": return "Historical revision"
         case "failed": return "Preview failed"
@@ -81,11 +92,13 @@ enum MarkcutReviewGrouping {
     }
 
     private static func sourceIdentity(_ item: [String: Any]) -> (key: String?, title: String?) {
-        // Markcut exposes a nonreversible source identity, not local file paths.
-        // Use it to group revisions of the same video without leaking paths.
+        // Group by the Master-provided source identity. Some legacy keys are
+        // absolute local paths: use them only for grouping, never display them.
         if let key = item["videoGroupKey"] as? String, !key.isEmpty {
-            let title = (item["videoGroupTitle"] as? String) ?? (item["label"] as? String) ?? "Video"
-            return ("video:\(key)", displayRunTitle(title))
+            let explicit = item["videoGroupTitle"] as? String
+            let raw = explicit ?? ((item["title"] as? String) ?? (item["label"] as? String) ?? "Video")
+            let title = explicit.map(displayRunTitle) ?? runDisplayTitle(groupKey: key, fallback: raw)
+            return ("video:\(key)", title)
         }
         for field in ["creativeId", "projectId", "creativePath", "projectPath", "sourcePath", "path"] {
             guard let raw = item[field] as? String, !raw.isEmpty else { continue }
@@ -118,7 +131,8 @@ enum MarkcutReviewGrouping {
     }
 
     private static func isPending(_ item: [String: Any]) -> Bool {
-        (item["status"] as? String) == "ready" && !(item["decision"] is [String: Any])
+        (item["status"] as? String) == "ready" &&
+            ((item["reviewActionable"] as? Bool) ?? true) && !(item["decision"] is [String: Any])
     }
 
     private static func timestamp(_ item: [String: Any]) -> String {
@@ -129,6 +143,31 @@ enum MarkcutReviewGrouping {
         let trimmed = jobID.trimmingCharacters(in: .whitespacesAndNewlines)
         if UUID(uuidString: trimmed) != nil { return String(trimmed.prefix(8)) }
         return trimmed.count > 18 ? String(trimmed.prefix(15)) + "…" : trimmed
+    }
+
+    /// The Master groups by a private source key. Render only the dated run
+    /// folder and the video variant, never the source's absolute Mac path.
+    private static func runDisplayTitle(groupKey: String, fallback: String) -> String {
+        let components = groupKey.split(separator: "/").map(String.init)
+        if let runsIndex = components.lastIndex(of: "runs"),
+           runsIndex + 1 < components.count {
+            let afterRuns = components.dropFirst(runsIndex + 1)
+            // Supports runs/YYYY-MM-DD-name and runs/series/YYYY-MM-DD-name.
+            let run = afterRuns.first(where: { value in
+                value.range(of: #"^\d{4}-\d{2}-\d{2}-"#, options: .regularExpression) != nil
+            })
+            if let run {
+                let source = components.last ?? ""
+                let stem = source.replacingOccurrences(of: #"\.md$"#, with: "", options: .regularExpression)
+                let title = displayRunTitle(run)
+                if !["video", "index", "untitled", "review"].contains(stem.lowercased()),
+                   !stem.isEmpty {
+                    return humanize(stem) + " · " + title
+                }
+                return title
+            }
+        }
+        return displayRunTitle(fallback)
     }
 
     private static func displayRunTitle(_ value: String) -> String {

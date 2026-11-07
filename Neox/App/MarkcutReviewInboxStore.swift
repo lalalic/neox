@@ -68,9 +68,10 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
     let ownerCallbackTool: String?
     let ownerThreadID: String?
     let playerURL: String?
+    let createdAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, contentHash, title, groupTitle, delivery, eventTemplate
+        case id, contentHash, title, groupTitle, delivery, eventTemplate, createdAt
         case previewID = "previewId"
         case revisionID = "revisionId"
         case groupID = "groupId"
@@ -82,7 +83,7 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
          groupID: String? = nil, groupTitle: String? = nil, jobID: String? = nil,
          delivery: String? = nil, eventTemplate: MarkcutReviewEventTemplate? = nil,
          previewID: String? = nil, ownerCallbackTool: String? = nil, ownerThreadID: String? = nil,
-         playerURL: String? = nil) throws {
+         playerURL: String? = nil, createdAt: String? = nil) throws {
         guard UUID(uuidString: id) != nil,
               contentHash.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
               !revisionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -110,6 +111,7 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
         self.ownerCallbackTool = ownerCallbackTool
         self.ownerThreadID = ownerThreadID
         self.playerURL = playerURL
+        self.createdAt = createdAt
     }
 
     // JSONDecoder does not call the memberwise validating initializer.
@@ -129,7 +131,8 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
             previewID: fields.decodeIfPresent(String.self, forKey: .previewID),
             ownerCallbackTool: fields.decodeIfPresent(String.self, forKey: .ownerCallbackTool),
             ownerThreadID: fields.decodeIfPresent(String.self, forKey: .ownerThreadID),
-            playerURL: fields.decodeIfPresent(String.self, forKey: .playerURL)
+            playerURL: fields.decodeIfPresent(String.self, forKey: .playerURL),
+            createdAt: fields.decodeIfPresent(String.self, forKey: .createdAt)
         )
     }
 
@@ -138,11 +141,13 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
 
     var groupingValue: [String: Any] {
         var value: [String: Any] = ["id": id, "revisionId": revisionID, "contentHash": contentHash,
-                                    "title": title, "status": "ready"]
+                                    "title": title, "status": "ready",
+                                    "reviewActionable": canDeliver, "delivery": effectiveDelivery]
         if let groupID { value["videoGroupKey"] = groupID }
         if let groupTitle { value["videoGroupTitle"] = groupTitle }
         if let jobID { value["relayCorrelations"] = [["jobId": jobID]] }
         if let playerURL { value["playerUrl"] = playerURL }
+        if let createdAt { value["createdAt"] = createdAt }
         return value
     }
 }
@@ -253,8 +258,16 @@ final class MarkcutReviewInboxStore: ObservableObject {
 
     @discardableResult
     func accept(_ request: MarkcutReviewRequest, notify: Bool = true) -> Bool {
-        guard !dismissedIDs.contains(request.id),
-              !requests.contains(where: { $0.id == request.id }) else { return false }
+        guard !dismissedIDs.contains(request.id) else { return false }
+        if let index = requests.firstIndex(where: { $0.id == request.id }) {
+            // Enrich existing iPhone rows after the Master adds timestamps;
+            // a later sync must not leave old local rows permanently unsorted.
+            if requests[index].createdAt == nil && request.createdAt != nil {
+                requests[index] = request
+                saveRequests()
+            }
+            return false
+        }
         requests.insert(request, at: 0)
         if let groupID = request.groupID {
             latestGroupRequestIDs[groupID] = request.id
@@ -333,7 +346,7 @@ final class MarkcutReviewInboxStore: ObservableObject {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
             guard granted else { return }
             let content = UNMutableNotificationContent()
-            content.title = "Video ready for review"
+            content.title = request.canDeliver ? "Video ready for review" : "Video preview ready"
             content.body = request.title
             content.sound = .default
             content.userInfo = ["reviewRequestId": request.id]

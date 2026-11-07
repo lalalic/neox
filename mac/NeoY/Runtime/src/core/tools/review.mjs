@@ -76,7 +76,8 @@ export function payloadForReview(a) {
   const request=validateReview(a);
   // APNs is a wake-up hint; the full request and immutable template are stored
   // on Neo Master and fetched via the phone's authenticated MCP connection.
-  const message={aps:{alert:{title:'Video ready for review',body:request.title},sound:'default'},neoReviewRequestId:request.id};
+  const actionable=request.delivery==='event' || Boolean(request.ownerCallbackTool||request.ownerThreadId);
+  const message={aps:{alert:{title:actionable?'Video ready for review':'Video preview ready',body:request.title},sound:'default'},neoReviewRequestId:request.id};
   assertValid(Buffer.byteLength(JSON.stringify(message))<=4096,'APNs payload too large');
   return message;
 }
@@ -175,7 +176,7 @@ export function pendingReviews(){
   return {requests:Object.values(store.requests)
     .filter(x=>Date.parse(x.createdAt)>=cutoff)
     .sort((a,b)=>b.createdAt.localeCompare(a.createdAt))
-    .slice(0,500).map(x=>x.review)};
+    .slice(0,500).map(x=>({...x.review,createdAt:x.createdAt}))};
 }
 export function completeReview({id}){
   assertValid(typeof id==='string' && UUID.test(id),'Invalid review request ID');

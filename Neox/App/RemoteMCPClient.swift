@@ -313,10 +313,15 @@ final class RemoteMCPClient: ObservableObject {
         guard let items = result["requests"] as? [[String: Any]] else {
             throw RemoteError.toolFailure("Neo Master returned no review request list")
         }
-        return items.compactMap { dictionary in
-            guard JSONSerialization.isValidJSONObject(dictionary),
-                  let encoded = try? JSONSerialization.data(withJSONObject: dictionary) else { return nil }
-            return try? JSONDecoder().decode(MarkcutReviewRequest.self, from: encoded)
+        return try items.enumerated().map { index, dictionary in
+            do {
+                let encoded = try JSONSerialization.data(withJSONObject: dictionary)
+                return try JSONDecoder().decode(MarkcutReviewRequest.self, from: encoded)
+            } catch {
+                // A corrupt response must not silently turn a nonempty Master
+                // inbox into an empty phone list.
+                throw RemoteError.toolFailure("Preview list item \(index + 1) could not be decoded: \(error.localizedDescription)")
+            }
         }
     }
 

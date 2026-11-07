@@ -16,6 +16,7 @@ struct StatusView: View {
     @State private var clearingTemp = false
     @StateObject private var tours = CaptureTourStore.shared
     @ObservedObject private var reviewInbox = MarkcutReviewInboxStore.shared
+    @ObservedObject private var reviewPush = ReviewPushCoordinator.shared
     // Bonjour is a *nearby* signal, not the authoritative online status.
     // Test the saved HTTPS address with its existing Keychain credential.
     @StateObject private var savedMaster = RemoteMCPClient()
@@ -84,7 +85,6 @@ struct StatusView: View {
                     actionLabel("Review Inbox", icon: "checkmark.rectangle.stack")
                 }
                 .buttonStyle(.plain)
-                .disabled(reviewInbox.requests.isEmpty && !ProcessInfo.processInfo.arguments.contains("-markcut-review-ui-fixture"))
                 .accessibilityIdentifier("markcutReviewInboxOpen")
 
                 Button {
@@ -109,12 +109,22 @@ struct StatusView: View {
         .background(Color(.systemBackground))
         .sheet(isPresented: $showingTourRunner) { CaptureTourRunnerView(tours: tours) }
         .sheet(isPresented: $showingVlogSubmission) { VlogSubmissionView() }
-        .sheet(isPresented: $showingMarkcutReviews) { MarkcutReviewInboxView() }
+        .sheet(isPresented: $showingMarkcutReviews) {
+            MarkcutReviewInboxView(requestedPreviewID: reviewPush.tappedRequestID)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .markcutReviewNotificationTapped)) { _ in
-            if !reviewInbox.requests.isEmpty { showingMarkcutReviews = true }
+            showingMarkcutReviews = true
+        }
+        .onChange(of: reviewPush.tappedRequestID, initial: true) { _, id in
+            if id != nil { showingMarkcutReviews = true }
         }
         .sheet(isPresented: $showingRemote) { RemoteControlView() }
         .task {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-markcut-notification-route-fixture") {
+                reviewPush.notificationTapped("fixture-standalone-preview")
+            }
+            #endif
             while !Task.isCancelled {
                 if !clearingTemp { hasTemp = bridge.hasTemporaryFiles }
                 do {

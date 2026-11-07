@@ -2,13 +2,44 @@ import XCTest
 
 final class MarkcutReviewInboxUITests: XCTestCase {
     @MainActor
-    func testReviewInboxDisabledWhenNoPendingRequest() {
+    func testReviewInboxCanOpenWithEmptyLocalInbox() {
         let app = XCUIApplication()
         app.launch()
         let inbox = app.buttons["markcutReviewInboxOpen"]
         XCTAssertTrue(inbox.waitForExistence(timeout: 5))
-        XCTAssertFalse(inbox.isEnabled)
+        XCTAssertTrue(inbox.isEnabled)
+        inbox.tap()
+        XCTAssertTrue(app.staticTexts["No previews yet"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Refresh local reviews"].exists)
+    }
+
+    @MainActor
+    func testNotificationRoutesToExactlyThePreviewItem() {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-markcut-review-ui-multi-fixture",
+            "-markcut-notification-route-fixture"
+        ]
+        app.launch()
+        XCTAssertTrue(app.buttons["markcutReviewPreviewClose"].waitForExistence(timeout: 12))
+        XCTAssertTrue(app.staticTexts["Preview only · no approval requested"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["markcutReviewApprove"].exists)
+    }
+
+    @MainActor
+    func testPreviewOnlyAndPendingReviewAreDistinctInMultiItemList() {
+        let app = XCUIApplication()
+        app.launchArguments.append("-markcut-review-ui-multi-fixture")
+        app.launch()
+        app.buttons["markcutReviewInboxOpen"].tap()
+        let rows = app.buttons.matching(identifier: "markcutReviewGroup")
+        XCTAssertEqual(rows.count, 2)
+        let preview = rows.containing(NSPredicate(format: "label CONTAINS[c] %@", "Standalone")).firstMatch
+        XCTAssertTrue(preview.exists)
+        preview.tap()
+        XCTAssertTrue(app.staticTexts["Preview only · no approval requested"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["markcutReviewApprove"].exists)
+        XCTAssertFalse(app.buttons["markcutReviewRequestChanges"].exists)
     }
 
     @MainActor
@@ -24,7 +55,7 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         let remove = app.buttons["markcutReviewRemoveMenuItem"]
         XCTAssertTrue(remove.waitForExistence(timeout: 5))
         remove.tap()
-        XCTAssertTrue(app.staticTexts["No video reviews"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["No previews yet"].waitForExistence(timeout: 5))
     }
 
     @MainActor
@@ -39,7 +70,7 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         let remove = app.buttons["markcutReviewRemoveGroup"]
         XCTAssertTrue(remove.waitForExistence(timeout: 3))
         remove.tap()
-        XCTAssertTrue(app.staticTexts["No video reviews"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["No previews yet"].waitForExistence(timeout: 5))
     }
 
     @MainActor

@@ -271,6 +271,43 @@ final class MarkcutReviewDecisionTests: XCTestCase {
         XCTAssertEqual(groups.first?.title, "Rsboost Backup · 11/02")
     }
 
+    func testStandaloneRunTitlesAndChronologicalSort() throws {
+        let older = try MarkcutReviewRequest(id: UUID().uuidString,
+            contentHash: String(repeating: "a", count: 64), revisionID: "old",
+            title: "video", groupID: "/Users/test/neo/vlog/runs/2026-11-05-evening-walk/video.md",
+            delivery: "text", createdAt: "2026-11-05T10:00:00.000Z")
+        let newer = try MarkcutReviewRequest(id: UUID().uuidString,
+            contentHash: String(repeating: "b", count: 64), revisionID: "new",
+            title: "video", groupID: "/Users/test/neo/vlog/runs/2026-11-06-history-multigps/video.md",
+            delivery: "text", createdAt: "2026-11-06T10:00:00.000Z")
+        let groups = MarkcutReviewGrouping.groups(from: [older.groupingValue, newer.groupingValue])
+        XCTAssertEqual(groups.count, 2)
+        XCTAssertEqual(groups.map(\.title), ["History Multigps · 11/06", "Evening Walk · 11/05"])
+        XCTAssertEqual(groups.map { $0.sessions.first?.reviewSessionID }, [newer.id, older.id])
+        XCTAssertTrue(groups.allSatisfy { $0.pendingCount == 0 })
+        XCTAssertEqual(MarkcutReviewGrouping.statusText(newer.groupingValue), "Preview only")
+    }
+
+    @MainActor
+    func testExistingLocalRowsGainMasterTimestampAfterSync() throws {
+        let suite = "MarkcutTimestampTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let id = UUID().uuidString
+        let original = try MarkcutReviewRequest(id: id,
+            contentHash: String(repeating: "c", count: 64), revisionID: "rev",
+            title: "video", groupID: "run1", delivery: "text")
+        let store = MarkcutReviewInboxStore(defaults: defaults)
+        XCTAssertTrue(store.accept(original, notify: false))
+        let enriched = try MarkcutReviewRequest(id: id,
+            contentHash: original.contentHash, revisionID: "rev",
+            title: "video", groupID: "run1", delivery: "text",
+            createdAt: "2026-11-07T05:10:00.000Z")
+        XCTAssertFalse(store.accept(enriched, notify: false))
+        XCTAssertEqual(store.requests.count, 1)
+        XCTAssertEqual(MarkcutReviewInboxStore(defaults: defaults).requests.first?.createdAt, enriched.createdAt)
+    }
+
     func testFallbackGroupsByParentAndKeepsGenericBasenamesWithoutParentSeparate() {
         let sessions: [[String: Any]] = [
             ["id":"a", "path":"/work/creative-a/video.md", "status":"ready"],
