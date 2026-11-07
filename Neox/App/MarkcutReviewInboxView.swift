@@ -104,7 +104,8 @@ struct MarkcutReviewInboxView: View {
                 .background(Color(uiColor: .systemBackground))
             }
             .task(id: inbox.feedbackQueue.count) {
-                await reviewPush.syncPending()
+                // Do not block an already-tapped notification behind Master sync.
+                // A slow network can otherwise leave the target revision unselected.
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("-markcut-review-ui-multi-fixture") {
                     fixtureSessions = MarkcutReviewGrouping.multiModeFixture
@@ -112,6 +113,10 @@ struct MarkcutReviewInboxView: View {
                     fixtureSessions = MarkcutReviewGrouping.uiFixture
                 }
                 #endif
+                openRequestedPreviewIfAvailable()
+                await reviewPush.syncPending()
+                // The notification may arrive before the remote inbox finishes syncing.
+                openRequestedPreviewIfAvailable()
                 while !Task.isCancelled {
                     await retryQueuedFeedback()
                     guard inbox.feedbackQueue.contains(where: { feedback in
