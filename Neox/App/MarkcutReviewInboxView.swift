@@ -6,10 +6,13 @@ import UIKit
 struct MarkcutReviewInboxView: View {
     let requestedPreviewID: String?
     let asTab: Bool
+    let isPilotActive: Bool
 
-    init(requestedPreviewID: String? = nil, asTab: Bool = false) {
+    init(requestedPreviewID: String? = nil, asTab: Bool = false,
+         isPilotActive: Bool = true) {
         self.requestedPreviewID = requestedPreviewID
         self.asTab = asTab
+        self.isPilotActive = isPilotActive
     }
 
     @Environment(\.dismiss) private var dismiss
@@ -45,6 +48,11 @@ struct MarkcutReviewInboxView: View {
                         Button { open(group) } label: { ReviewGroupRow(group: group) }
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("markcutReviewGroup")
+                            .appCopilotAction(
+                                id: "neox.review.group.\(group.id)",
+                                label: "Open \(group.title)",
+                                isVisible: isPilotActive && selectedGroup == nil
+                            ) { open(group) }
                         Menu {
                             Button("Remove from Inbox", systemImage: "trash", role: .destructive) {
                                 removeGroup(group)

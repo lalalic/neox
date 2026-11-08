@@ -25,7 +25,10 @@ struct NeoxApp: App {
                 RelayJobsView(master: savedMaster)
                     .tabItem { Label("Jobs", systemImage: "list.bullet.rectangle") }
                     .tag(MobileTab.jobs)
-                MarkcutReviewInboxView(requestedPreviewID: reviewPush.tappedRequestID, asTab: true)
+                MarkcutReviewInboxView(
+                    requestedPreviewID: reviewPush.tappedRequestID, asTab: true,
+                    isPilotActive: selectedTab == .reviews
+                )
                     .tabItem { Label("Review Inbox", systemImage: "checkmark.rectangle.stack") }
                     .tag(MobileTab.reviews)
                 StatusView()
@@ -38,6 +41,8 @@ struct NeoxApp: App {
                 // parent doesn't reach .overlay content on all iOS versions
                 // and crashes DemoOverlayView's @EnvironmentObject lookup.
                 .overlay { DemoOverlayView().environmentObject(bridge.agentKit.demoRuntime) }
+                .onAppear { registerPilotTabs() }
+                .onDisappear { unregisterPilotTabs() }
                 .onReceive(NotificationCenter.default.publisher(for: .markcutReviewNotificationTapped)) { _ in
                     selectedTab = .reviews
                 }
@@ -72,6 +77,28 @@ struct NeoxApp: App {
                         break
                     }
                 }
+        }
+    }
+
+    /// Explicit app-owned SwiftUI state changes: no private touch synthesis.
+    /// The public package resolves UITabBar item frames at invocation time.
+    private func registerPilotTabs() {
+        let actions: [(String, String, MobileTab)] = [
+            ("chat", "Chat", .chat),
+            ("jobs", "Jobs", .jobs),
+            ("reviews", "Review Inbox", .reviews),
+            ("connector", "Connector", .connector)
+        ]
+        for (index, item) in actions.enumerated() {
+            AppCopilotActionRegistry.shared.registerTab(
+                id: "neox.tab.\(item.0)", label: item.1, index: index
+            ) { selectedTab = item.2 }
+        }
+    }
+
+    private func unregisterPilotTabs() {
+        for id in ["chat", "jobs", "reviews", "connector"] {
+            AppCopilotActionRegistry.shared.unregister(id: "neox.tab.\(id)")
         }
     }
 }
