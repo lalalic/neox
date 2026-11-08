@@ -15,6 +15,7 @@ enum NeoYSetupCommand: Equatable, Sendable {
     case deploymentSetTunnel(NeoYTunnelMode)
     case deploymentSetTunnelName(String)
     case deploymentSetHostname(String)
+    case deploymentProvider(name: String, enabled: Bool)
     case diagnosticsEnable
     case diagnosticsDisable
     case diagnosticsSet(NeoYDiagnosticsSetting)
@@ -114,6 +115,15 @@ enum NeoYSetupParser {
         case "show":
             try exact(tokens, count: 2)
             return .deploymentShow
+        case "provider":
+            guard tokens.count == 4, ["enable", "disable"].contains(tokens[2]) else {
+                throw NeoYSetupError.missingArgument("deployment provider <enable|disable> <federated-name>")
+            }
+            let name = tokens[3]
+            guard name.range(of: "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$", options: .regularExpression) != nil else {
+                throw NeoYSetupError.invalidValue("invalid federated provider name")
+            }
+            return .deploymentProvider(name: name, enabled: tokens[2] == "enable")
         case "set":
             guard tokens.count == 4 else {
                 throw NeoYSetupError.missingArgument("deployment set <port|tunnel|tunnel-name|hostname> <value>")
@@ -437,6 +447,14 @@ actor NeoYSetupService {
             return deploymentMutation("deployment.set.tunnel-name") { $0.tunnelName = name }
         case .deploymentSetHostname(let hostname):
             return deploymentMutation("deployment.set.hostname") { $0.publicHostname = hostname }
+        case .deploymentProvider(let name, let enabled):
+            // This writes only the applied provider allowlist; the pending
+            // Remote address/tunnel picker is NOT an input and is not saved.
+            return deploymentMutation("deployment.provider") {
+                var providers = $0.enabledRemoteProviders
+                if enabled { providers.insert(name) } else { providers.remove(name) }
+                $0.remoteProviders = providers
+            }
         case .diagnosticsEnable:
             return await mutate("diagnostics.enable") { try await self.controlPlane.setDiagnosticsEnabled(true) }
         case .diagnosticsDisable:
@@ -658,6 +676,9 @@ actor NeoYSetupService {
             deployment set tunnel <off|quick|named>
             deployment set tunnel-name <name>
             deployment set hostname <host>
+            deployment provider enable|disable <federated-name>
+            The provider command edits only the authenticated remote exposure
+            allowlist and preserves the applied hostname, tunnel and tool list.
             Changes are persisted and the MCP/tunnel runtime is reconciled automatically.
             """
         case .diagnostics:

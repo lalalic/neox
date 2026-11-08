@@ -295,6 +295,58 @@ final class RemoteMCPClient: ObservableObject {
         return response
     }
 
+    private var chatGatewayProvider: String {
+        #if DEBUG
+        // Test builds may explicitly opt in to an isolated staging provider.
+        // Production builds always use the canonical federated MCP.
+        if ProcessInfo.processInfo.arguments.contains("-neo-chat-staging") {
+            return "mcp.chat-gateway-staging"
+        }
+        #endif
+        return "mcp.chat-gateway"
+    }
+
+    /// The Chat tab uses the existing saved authenticated HTTPS Master, never a
+    /// second listener or credentials copied from a Bonjour discovery result.
+    func relayJobs() async throws -> [RelayJob] {
+        let result = try await callAuthenticatedTool(chatGatewayProvider, [
+            "command": "chat_jobs", "args": ["limit": 100]
+        ])
+        guard let rows = result["jobs"] as? [[String: Any]] else {
+            throw RemoteError.invalidResponse
+        }
+        return rows.compactMap { RelayJob(wire: $0) }
+    }
+
+    func chatGatewayFeed() async throws -> [ChatGatewayItem] {
+        let result = try await callAuthenticatedTool(chatGatewayProvider, [
+            "command": "chat_feed", "args": ["limit": 100]
+        ])
+        guard let items = result["items"] as? [[String: Any]] else {
+            throw RemoteError.invalidResponse
+        }
+        return try items.map { try ChatGatewayItem(wire: $0) }
+    }
+
+    func chatGatewayHeadBound() async throws -> Bool {
+        let result = try await callAuthenticatedTool(chatGatewayProvider, [
+            "command": "chat_head", "args": [:]
+        ])
+        guard let bound = result["bound"] as? Bool else { throw RemoteError.invalidResponse }
+        return bound
+    }
+
+    /// Queued submission is not a ChatGPT response. The orchestrator reports
+    /// replies explicitly through chat_report, which the Chat tab then fetches.
+    func sendChatGatewayMessage(_ text: String, requestID: String) async throws {
+        let receipt = try await callAuthenticatedTool(chatGatewayProvider, [
+            "command": "chat_send", "args": ["text": text, "requestId": requestID]
+        ])
+        guard receipt["status"] as? String == "submitted", receipt["id"] as? String == requestID else {
+            throw RemoteError.toolFailure("Neo Master did not confirm queued message submission")
+        }
+    }
+
     /// APNs token registration automatically follows a saved Master Access Code
     /// connection through Neo.app Core's authenticated review service.
     func registerAPNsDevice(deviceID: String, token: String, environment: String) async throws {

@@ -5,9 +5,11 @@ import UIKit
 /// view-only; event-mode requests allow explicit human review.
 struct MarkcutReviewInboxView: View {
     let requestedPreviewID: String?
+    let asTab: Bool
 
-    init(requestedPreviewID: String? = nil) {
+    init(requestedPreviewID: String? = nil, asTab: Bool = false) {
         self.requestedPreviewID = requestedPreviewID
+        self.asTab = asTab
     }
 
     @Environment(\.dismiss) private var dismiss
@@ -38,19 +40,6 @@ struct MarkcutReviewInboxView: View {
     var body: some View {
         NavigationStack {
             List {
-                if let error = reviewPush.syncError {
-                    HStack {
-                        Text(error).font(.caption).foregroundStyle(.orange)
-                        Spacer()
-                        Button("Retry sync") {
-                            Task { await reviewPush.syncPending() }
-                        }
-                        .accessibilityIdentifier("markcutReviewRetrySync")
-                    }
-                }
-                if let message, message != "Synced with Neo Master" {
-                    Text(message).font(.caption).foregroundStyle(.secondary)
-                }
                 ForEach(groups) { group in
                     HStack(spacing: 0) {
                         Button { open(group) } label: { ReviewGroupRow(group: group) }
@@ -81,20 +70,18 @@ struct MarkcutReviewInboxView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .overlay {
-                if sessions.isEmpty && !syncing {
-                    ContentUnavailableView("No previews yet", systemImage: "film",
-                        description: Text("Previews and pending reviews from Neo Master appear here. Use Retry sync if the connection fails."))
-                }
-            }
             .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .top, spacing: 0) {
                 HStack(spacing: 8) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark").frame(width: 44, height: 44)
+                    if asTab {
+                        Spacer().frame(width: 44)
+                    } else {
+                        Button { dismiss() } label: {
+                            Image(systemName: "xmark").frame(width: 44, height: 44)
+                        }
+                        .accessibilityLabel("Close")
+                        .accessibilityIdentifier("markcutReviewInboxClose")
                     }
-                    .accessibilityLabel("Close")
-                    .accessibilityIdentifier("markcutReviewInboxClose")
                     Spacer(minLength: 4)
                     Text("Review Inbox").font(.headline).lineLimit(1)
                     Spacer().frame(width: 44)
@@ -119,10 +106,9 @@ struct MarkcutReviewInboxView: View {
                 openRequestedPreviewIfAvailable()
                 while !Task.isCancelled {
                     await retryQueuedFeedback()
-                    guard inbox.feedbackQueue.contains(where: { feedback in
-                        inbox.request(id: feedback.requestId)?.canDeliver == true
-                    }) else { return }
-                    do { try await Task.sleep(for: .seconds(30)) } catch { return }
+                    do { try await Task.sleep(for: .seconds(15)) } catch { return }
+                    await reviewPush.syncPending()
+                    openRequestedPreviewIfAvailable()
                 }
             }
             .sheet(item: $selectedGroup, onDismiss: clearSelection) { group in

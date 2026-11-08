@@ -5,7 +5,7 @@ final class MarkcutReviewInboxUITests: XCTestCase {
     func testReviewInboxCanOpenWithExistingOrEmptyLocalInbox() {
         let app = XCUIApplication()
         app.launch()
-        let inbox = app.buttons["markcutReviewInboxOpen"]
+        let inbox = app.tabBars.buttons["Review Inbox"]
         XCTAssertTrue(inbox.waitForExistence(timeout: 5))
         XCTAssertTrue(inbox.isEnabled)
         inbox.tap()
@@ -33,7 +33,7 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments.append("-markcut-review-ui-multi-fixture")
         app.launch()
-        app.buttons["markcutReviewInboxOpen"].tap()
+        app.tabBars.buttons["Review Inbox"].tap()
         let rows = app.buttons.matching(identifier: "markcutReviewGroup")
         XCTAssertEqual(rows.count, 2)
         let preview = rows.containing(NSPredicate(format: "label CONTAINS[c] %@", "Standalone")).firstMatch
@@ -49,7 +49,7 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments.append("-markcut-review-ui-fixture")
         app.launch()
-        app.buttons["markcutReviewInboxOpen"].tap()
+        app.tabBars.buttons["Review Inbox"].tap()
         XCTAssertFalse(app.buttons["Refresh local reviews"].exists)
         let options = app.buttons["markcutReviewOptions"]
         XCTAssertTrue(options.waitForExistence(timeout: 5))
@@ -57,7 +57,8 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         let remove = app.buttons["markcutReviewRemoveMenuItem"]
         XCTAssertTrue(remove.waitForExistence(timeout: 5))
         remove.tap()
-        XCTAssertTrue(app.staticTexts["No previews yet"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons.matching(identifier: "markcutReviewGroup").count, 0)
+        XCTAssertFalse(app.staticTexts["No previews yet"].exists)
     }
 
     @MainActor
@@ -65,14 +66,15 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments.append("-markcut-review-ui-fixture")
         app.launch()
-        app.buttons["markcutReviewInboxOpen"].tap()
+        app.tabBars.buttons["Review Inbox"].tap()
         let group = app.buttons["markcutReviewGroup"].firstMatch
         XCTAssertTrue(group.waitForExistence(timeout: 5))
         group.swipeLeft()
         let remove = app.buttons["markcutReviewRemoveGroup"]
         XCTAssertTrue(remove.waitForExistence(timeout: 3))
         remove.tap()
-        XCTAssertTrue(app.staticTexts["No previews yet"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons.matching(identifier: "markcutReviewGroup").count, 0)
+        XCTAssertFalse(app.staticTexts["No previews yet"].exists)
     }
 
     @MainActor
@@ -80,7 +82,7 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += ["-markcut-review-ui-fixture", "-markcut-review-async-preview-fixture"]
         app.launch()
-        app.buttons["markcutReviewInboxOpen"].tap()
+        app.tabBars.buttons["Review Inbox"].tap()
         let group = app.buttons["markcutReviewGroup"].firstMatch
         XCTAssertTrue(group.waitForExistence(timeout: 5))
         group.tap()
@@ -104,7 +106,7 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments.append("-markcut-review-ui-fixture")
         app.launch()
-        app.buttons["markcutReviewInboxOpen"].tap()
+        app.tabBars.buttons["Review Inbox"].tap()
         let group = app.buttons["markcutReviewGroup"].firstMatch
         XCTAssertTrue(group.waitForExistence(timeout: 5))
         group.tap()
@@ -120,7 +122,7 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments.append("-markcut-review-ui-fixture")
         app.launch()
-        app.buttons["markcutReviewInboxOpen"].tap()
+        app.tabBars.buttons["Review Inbox"].tap()
         let group = app.buttons["markcutReviewGroup"].firstMatch
         XCTAssertTrue(group.waitForExistence(timeout: 5))
         group.tap()
@@ -143,7 +145,7 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         app.launchArguments.append("-markcut-review-ui-fixture")
         app.launch()
 
-        app.buttons["markcutReviewInboxOpen"].tap()
+        app.tabBars.buttons["Review Inbox"].tap()
         let job = app.buttons["markcutReviewGroup"].firstMatch
         XCTAssertTrue(job.waitForExistence(timeout: 5))
         XCTAssertTrue(job.label.contains("Job #review-fixture-job"))
