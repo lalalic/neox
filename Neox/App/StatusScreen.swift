@@ -1,7 +1,7 @@
 import Photos
 import SwiftUI
 
-/// Status screen — the only human-facing surface. Shows where to connect,
+/// Connector tab — phone bridge status and actions. Shows where to connect,
 /// what the server is doing, and grants Photos permission once.
 struct StatusView: View {
     @EnvironmentObject private var bridge: ServerController
@@ -10,16 +10,13 @@ struct StatusView: View {
     @State private var requestsExpanded = false
     @State private var showingTourRunner = false
     @State private var showingVlogSubmission = false
-    @State private var showingMarkcutReviews = false
     @State private var showingRemote = false
     @State private var hasTemp = false
     @State private var clearingTemp = false
     @StateObject private var tours = CaptureTourStore.shared
-    @ObservedObject private var reviewInbox = MarkcutReviewInboxStore.shared
-    @ObservedObject private var reviewPush = ReviewPushCoordinator.shared
     // Bonjour is a *nearby* signal, not the authoritative online status.
     // Test the saved HTTPS address with its existing Keychain credential.
-    @StateObject private var savedMaster = RemoteMCPClient()
+    @EnvironmentObject private var savedMaster: RemoteMCPClient
     @State private var remoteChecked = false
 
     var body: some View {
@@ -75,56 +72,12 @@ struct StatusView: View {
 
             Divider()
 
-            HStack(spacing: 8) {
-                Button { showingVlogSubmission = true } label: {
-                    actionLabel("Create Vlog", icon: "film.stack")
-                }
-                .buttonStyle(.plain)
-
-                Button { showingMarkcutReviews = true } label: {
-                    actionLabel("Review Inbox", icon: "checkmark.rectangle.stack")
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("markcutReviewInboxOpen")
-
-                Button {
-                    guard hasTemp && !clearingTemp else { return }
-                    clearingTemp = true
-                    Task {
-                        try? await Task.sleep(for: .milliseconds(100))
-                        bridge.clearExports()
-                        hasTemp = bridge.hasTemporaryFiles
-                        clearingTemp = false
-                    }
-                } label: {
-                    actionLabel("Clear Temp", icon: clearingTemp ? "arrow.triangle.2.circlepath" : "trash")
-                        .foregroundStyle(clearingTemp ? Color.orange : (hasTemp ? Color.primary : Color.secondary))
-                }
-                .buttonStyle(.plain)
-                .disabled(!hasTemp || clearingTemp)
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 2)
         }
         .background(Color(.systemBackground))
         .sheet(isPresented: $showingTourRunner) { CaptureTourRunnerView(tours: tours) }
         .sheet(isPresented: $showingVlogSubmission) { VlogSubmissionView() }
-        .sheet(isPresented: $showingMarkcutReviews) {
-            MarkcutReviewInboxView(requestedPreviewID: reviewPush.tappedRequestID)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .markcutReviewNotificationTapped)) { _ in
-            showingMarkcutReviews = true
-        }
-        .onChange(of: reviewPush.tappedRequestID, initial: true) { _, id in
-            if id != nil { showingMarkcutReviews = true }
-        }
         .sheet(isPresented: $showingRemote) { RemoteControlView() }
         .task {
-            #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-markcut-notification-route-fixture") {
-                reviewPush.notificationTapped("fixture-standalone-preview")
-            }
-            #endif
             while !Task.isCancelled {
                 if !clearingTemp { hasTemp = bridge.hasTemporaryFiles }
                 do {
@@ -144,15 +97,6 @@ struct StatusView: View {
         // No .onAppear ensureRunning() here — NeoxApp's scenePhase(.active)
         // handler already restarts on every foreground. Keeping both would
         // restart twice at launch and log two 'listening' lines.
-    }
-
-    private func actionLabel(_ name: String, icon: String) -> some View {
-        VStack(spacing: 5) {
-            Image(systemName: icon).font(.title3)
-            Text(name).font(.system(size: 11, weight: .medium)).lineLimit(1)
-        }
-        .frame(maxWidth: .infinity, minHeight: 54)
-        .contentShape(Rectangle())
     }
 
     static func masterStatus(nearby: Bool, authenticated: Bool,
@@ -237,6 +181,31 @@ struct StatusView: View {
                         }
                     }
                 }
+            }
+
+            Section("Actions") {
+                Button { showingVlogSubmission = true } label: {
+                    Label("Create Vlog", systemImage: "film.stack")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .accessibilityIdentifier("connectorCreateVlog")
+
+                Button {
+                    guard hasTemp && !clearingTemp else { return }
+                    clearingTemp = true
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(100))
+                        bridge.clearExports()
+                        hasTemp = bridge.hasTemporaryFiles
+                        clearingTemp = false
+                    }
+                } label: {
+                    Label("Clear Temp", systemImage:
+                          clearingTemp ? "arrow.triangle.2.circlepath" : "trash")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .disabled(!hasTemp || clearingTemp)
+                .accessibilityIdentifier("connectorClearTemp")
             }
 
             CaptureTourCard(tours: tours, showingRunner: $showingTourRunner)

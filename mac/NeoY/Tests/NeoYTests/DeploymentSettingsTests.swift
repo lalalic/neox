@@ -2,6 +2,29 @@ import XCTest
 @testable import NeoY
 
 final class DeploymentSettingsTests: XCTestCase {
+    func testRemoteProviderCommandEditsOnlyProviderExposure() throws {
+        XCTAssertEqual(try NeoYSetupParser.parse("deployment provider enable chat-gateway"),
+                       .deploymentProvider(name: "chat-gateway", enabled: true))
+        XCTAssertEqual(try NeoYSetupParser.parse("deployment provider disable chat-gateway-staging"),
+                       .deploymentProvider(name: "chat-gateway-staging", enabled: false))
+        XCTAssertThrowsError(try NeoYSetupParser.parse("deployment provider enable ../secret"))
+        XCTAssertThrowsError(try NeoYSetupParser.parse("deployment provider enable all providers"))
+
+        var applied = NeoYDeploymentSettings()
+        applied.tunnelMode = .named
+        applied.publicHostname = "neoy.example.com"
+        applied.remoteTools = ["status", "chatgpt"]
+        applied.remoteProviders = ["markcut"]
+        let unchanged = applied
+        var providers = applied.enabledRemoteProviders
+        providers.insert("chat-gateway")
+        applied.remoteProviders = providers
+        XCTAssertEqual(applied.enabledRemoteProviders, ["markcut", "chat-gateway"])
+        XCTAssertEqual(applied.publicHostname, unchanged.publicHostname)
+        XCTAssertEqual(applied.tunnelMode, unchanged.tunnelMode)
+        XCTAssertEqual(applied.remoteTools, unchanged.remoteTools)
+    }
+
     func testNamedRemoteFeatureURLsUseOneAppliedOrigin() throws {
         let named = try NeoYDeploymentSettings().applyingRemoteAddress(
             .named, hostname: "neoy.example.com", enabled: true)
