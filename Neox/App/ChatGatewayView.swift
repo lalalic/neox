@@ -1,5 +1,7 @@
 import Foundation
+import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ChatGatewayItem: Identifiable, Equatable {
     let id: String
@@ -147,6 +149,11 @@ final class ChatGatewayStore: ObservableObject {
 struct ChatGatewayView: View {
     @ObservedObject var master: RemoteMCPClient
     @StateObject private var store = ChatGatewayStore()
+    @StateObject private var dictation = ChatComposerDictation()
+    @State private var pickedPhoto: PhotosPickerItem?
+    @State private var importingFile = false
+    @State private var dictationPrefix = ""
+    @FocusState private var composerFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -169,24 +176,32 @@ struct ChatGatewayView: View {
                 }
             }
 
-            Divider()
-            HStack(alignment: .bottom, spacing: 10) {
-                TextField("Message", text: $store.draft, axis: .vertical)
-                    .lineLimit(1...5)
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityIdentifier("neoChatComposer")
-                Button {
-                    Task { await store.send(using: master) }
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 30))
-                }
-                .disabled(store.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                          store.draft.count > 2000)
-                .accessibilityIdentifier("neoChatSend")
-            }
-            .padding(12)
+            composer
         }
+        .onChange(of: dictation.transcript) { _, text in
+            guard !text.isEmpty else { return }
+            let separator = dictationPrefix.isEmpty ||
+                dictationPrefix.hasSuffix(" ") || dictationPrefix.hasSuffix("\n") ? "" : " "
+            store.draft = String((dictationPrefix + separator + text).prefix(2000))
+        }
+        .onChange(of: pickedPhoto) { photo in
+            guard let photo else { return }
+            Task {
+                if let text = try? await ChatComposerImport.textFromPhoto(photo) {
+                    store.draft = ChatComposerImport.append(text, to: store.draft, source: "Photo text")
+                    if !text.isEmpty { composerFocused = true }
+                }
+                pickedPhoto = nil
+            }
+        }
+        .fileImporter(isPresented: $importingFile, allowedContentTypes: [.text, .pdf]) { result in
+            guard case .success(let url) = result else { return }
+            if let text = try? ChatComposerImport.textFromFile(url) {
+                store.draft = ChatComposerImport.append(text, to: store.draft, source: url.lastPathComponent)
+                if !text.isEmpty { composerFocused = true }
+            }
+        }
+        .onDisappear { dictation.stop() }
         .task {
             // Automatic recovery while the Chat tab is visible.
             while !Task.isCancelled {
@@ -195,6 +210,82 @@ struct ChatGatewayView: View {
                 catch { return }
             }
         }
+    }
+
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            TextField("Message", text: $store.draft, axis: .vertical)
+                .focused($composerFocused)
+                .lineLimit(1...5)
+                .font(.body)
+                .accessibilityIdentifier("neoChatComposer")
+
+            HStack(spacing: 12) {
+                Menu {
+                    PhotosPicker(selection: $pickedPhoto, matching: .images) {
+                        Label("Text from Photo", systemImage: "photo.on.rectangle")
+                    }
+                    Button {
+                        importingFile = true
+                    } label: {
+                        Label("Text from File", systemImage: "doc.text")
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .frame(width: 34, height: 34)
+                        .background(Color(.tertiarySystemBackground), in: Circle())
+                }
+                .accessibilityLabel("Add")
+                .accessibilityIdentifier("neoChatAdd")
+
+                Spacer(minLength: 0)
+
+                Button {
+                    if !dictation.isRecording && !dictation.isStarting {
+                        dictationPrefix = store.draft
+                        composerFocused = false
+                    }
+                    dictation.toggle()
+                } label: {
+                    Image(systemName: dictation.isRecording ? "stop.fill" : "mic")
+                        .font(.system(size: 19, weight: .medium))
+                        .foregroundStyle(dictation.isRecording ? Color.red : Color.primary)
+                        .frame(width: 35, height: 35)
+                        .contentShape(Circle())
+                }
+                .accessibilityLabel(dictation.isRecording ? "Stop dictation" : "Dictate")
+                .accessibilityIdentifier("neoChatMicrophone")
+
+                Button {
+                    dictation.stop()
+                    Task { await store.send(using: master) }
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color(uiColor: .systemBackground))
+                        .frame(width: 34, height: 34)
+                        .background(Color(uiColor: .label), in: Circle())
+                }
+                .disabled(store.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                          store.draft.count > 2000)
+                .opacity(store.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.35 : 1)
+                .accessibilityLabel("Send")
+                .accessibilityIdentifier("neoChatSend")
+            }
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 10)
+        .background(Color(.secondarySystemBackground),
+                    in: RoundedRectangle(cornerRadius: 25, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 25, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.045), lineWidth: 1)
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 5)
+        .padding(.bottom, 7)
     }
 
     @ViewBuilder

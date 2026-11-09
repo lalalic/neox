@@ -10,6 +10,8 @@ final class ChatGatewayUITests: XCTestCase {
         XCTAssertFalse(app.buttons["neoChatRefresh"].exists)
         XCTAssertTrue(app.textFields["neoChatComposer"].exists ||
                       app.textViews["neoChatComposer"].exists)
+        XCTAssertTrue(app.buttons["neoChatAdd"].exists)
+        XCTAssertTrue(app.buttons["neoChatMicrophone"].exists)
         XCTAssertTrue(app.buttons["neoChatSend"].exists)
         XCTAssertFalse(app.buttons["neoChatSend"].isEnabled)
         let composer = app.textFields["neoChatComposer"].exists ?
@@ -26,5 +28,28 @@ final class ChatGatewayUITests: XCTestCase {
         // The keyboard can cover the tab bar while composing. The assertion
         // above already verifies the Chat tab and its interactive outbox;
         // tab switching is covered separately by the app's navigation tests.
+    }
+}
+
+extension ChatGatewayUITests {
+    func testComposerPlusOpensRealImportOptions() {
+        let app = XCUIApplication()
+        app.launch()
+        let add = app.buttons["neoChatAdd"]
+        XCTAssertTrue(add.waitForExistence(timeout: 12))
+        add.tap()
+        XCTAssertTrue(app.buttons["Text from File"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Text from Photo"].exists)
+    }
+}
+
+extension ChatGatewayUITests {
+    func testComposerMicrophoneIsAccessibleWithoutText() {
+        let app = XCUIApplication()
+        app.launch()
+        let mic = app.buttons["neoChatMicrophone"]
+        XCTAssertTrue(mic.waitForExistence(timeout: 12))
+        XCTAssertEqual(mic.label, "Dictate")
+        XCTAssertTrue(mic.isEnabled)
     }
 }
