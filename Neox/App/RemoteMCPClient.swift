@@ -338,11 +338,48 @@ final class RemoteMCPClient: ObservableObject {
 
     /// Queued submission is not a ChatGPT response. The orchestrator reports
     /// replies explicitly through chat_report, which the Chat tab then fetches.
-    func sendChatGatewayMessage(_ text: String, requestID: String) async throws {
+    func sendChatGatewayMessage(_ text: String, requestID: String,
+                                attachments: [ChatLocalAttachment] = []) async throws {
+        let chunkSize = 128 * 1024
+        for attachment in attachments {
+            let bytes = try Data(contentsOf: URL(fileURLWithPath: attachment.path))
+            let digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+            guard bytes.count == attachment.size, digest == attachment.sha256,
+                  bytes.count > 0, bytes.count <= 12 * 1024 * 1024 else {
+                throw RemoteError.toolFailure("Local attachment changed before sending")
+            }
+            let chunks = (bytes.count + chunkSize - 1) / chunkSize
+            for index in 0..<chunks {
+                let start = index * chunkSize
+                let end = min(bytes.count, start + chunkSize)
+                let receipt = try await callAuthenticatedTool(chatGatewayProvider, [
+                    "command": "chat_upload",
+                    "args": [
+                        "requestId": requestID,
+                        "attachmentId": attachment.id,
+                        "name": attachment.name,
+                        "chunkIndex": index,
+                        "chunkCount": chunks,
+                        "contentBase64": Data(bytes[start..<end]).base64EncodedString(),
+                        "size": attachment.size,
+                        "sha256": attachment.sha256,
+                    ]
+                ])
+                guard receipt["attachmentId"] as? String == attachment.id else {
+                    throw RemoteError.invalidResponse
+                }
+                if index == chunks - 1 && receipt["complete"] as? Bool != true {
+                    throw RemoteError.invalidResponse
+                }
+            }
+        }
+        let refs: [[String: String]] = attachments.map { ["id": $0.id, "name": $0.name] }
         let receipt = try await callAuthenticatedTool(chatGatewayProvider, [
-            "command": "chat_send", "args": ["text": text, "requestId": requestID]
+            "command": "chat_send",
+            "args": ["text": text, "requestId": requestID, "attachments": refs]
         ])
-        guard receipt["status"] as? String == "submitted", receipt["id"] as? String == requestID else {
+        guard receipt["status"] as? String == "submitted",
+              receipt["id"] as? String == requestID else {
             throw RemoteError.toolFailure("Neo Master did not confirm queued message submission")
         }
     }
@@ -474,8 +511,12 @@ final class RemoteMCPClient: ObservableObject {
         // Resolve the requested provider tool on the saved HTTPS endpoint; never
         // redirect credentials to an endpoint carried by a review request.
         guard URL(string: endpoint)?.scheme == "https", !bearer.isEmpty else { throw RemoteError.missingCredential }
-        let listing = try await requestRPC(method: "tools/list", params: [:], address: endpoint)
-        let names = (listing["tools"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
+        if remoteToolNames.isEmpty {
+            let listing = try await requestRPC(method: "tools/list", params: [:], address: endpoint)
+            remoteToolNames = (listing["tools"] as? [[String: Any]] ?? [])
+                .compactMap { $0["name"] as? String }
+        }
+        let names = remoteToolNames
         guard let name = names.first(where: { $0 == toolName || $0.hasSuffix("." + toolName) }) else {
             throw RemoteError.toolsUnavailable
         }
