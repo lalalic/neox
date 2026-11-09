@@ -38,8 +38,8 @@ extension ChatGatewayUITests {
         let add = app.buttons["neoChatAdd"]
         XCTAssertTrue(add.waitForExistence(timeout: 12))
         add.tap()
-        XCTAssertTrue(app.buttons["Text from File"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Text from Photo"].exists)
+        XCTAssertTrue(app.buttons["File"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Photo"].exists)
     }
 }
 

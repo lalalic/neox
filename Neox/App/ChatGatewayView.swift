@@ -54,6 +54,7 @@ final class ChatGatewayStore: ObservableObject {
     @Published private(set) var items: [ChatGatewayItem] = []
     @Published private(set) var queued: [QueuedChatMessage] = []
     @Published var draft = ""
+    @Published var draftAttachments: [ChatLocalAttachment] = []
 
     private let outbox: ChatGatewayOutbox
     private var refreshing = false
@@ -71,7 +72,7 @@ final class ChatGatewayStore: ObservableObject {
                 try? ChatGatewayItem(wire: [
                     "id": "owner:" + pending.id,
                     "kind": "owner",
-                    "text": pending.text,
+                    "text": pending.text + (pending.attachments ?? []).map { "\n📎 " + $0.name }.joined(),
                     "at": ISO8601DateFormatter().string(from: pending.createdAt),
                     "status": "pending",
                 ])
@@ -110,19 +111,37 @@ final class ChatGatewayStore: ObservableObject {
 
     func send(using master: RemoteMCPClient) async {
         let message = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !message.isEmpty, message.count <= 2000 else { return }
+        guard (!message.isEmpty || !draftAttachments.isEmpty), message.count <= 2000 else { return }
 
         // Commit locally BEFORE clearing the composer. A disconnected phone
         // or temporarily unavailable head never requires a Retry tap.
         do {
-            try outbox.enqueue(message)
+            try outbox.enqueue(message, attachments: draftAttachments)
             queued = outbox.messages
             draft = ""
+            draftAttachments = []
         } catch {
             // If local persistence fails, keep the draft intact, not a fake sent state.
             return
         }
         await refresh(from: master)
+    }
+
+    func attach(data: Data, name: String) {
+        guard draftAttachments.count < 4,
+              let stored = try? outbox.stage(data, name: name) else { return }
+        draftAttachments.append(stored)
+    }
+
+    func attach(fileURL: URL) {
+        guard draftAttachments.count < 4,
+              let stored = try? outbox.stage(fileURL: fileURL) else { return }
+        draftAttachments.append(stored)
+    }
+
+    func removeAttachment(_ attachment: ChatLocalAttachment) {
+        draftAttachments.removeAll { $0.id == attachment.id }
+        outbox.discard(attachment)
     }
 
     private func flush(using master: RemoteMCPClient) async {
@@ -132,7 +151,8 @@ final class ChatGatewayStore: ObservableObject {
 
         for message in outbox.messages {
             do {
-                try await master.sendChatGatewayMessage(message.text, requestID: message.id)
+                try await master.sendChatGatewayMessage(
+                    message.text, requestID: message.id, attachments: message.attachments ?? [])
                 try outbox.acknowledge(message.id)
                 queued = outbox.messages
             } catch {
@@ -187,18 +207,18 @@ struct ChatGatewayView: View {
         .onChange(of: pickedPhoto) { photo in
             guard let photo else { return }
             Task {
-                if let text = try? await ChatComposerImport.textFromPhoto(photo) {
-                    store.draft = ChatComposerImport.append(text, to: store.draft, source: "Photo text")
-                    if !text.isEmpty { composerFocused = true }
+                if let data = try? await photo.loadTransferable(type: Data.self) {
+                    let ext = photo.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
+                    store.attach(data: data, name: "photo-" + UUID().uuidString + "." + ext)
                 }
                 pickedPhoto = nil
             }
         }
-        .fileImporter(isPresented: $importingFile, allowedContentTypes: [.text, .pdf]) { result in
-            guard case .success(let url) = result else { return }
-            if let text = try? ChatComposerImport.textFromFile(url) {
-                store.draft = ChatComposerImport.append(text, to: store.draft, source: url.lastPathComponent)
-                if !text.isEmpty { composerFocused = true }
+        .fileImporter(isPresented: $importingFile, allowedContentTypes: [.item],
+                      allowsMultipleSelection: true) { result in
+            guard case .success(let urls) = result else { return }
+            for url in urls.prefix(4 - store.draftAttachments.count) {
+                store.attach(fileURL: url)
             }
         }
         .onDisappear { dictation.stop() }
@@ -220,15 +240,37 @@ struct ChatGatewayView: View {
                 .font(.body)
                 .accessibilityIdentifier("neoChatComposer")
 
+            if !store.draftAttachments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(store.draftAttachments) { attachment in
+                            HStack(spacing: 4) {
+                                Image(systemName: "paperclip")
+                                Text(attachment.name).lineLimit(1)
+                                Button {
+                                    store.removeAttachment(attachment)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                }
+                                .accessibilityLabel("Remove " + attachment.name)
+                            }
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(.quaternary, in: Capsule())
+                        }
+                    }
+                }
+            }
             HStack(spacing: 12) {
                 Menu {
                     PhotosPicker(selection: $pickedPhoto, matching: .images) {
-                        Label("Text from Photo", systemImage: "photo.on.rectangle")
+                        Label("Photo", systemImage: "photo.on.rectangle")
                     }
                     Button {
                         importingFile = true
                     } label: {
-                        Label("Text from File", systemImage: "doc.text")
+                        Label("File", systemImage: "doc")
                     }
                 } label: {
                     Image(systemName: "plus")
@@ -268,9 +310,10 @@ struct ChatGatewayView: View {
                         .frame(width: 34, height: 34)
                         .background(Color(uiColor: .label), in: Circle())
                 }
-                .disabled(store.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                          store.draft.count > 2000)
-                .opacity(store.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.35 : 1)
+                .disabled((store.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                           store.draftAttachments.isEmpty) || store.draft.count > 2000)
+                .opacity((store.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                          store.draftAttachments.isEmpty) ? 0.35 : 1)
                 .accessibilityLabel("Send")
                 .accessibilityIdentifier("neoChatSend")
             }
