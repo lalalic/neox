@@ -8,6 +8,10 @@ Instructions for coding agents (and humans) modifying this repo.
 desktop agents over MCP. The app consumes `AppCopilotKit` for reusable UI
 automation and demo tools; domain MCP behavior remains in `Neox/Server/`.
 
+## Neo Mobile Jobs and activity
+
+The Jobs tab consumes the selected Master's authenticated Chat Gateway rather than Relay storage or untrusted event payloads. Keep active Jobs first, display the durable creation timestamp (not last update), and show only allowlisted lifecycle activity. Offer cancellation only when the gateway explicitly advertises it, confirm the owner's intent, scope the request by exact repository and Job ID, and require an authoritative cancelled readback. Preserve the last successful snapshot during transient gateway failures. Test older gateways with no cancellation capability and cross-repository Job ID collisions. See the Jobs section in README.md and Neo's chat-gateway Skill.
+
 ## Neo Mobile online status
 
 Bonjour discovery only shows whether a Master is **nearby**. It is not evidence that an authenticated Neo HTTPS gateway is offline. Keep the user-selected Master visible while away from its LAN and probe its saved HTTPS MCP endpoint using the existing Keychain token. Only a successful authenticated response establishes Remote **Online**. A failed probe is a connection/credential issue, not proof the Mac is powered off. Never copy or redirect an existing token to a Bonjour-advertised URL without prior credential binding. Verify with iOS Simulator UI/state tests and a real authenticated phone connection before claiming the installed phone is fixed.
@@ -92,10 +96,11 @@ need to separately ask to apply or restart NeoY after a Job finishes.
 project.yml                  XcodeGen manifest — project/target/scheme = NeoxApp
 Neox/
   App/
-    NeoxApp.swift            @main; owns ServerController via scenePhase
-    StatusScreen.swift       the only UI: endpoint, Siri/Shortcuts handoff
-                             preview, tool list, request log, Access-Photos
-                             + Clear-Exports buttons
+    NeoxApp.swift            @main; owns ServerController and four tabs:
+                             Chat, Jobs, Review Inbox, Connector
+    RelayJobsView.swift      authenticated Relay Jobs and safe activity/cancel UI
+    StatusScreen.swift       Connector: endpoint, Siri/Shortcuts handoff,
+                             preview, tool list, request log, Photos/export actions
   Server/
     MCPServer.swift          hand-rolled HTTP server on NWListener:
                              JSON-RPC 2.0 at POST /mcp (initialize, tools/list,

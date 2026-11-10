@@ -20,11 +20,15 @@ A dedicated password key enters the saved Mac password into the focused Mac
 input when the owner explicitly taps it. Closing or leaving the view ends
 the session.
 
-A headless iPhone app whose only consumer is a **desktop coding agent**. It runs
-an MCP (Model Context Protocol) server on the local network so an agent can
-search, analyze, and pull photos/videos off the phone over WiFi.
+Neo Mobile provides **Chat**, **Jobs**, **Review Inbox**, and **Connector** tabs. The Connector includes the existing iPhone media MCP server so a desktop agent can search, analyze, and pull photos/videos over Wi-Fi.
 
-**No chat UI. No channels. One status screen.**
+## Relay Jobs on Neo Mobile
+
+The Jobs tab reads the selected Master's authenticated Chat Gateway. Active Jobs are listed first, followed by recent terminal Jobs. Each row shows the title (or Job ID fallback), state and **creation time** (from Relay `createdAt`, not the last update). The detail view shows the repository and a sanitized activity timeline; no raw prompts, private paths, arbitrary event messages or exception text are displayed.
+
+Pull down to refresh the Jobs list. Open a Job to refresh its activity. Eligible Jobs expose a swipe **Cancel** action only when the authenticated gateway advertises `cancellable`; cancellation asks for confirmation and the phone requires the Master's authoritative `CANCELLED` readback. The request uses the exact repository and Job ID, not a PR number. Older gateways that omit the capability cannot offer cancellation. Connectivity failures preserve the last good snapshot rather than treating it as an empty authoritative state.
+
+The gateway owns the source of truth and authorization: [Chat Gateway Skill](https://github.com/lalalic/neo/blob/main/skills/chat-gateway/SKILL.md) and [Mobile Job controls](https://github.com/lalalic/neo/blob/main/skills/chat-gateway/docs/neo-mobile-job-controls.md). The phone does not mutate Relay's SQLite store or infer completion from a submission receipt.
 
 ## NeoY v2 design principles
 
