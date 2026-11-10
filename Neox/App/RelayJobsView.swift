@@ -7,10 +7,10 @@ struct RelayJob: Identifiable, Equatable, Hashable {
     let repository: String
     let status: String
     let updatedAt: String
-    /// Durable Relay creation time. The current chat-gateway contract omits it.
+    /// Durable Relay creation time, never inferred from update time.
     let createdAt: String
-    /// Only the authenticated gateway may assert this after checking its PR.
-    /// The current chat_jobs contract omits it, so cancellation stays hidden.
+    /// Only the authenticated gateway may advertise this capability.
+    /// The actual operation rechecks the durable Job state (no PR is required).
     let gatewayAllowsCancellation: Bool
 
     init?(wire: [String: Any]) {
@@ -41,7 +41,7 @@ struct RelayJob: Identifiable, Equatable, Hashable {
     var displayTitle: String { title.isEmpty ? "Job \(id)" : title }
 
     /// Requires explicit gateway capability and a nonterminal Relay state.
-    /// This is false for every response from today's chat_jobs contract.
+    /// Older gateways omit this property, which safely hides the action.
     var canCancel: Bool {
         gatewayAllowsCancellation && [.planning, .queued, .active, .running, .paused, .blocked].contains(lifecycle)
     }
@@ -112,15 +112,15 @@ enum RelayJobLifecycle: Equatable {
 }
 
 /// Sanitized lifecycle-only activity representation. Free-form messages and
-/// exception text are never read. The current gateway does not yet return it.
+/// exception text are never read.
 struct RelayJobActivityEvent: Identifiable, Equatable {
     let id: String
     let title: String
     let date: Date
     let taskLabel: String?
 
-    init?(wire: [String: Any]) {
-        guard let rawID = wire["id"] as? String,
+    init?(wire: [String: Any], fallbackID: String? = nil) {
+        guard let rawID = (wire["id"] as? String) ?? fallbackID,
               let id = Self.safeIdentifier(rawID),
               let type = wire["type"] as? String,
               let title = Self.labels[type],
@@ -140,7 +140,14 @@ struct RelayJobActivityEvent: Identifiable, Equatable {
         "task.failed": "Task failed", "task.cancelled": "Task cancelled",
         "job.cancelled": "Job cancelled", "job.completed": "Job completed",
         "job.failed": "Job failed", "review.approved": "Review approved",
-        "review.changes_required": "Changes requested"
+        "review.changes_required": "Changes requested",
+        "planner.started": "Planning started", "planner.completed": "Planning completed",
+        "job.runtime_status.changed": "Job status changed",
+        "task.created": "Task created", "task.dispatch": "Task dispatched",
+        "task.process.launched": "Task running", "task.release": "Task released",
+        "task.succeeded": "Task completed", "review.created": "Review requested",
+        "review.requested": "Review requested", "review.started": "Review running",
+        "review.blocked": "Review blocked"
     ]
 
     private static func safeIdentifier(_ value: String) -> String? {
@@ -218,6 +225,8 @@ final class RelayJobsStore: ObservableObject {
     private var refreshing = false
     private let cancelOperation: CancelOperation?
 
+    private func key(_ job: RelayJob) -> String { "\(job.repository)#\(job.id)" }
+
     init(cancelOperation: CancelOperation? = nil) {
         self.cancelOperation = cancelOperation
     }
@@ -251,26 +260,38 @@ final class RelayJobsStore: ObservableObject {
     }
 
     func cancel(_ job: RelayJob) async throws {
-        guard job.canCancel, !cancellingIDs.contains(job.id),
+        guard job.canCancel, !cancellingIDs.contains(key(job)),
               let cancelOperation else { throw RelayJobCancellationError.unsupported }
-        cancellingIDs.insert(job.id)
-        defer { cancellingIDs.remove(job.id) }
+        cancellingIDs.insert(key(job))
+        defer { cancellingIDs.remove(key(job)) }
         let response = try await cancelOperation(job)
-        guard response.id == job.id, response.lifecycle == .cancelled else {
+        guard response.id == job.id, response.repository == job.repository,
+              response.lifecycle == .cancelled else {
             throw RelayJobCancellationError.unconfirmed
         }
-        jobs.removeAll { $0.id == response.id }
+        jobs.removeAll { $0.id == response.id && $0.repository == response.repository }
         jobs.append(response)
     }
 
-    func isCancelling(_ job: RelayJob) -> Bool { cancellingIDs.contains(job.id) }
+    func isCancelling(_ job: RelayJob) -> Bool { cancellingIDs.contains(key(job)) }
     func canCancel(_ job: RelayJob) -> Bool { job.canCancel && cancelOperation != nil }
 
-    func setActivity(_ events: [RelayJobActivityEvent], for jobID: String) {
-        activities[jobID] = events.sorted { $0.date > $1.date }
+    func refreshActivity(for job: RelayJob, from master: RemoteMCPClient) async {
+        if !master.connected { await master.connect() }
+        guard master.connected else { return }
+        do {
+            let rows = try await master.relayJobActivity(job)
+            activities[key(job)] = rows.sorted { $0.date > $1.date }
+        } catch {
+            // Preserve the last authoritative history if the Master is unavailable.
+        }
     }
 
-    func activity(for jobID: String) -> [RelayJobActivityEvent]? { activities[jobID] }
+    func setActivity(_ events: [RelayJobActivityEvent], for job: RelayJob) {
+        activities[key(job)] = events.sorted { $0.date > $1.date }
+    }
+
+    func activity(for job: RelayJob) -> [RelayJobActivityEvent]? { activities[key(job)] }
 
     var ordered: [RelayJob] {
         jobs.sorted {
@@ -300,6 +321,13 @@ struct RelayJobsView: View {
     @State private var confirmationJob: RelayJob?
     @State private var failureMessage: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(master: RemoteMCPClient) {
+        self.master = master
+        _store = StateObject(wrappedValue: RelayJobsStore(cancelOperation: { job in
+            try await master.cancelRelayJob(job)
+        }))
+    }
 
     var body: some View {
         NavigationStack {
@@ -332,7 +360,7 @@ struct RelayJobsView: View {
             .refreshable { await store.refresh(from: master) }
             .navigationTitle("Jobs")
             .navigationDestination(for: RelayJob.self) { job in
-                RelayJobDetailView(job: store.jobs.first(where: { $0.id == job.id }) ?? job,
+                RelayJobDetailView(job: store.jobs.first(where: { $0.id == job.id && $0.repository == job.repository }) ?? job,
                                    store: store, master: master)
             }
             .confirmationDialog(
@@ -441,7 +469,7 @@ private struct RelayJobDetailView: View {
                 }
             }
             Section("Activity") {
-                if let activity = store.activity(for: job.id) {
+                if let activity = store.activity(for: job) {
                     if activity.isEmpty {
                         ContentUnavailableView("No activity yet", systemImage: "clock.arrow.circlepath")
                             .listRowBackground(Color.clear)
@@ -473,6 +501,16 @@ private struct RelayJobDetailView: View {
         .listStyle(.insetGrouped)
         .navigationTitle(job.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
-        .refreshable { await store.refresh(from: master) }
+        .refreshable {
+            await store.refresh(from: master)
+            await store.refreshActivity(for: job, from: master)
+        }
+        .task(id: "\(job.repository)/\(job.id)") {
+            while !Task.isCancelled {
+                await store.refreshActivity(for: job, from: master)
+                do { try await Task.sleep(for: .seconds(8)) }
+                catch { return }
+            }
+        }
     }
 }

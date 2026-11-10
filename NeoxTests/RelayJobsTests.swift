@@ -57,6 +57,35 @@ final class RelayJobsTests: XCTestCase {
         ]))
     }
 
+    func testSourceActivityWithoutEventIdsUsesStableSafeUIIdentity() throws {
+        let row: [String: Any] = [
+            "type": "planner.completed", "timestamp": "2026-11-10T13:50:00Z",
+            "taskId": "883", "details": "/private/secret"
+        ]
+        let event = try XCTUnwrap(RelayJobActivityEvent(wire: row, fallbackID: "597-0"))
+        XCTAssertEqual(event.id, "597-0")
+        XCTAssertEqual(event.title, "Planning completed")
+        XCTAssertEqual(event.taskLabel, "Task 883")
+        XCTAssertFalse(String(describing: event).contains("/private/secret"))
+        XCTAssertNil(RelayJobActivityEvent(wire: row, fallbackID: "bad/id"))
+    }
+
+    func testCancellationRejectsCrossRepositoryReceipt() async throws {
+        let source = try XCTUnwrap(RelayJob(wire: [
+            "id": "44", "repository": "owner/neo", "status": "RUNNING", "cancellable": true
+        ]))
+        let wrongRepo = try XCTUnwrap(RelayJob(wire: [
+            "id": "44", "repository": "other/neox", "status": "CANCELLED"
+        ]))
+        let store = RelayJobsStore(cancelOperation: { _ in wrongRepo })
+        do {
+            try await store.cancel(source)
+            XCTFail("Cross-repository cancellation must never be accepted")
+        } catch {
+            XCTAssertEqual(error as? RelayJobCancellationError, .unconfirmed)
+        }
+    }
+
     func testCancellationRequiresGatewayCapabilityAndNonterminalState() throws {
         let running = try XCTUnwrap(RelayJob(wire: ["id": "44", "status": "RUNNING", "cancellable": true]))
         let completed = try XCTUnwrap(RelayJob(wire: ["id": "45", "status": "COMPLETED", "cancellable": true]))

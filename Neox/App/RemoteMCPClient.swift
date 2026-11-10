@@ -318,6 +318,45 @@ final class RemoteMCPClient: ObservableObject {
         return rows.compactMap { RelayJob(wire: $0) }
     }
 
+    /// Read only allowlisted activity from the authenticated Master. Source
+    /// events have no client ID; attach a stable position-based UI identity.
+    func relayJobActivity(_ job: RelayJob) async throws -> [RelayJobActivityEvent] {
+        let result = try await callAuthenticatedTool(chatGatewayProvider, [
+            "command": "chat_job_activity",
+            "args": ["repository": job.repository, "jobId": job.id]
+        ])
+        guard result["repository"] as? String == job.repository,
+              result["jobId"] as? String == job.id,
+              result["source"] as? String == "events-bus-history",
+              let rows = result["events"] as? [[String: Any]] else {
+            throw RemoteError.invalidResponse
+        }
+        return rows.enumerated().compactMap { index, row in
+            RelayJobActivityEvent(wire: row, fallbackID: "\(job.id)-\(index)")
+        }
+    }
+
+    /// Relay's Graph-owned cancellation must reach durable CANCELLED before
+    /// this method returns a success; a request acknowledgement is insufficient.
+    func cancelRelayJob(_ job: RelayJob) async throws -> RelayJob {
+        guard job.canCancel else { throw RelayJobCancellationError.unsupported }
+        let result = try await callAuthenticatedTool(chatGatewayProvider, [
+            "command": "chat_job_cancel",
+            "args": ["repository": job.repository, "jobId": job.id]
+        ])
+        guard result["status"] as? String == "cancelled",
+              result["repository"] as? String == job.repository,
+              result["id"] as? String == job.id else {
+            throw RelayJobCancellationError.unconfirmed
+        }
+        var receipt = result
+        receipt["status"] = "CANCELLED"
+        guard let confirmed = RelayJob(wire: receipt), confirmed.lifecycle == .cancelled else {
+            throw RelayJobCancellationError.unconfirmed
+        }
+        return confirmed
+    }
+
     func chatGatewayFeed() async throws -> [ChatGatewayItem] {
         let result = try await callAuthenticatedTool(chatGatewayProvider, [
             "command": "chat_feed", "args": ["limit": 100]
