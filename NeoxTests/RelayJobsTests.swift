@@ -60,6 +60,57 @@ final class RelayJobsTests: XCTestCase {
         ])?.title, "Job blocked")
     }
 
+    func testActivitySymbolsComeOnlyFromAllowlistedEventTypes() throws {
+        let mappings = [
+            "job.created": "plus.circle", "job.planned": "doc.text",
+            "task.queued": "clock", "task.started": "play.circle",
+            "task.progress": "arrow.trianglehead.2.clockwise.rotate.90",
+            "task.completed": "checkmark.circle", "task.failed": "exclamationmark.triangle",
+            "task.cancelled": "xmark.circle", "job.cancelled": "xmark.circle",
+            "job.completed": "checkmark.circle", "job.failed": "exclamationmark.triangle",
+            "job.blocked": "hand.raised.circle", "review.approved": "checkmark.seal",
+            "review.changes_required": "arrow.uturn.backward.circle",
+            "planner.started": "wand.and.stars", "planner.completed": "doc.text",
+            "job.runtime_status.changed": "arrow.trianglehead.2.clockwise.rotate.90",
+            "task.created": "plus.circle", "task.dispatch": "play.circle",
+            "task.process.launched": "play.circle", "task.release": "play.circle",
+            "task.succeeded": "checkmark.circle", "review.created": "eye",
+            "review.requested": "eye", "review.started": "eye", "review.blocked": "hand.raised.circle"
+        ]
+        for (type, expectedSymbol) in mappings {
+            let event = try XCTUnwrap(RelayJobActivityEvent(wire: [
+                "id": type, "type": type, "timestamp": "2026-11-08T16:40:00Z",
+                "symbol": "exclamationmark.triangle"
+            ]))
+            XCTAssertEqual(event.symbol, expectedSymbol, type)
+        }
+    }
+
+    func testActivityTimeIsFixedLocalizedAndIncludesDateOnlyWhenNeeded() throws {
+        let locale = Locale(identifier: "en_US_POSIX")
+        let timeZone = TimeZone(secondsFromGMT: 0)!
+        let reference = try XCTUnwrap(RelayTimestamp.parse("2026-11-10T21:00:00Z"))
+        let today = try XCTUnwrap(RelayTimestamp.activityDisplay(
+            "2026-11-10T16:30:00Z", referenceDate: reference, locale: locale, timeZone: timeZone
+        ))
+        XCTAssertTrue(today.contains("4:30"))
+        XCTAssertTrue(today.contains("PM"))
+        XCTAssertFalse(today.contains("2026"))
+
+        let sameYear = try XCTUnwrap(RelayTimestamp.activityDisplay(
+            "2026-11-08T16:30:00Z", referenceDate: reference, locale: locale, timeZone: timeZone
+        ))
+        XCTAssertTrue(sameYear.contains("Nov"))
+        XCTAssertTrue(sameYear.contains("8"))
+        XCTAssertFalse(sameYear.contains("2026"))
+
+        let priorYear = try XCTUnwrap(RelayTimestamp.activityDisplay(
+            "2025-11-08T16:30:00Z", referenceDate: reference, locale: locale, timeZone: timeZone
+        ))
+        XCTAssertTrue(priorYear.contains("2025"))
+        XCTAssertNil(RelayTimestamp.activityDisplay("not-a-date"))
+    }
+
     func testSourceActivityWithoutEventIdsUsesStableSafeUIIdentity() throws {
         let row: [String: Any] = [
             "type": "planner.completed", "timestamp": "2026-11-10T13:50:00Z",

@@ -109,9 +109,9 @@ final class ChatGatewayStore: ObservableObject {
         }
     }
 
-    func send(using master: RemoteMCPClient) async {
+    func send(using master: RemoteMCPClient) -> Bool {
         let message = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard (!message.isEmpty || !draftAttachments.isEmpty), message.count <= 2000 else { return }
+        guard (!message.isEmpty || !draftAttachments.isEmpty), message.count <= 2000 else { return false }
 
         // Commit locally BEFORE clearing the composer. A disconnected phone
         // or temporarily unavailable head never requires a Retry tap.
@@ -122,9 +122,12 @@ final class ChatGatewayStore: ObservableObject {
             draftAttachments = []
         } catch {
             // If local persistence fails, keep the draft intact, not a fake sent state.
-            return
+            return false
         }
-        await refresh(from: master)
+        // Start delivery immediately, but do not keep the composer focused
+        // while a gateway request is in flight.
+        Task { await refresh(from: master) }
+        return true
     }
 
     func attach(data: Data, name: String) {
@@ -168,6 +171,7 @@ final class ChatGatewayStore: ObservableObject {
 
 struct ChatGatewayView: View {
     @ObservedObject var master: RemoteMCPClient
+    let isActive: Bool
     @StateObject private var store = ChatGatewayStore()
     @StateObject private var dictation = ChatComposerDictation()
     @State private var pickedPhoto: PhotosPickerItem?
@@ -189,6 +193,8 @@ struct ChatGatewayView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 14)
                 }
+                .scrollDismissesKeyboard(.immediately)
+                .simultaneousGesture(TapGesture().onEnded { composerFocused = false })
                 .onChange(of: store.visibleItems.count) { _, _ in
                     if let last = store.visibleItems.last {
                         withAnimation { scroll.scrollTo(last.id, anchor: .bottom) }
@@ -198,11 +204,23 @@ struct ChatGatewayView: View {
 
             composer
         }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { composerFocused = false }
+            }
+        }
         .onChange(of: dictation.transcript) { _, text in
             guard !text.isEmpty else { return }
             let separator = dictationPrefix.isEmpty ||
                 dictationPrefix.hasSuffix(" ") || dictationPrefix.hasSuffix("\n") ? "" : " "
             store.draft = String((dictationPrefix + separator + text).prefix(2000))
+        }
+        .onChange(of: isActive) { _, active in
+            if !active {
+                dictation.stop()
+                composerFocused = false
+            }
         }
         .onChange(of: pickedPhoto) { photo in
             guard let photo else { return }
@@ -221,7 +239,10 @@ struct ChatGatewayView: View {
                 store.attach(fileURL: url)
             }
         }
-        .onDisappear { dictation.stop() }
+        .onDisappear {
+            dictation.stop()
+            composerFocused = false
+        }
         .task {
             // Automatic recovery while the Chat tab is visible.
             while !Task.isCancelled {
@@ -302,7 +323,9 @@ struct ChatGatewayView: View {
 
                 Button {
                     dictation.stop()
-                    Task { await store.send(using: master) }
+                    if store.send(using: master) {
+                        composerFocused = false
+                    }
                 } label: {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 16, weight: .semibold))

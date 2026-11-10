@@ -115,6 +115,7 @@ enum RelayJobLifecycle: Equatable {
 /// exception text are never read.
 struct RelayJobActivityEvent: Identifiable, Equatable {
     let id: String
+    let type: String
     let title: String
     let date: Date
     let taskLabel: String?
@@ -128,6 +129,7 @@ struct RelayJobActivityEvent: Identifiable, Equatable {
               let date = RelayTimestamp.parse(timestamp) else { return nil }
         let taskID = (wire["taskId"] as? String).flatMap(Self.safeIdentifier)
         self.id = id
+        self.type = type
         self.title = title
         self.date = date
         self.taskLabel = taskID.map { "Task \($0)" }
@@ -150,6 +152,26 @@ struct RelayJobActivityEvent: Identifiable, Equatable {
         "review.requested": "Review requested", "review.started": "Review running",
         "review.blocked": "Review blocked"
     ]
+
+    /// Decorative presentation selected from the sanitized event type only.
+    var symbol: String {
+        switch type {
+        case "job.created", "task.created": "plus.circle"
+        case "job.planned", "planner.completed": "doc.text"
+        case "task.queued": "clock"
+        case "task.started", "task.dispatch", "task.process.launched", "task.release": "play.circle"
+        case "task.progress", "job.runtime_status.changed": "arrow.trianglehead.2.clockwise.rotate.90"
+        case "task.completed", "task.succeeded", "job.completed": "checkmark.circle"
+        case "task.failed", "job.failed": "exclamationmark.triangle"
+        case "task.cancelled", "job.cancelled": "xmark.circle"
+        case "job.blocked", "review.blocked": "hand.raised.circle"
+        case "review.approved": "checkmark.seal"
+        case "review.changes_required": "arrow.uturn.backward.circle"
+        case "review.created", "review.requested", "review.started": "eye"
+        case "planner.started": "wand.and.stars"
+        default: "circle"
+        }
+    }
 
     private static func safeIdentifier(_ value: String) -> String? {
         guard value.range(of: "^[A-Za-z0-9_.-]{1,64}$", options: .regularExpression) != nil else { return nil }
@@ -199,6 +221,36 @@ enum RelayTimestamp {
         formatter.timeZone = timeZone
         formatter.setLocalizedDateFormatFromTemplate("EEEE MMMM d yyyy h:mm a")
         return formatter.string(from: date)
+    }
+
+    static func activityDisplay(
+        _ date: Date,
+        referenceDate: Date = Date(),
+        locale: Locale = .current,
+        timeZone: TimeZone = .current
+    ) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        calendar.timeZone = timeZone
+        let sameDay = calendar.isDate(date, inSameDayAs: referenceDate)
+        let sameYear = calendar.component(.year, from: date) == calendar.component(.year, from: referenceDate)
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.timeZone = timeZone
+        formatter.setLocalizedDateFormatFromTemplate(
+            sameDay ? "h:mm a" : (sameYear ? "MMM d h:mm a" : "MMM d yyyy h:mm a")
+        )
+        return formatter.string(from: date)
+    }
+
+    static func activityDisplay(
+        _ value: String,
+        referenceDate: Date = Date(),
+        locale: Locale = .current,
+        timeZone: TimeZone = .current
+    ) -> String? {
+        guard let date = parse(value) else { return nil }
+        return activityDisplay(date, referenceDate: referenceDate, locale: locale, timeZone: timeZone)
     }
 }
 
@@ -338,6 +390,7 @@ struct RelayJobsView: View {
                         RelayJobRow(job: job, reduceMotion: reduceMotion)
                     }
                     .accessibilityIdentifier("neoRelayJobRow-\(job.id)")
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         if store.canCancel(job) {
                             Button(role: .destructive) { confirmationJob = job } label: {
@@ -356,10 +409,9 @@ struct RelayJobsView: View {
                                            description: Text("Jobs from your selected Master will appear here."))
                 }
             }
-            .listStyle(.insetGrouped)
             .accessibilityIdentifier("neoRelayJobsList")
             .refreshable { await store.refresh(from: master) }
-            .navigationTitle("Jobs")
+            .listStyle(.plain)
             .navigationDestination(for: RelayJob.self) { job in
                 RelayJobDetailView(job: store.jobs.first(where: { $0.id == job.id && $0.repository == job.repository }) ?? job,
                                    store: store, master: master)
@@ -476,17 +528,25 @@ private struct RelayJobDetailView: View {
                             .listRowBackground(Color.clear)
                     } else {
                         ForEach(activity) { event in
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(event.title)
-                                HStack {
-                                    if let taskLabel = event.taskLabel { Text(taskLabel) }
-                                    Spacer()
-                                    Text(event.date, style: .relative)
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: event.symbol)
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 18)
+                                    .accessibilityHidden(true)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(event.title)
+                                    HStack {
+                                        if let taskLabel = event.taskLabel { Text(taskLabel) }
+                                        Spacer()
+                                        Text(RelayTimestamp.activityDisplay(event.date))
+                                    }
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                                 }
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                             }
                             .accessibilityElement(children: .combine)
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                         }
                     }
                 } else {
@@ -499,7 +559,7 @@ private struct RelayJobDetailView: View {
                 }
             }
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
         .navigationTitle(job.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
