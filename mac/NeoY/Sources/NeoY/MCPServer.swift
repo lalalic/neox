@@ -625,7 +625,7 @@ public final class MCPServer {
 
         // Files are publicly readable by browser-embedded players.
         if method == "OPTIONS" {
-            let filePreflight = path.hasPrefix("/files/") || path.hasPrefix("/public/")
+            let filePreflight = path.hasPrefix("/files/") || path.hasPrefix("/preview-files/") || path.hasPrefix("/public/")
             sendHTTP(connection: connection, status: 204, body: nil,
                      extraHeaders: filePreflight ? [
                         "Access-Control-Allow-Origin": "*",
@@ -671,6 +671,15 @@ public final class MCPServer {
                 serveStaticFile(relativePath: String(tail[tail.index(after: slash)...]),
                                 root: mount, rangeHeader: rangeHeader,
                                 headOnly: method == "HEAD", connection: connection)
+            } else if ["GET", "HEAD"].contains(method),
+               path.hasPrefix("/preview-files/"),
+               let tail = path.removingPercentEncoding?.dropFirst("/preview-files/".count),
+               let slash = tail.firstIndex(of: "/"),
+               let mount = NeoYFileMounts.load()[String(tail[..<slash])] {
+                let relative = String(tail[tail.index(after: slash)...])
+                let selected = Self.previewProxyPath(relativePath: relative, root: mount) ?? relative
+                serveStaticFile(relativePath: selected, root: mount, rangeHeader: rangeHeader,
+                                headOnly: method == "HEAD", connection: connection, allowVisionProxy: selected != relative)
             } else if ["GET", "HEAD"].contains(method),
                path.hasPrefix("/files/") || path.hasPrefix("/public/"),
                let root = _staticFileRoot {
@@ -1203,16 +1212,52 @@ public final class MCPServer {
 
     // MARK: - Static File Serving
 
+    // Preview-only media mapping: reuse Visioner's existing proxy, never transcode.
+    // Missing or invalid entries fall back to the original requested file.
+    nonisolated static func previewProxyPath(relativePath: String, root: URL) -> String? {
+        let parts = relativePath.split(separator: "/").map(String.init)
+        guard !parts.isEmpty, !parts.contains(where: { $0 == "." || $0 == ".." || $0.hasPrefix(".") }),
+              !relativePath.contains("\\") else { return nil }
+        let base = root.resolvingSymlinksInPath().standardizedFileURL.path
+        // Manifest is stored at the Vlog run root; discover it by walking ancestors.
+        let original = root.appendingPathComponent(relativePath).resolvingSymlinksInPath()
+        guard original.path.hasPrefix(base + "/") else { return nil }
+        var directory = original.deletingLastPathComponent()
+        while directory.path.hasPrefix(base + "/") || directory.path == base {
+            let manifest = directory.appendingPathComponent("vision-normalized-manifest.json")
+            if let data = try? Data(contentsOf: manifest),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let sources = json["sources"] as? [[String: Any]] {
+                let relativeOriginal = original.path.replacingOccurrences(of: directory.path + "/", with: "", range: original.path.range(of: directory.path + "/"))
+                for item in sources where item["originalPath"] as? String == relativeOriginal {
+                    guard let proxy = item["normalizedPath"] as? String,
+                          !proxy.split(separator: "/").contains(where: { $0 == ".." || $0 == "." }),
+                          proxy.hasPrefix("input/media/.normalized/") else { return nil }
+                    let candidate = directory.appendingPathComponent(proxy).resolvingSymlinksInPath()
+                    guard candidate.path.hasPrefix(base + "/"),
+                          FileManager.default.fileExists(atPath: candidate.path),
+                          (try? candidate.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { return nil }
+                    return String(candidate.path.dropFirst(base.count + 1))
+                }
+                return nil
+            }
+            if directory.path == base { break }
+            directory.deleteLastPathComponent()
+        }
+        return nil
+    }
+
     nonisolated private func serveStaticFile(
         relativePath: String,
         root: URL,
         rangeHeader: String?,
         headOnly: Bool,
-        connection: NWConnection
+        connection: NWConnection,
+        allowVisionProxy: Bool = false
     ) {
         // Never expose hidden project metadata, credentials, or traversal segments.
         let segments = relativePath.split(separator: "/", omittingEmptySubsequences: false)
-        guard !segments.contains(where: { $0.isEmpty || $0 == ".." || $0 == "." || $0.hasPrefix(".") }),
+        guard !segments.contains(where: { $0.isEmpty || $0 == ".." || $0 == "." || ($0.hasPrefix(".") && !(allowVisionProxy && $0 == ".normalized")) }),
               !relativePath.contains("\\") else {
             sendHTTP(connection: connection, status: 403, body: Data("Forbidden".utf8))
             return
