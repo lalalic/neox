@@ -19,6 +19,17 @@ final class NeoNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Running"].exists)
         XCTAssertTrue(app.staticTexts["Completed"].exists)
 
+        let runningRow = app.staticTexts["Running vlog edit"]
+        XCTAssertTrue(runningRow.waitForExistence(timeout: 3))
+        runningRow.swipeLeft()
+        XCTAssertFalse(app.buttons["Cancel"].exists,
+                       "The current gateway summary has no cancellation capability")
+        runningRow.tap()
+        XCTAssertTrue(app.staticTexts["Activity not available yet"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(
+            format: "label CONTAINS %@", "currently provides Job summaries only"
+        )).firstMatch.exists)
+
         tabs.buttons["Review Inbox"].tap()
         XCTAssertTrue(app.staticTexts["Review Inbox"].waitForExistence(timeout: 6))
         XCTAssertFalse(app.buttons["markcutReviewInboxClose"].exists)
