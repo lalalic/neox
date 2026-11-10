@@ -14,6 +14,8 @@ final class NeoNavigationUITests: XCTestCase {
 
         tabs.buttons["Jobs"].tap()
         XCTAssertTrue(app.staticTexts["Running vlog edit"].waitForExistence(timeout: 6))
+        XCTAssertFalse(app.navigationBars.staticTexts["Jobs"].exists,
+                       "The Jobs tab identity is enough; omit the duplicate page title")
         XCTAssertTrue(app.staticTexts["Finished validation"].exists)
         // SwiftUI List rows are exposed as cells on iOS 26, not otherElements.
         XCTAssertTrue(app.staticTexts["Running"].exists)

@@ -19,7 +19,7 @@ struct NeoxApp: App {
     var body: some Scene {
         WindowGroup {
             TabView(selection: $selectedTab) {
-                ChatGatewayView(master: savedMaster)
+                ChatGatewayView(master: savedMaster, isActive: selectedTab == .chat)
                     .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }
                     .tag(MobileTab.chat)
                 RelayJobsView(master: savedMaster)
