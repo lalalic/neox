@@ -55,6 +55,9 @@ final class RelayJobsTests: XCTestCase {
         XCTAssertNil(RelayJobActivityEvent(wire: [
             "id": "evt_4", "type": "unknown.event", "timestamp": "2026-11-08T16:40:00Z"
         ]))
+        XCTAssertEqual(RelayJobActivityEvent(wire: [
+            "id": "evt_5", "type": "job.blocked", "timestamp": "2026-11-08T16:40:00Z"
+        ])?.title, "Job blocked")
     }
 
     func testSourceActivityWithoutEventIdsUsesStableSafeUIIdentity() throws {
