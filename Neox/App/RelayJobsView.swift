@@ -7,6 +7,8 @@ struct RelayJob: Identifiable, Equatable, Hashable {
     let repository: String
     let status: String
     let updatedAt: String
+    /// Durable Relay creation time. The current chat-gateway contract omits it.
+    let createdAt: String
     /// Only the authenticated gateway may assert this after checking its PR.
     /// The current chat_jobs contract omits it, so cancellation stays hidden.
     let gatewayAllowsCancellation: Bool
@@ -21,6 +23,7 @@ struct RelayJob: Identifiable, Equatable, Hashable {
         self.repository = Self.clean(wire["repository"] as? String ?? "", limit: 120) ?? ""
         self.status = status
         self.updatedAt = Self.clean(wire["updatedAt"] as? String ?? "", limit: 40) ?? ""
+        self.createdAt = Self.clean(wire["createdAt"] as? String ?? "", limit: 40) ?? ""
         self.gatewayAllowsCancellation = wire["cancellable"] as? Bool == true
     }
 
@@ -147,7 +150,7 @@ struct RelayJobActivityEvent: Identifiable, Equatable {
 
 }
 
-private enum RelayTimestamp {
+enum RelayTimestamp {
     static func parse(_ value: String) -> Date? {
         for options: ISO8601DateFormatter.Options in [
             [.withInternetDateTime, .withFractionalSeconds], [.withInternetDateTime]
@@ -157,6 +160,37 @@ private enum RelayTimestamp {
             if let date = formatter.date(from: value) { return date }
         }
         return nil
+    }
+
+    static func creationDisplay(
+        _ value: String,
+        referenceDate: Date = Date(),
+        locale: Locale = .current,
+        timeZone: TimeZone = .current
+    ) -> String? {
+        guard let date = parse(value) else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        calendar.timeZone = timeZone
+        let includeYear = calendar.component(.year, from: date) != calendar.component(.year, from: referenceDate)
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.timeZone = timeZone
+        formatter.setLocalizedDateFormatFromTemplate(includeYear ? "MMM d yyyy h:mm a" : "MMM d h:mm a")
+        return formatter.string(from: date)
+    }
+
+    static func creationDetail(
+        _ value: String,
+        locale: Locale = .current,
+        timeZone: TimeZone = .current
+    ) -> String? {
+        guard let date = parse(value) else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.timeZone = timeZone
+        formatter.setLocalizedDateFormatFromTemplate("EEEE MMMM d yyyy h:mm a")
+        return formatter.string(from: date)
     }
 }
 
@@ -204,12 +238,16 @@ final class RelayJobsStore: ObservableObject {
             return
         }
         do {
-            jobs = try await master.relayJobs()
+            applySnapshot(try await master.relayJobs())
             hasLoaded = true
         } catch {
             // Preserve the last good snapshot during temporary connection loss.
             hasLoaded = true
         }
+    }
+
+    func applySnapshot(_ snapshot: [RelayJob]) {
+        jobs = snapshot
     }
 
     func cancel(_ job: RelayJob) async throws {
@@ -363,6 +401,9 @@ private struct RelayJobRow: View {
                 Text(job.displayTitle)
                     .font(.body.weight(.medium))
                     .lineLimit(2)
+                Text("Created \(RelayTimestamp.creationDisplay(job.createdAt) ?? "Date unavailable")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 HStack(spacing: 8) {
                     Text("#\(job.id)")
                     Text(job.statusName)
@@ -391,6 +432,10 @@ private struct RelayJobDetailView: View {
                     .foregroundStyle(job.lifecycle.tint)
                 LabeledContent("Job", value: "#\(job.id)")
                 if !job.repository.isEmpty { LabeledContent("Repository", value: job.repository) }
+                LabeledContent(
+                    "Created",
+                    value: RelayTimestamp.creationDetail(job.createdAt) ?? "Date unavailable"
+                )
                 if let date = RelayTimestamp.parse(job.updatedAt) {
                     LabeledContent("Last updated", value: date.formatted(date: .abbreviated, time: .shortened))
                 }
