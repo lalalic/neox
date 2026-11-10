@@ -46,6 +46,23 @@ final class NeoNavigationUITests: XCTestCase {
     }
 
     @MainActor
+    func testWaitingShortcutStatusIsVisibleInJobsAndDetail() {
+        let app = XCUIApplication()
+        app.launchArguments.append("-neo-jobs-ui-fixture")
+        app.launch()
+
+        let jobsTab = app.tabBars.buttons["Jobs"]
+        XCTAssertTrue(jobsTab.waitForExistence(timeout: 15))
+        jobsTab.tap()
+        let waitingRow = app.staticTexts["Waiting for event"]
+        XCTAssertTrue(waitingRow.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Waiting"].exists)
+        waitingRow.tap()
+        XCTAssertTrue(app.staticTexts["Waiting"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.staticTexts["Status unavailable"].exists)
+    }
+
+    @MainActor
     func testNotificationOpensReviewInboxTabNotConnectorSheet() {
         let app = XCUIApplication()
         app.launchArguments += ["-markcut-review-ui-multi-fixture",

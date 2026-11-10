@@ -24,7 +24,7 @@ Neo Mobile provides **Chat**, **Jobs**, **Review Inbox**, and **Connector** tabs
 
 ## Relay Jobs on Neo Mobile
 
-The Jobs tab reads the selected Master's authenticated Chat Gateway. Active Jobs are listed first, followed by recent terminal Jobs. Each row shows the title (or Job ID fallback), state and **creation time** (from Relay `createdAt`, not the last update). The detail view shows the repository and a sanitized activity timeline; no raw prompts, private paths, arbitrary event messages or exception text are displayed.
+The Jobs tab reads the selected Master's authenticated Chat Gateway. Active Jobs are listed first, followed by recent terminal Jobs. Each row shows the title (or Job ID fallback), the Gateway-projected runtime status (including `WAITING`, `IDLE`, `REVIEWING`, and `MERGE_PENDING`), and **creation time** (from Relay `createdAt`, not the last update). The detail view reads the latest Job snapshot while open and shows the repository and a sanitized activity timeline; no raw prompts, private paths, arbitrary event messages or exception text are displayed.
 
 Pull down to refresh the Jobs list. Open a Job to refresh its activity. Eligible Jobs expose a swipe **Cancel** action only when the authenticated gateway advertises `cancellable`; cancellation asks for confirmation and the phone requires the Master's authoritative `CANCELLED` readback. The request uses the exact repository and Job ID, not a PR number. Older gateways that omit the capability cannot offer cancellation. Connectivity failures preserve the last good snapshot rather than treating it as an empty authoritative state.
 

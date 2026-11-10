@@ -36,29 +36,34 @@ struct RelayJob: Identifiable, Equatable, Hashable {
     var lifecycle: RelayJobLifecycle { RelayJobLifecycle(status: status) }
     var statusName: String { lifecycle.title }
     var isActive: Bool {
-        [.planning, .queued, .active, .running, .paused, .blocked].contains(lifecycle)
+        lifecycle.isActive
     }
     var displayTitle: String { title.isEmpty ? "Job \(id)" : title }
 
     /// Requires explicit gateway capability and a nonterminal Relay state.
     /// Older gateways omit this property, which safely hides the action.
     var canCancel: Bool {
-        gatewayAllowsCancellation && [.planning, .queued, .active, .running, .paused, .blocked].contains(lifecycle)
+        gatewayAllowsCancellation && lifecycle.isActive
     }
 }
 
 enum RelayJobLifecycle: Equatable {
-    case planning, queued, active, running, paused, blocked
-    case completed, succeeded, failed, cancelled, unknown
+    case planning, queued, active, idle, waiting, running, reviewing, mergePending, paused, blocked
+    case merged, completed, succeeded, failed, cancelled, unknown
 
     init(status: String) {
         switch status.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
         case "PLANNING": self = .planning
         case "QUEUED", "DRAFT": self = .queued
         case "ACTIVE": self = .active
+        case "IDLE": self = .idle
+        case "WAITING": self = .waiting
         case "RUNNING": self = .running
+        case "REVIEWING": self = .reviewing
+        case "MERGE_PENDING": self = .mergePending
         case "PAUSED", "AWAITING_DECISION": self = .paused
         case "BLOCKED": self = .blocked
+        case "MERGED": self = .merged
         case "COMPLETED": self = .completed
         case "SUCCEEDED": self = .succeeded
         case "FAILED": self = .failed
@@ -72,9 +77,14 @@ enum RelayJobLifecycle: Equatable {
         case .planning: "Planning"
         case .queued: "Queued"
         case .active: "Active"
+        case .idle: "Idle"
+        case .waiting: "Waiting"
         case .running: "Running"
+        case .reviewing: "Reviewing"
+        case .mergePending: "Merge pending"
         case .paused: "Paused"
         case .blocked: "Blocked"
+        case .merged: "Merged"
         case .completed: "Completed"
         case .succeeded: "Succeeded"
         case .failed: "Failed"
@@ -87,10 +97,13 @@ enum RelayJobLifecycle: Equatable {
         switch self {
         case .planning, .queued: "clock"
         case .active: "ellipsis.circle"
+        case .idle, .waiting: "hourglass"
+        case .reviewing: "eye"
+        case .mergePending: "arrow.triangle.merge"
         case .running: "arrow.trianglehead.2.clockwise.rotate.90"
         case .paused: "pause.circle"
         case .blocked: "hand.raised.circle"
-        case .completed, .succeeded: "checkmark.circle"
+        case .merged, .completed, .succeeded: "checkmark.circle"
         case .failed: "exclamationmark.triangle"
         case .cancelled: "xmark.circle"
         case .unknown: "questionmark.circle"
@@ -100,15 +113,19 @@ enum RelayJobLifecycle: Equatable {
     var tint: Color {
         switch self {
         case .planning, .queued, .active, .running: .accentColor
-        case .paused, .blocked, .unknown: .secondary
-        case .completed, .succeeded: .green
+        case .reviewing, .mergePending: .accentColor
+        case .idle, .waiting, .paused, .blocked, .unknown: .secondary
+        case .merged, .completed, .succeeded: .green
         case .failed: .red
         case .cancelled: .secondary
         }
     }
 
+    var isActive: Bool {
+        [.planning, .queued, .active, .idle, .waiting, .running, .reviewing, .mergePending, .paused, .blocked].contains(self)
+    }
     var isRunning: Bool { self == .running }
-    var isTerminal: Bool { [.completed, .succeeded, .failed, .cancelled].contains(self) }
+    var isTerminal: Bool { [.merged, .completed, .succeeded, .failed, .cancelled].contains(self) }
 }
 
 /// Sanitized lifecycle-only activity representation. Free-form messages and
@@ -312,6 +329,10 @@ final class RelayJobsStore: ObservableObject {
         jobs = snapshot
     }
 
+    func currentJob(matching job: RelayJob) -> RelayJob {
+        jobs.first(where: { $0.id == job.id && $0.repository == job.repository }) ?? job
+    }
+
     func cancel(_ job: RelayJob) async throws {
         guard job.canCancel, !cancellingIDs.contains(key(job)),
               let cancelOperation else { throw RelayJobCancellationError.unsupported }
@@ -363,6 +384,9 @@ final class RelayJobsStore: ObservableObject {
             RelayJob(wire: ["id": "fixture-7", "title": "Finished validation",
                             "status": "COMPLETED", "updatedAt": "2026-11-08T16:30:00Z",
                             "repository": "lalalic/neo"])!,
+            RelayJob(wire: ["id": "fixture-6", "title": "Waiting for event",
+                            "status": "WAITING", "updatedAt": "2026-11-08T16:35:00Z",
+                            "repository": "local/vlog"])!,
         ]
     }
     #endif
@@ -413,8 +437,7 @@ struct RelayJobsView: View {
             .refreshable { await store.refresh(from: master) }
             .listStyle(.plain)
             .navigationDestination(for: RelayJob.self) { job in
-                RelayJobDetailView(job: store.jobs.first(where: { $0.id == job.id && $0.repository == job.repository }) ?? job,
-                                   store: store, master: master)
+                RelayJobDetailView(job: job, store: store, master: master)
             }
             .confirmationDialog(
                 "Cancel \(confirmationJob?.displayTitle ?? "Job")?",
@@ -507,17 +530,20 @@ private struct RelayJobDetailView: View {
     @ObservedObject var master: RemoteMCPClient
 
     var body: some View {
-        List {
+        // NavigationLink captures a snapshot; @ObservedObject ensures the latest
+        // authoritative status is reflected when the Job list refreshes.
+        let current = store.currentJob(matching: job)
+        return List {
             Section("Status") {
-                Label(job.statusName, systemImage: job.lifecycle.symbol)
-                    .foregroundStyle(job.lifecycle.tint)
-                LabeledContent("Job", value: "#\(job.id)")
-                if !job.repository.isEmpty { LabeledContent("Repository", value: job.repository) }
+                Label(current.statusName, systemImage: current.lifecycle.symbol)
+                    .foregroundStyle(current.lifecycle.tint)
+                LabeledContent("Job", value: "#\(current.id)")
+                if !current.repository.isEmpty { LabeledContent("Repository", value: current.repository) }
                 LabeledContent(
                     "Created",
-                    value: RelayTimestamp.creationDetail(job.createdAt) ?? "Date unavailable"
+                    value: RelayTimestamp.creationDetail(current.createdAt) ?? "Date unavailable"
                 )
-                if let date = RelayTimestamp.parse(job.updatedAt) {
+                if let date = RelayTimestamp.parse(current.updatedAt) {
                     LabeledContent("Last updated", value: date.formatted(date: .abbreviated, time: .shortened))
                 }
             }

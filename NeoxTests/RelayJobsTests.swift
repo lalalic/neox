@@ -24,7 +24,10 @@ final class RelayJobsTests: XCTestCase {
         let statuses: [(String, RelayJobLifecycle, String)] = [
             ("PLANNING", .planning, "clock"), ("QUEUED", .queued, "clock"),
             ("RUNNING", .running, "arrow.trianglehead.2.clockwise.rotate.90"),
+            ("WAITING", .waiting, "hourglass"), ("IDLE", .idle, "hourglass"),
+            ("REVIEWING", .reviewing, "eye"), ("MERGE_PENDING", .mergePending, "arrow.triangle.merge"),
             ("PAUSED", .paused, "pause.circle"), ("BLOCKED", .blocked, "hand.raised.circle"),
+            ("MERGED", .merged, "checkmark.circle"),
             ("COMPLETED", .completed, "checkmark.circle"), ("SUCCEEDED", .succeeded, "checkmark.circle"),
             ("FAILED", .failed, "exclamationmark.triangle"), ("CANCELLED", .cancelled, "xmark.circle"),
             ("NEW_PRIVATE_STATE", .unknown, "questionmark.circle")
@@ -35,6 +38,67 @@ final class RelayJobsTests: XCTestCase {
             XCTAssertEqual(state.symbol, symbol)
             XCTAssertEqual(state.isRunning, state == .running)
         }
+    }
+
+    func testShortcutRuntimeStatusIsNonterminalAndAllowsGatewayAuthorizedCancellation() throws {
+        for status in ["WAITING", "IDLE", "REVIEWING", "MERGE_PENDING"] {
+            let job = try XCTUnwrap(RelayJob(wire: [
+                "id": "42", "repository": "local/vlog", "status": status, "cancellable": true
+            ]))
+            XCTAssertTrue(job.isActive, status)
+            XCTAssertTrue(job.canCancel, status)
+            XCTAssertFalse(job.lifecycle.isRunning, status)
+            XCTAssertFalse(job.lifecycle.isTerminal, status)
+            let legacy = try XCTUnwrap(RelayJob(wire: [
+                "id": "43", "repository": "local/vlog", "status": status
+            ]))
+            XCTAssertFalse(legacy.canCancel, "No gateway capability: \(status)")
+        }
+        for status in ["MERGED", "COMPLETED", "FAILED", "CANCELLED"] {
+            let job = try XCTUnwrap(RelayJob(wire: [
+                "id": "42", "status": status, "cancellable": true
+            ]))
+            XCTAssertFalse(job.isActive, status)
+            XCTAssertFalse(job.canCancel, status)
+        }
+    }
+
+    func testDetailResolvesNewestJobByRepositoryAndID() throws {
+        let store = RelayJobsStore()
+        let original = try XCTUnwrap(RelayJob(wire: [
+            "id": "605", "repository": "local/vlog", "status": "RUNNING",
+            "createdAt": "2026-11-08T09:00:00Z"
+        ]))
+        let updated = try XCTUnwrap(RelayJob(wire: [
+            "id": "605", "repository": "local/vlog", "status": "WAITING",
+            "createdAt": "2026-11-08T09:00:00Z"
+        ]))
+        let collision = try XCTUnwrap(RelayJob(wire: [
+            "id": "605", "repository": "other/neo", "status": "FAILED"
+        ]))
+        store.applySnapshot([original, collision])
+        XCTAssertEqual(store.currentJob(matching: original).statusName, "Running")
+        store.applySnapshot([updated, collision])
+        XCTAssertEqual(store.currentJob(matching: original).statusName, "Waiting")
+        XCTAssertEqual(store.currentJob(matching: collision).statusName, "Failed")
+        XCTAssertEqual(store.currentJob(matching: original).createdAt, original.createdAt)
+        store.applySnapshot([])
+        XCTAssertEqual(store.currentJob(matching: original).statusName, "Running",
+                       "Temporary missing row retains the navigation snapshot")
+    }
+
+    func testWaitingShortcutJobsSortAheadOfCompletedJobs() throws {
+        let store = RelayJobsStore()
+        let completed = try XCTUnwrap(RelayJob(wire: [
+            "id": "1", "repository": "local/vlog", "status": "COMPLETED",
+            "updatedAt": "2026-11-10T15:00:00Z"
+        ]))
+        let waiting = try XCTUnwrap(RelayJob(wire: [
+            "id": "2", "repository": "local/vlog", "status": "WAITING",
+            "updatedAt": "2026-11-09T15:00:00Z"
+        ]))
+        store.applySnapshot([completed, waiting])
+        XCTAssertEqual(store.ordered.map(\.id), ["2", "1"])
     }
 
     func testActivityAllowsOnlyKnownLifecycleFieldsAndDropsUnsafeText() throws {
