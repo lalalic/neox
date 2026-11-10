@@ -98,26 +98,30 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 do { try await Task.sleep(for: .seconds(6 * 60 * 60)) } catch { break }
             }
         }
-        // Keep required skills, but install the optional Neo Project Toolkit only on request.
+        // Prepare the user-owned project workspace without touching existing Git repositories.
+        do { try NeoWorkspaceConfiguration.prepareIfNeeded() }
+        catch { NSLog("Neo Workspace setup failed: %@", error.localizedDescription) }
+        // Install/reconcile the mandatory Harness and required shared Skills automatically.
         Task.detached {
             do {
                 let inventory = try NeoCLISetup.installedGlobalSkillNames()
                 NeoCLISetup.migrateOptionalSkillPreferencesIfNeeded(installed: inventory)
             } catch { NSLog("Neo optional Skills inventory unavailable: %@", error.localizedDescription) }
-            if NeoCLISetup.wantsProjectsToolkit() {
-                do {
-                    let outcome = try NeoCLISetup.installIfMissing()
-                    if outcome.contains("needs setup") || outcome.contains("failed") {
-                        NSLog("Neo Projects Toolkit startup: %@", outcome)
-                    }
+            do {
+                let outcome = try NeoCLISetup.installIfMissing()
+                if outcome.contains("needs setup") || outcome.contains("failed") {
+                    NSLog("Neo Harness installation needs recovery: %@", outcome)
                 }
-                catch { NSLog("Neo Projects Toolkit startup recovery failed: %@", error.localizedDescription) }
-            }
+            } catch { NSLog("Neo Harness startup recovery failed: %@", error.localizedDescription) }
             do { try NeoCLISetup.reconcileDesiredOptionalSkills() }
             catch { NSLog("Neo optional Skills startup recovery failed: %@", error.localizedDescription) }
             // Required Skills and their service daemons are Neo-owned infrastructure.
             // Keep them healthy while the app remains open, without user-facing toggles.
             while !Task.isCancelled {
+                if NeoCLISetup.cliPath() == nil {
+                    do { NSLog("Neo Harness recovery: %@", try NeoCLISetup.installIfMissing()) }
+                    catch { NSLog("Neo Harness recovery failed: %@", error.localizedDescription) }
+                }
                 do { _ = try NeoCLISetup.setupMissingGlobalSkills() }
                 catch { NSLog("Neo required Skills recovery failed: %@", error.localizedDescription) }
                 let optional = NeoCLISetup.desiredOptionalSkills()

@@ -7,6 +7,11 @@ Architecture work under `mac/NeoY` is governed by
 canonical source for NeoY V2 principles, the Architecture Lens used in planning,
 and principle-level review requirements.
 
+Managed Harness installation and the single `NEO_ROOT` Project configuration are
+specified in [Neo Harness Setup Contract](docs/neo-harness-setup-contract.md).
+Agents Relay is an external orchestration service; NeoY must not implement a
+second Job/Task lifecycle or require a Neo source checkout for CLI installation.
+
 ## Runtime endpoints
 
 - MCP: configurable local port (default `http://127.0.0.1:6767/mcp`), Bonjour `_mcp._tcp` / `NeoY`

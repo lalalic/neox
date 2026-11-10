@@ -122,6 +122,15 @@ architecture dependencies of Core execution.
 Core behavior must remain understandable independently of the chosen deployment
 supervisor.
 
+### 10. Managed Harness and Projects are separate assets
+
+NeoY installs and updates the managed Neo Harness CLI and its shared
+Agents/Skills, while the user owns independent Git Project repositories under
+a single configurable `NEO_ROOT`. `NEO_ROOT` is not a Harness checkout path,
+and NeoY must not derive shared assets from a particular Project directory.
+Generic Agents Relay is a federated orchestration runtime rather than a hidden
+NeoY implementation dependency. See [Neo Harness Setup Contract](neo-harness-setup-contract.md).
+
 ## Architecture Lens
 
 For every NeoY feature or material change, planning must answer only the questions
@@ -147,6 +156,8 @@ that are relevant to that task, but it must not skip a relevant question.
    supervisor becoming part of the Core capability contract?
 9. **Migration semantics** — Are we preserving the capability, or mechanically
    copying a legacy tool surface?
+10. **Harness/Project ownership** — Is an installed shared capability being
+    mixed with user-owned Project source or private Run data?
 
 The plan should record the applicable answers before implementation. The review
 should re-check those answers against the actual diff and flag any contradiction.

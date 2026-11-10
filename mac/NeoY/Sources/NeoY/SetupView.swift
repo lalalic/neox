@@ -18,12 +18,12 @@ final class NeoYSetupModel: ObservableObject {
     }
 
     @Published var tab: Tab = .connections
-    @Published var workspaceRootDraft = (try? NeoWorkspaceConfiguration.load().workspaceRoot)
-        ?? NeoWorkspaceConfiguration.defaultWorkspaceRoot.path
-    @Published private(set) var appliedWorkspaceRoot = (try? NeoWorkspaceConfiguration.load().workspaceRoot)
-        ?? NeoWorkspaceConfiguration.defaultWorkspaceRoot.path
-    @Published private(set) var validatedWorkspaceRoot: String?
-    @Published var workspaceValidation = ""
+    @Published var neoRootDraft = (try? NeoWorkspaceConfiguration.load().neoRoot)
+        ?? NeoWorkspaceConfiguration.defaultNeoRoot.path
+    @Published private(set) var appliedNeoRoot = (try? NeoWorkspaceConfiguration.load().neoRoot)
+        ?? NeoWorkspaceConfiguration.defaultNeoRoot.path
+    @Published private(set) var validatedNeoRoot: String?
+    @Published var neoRootValidation = ""
     @Published var portText = String(NeoYDeploymentSettings.defaultPort)
     @Published var remoteEnabled = false
     @Published var remoteMode: RemoteMode = .temporary
@@ -80,60 +80,57 @@ final class NeoYSetupModel: ObservableObject {
         coreRuntimeStatus = NeoYManagedCoreRuntime.active()?.lastPathComponent ?? "bootstrap Core (not installed)"
     }
 
-    var appliedNeoRoot: String {
-        URL(fileURLWithPath: appliedWorkspaceRoot, isDirectory: true)
-            .appendingPathComponent("neo", isDirectory: true).path
+
+    var environmentNeoRootOverride: String? {
+        ProcessInfo.processInfo.environment["NEO_ROOT"]
     }
 
-    var canApplyWorkspaceRoot: Bool {
-        guard let validatedWorkspaceRoot,
-              let current = try? NeoWorkspaceConfiguration.validate(workspaceRootDraft) else { return false }
-        return current == validatedWorkspaceRoot
+    var canApplyNeoRoot: Bool {
+        guard let validatedNeoRoot,
+              let current = try? NeoWorkspaceConfiguration.validate(neoRootDraft) else { return false }
+        return current == validatedNeoRoot
     }
 
-    func chooseWorkspaceRoot() {
+    func chooseNeoRoot() {
         let panel = NSOpenPanel()
-        panel.title = "Choose Workspace Root"
-        panel.message = "Neo will discover projects and shared skills under this directory."
+        panel.title = "Choose NEO_ROOT"
+        panel.message = "Projects are independent Git repositories directly beneath this directory."
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.directoryURL = URL(fileURLWithPath: workspaceRootDraft, isDirectory: true)
+        panel.directoryURL = URL(fileURLWithPath: neoRootDraft, isDirectory: true)
         if panel.runModal() == .OK, let url = panel.url {
-            workspaceRootDraft = url.path
-            validatedWorkspaceRoot = nil
-            workspaceValidation = ""
+            neoRootDraft = url.path
+            invalidateNeoRootValidation()
         }
     }
 
-    func validateWorkspaceRoot() {
+    func invalidateNeoRootValidation() {
+        validatedNeoRoot = nil
+        neoRootValidation = ""
+    }
+
+    func validateNeoRoot() {
         do {
-            let valid = try NeoWorkspaceConfiguration.validate(workspaceRootDraft)
-            validatedWorkspaceRoot = valid
-            let neoRoot = URL(fileURLWithPath: valid).appendingPathComponent("neo").path
-            workspaceValidation = "Valid directory. Neo Root: \(neoRoot)"
+            let valid = try NeoWorkspaceConfiguration.validate(neoRootDraft)
+            validatedNeoRoot = valid
+            neoRootValidation = "Valid Neo Projects root."
         } catch {
-            validatedWorkspaceRoot = nil
-            workspaceValidation = error.localizedDescription
+            validatedNeoRoot = nil
+            neoRootValidation = error.localizedDescription
         }
     }
 
-    func invalidateWorkspaceValidation() {
-        validatedWorkspaceRoot = nil
-        workspaceValidation = ""
-    }
-
-    func applyWorkspaceRoot() {
+    func applyNeoRoot() {
         do {
-            let saved = try NeoWorkspaceConfiguration.save(workspaceRoot: workspaceRootDraft)
-            appliedWorkspaceRoot = saved.workspaceRoot
-            workspaceRootDraft = saved.workspaceRoot
-            validatedWorkspaceRoot = saved.workspaceRoot
-            workspaceValidation = "Applied and verified."
-            result = "Workspace Root applied. Existing files and active jobs were not changed."
+            let saved = try NeoWorkspaceConfiguration.save(neoRoot: neoRootDraft)
+            appliedNeoRoot = saved.neoRoot
+            neoRootDraft = saved.neoRoot
+            validatedNeoRoot = saved.neoRoot
+            neoRootValidation = "Applied and verified; project files were not moved."
             refreshProjects()
         } catch {
-            workspaceValidation = "Not applied: \(error.localizedDescription)"
+            neoRootValidation = "Not applied: \(error.localizedDescription)"
         }
     }
 
@@ -843,32 +840,36 @@ struct NeoYSetupView: View {
 
     private var workspaceTab: some View {
         VStack(alignment: .leading, spacing: 18) {
-            heading("Workspace", "Choose where Neo discovers projects and shared skills.")
-            GroupBox("Workspace Root") {
+            heading("Neo Projects", "Configure the single NEO_ROOT setting.")
+            GroupBox("Neo Root (NEO_ROOT)") {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("This setting only changes discovery for future work. It does not move folders or affect active jobs.")
+                    Text("Each direct child Project owns an independent Git repository. The default is ~/Workspace. Changing this path does not move existing projects, Runs or active jobs.")
                         .font(.caption).foregroundStyle(.secondary)
                     HStack(spacing: 8) {
-                        TextField("Absolute directory path", text: $model.workspaceRootDraft)
+                        TextField("Absolute directory path", text: $model.neoRootDraft)
                             .textFieldStyle(.roundedBorder)
-                            .onChange(of: model.workspaceRootDraft) { _, _ in
-                                model.invalidateWorkspaceValidation()
+                            .onChange(of: model.neoRootDraft) { _, _ in
+                                model.invalidateNeoRootValidation()
                             }
-                        Button("Choose directory…") { model.chooseWorkspaceRoot() }
+                        Button("Choose directory…") { model.chooseNeoRoot() }
                     }
                     valueRow("Applied Neo Root", value: model.appliedNeoRoot)
-                    if !model.workspaceValidation.isEmpty {
-                        Text(model.workspaceValidation)
+                    if let override = model.environmentNeoRootOverride {
+                        Text("NEO_ROOT environment override is active: \(override). It takes precedence over the saved directory until the environment setting is cleared.")
                             .font(.caption)
-                            .foregroundStyle(model.validatedWorkspaceRoot == nil ? .orange : .secondary)
-                            .textSelection(.enabled)
+                            .foregroundStyle(.secondary)
+                    }
+                    if !model.neoRootValidation.isEmpty {
+                        Text(model.neoRootValidation)
+                            .font(.caption)
+                            .foregroundStyle(model.validatedNeoRoot == nil ? .orange : .secondary)
                     }
                     HStack {
                         Spacer()
-                        Button("Validate") { model.validateWorkspaceRoot() }
-                        Button("Apply") { model.applyWorkspaceRoot() }
+                        Button("Validate") { model.validateNeoRoot() }
+                        Button("Apply") { model.applyNeoRoot() }
                             .buttonStyle(.borderedProminent)
-                            .disabled(!model.canApplyWorkspaceRoot)
+                            .disabled(!model.canApplyNeoRoot)
                     }
                 }
                 .padding(8)
@@ -1047,19 +1048,14 @@ struct NeoYSetupView: View {
                 }
                 Divider()
 
-                featureRow("Neo Project Toolkit", detail: "CLI and workflows") {
-                    Toggle("", isOn: Binding(
-                        get: { model.toolkitEnabled && model.toolkitInstalled },
-                        set: { model.setToolkitEnabled($0) }
-                    ))
-                    .labelsHidden()
-                    .toggleStyle(.checkbox)
-                    .disabled(model.isBusy)
-                    if model.toolkitEnabled && model.toolkitInstalled {
-                        Button("Update") { model.setupNeoCLI(update: true) }.disabled(model.isBusy)
-                    }
+                featureRow("Neo Harness", detail: "Managed CLI, bootstrap and shared Skills") {
+                    Text(model.toolkitInstalled ? "Installed" : "Needs recovery")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button(model.toolkitInstalled ? "Update" : "Repair") {
+                        model.setupNeoCLI(update: model.toolkitInstalled)
+                    }.disabled(model.isBusy)
                 }
-                if model.toolkitEnabled && model.toolkitInstalled {
+                if model.toolkitInstalled {
                     HStack(spacing: 20) {
                         Toggle("Auto-update Neo CLI", isOn: Binding(
                             get: { model.autoUpdateToolkit },

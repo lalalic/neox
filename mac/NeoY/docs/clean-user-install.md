@@ -5,6 +5,11 @@ This repository currently builds the NeoY menu-bar service and installs it as
 Leo/Neo release. The supported clean-user path is to clone this repository and
 run its local installer; do not use an unverified download link.
 
+This source-build procedure is distinct from the target managed-Harness
+installation behavior. See the [Neo Harness Setup Contract](neo-harness-setup-contract.md)
+for single-root `NEO_ROOT` configuration, owned components, and the remaining
+zero-prerequisite installer gate.
+
 ## Prerequisites
 
 - macOS 14 or newer.
@@ -19,9 +24,17 @@ run its local installer; do not use an unverified download link.
 
 The installer runs the NeoY Core runtime tests, generates and builds the Xcode
 project, signs the app, installs `/Applications/Neo.app`, and registers its
-per-user launch agent. NeoY starts Core and performs best-effort setup of its
-pinned Neo CLI and only its missing global skills. Existing Neo CLI development
-links and already-installed skills are retained. The installer is for a clean
+per-user launch agent. NeoY starts Core and reconciles its
+mandatory managed Neo Harness CLI and missing required shared Skills. On a fresh
+installation, Neo.app saves `~/Workspace` as `neoRoot`; a user-selected root is
+preserved on upgrade. Existing Neo CLI development
+links and already-installed skills are retained. The source installer still requires Node.js/npm. A fully standalone packaged
+Neo.app install without a preinstalled Node/npm runtime is not yet supported;
+that prerequisite must be addressed before calling this a zero-dependency user installer.
+The next Harness version is `@lalalic/neo@1.0.3`, and the npm package must
+be published before deploying a Neo.app build pinned to that version.
+
+The installer is for a clean
 install or an intentional NeoY upgrade; inspect it before using it on a Mac
 that already runs NeoY or legacy services.
 

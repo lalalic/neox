@@ -45,20 +45,19 @@ final class NeoCLISetupTests: XCTestCase {
             bootstrap: URL(fileURLWithPath: "/nonexistent/neo-setup.md"), project: "neo/test"))
     }
 
-    func testStartupPreferencesPreserveExplicitToolkitChoice() {
+    func testNeoHarnessIsMandatoryRegardlessOfLegacyToolkitPreference() {
         let suite = "NeoCLISetupTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         defaults.set(false, forKey: NeoCLISetup.toolkitPreferenceKey)
-        XCTAssertFalse(NeoCLISetup.wantsProjectsToolkit(defaults: defaults))
+        XCTAssertTrue(NeoCLISetup.wantsProjectsToolkit(defaults: defaults))
         defaults.set(true, forKey: NeoCLISetup.toolkitPreferenceKey)
         XCTAssertTrue(NeoCLISetup.wantsProjectsToolkit(defaults: defaults))
     }
 
-    func testWorkspaceConfigurationDefaultsAndDerivesNeoRoot() {
-        let root = NeoWorkspaceConfiguration.defaultWorkspaceRoot.path
-        XCTAssertEqual(NeoWorkspaceConfiguration(schemaVersion: 1, workspaceRoot: root).neoRoot,
-                       URL(fileURLWithPath: root).appendingPathComponent("neo").path)
+    func testWorkspaceConfigurationDefaultsIndependentProjectRoot() {
+        let root = NeoWorkspaceConfiguration.defaultNeoRoot.path
+        XCTAssertEqual(NeoWorkspaceConfiguration(schemaVersion: 1, neoRoot: root).neoRoot, root)
     }
 
     func testWorkspaceConfigurationValidatesAndAtomicallyReadsBack() throws {
@@ -72,13 +71,65 @@ final class NeoCLISetupTests: XCTestCase {
 
         XCTAssertThrowsError(try NeoWorkspaceConfiguration.validate(workspace.appendingPathComponent("missing").path))
         XCTAssertThrowsError(try NeoWorkspaceConfiguration.validate("relative/path"))
-        let saved = try NeoWorkspaceConfiguration.save(workspaceRoot: workspace.path, to: file)
-        XCTAssertEqual(saved.workspaceRoot, workspace.resolvingSymlinksInPath().path)
+        let saved = try NeoWorkspaceConfiguration.save(neoRoot: workspace.path, to: file)
+        XCTAssertEqual(saved.neoRoot, workspace.resolvingSymlinksInPath().path)
         XCTAssertEqual(try NeoWorkspaceConfiguration.load(from: file), saved)
+        let prepared = try NeoWorkspaceConfiguration.prepareIfNeeded(at: file)
+        XCTAssertEqual(prepared, saved)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: prepared.neoRoot))
+        let customProjects = directory.appendingPathComponent("custom-projects", isDirectory: true)
+        try FileManager.default.createDirectory(at: customProjects, withIntermediateDirectories: true)
+        let customized = try NeoWorkspaceConfiguration.save(neoRoot: customProjects.path, to: file)
+        XCTAssertEqual(customized.neoRoot, customProjects.path)
         let originalData = try Data(contentsOf: file)
-        XCTAssertThrowsError(try NeoWorkspaceConfiguration.save(workspaceRoot: "relative", to: file))
+        XCTAssertThrowsError(try NeoWorkspaceConfiguration.save(neoRoot: "relative", to: file))
         XCTAssertEqual(try Data(contentsOf: file), originalData)
         XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+    }
+
+    func testFirstLaunchMigratesPreviousRootFieldsOnlyOnce() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let workspace = directory.appendingPathComponent("workspace", isDirectory: true)
+        let selected = directory.appendingPathComponent("selected-projects", isDirectory: true)
+        let file = directory.appendingPathComponent("config/workspace.json")
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let historical: [String: Any] = ["schemaVersion": 1,
+                                          "workspaceRoot": workspace.path,
+                                          "projectsRoot": selected.path]
+        try JSONSerialization.data(withJSONObject: historical).write(to: file)
+        XCTAssertThrowsError(try NeoWorkspaceConfiguration.load(from: file))
+        let migrated = try NeoWorkspaceConfiguration.prepareIfNeeded(at: file)
+        XCTAssertEqual(migrated.neoRoot, selected.resolvingSymlinksInPath().path)
+        let data = try Data(contentsOf: file)
+        let savedFields = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(Set(savedFields.keys), ["schemaVersion", "neoRoot"])
+        XCTAssertEqual(try NeoWorkspaceConfiguration.prepareIfNeeded(at: file), migrated)
+        XCTAssertEqual(try Data(contentsOf: file), data)
+    }
+
+    func testLegacyWorkspaceOnlyConfigPreservesFormerNeoSubfolder() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let workspace = directory.appendingPathComponent("workspace", isDirectory: true)
+        let file = directory.appendingPathComponent("config/workspace.json")
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: ["schemaVersion": 1, "workspaceRoot": workspace.path])
+            .write(to: file)
+        let previouslyEffective = workspace.appendingPathComponent("neo", isDirectory: true)
+        try FileManager.default.createDirectory(at: previouslyEffective, withIntermediateDirectories: true)
+        let sentinel = previouslyEffective.appendingPathComponent("project-sentinel.txt")
+        try "must remain untouched".write(to: sentinel, atomically: true, encoding: .utf8)
+        XCTAssertEqual(try NeoWorkspaceConfiguration.prepareIfNeeded(at: file).neoRoot,
+                       previouslyEffective.resolvingSymlinksInPath().path)
+        XCTAssertEqual(try String(contentsOf: sentinel, encoding: .utf8), "must remain untouched")
+        XCTAssertEqual(try NeoWorkspaceConfiguration.load(from: file).neoRoot,
+                       previouslyEffective.resolvingSymlinksInPath().path)
     }
 
     func testRequiredServiceOwnershipAndRecoveryPlan() {
@@ -176,13 +227,13 @@ final class NeoCLISetupTests: XCTestCase {
     }
 
     func testPublishedNeoCLIDistributionIdentity() {
-        XCTAssertEqual(NeoCLISetup.npmCLI, "@lalalic/neo@1.0.2")
+        XCTAssertEqual(NeoCLISetup.npmCLI, "@lalalic/neo@1.0.3")
     }
 
     func testCLIInstalledPackageIdentity() {
-        XCTAssertEqual(NeoCLISetup.packageDecision(installed: ["@lalalic/neo": "1.0.2"], executableExists: true), "ready")
-        XCTAssertTrue(NeoCLISetup.packageDecision(installed: ["@lalalic/neo": "1.0.1"], executableExists: true).hasPrefix("upgrade_required:"))
-        XCTAssertTrue(NeoCLISetup.packageDecision(installed: ["@lalalic/neo": "1.0.2"], executableExists: false).hasPrefix("upgrade_required:"))
+        XCTAssertEqual(NeoCLISetup.packageDecision(installed: ["@lalalic/neo": "1.0.3"], executableExists: true), "ready")
+        XCTAssertTrue(NeoCLISetup.packageDecision(installed: ["@lalalic/neo": "1.0.2"], executableExists: true).hasPrefix("upgrade_required:"))
+        XCTAssertTrue(NeoCLISetup.packageDecision(installed: ["@lalalic/neo": "1.0.3"], executableExists: false).hasPrefix("upgrade_required:"))
     }
 
     func testLegacyNeoNeverSilentlyReplaced() {
@@ -204,8 +255,13 @@ final class NeoCLISetupTests: XCTestCase {
             "browser-workspace/platforms/chatgpt", "ai-trading-lab",
             "neo/vlog"
         ].map { ["xchat_project": $0] }
-        XCTAssertEqual(NeoCLISetup.neoProjectNames(from: projects),
-                       ["commerce", "family-tutor", "vlog"])
+        let independent: [[String: Any]] = [
+            ["xchat_project": "content-distribution", "neo_project": true],
+            ["xchat_project": "vlog", "neo_project": true],
+            ["xchat_project": "runs/temp", "neo_project": true],
+        ]
+        XCTAssertEqual(NeoCLISetup.neoProjectNames(from: projects + independent),
+                       ["content-distribution", "vlog"])
     }
 
     func testLegacyCapabilityConfigurationDefaultsToolOverrides() throws {

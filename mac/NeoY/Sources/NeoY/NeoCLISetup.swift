@@ -244,12 +244,9 @@ enum NeoCLISetup {
         last.map { now.timeIntervalSince($0) >= 86_400 } ?? true
     }
 
-    /// On existing installations preserve the observed CLI choice. New users
-    /// must explicitly enable the optional Projects Toolkit.
-    static func wantsProjectsToolkit(defaults: UserDefaults = .standard) -> Bool {
-        if let value = defaults.object(forKey: toolkitPreferenceKey) as? Bool { return value }
-        return cliPath() != nil
-    }
+    /// The Harness/CLI is a mandatory Neo.app component, even on a clean install.
+    /// The former opt-out preference is ignored; optional projects/Skills remain optional.
+    static func wantsProjectsToolkit(defaults: UserDefaults = .standard) -> Bool { true }
 
     static func desiredOptionalSkills(defaults: UserDefaults = .standard) -> Set<String> {
         guard let names = defaults.stringArray(forKey: optionalSkillsPreferenceKey) else { return [] }
@@ -413,7 +410,7 @@ enum NeoCLISetup {
         }
         let resolver = Process()
         resolver.executableURL = cli
-        resolver.arguments = ["project", "resolve", "neo/\(name)"]
+        resolver.arguments = ["project", "resolve", name]
         resolver.environment = ProcessInfo.processInfo.environment.merging(["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]) { _, configured in configured }
         let output = Pipe()
         resolver.standardOutput = output
@@ -423,7 +420,7 @@ enum NeoCLISetup {
         resolver.waitUntilExit()
         guard resolver.terminationStatus == 0,
               let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              json["xchat_project"] as? String == "neo/\(name)",
+              (json["name"] as? String) == name,
               json["local_path"] is String else {
             throw NSError(domain: "NeoProject", code: 2,
                           userInfo: [NSLocalizedDescriptionKey: "Project resolution failed"])
@@ -453,7 +450,7 @@ enum NeoCLISetup {
         }
         let process = Process()
         process.executableURL = cli
-        process.arguments = ["project", "setup-agent", "neo/\(name)"]
+        process.arguments = ["project", "setup-agent", name]
         process.environment = ProcessInfo.processInfo.environment.merging(["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"]) { _, configured in configured }
         let output = Pipe()
         process.standardOutput = output
@@ -494,6 +491,9 @@ enum NeoCLISetup {
         guard try git(["status", "--porcelain"]).isEmpty else {
             throw NSError(domain: "NeoProject", code: 5,
                           userInfo: [NSLocalizedDescriptionKey: "Project has local changes; update skipped."])
+        }
+        if (try? git(["remote", "get-url", "origin"])) == nil {
+            return "Local-only project; no remote update is configured."
         }
         return try git(["pull", "--ff-only"])
     }
@@ -538,14 +538,17 @@ enum NeoCLISetup {
         return json["status"] as? String
     }
 
-    /// The CLI discovers every Workspace project and nested README directory.
-    /// Show first-level Neo products, not nested runs or infrastructure skills.
+    /// Prefer independent Neo Projects identified by the CLI; accept existing
+    /// source-monorepo projects only until they are migrated, never nested runs.
     static func neoProjectNames(from records: [[String: Any]]) -> [String] {
-        let names = records.compactMap { $0["xchat_project"] as? String }
-        return Array(Set(names.filter { name in
-            let parts = name.split(separator: "/")
-            return parts.count == 2 && parts[0] == "neo" && parts[1] != "skills"
-        }.map { String($0.dropFirst("neo/".count)) })).sorted()
+        let names = records.compactMap { record -> String? in
+            guard record["neo_project"] as? Bool == true,
+                  let path = record["xchat_project"] as? String,
+                  path.range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]*$"#, options: .regularExpression) != nil
+            else { return nil }
+            return path
+        }
+        return Array(Set(names)).sorted()
     }
 
     static func installedGlobalSkills() -> [String] {
@@ -584,9 +587,9 @@ enum NeoCLISetup {
         guard let dest = try? FileManager.default.destinationOfSymbolicLink(atPath: path.path) else { return false }
         return URL(fileURLWithPath: dest, relativeTo: path.deletingLastPathComponent()).standardizedFileURL.path.contains("/Workspace/neo/")
     }
-    static let npmCLI = "@lalalic/neo@1.0.2"
+    static let npmCLI = "@lalalic/neo@1.0.3"
     static let npmPackage = "@lalalic/neo"
-    static let expectedVersion = "1.0.2"
+    static let expectedVersion = "1.0.3"
     static let latestNpmCLI = "@lalalic/neo@latest"
 
     static func managedToolkitInstalled() -> Bool {
