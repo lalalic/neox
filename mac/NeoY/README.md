@@ -142,6 +142,12 @@ NeoY can report/open permission settings, but Screen Recording, Accessibility, c
 
 ## NeoY 2.2 Core Agent Runtime
 
+An experimental Rust Core development alternative is maintained under
+[`Runtime/src/core/rust`](Runtime/src/core/rust/README.md). It is not packaged
+or selected by NeoY; the Node.js Core remains the production provider. See its
+[parity matrix](Runtime/src/core/rust/docs/parity-matrix.md) before relying on
+Rust behavior.
+
 NeoY 2.2 keeps the privileged agent surface intentionally small:
 
 ```text

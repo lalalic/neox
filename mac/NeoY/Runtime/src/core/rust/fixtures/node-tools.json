@@ -1,0 +1,331 @@
+[
+  {
+    "name": "status",
+    "title": "Neo status",
+    "description": "Inspect the host identity, runtime paths, permissions context, configured shell, and Codex executable. This is read-only.",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "shell",
+    "description": "Execute commands and manage background shell jobs. Use command='help' to list subcommands or inspect one subcommand's exact args schema.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "enum": [
+            "help",
+            "exec",
+            "job.kill",
+            "job.list",
+            "job.status",
+            "start"
+          ],
+          "description": "Subcommand name, or 'help'."
+        },
+        "args": {
+          "type": "object",
+          "description": "Arguments for the selected subcommand. Use help for the exact schema."
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "additionalProperties": false,
+      "examples": [
+        {
+          "command": "exec",
+          "args": {
+            "command": "pwd"
+          }
+        },
+        {
+          "command": "start",
+          "args": {
+            "command": "npm test",
+            "label": "tests"
+          }
+        },
+        {
+          "command": "job.status",
+          "args": {
+            "job_id": "<job id from start>"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "fs",
+    "description": "Read, write, inspect, and manage filesystem paths. Use command='help' to list subcommands or inspect one subcommand's exact args schema.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "enum": [
+            "help",
+            "find",
+            "grep",
+            "list",
+            "manage",
+            "read",
+            "stat",
+            "write"
+          ],
+          "description": "Subcommand name, or 'help'."
+        },
+        "args": {
+          "type": "object",
+          "description": "Arguments for the selected subcommand. Use help for the exact schema."
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "additionalProperties": false,
+      "examples": [
+        {
+          "command": "read",
+          "args": {
+            "path": "~/README.md",
+            "encoding": "utf8"
+          }
+        },
+        {
+          "command": "write",
+          "args": {
+            "path": "~/tmp/example.txt",
+            "content": "hello"
+          }
+        },
+        {
+          "command": "edit",
+          "args": {
+            "path": "~/tmp/example.txt",
+            "edits": [
+              {
+                "old_text": "hello",
+                "new_text": "hello world"
+              }
+            ]
+          }
+        },
+        {
+          "command": "grep",
+          "args": {
+            "pattern": "TODO",
+            "path": ".",
+            "glob": "*.mjs"
+          }
+        },
+        {
+          "command": "find",
+          "args": {
+            "pattern": "**/*.mjs",
+            "path": "."
+          }
+        },
+        {
+          "command": "list",
+          "args": {
+            "path": ".",
+            "max_entries": 20
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "apply_file_patch",
+    "title": "Apply file patch",
+    "description": "Apply a standard unified diff (git apply format). REQUIRED: patch (full diff string) and cwd (absolute working directory). Example patch: diff --git a/file.txt b/file.txt\\n--- a/file.txt\\n+++ b/file.txt\\n@@ -1 +1 @@\\n-old\\n+new\\n. Use check_only:true to validate before applying. Do not pass command/args wrappers or Codex Begin Patch markers. Supports reverse and three_way.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "patch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cwd": {
+          "type": "string",
+          "minLength": 1
+        },
+        "check_only": {
+          "type": "boolean",
+          "default": false
+        },
+        "reverse": {
+          "type": "boolean",
+          "default": false
+        },
+        "three_way": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "patch",
+        "cwd"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "codex",
+    "description": "Read local Codex thread history. Use command='help' to list subcommands or inspect one subcommand's exact args schema.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "enum": [
+            "help",
+            "thread.list",
+            "thread.read",
+            "thread.turns.list"
+          ],
+          "description": "Subcommand name, or 'help'."
+        },
+        "args": {
+          "type": "object",
+          "description": "Arguments for the selected subcommand. Use help for the exact schema."
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "additionalProperties": false,
+      "examples": []
+    }
+  },
+  {
+    "name": "discord",
+    "description": "Send replies only to verified Discord-originated turns using an opaque correlation ID. Use command='help' to list subcommands or inspect one subcommand's exact args schema.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "enum": [
+            "help",
+            "reply"
+          ],
+          "description": "Subcommand name, or 'help'."
+        },
+        "args": {
+          "type": "object",
+          "description": "Arguments for the selected subcommand. Use help for the exact schema."
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "additionalProperties": false,
+      "examples": [
+        {
+          "command": "reply",
+          "args": {
+            "correlationId": "<gateway correlationId>",
+            "text": "Hello!"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "chatgpt",
+    "description": "Submit ChatGPT turns (async FIFO by default, sync opt-in) or create a thread synchronously. Use command='help' for mode and session requirements.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "turn, thread, or help"
+        },
+        "args": {
+          "type": "object",
+          "description": "Subcommand arguments. Use help for the exact schema."
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "terminal",
+    "description": "Create and interact with persistent pseudo-terminal sessions. Use command='help' to list subcommands or inspect one subcommand's exact args schema.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "enum": [
+            "help",
+            "close",
+            "read",
+            "resize",
+            "signal",
+            "start",
+            "write"
+          ],
+          "description": "Subcommand name, or 'help'."
+        },
+        "args": {
+          "type": "object",
+          "description": "Arguments for the selected subcommand. Use help for the exact schema."
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "additionalProperties": false,
+      "examples": [
+        {
+          "command": "start",
+          "args": {
+            "command": "/bin/zsh",
+            "args": [
+              "-i"
+            ]
+          }
+        },
+        {
+          "command": "write",
+          "args": {
+            "session_id": "<session id>",
+            "data": "echo ready\\r"
+          }
+        },
+        {
+          "command": "read",
+          "args": {
+            "session_id": "<session id>",
+            "cursor": 0
+          }
+        }
+      ]
+    }
+  }
+]
