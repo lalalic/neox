@@ -7,11 +7,13 @@ final class RelayJobsTests: XCTestCase {
         let job = try XCTUnwrap(RelayJob(wire: [
             "id": "902\n", "title": "Vlog export\u{0007}", "repository": "lalalic/neo",
             "status": "RUNNING", "updatedAt": "2026-11-08T16:40:00Z",
+            "createdAt": "2026-11-07T09:15:00Z",
             "prompt": "private request", "objective": "secret"
         ]))
         XCTAssertEqual(job.id, "902")
         XCTAssertEqual(job.displayTitle, "Vlog export")
         XCTAssertEqual(job.statusName, "Running")
+        XCTAssertEqual(job.createdAt, "2026-11-07T09:15:00Z")
         XCTAssertTrue(job.isActive)
         XCTAssertFalse(job.canCancel, "The current gateway does not publish cancellation capability")
         XCTAssertFalse(String(describing: job).contains("private request"))
@@ -120,4 +122,55 @@ final class RelayJobsTests: XCTestCase {
         XCTAssertNil(RelayJob(wire: ["title": "Missing id", "status": "RUNNING"]))
         XCTAssertNil(RelayJob(wire: ["id": "42", "status": ""]))
     }
+
+    func testCreatedTimeUsesLocalTimeAndAddsYearAcrossYearBoundary() throws {
+        let locale = Locale(identifier: "en_US")
+        let zone = try XCTUnwrap(TimeZone(identifier: "America/Toronto"))
+        let reference = try XCTUnwrap(RelayTimestamp.parse("2026-01-05T12:00:00Z"))
+        let priorYear = try XCTUnwrap(RelayTimestamp.creationDisplay(
+            "2026-01-01T01:30:00Z", referenceDate: reference, locale: locale, timeZone: zone
+        ))
+        XCTAssertTrue(priorYear.contains("Dec"))
+        XCTAssertTrue(priorYear.contains("31"))
+        XCTAssertTrue(priorYear.contains("2025"))
+        XCTAssertTrue(priorYear.contains("8:30"))
+
+        let sameYear = try XCTUnwrap(RelayTimestamp.creationDisplay(
+            "2026-01-02T01:30:00Z", referenceDate: reference, locale: locale, timeZone: zone
+        ))
+        XCTAssertTrue(sameYear.contains("Jan"))
+        XCTAssertFalse(sameYear.contains("2026"))
+
+        let detail = try XCTUnwrap(RelayTimestamp.creationDetail(
+            "2026-01-01T01:30:00Z", locale: locale, timeZone: zone
+        ))
+        XCTAssertTrue(detail.contains("2025"))
+        XCTAssertTrue(detail.contains("December"))
+    }
+
+    func testCreatedTimeMissingOrInvalidUsesNoFabricatedDate() throws {
+        let missing = try XCTUnwrap(RelayJob(wire: ["id": "1", "status": "RUNNING"]))
+        let invalid = try XCTUnwrap(RelayJob(wire: [
+            "id": "2", "status": "RUNNING", "createdAt": "not-a-date",
+            "updatedAt": "2026-11-08T16:40:00Z"
+        ]))
+        XCTAssertNil(RelayTimestamp.creationDisplay(missing.createdAt))
+        XCTAssertNil(RelayTimestamp.creationDisplay(invalid.createdAt))
+        XCTAssertEqual(invalid.updatedAt, "2026-11-08T16:40:00Z")
+    }
+
+    func testCreatedTimeRemainsOnEachRefreshedSnapshot() throws {
+        let store = RelayJobsStore()
+        let first = try XCTUnwrap(RelayJob(wire: [
+            "id": "7", "status": "RUNNING", "createdAt": "2026-11-07T09:15:00Z"
+        ]))
+        let refreshed = try XCTUnwrap(RelayJob(wire: [
+            "id": "7", "status": "RUNNING", "updatedAt": "2026-11-08T16:40:00Z",
+            "createdAt": "2026-11-07T09:15:00Z"
+        ]))
+        store.applySnapshot([first])
+        store.applySnapshot([refreshed])
+        XCTAssertEqual(store.ordered.first?.createdAt, "2026-11-07T09:15:00Z")
+    }
+
 }
