@@ -44,6 +44,9 @@ final class SetupServiceTests: XCTestCase {
 
     func testCoreUpgradeCommands() throws {
         XCTAssertEqual(try NeoYSetupParser.parse("core status"), .coreStatus)
+        XCTAssertEqual(try NeoYSetupParser.parse("core provider rust"), .coreProvider("rust"))
+        XCTAssertEqual(try NeoYSetupParser.parse("core provider node"), .coreProvider("node"))
+        XCTAssertThrowsError(try NeoYSetupParser.parse("core provider python"))
         XCTAssertEqual(try NeoYSetupParser.parse("core upgrade latest"), .coreUpgrade("latest"))
         XCTAssertEqual(try NeoYSetupParser.parse("core upgrade 0.1.10"), .coreUpgrade("0.1.10"))
         XCTAssertEqual(try NeoYSetupParser.parse("help core"), .help(topic: .core))
@@ -420,6 +423,27 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertEqual(resolved.map(\.name), ["events"])
         XCTAssertEqual(resolved.first?.url, external.url)
         XCTAssertTrue(NeoYBundledRuntime.coreMCPServers(runtimeURL: absent).isEmpty)
+    }
+
+    func testRustCoreOptInSelectionAndRollback() throws {
+        let directory = Self.makeDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let marker = directory.appendingPathComponent("provider")
+        let rust = directory.appendingPathComponent("neoy-core-rust")
+        // This is an independent stdio executable, not a wrapper around Node.
+        try "#!/bin/sh\nexit 0\n".write(to: rust, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: rust.path)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        XCTAssertEqual(NeoYBundledRuntime.preferredBackend(marker: marker), "node")
+        try NeoYBundledRuntime.selectBackend("rust", rustBinary: rust, marker: marker)
+        XCTAssertEqual(NeoYBundledRuntime.preferredBackend(marker: marker), "rust")
+        let providers = NeoYBundledRuntime.coreMCPServers(runtimeURL: directory.appendingPathComponent("node-absent"),
+                                                           rustBinary: rust, marker: marker)
+        XCTAssertEqual(providers.map(\.name), ["core"])
+        XCTAssertTrue(providers[0].url.contains(rust.path))
+        try NeoYBundledRuntime.selectBackend("node", rustBinary: rust, marker: marker)
+        XCTAssertEqual(NeoYBundledRuntime.preferredBackend(marker: marker), "node")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
     }
 
     func testBundledCoreToolsAreFlat() {

@@ -10,6 +10,7 @@ enum NeoYSetupCommand: Equatable, Sendable {
     case configuration
     case coreStatus
     case coreUpgrade(String)
+    case coreProvider(String)
     case deploymentShow
     case deploymentSetPort(UInt16)
     case deploymentSetTunnel(NeoYTunnelMode)
@@ -88,6 +89,9 @@ enum NeoYSetupParser {
         case "core":
             if tokens == ["core", "status"] { return .coreStatus }
             if tokens.count == 3, tokens[1] == "upgrade" { return .coreUpgrade(tokens[2]) }
+            if tokens.count == 3, tokens[1] == "provider", ["node", "rust"].contains(tokens[2]) {
+                return .coreProvider(tokens[2])
+            }
             throw NeoYSetupError.unknownCommand(tokens.joined(separator: " "))
         case "deployment": return try deployment(tokens)
         case "diagnostics": return try diagnostics(tokens)
@@ -424,7 +428,21 @@ actor NeoYSetupService {
         case .configuration:
             return Self.json(await snapshot())
         case .coreStatus:
-            return Self.json(["version": NeoYManagedCoreRuntime.active()?.lastPathComponent ?? "not installed"])
+            return Self.json([
+                "version": NeoYManagedCoreRuntime.active()?.lastPathComponent ?? "not installed",
+                "preferredProvider": NeoYBundledRuntime.preferredBackend(),
+                "rustInstalled": FileManager.default.isExecutableFile(atPath: NeoYBundledRuntime.rustBinaryURL.path) ? "true" : "false"
+            ])
+        case .coreProvider(let backend):
+            do {
+                try NeoYBundledRuntime.selectBackend(backend)
+                await MainActor.run {
+                    NotificationCenter.default.post(name: Notification.Name("neoYCoreRuntimeChanged"), object: nil)
+                }
+                return Self.json(["provider": backend, "status": "selected"])
+            } catch {
+                return Self.json(["provider": backend, "status": "failed", "error": error.localizedDescription])
+            }
         case .coreUpgrade(let version):
             do {
                 let selected = try await Task.detached(priority: .userInitiated) {
@@ -668,7 +686,7 @@ actor NeoYSetupService {
         case .configuration:
             "'config show' returns versioned validated configuration without making storage paths part of the normal UX."
         case .core:
-            "core status | core upgrade <latest|version|absolute-tgz-path> — verify and activate managed Core, then reconnect its provider."
+            "core status | core provider node|rust | core upgrade <latest|version|absolute-tgz-path> — switch the local Core provider with an immediate Node rollback; Rust requires an installed executable."
         case .deployment:
             """
             deployment show
@@ -735,7 +753,7 @@ actor NeoYSetupService {
               help [topic]
               status
               config show
-              core status|upgrade ...
+              core status|provider|upgrade ...
               deployment show|set ...
               diagnostics ...
               permissions status|open ...

@@ -99,3 +99,14 @@ suite is not proof of complete behavioral identity over every possible input.
 This alternative is **not activated in NeoY**; retain Node as production until
 a separately authorized, independently reviewed Swift federation canary and
 rollback verification succeed.
+
+## Local NeoY canary / rollback
+
+A signed NeoY host with `core provider` support can select this independently
+installed binary. Copy the reviewed release binary to the private path
+`~/Library/Application Support/NeoY/core/rust/neoy-core-rust` (0700 directory,
+0700 executable), then use `neoy.setup` with `core provider rust`; the native
+runtime reconnects the `core` stdio provider without restarting NeoY. Check
+`core status` and `status`/`shell.exec` MCP behavior, not only the selection
+receipt. `core provider node` immediately selects the managed Node runtime
+again. The Core binary itself does not publish or manage WebHelm sessions.
