@@ -12,12 +12,11 @@ const TOKENS_FILE = path.join(BASE,'devices.json');
 const REVIEWS_FILE = path.join(BASE,'reviews.json');
 const HEX = /^[0-9a-f]{64,512}$/;
 const SHA = /^[0-9a-f]{64}$/;
-const GIT_SHA = /^[0-9a-f]{40}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const THREAD = /^[a-zA-Z0-9_-]{8,160}$/;
 const callback = x => x === 'chatgpt' || x === 'review.feedback' || /^[a-z0-9_-]+\.review\.feedback$/.test(x);
 const SOURCE=/^job\/([A-Za-z0-9_-]+)\/task\/([A-Za-z0-9_-]+)\/execution\/([A-Za-z0-9_-]+)$/;
-const RESERVED=['decision','feedback','comments','revision','revisionId','contentHash','commitSha','previewId','requestId','idempotencyKey'];
+const RESERVED=['decision','feedback','comments','revision','revisionId','contentHash','commitSha','invocationId','previewId','requestId','idempotencyKey'];
 
 function assertValid(ok, message) { if (!ok) throw new Error(message); }
 export function validateRegistration(a) {
@@ -34,9 +33,9 @@ export function validateReview(a) {
   const delivery=a.delivery||'text';
   assertValid(delivery==='text'||delivery==='event','Unsupported review delivery');
   if(delivery==='event'){
-    assertValid(typeof a.commitSha==='string' && GIT_SHA.test(a.commitSha),'Invalid Git Commit SHA');
+    assertValid(a.commitSha===undefined, 'Review cannot carry Git SHA');
     assertValid(typeof a.mediaHash==='string' && SHA.test(a.mediaHash),'Invalid compiled media hash');
-    assertValid(a.contentHash===undefined && a.revisionId===undefined,'Event review must use Git SHA only');
+    assertValid(a.contentHash===undefined && a.revisionId===undefined,'Event review uses Task execution identity');
     const t=a.eventTemplate;
     assertValid(t && typeof t==='object' && !Array.isArray(t),'Missing event template');
     assertValid(t.type==='task.interactive_decision','Unsafe review event type');
@@ -46,7 +45,6 @@ export function validateReview(a) {
     const fixed=t.data.interactive;
     assertValid(fixed && typeof fixed==='object' && !Array.isArray(fixed) &&
       fixed.jobId===match[1] && fixed.taskId===match[2] && fixed.executionId===match[3] &&
-      typeof fixed.invocationId==='string' && /^[A-Za-z0-9_-]{1,128}$/.test(fixed.invocationId) &&
       RESERVED.every(k=>!Object.hasOwn(fixed,k)),'Invalid interactive identity or reserved fields');
     assertValid(Object.keys(t).every(k=>['type','source','data'].includes(k)),'Invalid event template fields');
     assertValid(a.ownerCallbackTool===undefined && a.ownerThreadId===undefined,'Event cannot carry owner callback');
@@ -63,7 +61,7 @@ export function validateReview(a) {
     }
   }
   const result={id:a.id.toLowerCase(),title:a.title,
-    ...(delivery==='event'?{commitSha:a.commitSha,mediaHash:a.mediaHash}:{contentHash:a.contentHash,revisionId:a.revisionId})};
+    ...(delivery==='event'?{mediaHash:a.mediaHash}:{contentHash:a.contentHash,revisionId:a.revisionId})};
   if(a.delivery)result.delivery=delivery;
   if(a.ownerCallbackTool)result.ownerCallbackTool=a.ownerCallbackTool;
   if(a.eventTemplate)result.eventTemplate=JSON.parse(JSON.stringify(a.eventTemplate));
@@ -181,12 +179,9 @@ export function pendingReviews(){
   const cutoff=Date.now()-30*86400000;
   const active=Object.values(store.requests)
     .filter(x=>Date.parse(x.createdAt)>=cutoff);
-  // Old Event records without a verifiable Git SHA stay in the durable store,
-  // untouched. They are not actionable under the current protocol and must
-  // never break sync of other reviews or be assigned a synthetic SHA.
-  const supported=active.filter(x=>x.review?.delivery!=='event' || (
-    GIT_SHA.test(x.review.commitSha??'') && SHA.test(x.review.mediaHash??'') &&
-    x.review.contentHash===undefined && x.review.revisionId===undefined));
+  const supported=active.filter(x=>{
+    try{validateReview(x.review);return true;}catch{return false;}
+  });
   return {requests:supported
     .sort((a,b)=>b.createdAt.localeCompare(a.createdAt))
     .slice(0,500).map(x=>({...x.review,createdAt:x.createdAt})),

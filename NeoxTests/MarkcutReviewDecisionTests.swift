@@ -122,11 +122,11 @@ final class MarkcutReviewDecisionTests: XCTestCase {
             source: "job/j123/task/producer/execution/e456",
             data: ["interactive": .object([
                 "jobId": .string("j123"), "taskId": .string("producer"),
-                "executionId": .string("e456"), "invocationId": .string("video-preview-42")
+                "executionId": .string("e456")
             ])])
         let request = try MarkcutReviewRequest(id: UUID().uuidString,
-            contentHash: String(repeating: "b", count: 64), revisionID: String(repeating: "d", count: 40),
-            title: "Review scene", commitSha: String(repeating: "d", count: 40), delivery: "event", eventTemplate: template,
+            contentHash: String(repeating: "b", count: 64), revisionID: "e456",
+            title: "Review scene", delivery: "event", eventTemplate: template,
             previewID: "preview-42")
         let comment = MarkcutReviewComment(sceneId: "intro", timeSeconds: 4.25,
             text: "Remove second pause", scope: "spot")
@@ -138,8 +138,8 @@ final class MarkcutReviewDecisionTests: XCTestCase {
         XCTAssertEqual(event["type"] as? String, "task.interactive_decision")
         let data = try XCTUnwrap(event["data"] as? [String: Any])
         let interactive = try XCTUnwrap(data["interactive"] as? [String: Any])
-        XCTAssertEqual(interactive["revision"] as? String, request.commitSha)
-        XCTAssertEqual(interactive["commitSha"] as? String, request.commitSha)
+        XCTAssertNil(interactive["revision"])
+        XCTAssertNil(interactive["commitSha"])
         XCTAssertNil(interactive["revisionId"])
         XCTAssertNil(interactive["contentHash"])
         XCTAssertEqual(interactive["previewId"] as? String, "preview-42")
@@ -176,13 +176,13 @@ final class MarkcutReviewDecisionTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let request = try MarkcutReviewRequest(id: UUID().uuidString,
-            contentHash: String(repeating: "c", count: 64), revisionID: String(repeating: "e", count: 40), title: "Review",
-            commitSha: String(repeating: "e", count: 40), delivery: "event", eventTemplate: MarkcutReviewEventTemplate(
+            contentHash: String(repeating: "c", count: 64), revisionID: "e8", title: "Review",
+            delivery: "event", eventTemplate: MarkcutReviewEventTemplate(
                 type: "task.interactive_decision",
                 source: "job/j8/task/review/execution/e8",
                 data: ["interactive": .object([
                     "jobId": .string("j8"), "taskId": .string("review"),
-                    "executionId": .string("e8"), "invocationId": .string("review-r8")
+                    "executionId": .string("e8")
                 ])]))
         let queued = MarkcutReviewFeedback(requestId: request.id, decision: .approved,
             feedback: "", idempotencyKey: "retry-key-preserved")

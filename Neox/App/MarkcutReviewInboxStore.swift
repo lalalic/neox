@@ -17,10 +17,8 @@ struct MarkcutReviewEventTemplate: Codable, Equatable {
               case let .string(jobID)? = fixed["jobId"], jobID == sourceParts[1],
               case let .string(taskID)? = fixed["taskId"], taskID == sourceParts[3],
               case let .string(executionID)? = fixed["executionId"], executionID == sourceParts[5],
-              case let .string(invocationID)? = fixed["invocationId"], !invocationID.isEmpty,
-              invocationID.range(of: #"^[A-Za-z0-9_-]{1,128}$"#, options: .regularExpression) != nil,
               !["decision", "feedback", "comments", "revision", "revisionId", "contentHash", "commitSha",
-                "previewId", "requestId", "idempotencyKey"].contains(where: { fixed[$0] != nil }) else {
+                "invocationId", "previewId", "requestId", "idempotencyKey"].contains(where: { fixed[$0] != nil }) else {
             throw CocoaError(.validationMissingMandatoryProperty)
         }
     }
@@ -30,17 +28,13 @@ struct MarkcutReviewEventTemplate: Codable, Equatable {
         let encoded = try JSONEncoder().encode(data)
         var fixed = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] ?? [:]
         guard var interactive = fixed["interactive"] as? [String: Any],
-              let decision = review["decision"] as? String,
-              let revision = review["commitSha"] as? String,
-              revision.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil else {
+              let decision = review["decision"] as? String else {
             throw CocoaError(.validationMissingMandatoryProperty)
         }
         let comments = review["comments"] as? [[String: Any]] ?? []
         interactive["decision"] = decision
         interactive["feedback"] = (review["feedback"] as? String) ?? comments.compactMap { $0["text"] as? String }.joined(separator: "\n")
         interactive["comments"] = comments
-        interactive["revision"] = revision
-        interactive["commitSha"] = revision
         for field in ["previewId", "requestId", "idempotencyKey"] {
             interactive[field] = review[field]
         }
@@ -60,7 +54,6 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
     let id: String
     let contentHash: String
     let revisionID: String
-    let commitSha: String?
     let title: String
     let groupID: String?
     let groupTitle: String?
@@ -74,7 +67,7 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
     let createdAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, contentHash, commitSha, mediaHash, title, groupTitle, delivery, eventTemplate, createdAt
+        case id, contentHash, mediaHash, title, groupTitle, delivery, eventTemplate, createdAt
         case previewID = "previewId"
         case revisionID = "revisionId"
         case groupID = "groupId"
@@ -82,7 +75,7 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
         case ownerCallbackTool, ownerThreadID = "ownerThreadId", playerURL = "playerUrl"
     }
 
-    init(id: String, contentHash: String, revisionID: String, title: String, commitSha: String? = nil,
+    init(id: String, contentHash: String, revisionID: String, title: String,
          groupID: String? = nil, groupTitle: String? = nil, jobID: String? = nil,
          delivery: String? = nil, eventTemplate: MarkcutReviewEventTemplate? = nil,
          previewID: String? = nil, ownerCallbackTool: String? = nil, ownerThreadID: String? = nil,
@@ -90,8 +83,6 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
         guard UUID(uuidString: id) != nil,
               contentHash.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
               !revisionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              (delivery == "event" ? (commitSha != nil && commitSha == revisionID &&
-                  commitSha!.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil) : commitSha == nil),
               !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               delivery.map({ $0 == "text" || $0 == "event" }) ?? true,
               (delivery == "event" ? eventTemplate != nil : eventTemplate == nil),
@@ -109,7 +100,6 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
         self.id = id
         self.contentHash = contentHash
         self.revisionID = revisionID
-        self.commitSha = commitSha
         self.title = title
         self.groupID = groupID
         self.groupTitle = groupTitle
@@ -128,17 +118,18 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
         if isEvent && (fields.contains(.contentHash) || fields.contains(.revisionID)) {
             throw CocoaError(.validationMissingMandatoryProperty)
         }
+        let eventTemplate = try fields.decodeIfPresent(MarkcutReviewEventTemplate.self, forKey: .eventTemplate)
+        let eventExecution = eventTemplate?.source.split(separator: "/").last.map(String.init)
         try self.init(
             id: fields.decode(String.self, forKey: .id),
             contentHash: fields.decode(String.self, forKey: isEvent ? .mediaHash : .contentHash),
-            revisionID: fields.decode(String.self, forKey: isEvent ? .commitSha : .revisionID),
+            revisionID: isEvent ? (eventExecution ?? "") : fields.decode(String.self, forKey: .revisionID),
             title: fields.decode(String.self, forKey: .title),
-            commitSha: isEvent ? fields.decode(String.self, forKey: .commitSha) : nil,
             groupID: fields.decodeIfPresent(String.self, forKey: .groupID),
             groupTitle: fields.decodeIfPresent(String.self, forKey: .groupTitle),
             jobID: fields.decodeIfPresent(String.self, forKey: .jobID),
             delivery: fields.decodeIfPresent(String.self, forKey: .delivery),
-            eventTemplate: fields.decodeIfPresent(MarkcutReviewEventTemplate.self, forKey: .eventTemplate),
+            eventTemplate: eventTemplate,
             previewID: fields.decodeIfPresent(String.self, forKey: .previewID),
             ownerCallbackTool: fields.decodeIfPresent(String.self, forKey: .ownerCallbackTool),
             ownerThreadID: fields.decodeIfPresent(String.self, forKey: .ownerThreadID),
@@ -151,8 +142,7 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(title, forKey: .title)
-        if let commitSha {
-            try c.encode(commitSha, forKey: .commitSha)
+        if delivery == "event" {
             try c.encode(contentHash, forKey: .mediaHash)
         } else {
             try c.encode(contentHash, forKey: .contentHash)
@@ -176,7 +166,7 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
     var groupingValue: [String: Any] {
         var value: [String: Any] = ["id": id, "title": title, "status": "ready",
                                     "reviewActionable": canDeliver, "delivery": effectiveDelivery]
-        if let commitSha { value["commitSha"] = commitSha; value["mediaHash"] = contentHash }
+        if delivery == "event" { value["mediaHash"] = contentHash }
         else { value["revisionId"] = revisionID; value["contentHash"] = contentHash }
         if let groupID { value["videoGroupKey"] = groupID }
         if let groupTitle { value["videoGroupTitle"] = groupTitle }
@@ -215,8 +205,7 @@ struct MarkcutReviewFeedback: Codable, Equatable, Identifiable {
                      "timeSeconds": comment.timeSeconds, "text": comment.text, "scope": comment.scope] as [String: Any]
                 },
                 "idempotencyKey": idempotencyKey]
-        if let commitSha = request.commitSha { result["commitSha"] = commitSha }
-        else { result["revisionId"] = request.revisionID; result["contentHash"] = request.contentHash }
+        if request.delivery != "event" { result["revisionId"] = request.revisionID; result["contentHash"] = request.contentHash }
         return result
     }
     var id: String { requestId }
