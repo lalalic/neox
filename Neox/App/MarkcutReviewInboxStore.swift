@@ -5,41 +5,53 @@ struct MarkcutReviewEventTemplate: Codable, Equatable {
     let type: String
     let source: String
     let data: [String: JSONValue]
+    let responseKey: String?
+
+    init(type: String, source: String, data: [String: JSONValue], responseKey: String? = nil) {
+        self.type = type
+        self.source = source
+        self.data = data
+        self.responseKey = responseKey
+    }
 
     func validate() throws {
-        let jobSource = #"^job/[A-Za-z0-9_-]+/task/[A-Za-z0-9_-]+/execution/[A-Za-z0-9_-]+$"#
-        let sourceParts = source.split(separator: "/").map(String.init)
-        guard type == "task.interactive_decision",
-              source.range(of: jobSource, options: .regularExpression) != nil,
-              !data.keys.contains(where: { ["__proto__", "constructor", "prototype"].contains($0) }),
-              sourceParts.count == 6,
-              case let .object(fixed)? = data["interactive"],
-              case let .string(jobID)? = fixed["jobId"], jobID == sourceParts[1],
-              case let .string(taskID)? = fixed["taskId"], taskID == sourceParts[3],
-              case let .string(executionID)? = fixed["executionId"], executionID == sourceParts[5],
-              !["decision", "feedback", "comments", "revision", "revisionId", "contentHash", "commitSha",
-                "invocationId", "previewId", "requestId", "idempotencyKey"].contains(where: { fixed[$0] != nil }) else {
+        // Generic event envelope: no Relay event name, Task ID, or execution validation here.
+        let key = responseKey ?? "review"
+        guard type.range(of: #"^[A-Za-z0-9_.:-]{1,128}$"#, options: .regularExpression) != nil,
+              !source.isEmpty, source.count <= 512,
+              source.rangeOfCharacter(from: .controlCharacters) == nil,
+              key.range(of: #"^[A-Za-z_][A-Za-z0-9_-]{0,63}$"#, options: .regularExpression) != nil,
+              !["__proto__", "constructor", "prototype"].contains(key),
+              !data.keys.contains(where: { ["__proto__", "constructor", "prototype"].contains($0) }) else {
             throw CocoaError(.validationMissingMandatoryProperty)
+        }
+        if let target = data[key] {
+            guard case let .object(fields) = target,
+                  !["decision", "feedback", "comments", "previewId", "requestId", "idempotencyKey"]
+                    .contains(where: { fields[$0] != nil }) else {
+                throw CocoaError(.validationMissingMandatoryProperty)
+            }
         }
     }
 
     func event(review: [String: Any]) throws -> [String: Any] {
         try validate()
         let encoded = try JSONEncoder().encode(data)
-        var fixed = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] ?? [:]
-        guard var interactive = fixed["interactive"] as? [String: Any],
-              let decision = review["decision"] as? String else {
+        var envelope = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] ?? [:]
+        let key = responseKey ?? "review"
+        guard let decision = review["decision"] as? String else {
             throw CocoaError(.validationMissingMandatoryProperty)
         }
         let comments = review["comments"] as? [[String: Any]] ?? []
-        interactive["decision"] = decision
-        interactive["feedback"] = (review["feedback"] as? String) ?? comments.compactMap { $0["text"] as? String }.joined(separator: "\n")
-        interactive["comments"] = comments
+        var response = envelope[key] as? [String: Any] ?? [:]
+        response["decision"] = decision
+        response["feedback"] = (review["feedback"] as? String) ?? comments.compactMap { $0["text"] as? String }.joined(separator: "\n")
+        response["comments"] = comments
         for field in ["previewId", "requestId", "idempotencyKey"] {
-            interactive[field] = review[field]
+            response[field] = review[field]
         }
-        fixed["interactive"] = interactive
-        return ["type": type, "source": source, "data": fixed]
+        envelope[key] = response
+        return ["type": type, "source": source, "data": envelope]
     }
 }
 
@@ -99,7 +111,8 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
         self.previewID = previewID
         self.id = id
         self.contentHash = contentHash
-        self.revisionID = revisionID
+        // Event mode has no business revision: use transport request UUID for UI identity.
+        self.revisionID = delivery == "event" ? id : revisionID
         self.title = title
         self.groupID = groupID
         self.groupTitle = groupTitle
@@ -119,11 +132,10 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
             throw CocoaError(.validationMissingMandatoryProperty)
         }
         let eventTemplate = try fields.decodeIfPresent(MarkcutReviewEventTemplate.self, forKey: .eventTemplate)
-        let eventExecution = eventTemplate?.source.split(separator: "/").last.map(String.init)
-        try self.init(
+                try self.init(
             id: fields.decode(String.self, forKey: .id),
             contentHash: fields.decode(String.self, forKey: isEvent ? .mediaHash : .contentHash),
-            revisionID: isEvent ? (eventExecution ?? "") : fields.decode(String.self, forKey: .revisionID),
+            revisionID: isEvent ? (try fields.decode(String.self, forKey: .id)) : fields.decode(String.self, forKey: .revisionID),
             title: fields.decode(String.self, forKey: .title),
             groupID: fields.decodeIfPresent(String.self, forKey: .groupID),
             groupTitle: fields.decodeIfPresent(String.self, forKey: .groupTitle),

@@ -123,7 +123,7 @@ final class MarkcutReviewDecisionTests: XCTestCase {
             data: ["interactive": .object([
                 "jobId": .string("j123"), "taskId": .string("producer"),
                 "executionId": .string("e456")
-            ])])
+            ])], responseKey: "interactive")
         let request = try MarkcutReviewRequest(id: UUID().uuidString,
             contentHash: String(repeating: "b", count: 64), revisionID: "e456",
             title: "Review scene", delivery: "event", eventTemplate: template,
@@ -153,21 +153,47 @@ final class MarkcutReviewDecisionTests: XCTestCase {
             from: JSONEncoder().encode(request))
         XCTAssertEqual(restored.eventTemplate, template)
         XCTAssertTrue(restored.canDeliver)
+        // Mobile transports valid opaque event types and sources. Only the caller owns the semantics.
+        XCTAssertNoThrow(try MarkcutReviewEventTemplate(
+            type: "another.product.feedback", source: "custom/feedback-channel",
+            data: ["extra": .string("opaque")]).validate())
         XCTAssertThrowsError(try MarkcutReviewEventTemplate(
-            type: "task.interactive_decision", source: template.source,
-            data: ["interactive": .object([
-                "jobId": .string("j123"), "taskId": .string("producer"), "executionId": .string("e456"),
-                "invocationId": .string("video-preview-42"), "decision": .string("approved")
-            ])]).validate())
+            type: "another.product.feedback", source: "bad\nsource",
+            data: [:]).validate())
         XCTAssertThrowsError(try MarkcutReviewEventTemplate(
-            type: "markcut.review.submitted", source: template.source, data: template.data).validate())
+            type: "another.product.feedback", source: "custom/channel",
+            data: ["interactive": .object(["decision": .string("approved")])],
+            responseKey: "interactive").validate())
         XCTAssertThrowsError(try MarkcutReviewRequest(id: UUID().uuidString,
             contentHash: request.contentHash, revisionID: "rev", title: "Bad",
             delivery: "event", eventTemplate: MarkcutReviewEventTemplate(
-                type: "task.completed", source: template.source, data: [:])))
+                type: "task.completed", source: "invalid\nsource", data: [:])))
         XCTAssertThrowsError(try MarkcutReviewRequest(id: UUID().uuidString,
             contentHash: request.contentHash, revisionID: "rev", title: "Bad",
             delivery: "event", eventTemplate: nil))
+    }
+
+    @MainActor
+    func testGenericEventCanRoundTripAndSubmitWithoutTaskOrRelayFields() throws {
+        let template = MarkcutReviewEventTemplate(type: "other.feedback.saved",
+            source: "arbitrary/app-channel", data: ["context": .string("unchanged"),
+            "payload": .object(["userOwned": .string("opaque")])], responseKey: "payload")
+        let request = try MarkcutReviewRequest(id: UUID().uuidString,
+            contentHash: String(repeating: "a", count: 64), revisionID: "transport-only",
+            title: "Other product review", delivery: "event", eventTemplate: template)
+        let encoded = try JSONEncoder().encode(request)
+        let decoded = try JSONDecoder().decode(MarkcutReviewRequest.self, from: encoded)
+        XCTAssertEqual(decoded.eventTemplate, template)
+        let feedback = MarkcutReviewFeedback(requestId: request.id, decision: .approved,
+            feedback: "", idempotencyKey: "same-on-retry")
+        let event = try XCTUnwrap(decoded.eventTemplate?.event(review: feedback.reviewResult(request: decoded)))
+        XCTAssertEqual(event["type"] as? String, "other.feedback.saved")
+        XCTAssertEqual(event["source"] as? String, "arbitrary/app-channel")
+        let data = try XCTUnwrap(event["data"] as? [String: Any])
+        let result = try XCTUnwrap(data["payload"] as? [String: Any])
+        XCTAssertEqual(result["userOwned"] as? String, "opaque")
+        XCTAssertEqual(result["decision"] as? String, "approved")
+        XCTAssertEqual(result["idempotencyKey"] as? String, "same-on-retry")
     }
 
     @MainActor

@@ -17,15 +17,18 @@ const keys=crypto.generateKeyPairSync('ec',{namedCurve:'prime256v1'});
 const privateKey=keys.privateKey.export({type:'pkcs8',format:'pem'});
 fs.writeFileSync(path.join(temp,'key.p8'),privateKey,{mode:0o600});
 fs.writeFileSync(path.join(temp,'config.json'),JSON.stringify({topic:'com.neox.app',keyId:'Z4YUMQ3P42',teamId:'JABNLDLN8G',keyPath:path.join(temp,'key.p8')}),{mode:0o600});
-test('event validation accepts generic Relay contract, rejects old types and forged identities',()=>{
+test('Core transports arbitrary caller events without interpreting Relay identity',()=>{
+ const arbitrary={type:'sample.review.finished',source:'custom/owner-channel',responseKey:'result',
+   data:{result:{opaque:'business-owned'},metadata:{workflow:'unrelated'}}};
+ assert.deepEqual(validateReview({...event,eventTemplate:arbitrary}).eventTemplate,arbitrary);
  assert.equal(validateReview(event).eventTemplate.type,'task.interactive_decision');
- assert.throws(()=>validateReview({...event,eventTemplate:{...template,type:'markcut.review.submitted'}}));
- assert.throws(()=>validateReview({...event,eventTemplate:{...template,type:'task.completed'}}));
- assert.throws(()=>validateReview({...event,eventTemplate:{...template,source:'job/j8/task/x/execution/e8'}}));
- assert.throws(()=>validateReview({...event,eventTemplate:{...template,data:{interactive:{...template.data.interactive,decision:'approved'}}}}));
+ assert.throws(()=>validateReview({...event,eventTemplate:{...arbitrary,source:'bad\nsource'}}));
+ assert.throws(()=>validateReview({...event,eventTemplate:{...arbitrary,responseKey:'__proto__'}}));
+ assert.throws(()=>validateReview({...event,eventTemplate:{...arbitrary,data:{result:{decision:'prefilled'}}}}));
+ assert.throws(()=>validateReview({...event,eventTemplate:{...arbitrary,data:JSON.parse('{"__proto__":{}}')}}));
  assert.throws(()=>validateReview({...event,ownerCallbackTool:'chatgpt'}));
  assert.throws(()=>validateReview({...event,delivery:'other'}));
- assert.throws(()=>validateReview({...event,commitSha:'f'.repeat(64)}));
+ assert.equal(validateReview({...event,unrelatedCallerMetadata:'opaque'}).unrelatedCallerMetadata,undefined);
  assert.throws(()=>validateReview({...event,revisionId:'old'}));
  assert.throws(()=>validateReview({...r,contentHash:'bad'}));
  assert.throws(()=>validateRegistration({deviceId:ID,token:'bad',environment:'sandbox'}));

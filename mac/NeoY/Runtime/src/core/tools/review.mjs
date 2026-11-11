@@ -15,8 +15,9 @@ const SHA = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const THREAD = /^[a-zA-Z0-9_-]{8,160}$/;
 const callback = x => x === 'chatgpt' || x === 'review.feedback' || /^[a-z0-9_-]+\.review\.feedback$/.test(x);
-const SOURCE=/^job\/([A-Za-z0-9_-]+)\/task\/([A-Za-z0-9_-]+)\/execution\/([A-Za-z0-9_-]+)$/;
-const RESERVED=['decision','feedback','comments','revision','revisionId','contentHash','commitSha','invocationId','previewId','requestId','idempotencyKey'];
+const EVENT_TYPE=/^[A-Za-z0-9_.:-]{1,128}$/;
+const RESPONSE_KEY=/^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
+const RESPONSE_FIELDS=['decision','feedback','comments','previewId','requestId','idempotencyKey'];
 
 function assertValid(ok, message) { if (!ok) throw new Error(message); }
 export function validateRegistration(a) {
@@ -33,25 +34,35 @@ export function validateReview(a) {
   const delivery=a.delivery||'text';
   assertValid(delivery==='text'||delivery==='event','Unsupported review delivery');
   if(delivery==='event'){
-    assertValid(a.commitSha===undefined, 'Review cannot carry Git SHA');
     assertValid(typeof a.mediaHash==='string' && SHA.test(a.mediaHash),'Invalid compiled media hash');
     assertValid(a.contentHash===undefined && a.revisionId===undefined,'Event review uses Task execution identity');
     const t=a.eventTemplate;
     assertValid(t && typeof t==='object' && !Array.isArray(t),'Missing event template');
-    assertValid(t.type==='task.interactive_decision','Unsafe review event type');
-    const match=typeof t.source==='string' ? t.source.match(SOURCE) : null;
-    assertValid(Boolean(match),'Invalid event source');
+    // Transport validates structure and injection safety, never the caller's event semantics.
+    assertValid(typeof t.type==='string' && EVENT_TYPE.test(t.type),'Invalid event type');
+    assertValid(typeof t.source==='string' && t.source.length>0 && t.source.length<=512 &&
+      !/[\r\n\x00-\x1f]/.test(t.source),'Invalid event source');
     assertValid(t.data && typeof t.data==='object' && !Array.isArray(t.data),'Invalid event data');
-    const fixed=t.data.interactive;
-    assertValid(fixed && typeof fixed==='object' && !Array.isArray(fixed) &&
-      fixed.jobId===match[1] && fixed.taskId===match[2] && fixed.executionId===match[3] &&
-      RESERVED.every(k=>!Object.hasOwn(fixed,k)),'Invalid interactive identity or reserved fields');
-    assertValid(Object.keys(t).every(k=>['type','source','data'].includes(k)),'Invalid event template fields');
+    assertValid(Object.keys(t).every(k=>['type','source','data','responseKey'].includes(k)), 'Unexpected event template fields');
+    const key=t.responseKey??'review';
+    assertValid(typeof key==='string' && RESPONSE_KEY.test(key) &&
+      !['__proto__','constructor','prototype'].includes(key),'Invalid responseKey');
+    const preset=t.data[key];
+    assertValid(preset===undefined||(preset!==null && typeof preset==='object' && !Array.isArray(preset) &&
+      RESPONSE_FIELDS.every(k=>!Object.hasOwn(preset,k))),'Invalid response target');
+    const json=JSON.stringify(t.data);
+    assertValid(typeof json==='string' && json.length<=12000,'Event data too large');
+    function safe(value){
+      if(value && typeof value==='object')for(const [field,child] of Object.entries(value)){
+        assertValid(!['__proto__','constructor','prototype'].includes(field),'Unsafe event data key');safe(child);
+      }
+    }
+    safe(t.data);
     assertValid(a.ownerCallbackTool===undefined && a.ownerThreadId===undefined,'Event cannot carry owner callback');
   }else{
     assertValid(typeof a.contentHash === 'string' && SHA.test(a.contentHash),'Invalid content hash');
     assertValid(typeof a.revisionId === 'string' && a.revisionId.length >= 1 && a.revisionId.length <= 256,'Invalid revision');
-    assertValid(a.commitSha===undefined && a.mediaHash===undefined,'Text reviews use standalone preview identity');
+    assertValid(a.mediaHash===undefined,'Text preview cannot carry event-media hash');
     assertValid(a.eventTemplate===undefined,'Text mode cannot carry event template');
     // Standalone ChatGPT text previews are still mirrored to iPhone for viewing;
     // without an owner thread they are read-only in the mobile inbox.
