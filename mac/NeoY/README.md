@@ -96,16 +96,29 @@ not claim same-turn suspension/resumption or hold the gateway request open.
 
 ## Tool-call audit
 
-NeoY records metadata for every `tools/call` accepted at its authenticated MCP
-gateway in `~/Library/Logs/NeoY/tool-calls.jsonl`. Coverage includes native
-tools, bundled Core forwarding, and federated providers. A successful execution
-has one `started` and one terminal record; denied, invalid, and unknown tool
-requests have one terminal record. Provider results with `isError=true` are
-failures. Records contain only time, call ID, tool name, local/remote and
-provider provenance, phase/status, terminal duration, and a fixed sanitized
-error code; arguments and response bodies are never audited. The private
-directory and file modes are `0700` and `0600`. Internal services called
-directly without the gateway are outside this audit.
+NeoY audits authenticated gateway `tools/call` requests, including native,
+Core, and federated tools, in `~/Library/Logs/NeoY/tool-calls.jsonl`. A normal
+call has a `started` record and a `succeeded` terminal record. Denied, invalid,
+and unknown tool requests have a terminal-only record; forwarded `isError=true`
+is recorded as `failed`. A Core `shell` or `terminal` result with a nonzero
+`exit_code` is recorded as `warning` instead of success, without changing the
+MCP response or treating it as a transport failure. Successful calls with no
+command exit or exit code 0 remain `succeeded`.
+
+Entries contain timestamps, call IDs, provenance, duration, error details,
+**raw input arguments and response bodies**, and a captured exit code when
+available. Treat these files as sensitive. Direct service calls that bypass
+NeoY's gateway are not audited here. Directory and file permissions are `0700`
+and `0600` respectively.
+
+The writer automatically rotates `tool-calls.jsonl` before it exceeds **8 MiB**.
+Machine-managed archives live in `~/Library/Logs/NeoY/audit-rotated/`; it retains
+at most **12** and deletes archives older than **7 days** on subsequent writes.
+An oversized single record is replaced by an entry marked `truncated=true`,
+retaining its call ID, outcome and exit code without the large raw payload.
+The total size of the active log plus managed archives is bounded at about
+**104 MiB**. Previously hand-archived files in `~/Library/Logs/NeoY/archive/`
+are deliberately outside this automatic deletion policy.
 
 ## Build and test
 

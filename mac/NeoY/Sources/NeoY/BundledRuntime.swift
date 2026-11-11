@@ -116,9 +116,12 @@ enum NeoYBundledRuntime {
     static func resolvedMCPServers(
         userServers: [NeoYMCPServerConfiguration],
         runtimeURL: URL = NeoYManagedCoreRuntime.selected(),
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        rustBinary: URL = rustBinaryURL,
+        marker: URL = coreProviderSelectionURL
     ) -> [NeoYMCPServerConfiguration] {
         let external = userServers.filter { !isBundledProviderName($0.name) }
-        return coreMCPServers(runtimeURL: runtimeURL, fileManager: fileManager) + external
+        return coreMCPServers(runtimeURL: runtimeURL, fileManager: fileManager,
+                              rustBinary: rustBinary, marker: marker) + external
     }
 }

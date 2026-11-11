@@ -175,9 +175,10 @@ final class ToolCallAuditTests: XCTestCase {
     }
 
     func testShellExitCodeFromRawFederatedOutput() throws {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("neoy-exit-code-\(UUID().uuidString).jsonl")
-        defer { try? FileManager.default.removeItem(at: url) }
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("neoy-exit-code-\(UUID().uuidString)", isDirectory: true)
+        let url = root.appendingPathComponent("tool-calls.jsonl")
+        defer { try? FileManager.default.removeItem(at: root) }
         let audit = ToolCallAudit(url: url)
         let callID = UUID()
         let provenance = ToolCallAudit.Provenance(origin: .remote, provider: "shell")
@@ -195,7 +196,155 @@ final class ToolCallAuditTests: XCTestCase {
         XCTAssertEqual(entries.count, 2)
         XCTAssertEqual(entries[0].input, .object(["command": .string("false")]))
         XCTAssertEqual(entries[1].exitCode, 7)
+        XCTAssertEqual(entries[1].status, .warning)
         XCTAssertNotNil(entries[1].output)
+    }
+
+    func testOnlyNonzeroShellAndTerminalExitsProduceWarnings() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("audit-warning-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("tool-calls.jsonl")
+        let audit = ToolCallAudit(url: url)
+        let provenance = ToolCallAudit.Provenance(origin: .local, provider: "core")
+        let examples: [(String, Int, ToolCallAudit.Status)] = [
+            ("shell", 0, .succeeded), ("shell", 2, .warning),
+            ("terminal", 137, .warning), ("other.tool", 2, .succeeded)
+        ]
+        for (tool, code, _) in examples {
+            audit.record(callID: UUID(), toolName: tool, provenance: provenance,
+                         status: .succeeded, output: .object([
+                            "structuredContent": .object(["exitCode": .int(code)]),
+                            "isError": .bool(false)
+                         ]))
+        }
+        audit.flush()
+        let entries = try Self.loadAuditEntries(at: url)
+        XCTAssertEqual(entries.count, examples.count)
+        for (entry, example) in zip(entries, examples) {
+            XCTAssertEqual(entry.tool, example.0)
+            XCTAssertEqual(entry.exitCode, example.1)
+            XCTAssertEqual(entry.status, example.2)
+            XCTAssertEqual(entry.phase, "terminal")
+        }
+        XCTAssertTrue(entries.allSatisfy { $0.truncated == nil })
+    }
+
+    func testRotationRetainsOnlyBoundedPrivateArchivesAndValidJSONL() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("audit-rotate-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("tool-calls.jsonl")
+        let audit = ToolCallAudit(url: url, maxFileBytes: 920,
+                                  maxArchives: 3, maxArchiveAge: 7 * 24 * 3600)
+        let provenance = ToolCallAudit.Provenance(origin: .local, provider: "core")
+        let lastID = UUID()
+        for i in 0..<45 {
+            audit.record(callID: i == 44 ? lastID : UUID(), toolName: "shell",
+                         provenance: provenance, status: .succeeded,
+                         output: .object(["exitCode": .int(0),
+                                          "stdout": .string(String(repeating: "x", count: 100))]))
+        }
+        audit.flush()
+        let rotated = root.appendingPathComponent("audit-rotated")
+        let archives = try FileManager.default.contentsOfDirectory(at: rotated,
+                                                                    includingPropertiesForKeys: nil)
+        XCTAssertEqual(archives.count, 3)
+        XCTAssertEqual(try Self.fileMode(at: rotated), 0o700)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        var entries: [ToolCallAudit.Entry] = []
+        for file in archives + [url] {
+            XCTAssertLessThanOrEqual(try Self.fileSize(at: file), 920)
+            XCTAssertEqual(try Self.fileMode(at: file), 0o600)
+            entries += try Self.loadAuditEntries(at: file)
+        }
+        XCTAssertTrue(entries.contains(where: { $0.callID == lastID.uuidString }))
+        XCTAssertTrue(entries.allSatisfy { $0.status == .succeeded })
+        XCTAssertLessThan(entries.count, 45, "oldest rotations should be discarded")
+    }
+
+    func testRotationDeletesExpiredManagedLogsButPreservesManualArchives() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("audit-prune-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("tool-calls.jsonl")
+        let rotated = root.appendingPathComponent("audit-rotated")
+        let manual = root.appendingPathComponent("archive")
+        try FileManager.default.createDirectory(at: rotated, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: manual, withIntermediateDirectories: true)
+        let stale = rotated.appendingPathComponent("tool-calls-1000-OLD.jsonl")
+        let unrelated = rotated.appendingPathComponent("some-other-tool.jsonl")
+        let preserved = manual.appendingPathComponent("tool-calls.before-rust.jsonl")
+        for file in [stale, unrelated, preserved] {
+            try "old\n".write(to: file, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-20 * 86400)],
+                                                  ofItemAtPath: file.path)
+        }
+        let audit = ToolCallAudit(url: url, maxFileBytes: 520,
+                                  maxArchives: 2, maxArchiveAge: 7 * 86400)
+        let provenance = ToolCallAudit.Provenance(origin: .local, provider: nil)
+        for _ in 0..<10 {
+            audit.record(callID: UUID(), toolName: "shell", provenance: provenance,
+                         status: .succeeded, output: .object(["exitCode": .int(0)]))
+        }
+        audit.flush()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stale.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: unrelated.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: preserved.path))
+    }
+
+    func testExpiredManagedArchivesPruneWithoutNewRollover() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("audit-aged-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let archive = root.appendingPathComponent("audit-rotated")
+        try FileManager.default.createDirectory(at: archive, withIntermediateDirectories: true)
+        let stale = archive.appendingPathComponent("tool-calls-1000-old.jsonl")
+        try "old\n".write(to: stale, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-9 * 86400)],
+                                              ofItemAtPath: stale.path)
+        let url = root.appendingPathComponent("tool-calls.jsonl")
+        let audit = ToolCallAudit(url: url, maxFileBytes: 4096, maxArchives: 5, maxArchiveAge: 7 * 86400)
+        audit.record(callID: UUID(), toolName: "setup", provenance: .init(origin: .local, provider: nil),
+                     status: .succeeded, output: .string("ok"))
+        audit.flush()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stale.path))
+        XCTAssertEqual(try Self.loadAuditEntries(at: url).count, 1)
+    }
+
+    func testOversizedSingleRecordIsMarkedTruncatedAndCannotExceedSizeCap() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("audit-oversize-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("tool-calls.jsonl")
+        let audit = ToolCallAudit(url: url, maxFileBytes: 700, maxArchives: 2)
+        audit.record(callID: UUID(), toolName: "shell",
+                     provenance: .init(origin: .remote, provider: "core"),
+                     status: .succeeded,
+                     input: .object(["secret": .string(String(repeating: "s", count: 4000))]),
+                     output: .object(["exitCode": .int(9),
+                                      "stdout": .string(String(repeating: "y", count: 9000))]))
+        audit.flush()
+        let entries = try Self.loadAuditEntries(at: url)
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entries[0].status, .warning)
+        XCTAssertEqual(entries[0].exitCode, 9)
+        XCTAssertEqual(entries[0].truncated, true)
+        XCTAssertNil(entries[0].input)
+        XCTAssertNil(entries[0].output)
+        XCTAssertLessThanOrEqual(try Self.fileSize(at: url), 700)
+    }
+
+    private static func loadAuditEntries(at url: URL) throws -> [ToolCallAudit.Entry] {
+        let data = try String(contentsOf: url, encoding: .utf8)
+        return try data.split(separator: "\n").map {
+            try JSONDecoder().decode(ToolCallAudit.Entry.self, from: Data($0.utf8))
+        }
+    }
+
+    private static func fileSize(at url: URL) throws -> Int {
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        return (attributes[.size] as? NSNumber)?.intValue ?? -1
+    }
+
+    private static func fileMode(at url: URL) throws -> UInt {
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        return (attributes[.posixPermissions] as? NSNumber)?.uintValue ?? 0
     }
 
     @MainActor

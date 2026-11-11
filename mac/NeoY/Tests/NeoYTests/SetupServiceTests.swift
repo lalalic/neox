@@ -417,12 +417,18 @@ final class SetupServiceTests: XCTestCase {
         let absent = Self.makeDirectory().appendingPathComponent("not-installed", isDirectory: true)
         let external = NeoYMCPServerConfiguration(name: "events", url: "http://127.0.0.1:9999/mcp", isEnabled: true)
         let legacy = NeoYMCPServerConfiguration(name: "macbridge", url: "stdio:///tmp/legacy", isEnabled: true)
+        // Explicitly select an absent Node fixture. A developer machine may
+        // legitimately be running a live Rust Core while tests execute.
+        let rust = absent.appendingPathComponent("missing-rust-core")
+        let marker = absent.appendingPathComponent("no-provider-marker")
         let resolved = NeoYBundledRuntime.resolvedMCPServers(
-            userServers: [external, legacy], runtimeURL: absent
+            userServers: [external, legacy], runtimeURL: absent,
+            rustBinary: rust, marker: marker
         )
         XCTAssertEqual(resolved.map(\.name), ["events"])
         XCTAssertEqual(resolved.first?.url, external.url)
-        XCTAssertTrue(NeoYBundledRuntime.coreMCPServers(runtimeURL: absent).isEmpty)
+        XCTAssertTrue(NeoYBundledRuntime.coreMCPServers(runtimeURL: absent,
+                                                           rustBinary: rust, marker: marker).isEmpty)
     }
 
     func testRustCoreOptInSelectionAndRollback() throws {
@@ -497,7 +503,13 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertTrue(NeoYBundledRuntime.coreEnvironment["NEO_CORE_LOG_DIR"]?.contains("Library/Logs/NeoY/Core") == true)
         XCTAssertFalse(NeoYBundledRuntime.coreEnvironment.keys.contains { $0.hasPrefix("MAC_DEV_BRIDGE_") })
         XCTAssertEqual(NeoYBundledRuntime.coreEnvironment["NEO_CORE_FULL_ACCESS_ACK"], "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS")
-        XCTAssertFalse(NeoYBundledRuntime.packagedRuntimeURL.path.contains("/Workspace/neox/"))
+        // When tests run from an Xcode workspace, the built test bundle also
+        // lives under Workspace; the contract is that Runtime comes from the
+        // app bundle, not from a source-checkout fallback.
+        let packaged = NeoYBundledRuntime.packagedRuntimeURL
+        let expected = (Bundle.main.resourceURL ?? Bundle.main.bundleURL)
+            .appendingPathComponent("Runtime", isDirectory: true)
+        XCTAssertEqual(packaged.standardizedFileURL, expected.standardizedFileURL)
     }
 
     private static func makeDirectory() -> URL {
