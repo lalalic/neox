@@ -2024,7 +2024,8 @@ fn short_lived_pty_preserves_output_and_reaps_exit_status() {
             .as_str()
             .unwrap_or_else(|| panic!("PTY failed: {started}"))
             .to_owned();
-        std::thread::sleep(Duration::from_millis(70));
+        // Delay deliberately: a fast child has exited before the first read.
+        std::thread::sleep(Duration::from_millis(250));
         let mut output = String::new();
         let mut exit_code = Value::Null;
         let mut cursor = 0;
@@ -2039,7 +2040,12 @@ fn short_lived_pty_preserves_output_and_reaps_exit_status() {
             );
             assert_ne!(result["result"]["isError"], true, "{result}");
             let state = &result["result"]["structuredContent"];
-            output.push_str(state["output"].as_str().unwrap_or(""));
+            assert_eq!(
+                state["text"], state["output"],
+                "Node-compatible PTY text field missing"
+            );
+            assert!(state["exited"].is_boolean());
+            output.push_str(state["text"].as_str().unwrap_or(""));
             cursor = state["nextCursor"].as_u64().unwrap_or(cursor);
             exit_code = state["exitCode"].clone();
             if exit_code == 0 && output.contains("rust-pty-exit-ok") {

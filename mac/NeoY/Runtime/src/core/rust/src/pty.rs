@@ -230,6 +230,39 @@ fn kill_tty_stragglers(session: &Session) {
     }
 }
 
+fn drain_master(session: &mut Session, max_output_bytes: usize) -> Result<(), ToolError> {
+    let mut buffer = [0_u8; 65_536];
+    loop {
+        let count = unsafe { libc::read(session.master, buffer.as_mut_ptr().cast(), buffer.len()) };
+        if count > 0 {
+            session.output.extend_from_slice(&buffer[..count as usize]);
+            session.total_output_bytes = session.total_output_bytes.saturating_add(count as u64);
+            if session.output.len() > max_output_bytes {
+                let excess = session.output.len() - max_output_bytes;
+                session.output.drain(..excess);
+                session.output_base = session.output_base.saturating_add(excess as u64);
+            }
+        } else if count == 0 {
+            session.exited = true;
+            break;
+        } else {
+            let errno = unsafe { *libc::__error() };
+            if errno == libc::EAGAIN || errno == libc::EWOULDBLOCK {
+                break;
+            }
+            if errno == libc::EIO {
+                session.exited = true;
+                break;
+            }
+            return Err(ToolError::new(std::io::Error::last_os_error().to_string()));
+        }
+        if count < buffer.len() as isize {
+            break;
+        }
+    }
+    Ok(())
+}
+
 impl PtyManager {
     pub fn available(&self) -> bool {
         static AVAILABLE: OnceLock<bool> = OnceLock::new();
@@ -355,6 +388,7 @@ impl PtyManager {
             })
             .collect::<Result<_, ToolError>>()?;
         let original_arguments = arguments.clone();
+        let original_arguments_for_response = original_arguments.clone();
         let mut c_arguments = vec![program.clone()];
         for argument in arguments {
             c_arguments
@@ -505,16 +539,64 @@ impl PtyManager {
             tty_last_scan_ms: 0,
         };
         sessions.insert(session_id.clone(), session);
+        // Drain as soon as the child has a PTY: Darwin may revoke the terminal
+        // on a fast exit before a caller's first read.
+        drop(sessions);
+        self.pump_output(65);
         Ok(json!({
             "sessionId": session_id,
             "pid": pid,
+            "leaderPid": pid,
             "command": executable,
+            "args": original_arguments_for_response,
             "cols": cols,
             "rows": rows,
             "cursor": 0,
             "output": "",
             "running": true
         }))
+    }
+
+    /// Drain PTY master output independently of MCP tool calls. The Node
+    /// helper continuously pumps output; waiting for terminal.read loses bytes
+    /// when a short-lived Darwin session exits and its tty is revoked.
+    pub fn pump_output(&self, timeout_ms: i32) {
+        let sessions: Vec<(String, RawFd)> = self
+            .sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, s)| s.master >= 0 && !s.exited)
+            .map(|(id, s)| (id.clone(), s.master))
+            .collect();
+        if sessions.is_empty() {
+            std::thread::sleep(Duration::from_millis(timeout_ms.max(1) as u64));
+            return;
+        }
+        let mut fds: Vec<libc::pollfd> = sessions
+            .iter()
+            .map(|(_, fd)| libc::pollfd {
+                fd: *fd,
+                events: libc::POLLIN | libc::POLLHUP | libc::POLLERR,
+                revents: 0,
+            })
+            .collect();
+        let rc = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout_ms) };
+        if rc <= 0 {
+            return;
+        }
+        let mut active = self.sessions.lock().unwrap();
+        for ((id, fd), pfd) in sessions.iter().zip(fds.iter()) {
+            if pfd.revents == 0 || pfd.revents & libc::POLLNVAL != 0 {
+                continue;
+            }
+            if let Some(session) = active.get_mut(id) {
+                // Do not drain a recently closed/reused descriptor.
+                if session.master == *fd && !session.exited {
+                    let _ = drain_master(session, self.max_output_bytes);
+                }
+            }
+        }
     }
 
     fn refresh(&self, session_id: &str) -> Result<SessionSnapshot, ToolError> {
@@ -524,39 +606,7 @@ impl PtyManager {
         })?;
         snapshot_tty_targets(session, false);
         let was_exited = session.exited;
-        let mut buffer = [0_u8; 65_536];
-        loop {
-            let count =
-                unsafe { libc::read(session.master, buffer.as_mut_ptr().cast(), buffer.len()) };
-            if count > 0 {
-                session.output.extend_from_slice(&buffer[..count as usize]);
-                session.total_output_bytes =
-                    session.total_output_bytes.saturating_add(count as u64);
-                if session.output.len() > self.max_output_bytes {
-                    let excess = session.output.len() - self.max_output_bytes;
-                    session.output.drain(..excess);
-                    session.output_base = session.output_base.saturating_add(excess as u64);
-                }
-            } else if count == 0 {
-                session.exited = true;
-                break;
-            } else {
-                let errno = unsafe { *libc::__error() };
-                if errno == libc::EAGAIN || errno == libc::EWOULDBLOCK {
-                    break;
-                }
-                // Darwin reports EIO on a PTY master after the last slave closes.
-                // Treat it as EOF so bytes already read remain available to callers.
-                if errno == libc::EIO {
-                    session.exited = true;
-                    break;
-                }
-                return Err(ToolError::new(std::io::Error::last_os_error().to_string()));
-            }
-            if count < buffer.len() as isize {
-                break;
-            }
-        }
+        drain_master(session, self.max_output_bytes)?;
         // Darwin's PTY master may return EIO/EOF *before* waitpid has been
         // called. Reap even after terminal closure or the leader's exit code is
         // permanently lost (and the process becomes a zombie).
@@ -659,6 +709,7 @@ impl PtyManager {
             "sessionId": session_id,
             "cursor": cursor,
             "nextCursor": next_cursor,
+            "text": text.clone(),
             "output": text,
             "command": session.command,
             "bytesAvailable": session.total_output_bytes.saturating_sub(start_absolute),
@@ -667,7 +718,10 @@ impl PtyManager {
             "totalBytes": session.total_output_bytes,
             "retainedBytes": session.output.len(),
             "running": !session.exited,
+            "exited": session.exited,
             "exitCode": session.exit_code,
+            "exitSignal": session.signal.clone(),
+            "closeReason": null,
             "signal": session.signal,
             "cols": session.cols,
             "rows": session.rows,

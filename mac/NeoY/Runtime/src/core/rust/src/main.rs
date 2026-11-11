@@ -59,7 +59,7 @@ fn main() {
     std::thread::spawn(move || {
         let mut last_sweep = std::time::Instant::now();
         loop {
-            std::thread::sleep(Duration::from_millis(100));
+            watcher.ptys.pump_output(20);
             if SHUTDOWN_SIGNAL.load(Ordering::SeqCst) != 0 {
                 cleanup(&watcher);
                 std::process::exit(0);
