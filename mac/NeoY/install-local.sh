@@ -27,7 +27,7 @@ if [[ -z "$identity" ]]; then
   exit 1
 fi
 
-for dependency in xcodegen xcodebuild node npm; do
+for dependency in xcodegen xcodebuild node npm cargo; do
   if ! command -v "$dependency" >/dev/null 2>&1; then
     print -u2 "NeoY local install requires '$dependency' on PATH."
     exit 1
@@ -39,18 +39,34 @@ if ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0
 fi
 
 npm test --prefix "$HERE/Runtime"
+# Build/test the least-privileged private file server as part of the one
+# canonical signed-app install. It is NOT the unrestricted Core provider.
+cargo test --locked --manifest-path "$HERE/FileServer/Cargo.toml"
+cargo build --release --locked --manifest-path "$HERE/FileServer/Cargo.toml"
 
 xcodegen generate --spec "$HERE/project.yml"
 rm -rf "$APP"
 xcodebuild -project "$PROJECT" -scheme NeoY -configuration Debug \
   -derivedDataPath "$DERIVED" build
 
+# Package a separately signed Rust helper, then sign the outer native app.
+# The Swift file handler continues to work if the helper ever fails to start.
+FILE_HELPER="$HERE/FileServer/target/release/neoy-file-server"
+[[ -x "$FILE_HELPER" ]] || { print -u2 "Rust file-server binary missing"; exit 1; }
+cp "$FILE_HELPER" "$APP/Contents/Resources/neoy-file-server"
+chmod 755 "$APP/Contents/Resources/neoy-file-server"
+codesign --force --sign "$identity" --timestamp=none "$APP/Contents/Resources/neoy-file-server"
+codesign --verify --strict "$APP/Contents/Resources/neoy-file-server"
 codesign --force --deep --sign "$identity" \
   --entitlements "$ENTITLEMENTS" --timestamp=none "$APP"
 codesign --verify --deep --strict "$APP"
 
 # Fail before staging, changing launchd or replacing the currently running app.
 # An app without packaged Core would silently lose the Core MCP provider.
+[[ -x "$APP/Contents/Resources/neoy-file-server" ]] || {
+  print -u2 "NeoY install preflight failed: signed app lacks Rust file server."
+  exit 1
+}
 CORE_ENTRY="$APP/Contents/Resources/Runtime/src/core/tools/index.mjs"
 CORE_PACKAGE="$APP/Contents/Resources/Runtime/package.json"
 if [[ ! -f "$CORE_ENTRY" || ! -f "$CORE_PACKAGE" ]]; then

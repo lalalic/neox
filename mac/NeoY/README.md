@@ -340,3 +340,17 @@ calls Neo.app's `notify` REST endpoint, and calls Agents Relay through its CLI.
 
 Review requests survive a missed APNs notification, and mobile foreground sync
 fetches pending entries before an acknowledged decision triggers `complete`.
+
+## Rust file-serving sidecar
+
+NeoY optionally runs a separate private Rust file server bundled and signed
+with the app. See [`FileServer/README.md`](FileServer/README.md). NeoY stays the
+sole external HTTP/MCP gateway; the Rust helper provides read-only streaming,
+range responses, conditional caching and manifest-selected normalized media
+through the same public `/files/`, `/public/`, `/preview-files/` URLs.
+Swift remains an automatic fallback if the helper cannot start or connect.
+There are no new public URLs or MCP tools. Existing mount/unmount settings,
+public CORS behavior and Markcut `video.md` references are unchanged. Native
+integration uses Actix Web, `actix-files::NamedFile::from_file` and `cap-std`
+for race-safe capability-confined file opening. The installer signs the helper
+under Neo.app; no independent supervisor or second exposed trust boundary.

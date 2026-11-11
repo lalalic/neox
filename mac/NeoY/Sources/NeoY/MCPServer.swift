@@ -293,6 +293,7 @@ public final class MCPServer {
 
     /// Optional root directory for serving static files at `/assets/`.
     nonisolated(unsafe) private var _staticFileRoot: URL?
+    nonisolated(unsafe) private var _rustFileSidecar: NeoYRustFileSidecar?
 
     /// Set a root directory to serve static files from via GET `/assets/...`.
     public func setStaticFileRoot(_ url: URL?) {
@@ -321,8 +322,19 @@ public final class MCPServer {
         _snapshotRemoteAllowedResourceURIs = remoteAllowedResourceURIs
         _snapshotHTTPRoutes = httpRoutes
 
+        // Optional, least-privileged file serving process. Swift remains the
+        // single externally reachable gateway; missing sidecar is safe fallback.
+        _rustFileSidecar = NeoYRustFileSidecar(staticRoot: _staticFileRoot)
+
         let parameters = NWParameters.tcp
-        let listener = try NWListener(using: parameters, on: NWEndpoint.Port(integerLiteral: port))
+        let listener: NWListener
+        do {
+            listener = try NWListener(using: parameters, on: NWEndpoint.Port(integerLiteral: port))
+        } catch {
+            _rustFileSidecar?.stop()
+            _rustFileSidecar = nil
+            throw error
+        }
 
         if let bonjourName {
             listener.service = NWListener.Service(name: bonjourName, type: "_mcp._tcp")
@@ -359,6 +371,8 @@ public final class MCPServer {
 
     /// Stop the server.
     public func stop() {
+        _rustFileSidecar?.stop()
+        _rustFileSidecar = nil
         listener?.cancel()
         listener = nil
         isRunning = false
@@ -662,15 +676,20 @@ public final class MCPServer {
             sendJSON(connection: connection, status: 200, json: info)
 
         default:
+            let immutableRangeHeader = rangeHeader
+            let immutableFileHeaders = headers
             // Static file serving: GET/HEAD /files/... (alias /public/... kept for compatibility)
             if ["GET", "HEAD"].contains(method),
                path.hasPrefix("/files/"),
                let tail = path.removingPercentEncoding?.dropFirst("/files/".count),
                let slash = tail.firstIndex(of: "/"),
                let mount = NeoYFileMounts.load()[String(tail[..<slash])] {
-                serveStaticFile(relativePath: String(tail[tail.index(after: slash)...]),
-                                root: mount, rangeHeader: rangeHeader,
-                                headOnly: method == "HEAD", connection: connection)
+                serveRustOrSwift(method: method, path: path, requestHeaders: immutableFileHeaders,
+                                 connection: connection) { [weak self] in
+                    self?.serveStaticFile(relativePath: String(tail[tail.index(after: slash)...]),
+                                          root: mount, rangeHeader: immutableRangeHeader,
+                                          headOnly: method == "HEAD", connection: connection)
+                }
             } else if ["GET", "HEAD"].contains(method),
                path.hasPrefix("/preview-files/"),
                let tail = path.removingPercentEncoding?.dropFirst("/preview-files/".count),
@@ -678,20 +697,23 @@ public final class MCPServer {
                let mount = NeoYFileMounts.load()[String(tail[..<slash])] {
                 let relative = String(tail[tail.index(after: slash)...])
                 let selected = Self.previewProxyPath(relativePath: relative, root: mount) ?? relative
-                serveStaticFile(relativePath: selected, root: mount, rangeHeader: rangeHeader,
-                                headOnly: method == "HEAD", connection: connection, allowVisionProxy: selected != relative)
+                serveRustOrSwift(method: method, path: path, requestHeaders: immutableFileHeaders,
+                                 connection: connection) { [weak self] in
+                    self?.serveStaticFile(relativePath: selected, root: mount, rangeHeader: immutableRangeHeader,
+                                          headOnly: method == "HEAD", connection: connection,
+                                          allowVisionProxy: selected != relative)
+                }
             } else if ["GET", "HEAD"].contains(method),
                path.hasPrefix("/files/") || path.hasPrefix("/public/"),
                let root = _staticFileRoot {
                 let prefix = path.hasPrefix("/files/") ? "/files/" : "/public/"
                 let relativePath = String(path.dropFirst(prefix.count))
-                serveStaticFile(
-                    relativePath: relativePath,
-                    root: root,
-                    rangeHeader: rangeHeader,
-                    headOnly: method == "HEAD",
-                    connection: connection
-                )
+                serveRustOrSwift(method: method, path: path, requestHeaders: immutableFileHeaders,
+                                 connection: connection) { [weak self] in
+                    self?.serveStaticFile(relativePath: relativePath, root: root,
+                                          rangeHeader: immutableRangeHeader,
+                                          headOnly: method == "HEAD", connection: connection)
+                }
             } else {
                 sendHTTP(connection: connection, status: 404, body: "Not found".data(using: .utf8))
             }
@@ -1245,6 +1267,19 @@ public final class MCPServer {
             directory.deleteLastPathComponent()
         }
         return nil
+    }
+
+    /// Delegate only file content over private loopback; preserve the exact
+    /// existing Swift fallback, URL surface and mount policy on failure.
+    nonisolated private func serveRustOrSwift(method: String, path: String,
+                                              requestHeaders: [String: String], connection: NWConnection,
+                                              fallback: @escaping @Sendable () -> Void) {
+        guard let sidecar = _rustFileSidecar,
+              sidecar.forward(method: method, path: path, requestHeaders: requestHeaders,
+                              client: connection, queue: httpQueue, fallback: fallback) else {
+            fallback()
+            return
+        }
     }
 
     nonisolated private func serveStaticFile(
