@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub const FULL_ACCESS_ACK: &str = "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS";
 pub const SERVER_NAME: &str = "neo-core-tools";
 pub const SERVER_TITLE: &str = "Neo Core Tools";
-pub const CORE_VERSION: &str = "0.2.0";
+pub const CORE_VERSION: &str = "0.2.1";
 pub const MODERN_PROTOCOL: &str = "2026-07-28";
 pub const LEGACY_PROTOCOLS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 

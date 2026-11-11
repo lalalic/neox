@@ -557,7 +557,10 @@ impl PtyManager {
                 break;
             }
         }
-        if !session.exited {
+        // Darwin's PTY master may return EIO/EOF *before* waitpid has been
+        // called. Reap even after terminal closure or the leader's exit code is
+        // permanently lost (and the process becomes a zombie).
+        if session.exit_code.is_none() && session.signal.is_none() {
             let mut status = std::mem::MaybeUninit::<libc::c_int>::uninit();
             let result = unsafe { libc::waitpid(session.pid, status.as_mut_ptr(), libc::WNOHANG) };
             if result == session.pid {

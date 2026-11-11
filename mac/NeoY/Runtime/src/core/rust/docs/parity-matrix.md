@@ -28,7 +28,7 @@ alone could not expose; this hotfix addresses them with dedicated tests:
 | `fs.manage` | Recursive/force/mode, directory copying, relative symlinks, cross-filesystem moves, chmod validation, copy safety | `filesystem_manage_preserves_node_permissions_and_tree_contract` |
 | GUI safety | `strictApprovals` and one-use foreground approval before `shell.exec` and `shell.start` | `strict_gui_approval_blocks_shell_exec_and_start`, `gui_approval_is_single_use_and_accepts_node_grant_format` |
 | Shell jobs | Node `id`, ISO dates, signal names, legacy Rust metadata compatibility, Node-created record consumption, private overflow snapshots | `rust_reads_existing_node_job_metadata_without_migration`, `background_job_metadata_survives_core_restart`, `shell_exec_stdin_output_limit_and_timeout` |
-| PTY containment | SIGTERM/EOF reclaim and start-time-qualified cleanup of processes on other terminal groups, including natural exit sweep | `detached_terminal_process_is_reclaimed_on_close`, `disconnect_and_sigterm_reclaim_terminal_process_group` |
+| PTY containment | SIGTERM/EOF reclaim, start-time-qualified cleanup, and independent `waitpid` reaping after Darwin PTY EIO/EOF (0.2.1) | `detached_terminal_process_is_reclaimed_on_close`, `disconnect_and_sigterm_reclaim_terminal_process_group`, `short_lived_pty_preserves_output_and_reaps_exit_status`, `pty_fork_survives_concurrent_shell_and_fs_calls` |
 | MCP and status | Modern protocol `_meta` key, request validation/error shape, existing host status fields, PTY availability, patch errors | `core_status_and_mcp_boundary_match_node_contract`, `modern_protocol_returns_completion_metadata`, `mcp_inventory_and_representative_calls` |
 
 **Remaining limitations:** The tests cover the reviewed code differences and

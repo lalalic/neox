@@ -2007,3 +2007,134 @@ fn gui_approval_is_single_use_and_accepts_node_grant_format() {
     let _ = server.child.wait();
     let _ = std::fs::remove_dir_all(temp);
 }
+
+#[test]
+fn short_lived_pty_preserves_output_and_reaps_exit_status() {
+    let mut server = Server::start(true);
+    server.initialize();
+    for index in 0..12 {
+        let started = server.call(
+            1800 + index * 3,
+            "terminal",
+            json!({
+                "command":"start","args":{"command":"/bin/echo","args":["rust-pty-exit-ok"]}
+            }),
+        );
+        let session_id = started["result"]["structuredContent"]["sessionId"]
+            .as_str()
+            .unwrap_or_else(|| panic!("PTY failed: {started}"))
+            .to_owned();
+        std::thread::sleep(Duration::from_millis(70));
+        let mut output = String::new();
+        let mut exit_code = Value::Null;
+        let mut cursor = 0;
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while std::time::Instant::now() < deadline {
+            let result = server.call(
+                1801 + index * 3,
+                "terminal",
+                json!({
+                    "command":"read","args":{"session_id":session_id,"cursor":cursor,"wait_ms":100}
+                }),
+            );
+            assert_ne!(result["result"]["isError"], true, "{result}");
+            let state = &result["result"]["structuredContent"];
+            output.push_str(state["output"].as_str().unwrap_or(""));
+            cursor = state["nextCursor"].as_u64().unwrap_or(cursor);
+            exit_code = state["exitCode"].clone();
+            if exit_code == 0 && output.contains("rust-pty-exit-ok") {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            output.contains("rust-pty-exit-ok"),
+            "PTY round {index} had no output: {output:?}, exit={exit_code}"
+        );
+        assert_eq!(exit_code, 0, "PTY round {index} lost exit status");
+        let closed = server.call(
+            1802 + index * 3,
+            "terminal",
+            json!({
+                "command":"close","args":{"session_id":session_id}
+            }),
+        );
+        assert_eq!(closed["result"]["isError"], false, "{closed}");
+    }
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+}
+
+#[test]
+fn pty_fork_survives_concurrent_shell_and_fs_calls() {
+    let mut server = Server::start(true);
+    server.initialize();
+    for round in 0..8_u64 {
+        let base = 2200 + round * 5;
+        let requests = [
+            json!({"jsonrpc":"2.0","id":base,"method":"tools/call","params":{
+                "name":"shell","arguments":{"command":"start","args":{"command":"sleep 0.15; printf done"}}
+            }}),
+            json!({"jsonrpc":"2.0","id":base+1,"method":"tools/call","params":{
+                "name":"fs","arguments":{"command":"stat","args":{"path":"/bin/echo"}}
+            }}),
+            json!({"jsonrpc":"2.0","id":base+2,"method":"tools/call","params":{
+                "name":"terminal","arguments":{"command":"start","args":{"command":"/bin/echo","args":["concurrent-pty-ok"]}}
+            }}),
+        ];
+        for request in requests {
+            writeln!(server.stdin, "{request}").unwrap();
+        }
+        server.stdin.flush().unwrap();
+        let mut session_id = None;
+        for _ in 0..3 {
+            let mut line = String::new();
+            server.stdout.read_line(&mut line).unwrap();
+            let result: Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(result["result"]["isError"], false, "{result}");
+            if result["id"] == base + 2 {
+                session_id = result["result"]["structuredContent"]["sessionId"]
+                    .as_str()
+                    .map(str::to_string);
+            }
+        }
+        let session_id = session_id.expect("concurrent PTY session started");
+        let mut output = String::new();
+        let mut cursor = 0_u64;
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let mut exit_code = Value::Null;
+        while std::time::Instant::now() < deadline {
+            let result = server.call(
+                base + 3,
+                "terminal",
+                json!({
+                    "command":"read","args":{"session_id":session_id,"cursor":cursor,"wait_ms":100}
+                }),
+            );
+            assert_eq!(result["result"]["isError"], false, "{result}");
+            let state = &result["result"]["structuredContent"];
+            output.push_str(state["output"].as_str().unwrap_or(""));
+            cursor = state["nextCursor"].as_u64().unwrap_or(cursor);
+            exit_code = state["exitCode"].clone();
+            if exit_code == 0 && output.contains("concurrent-pty-ok") {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            output.contains("concurrent-pty-ok"),
+            "PTY concurrent round {round}, output={output:?}, exit={exit_code}"
+        );
+        assert_eq!(
+            exit_code, 0,
+            "PTY concurrent round {round} failed to reap child"
+        );
+        let _ = server.call(
+            base + 4,
+            "terminal",
+            json!({"command":"close","args":{"session_id":session_id}}),
+        );
+    }
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+}
