@@ -31,14 +31,17 @@ function snapshotProcesses() {
     });
   } catch { return null; }
   const processes = new Map();
-  const groups = new Set();
+  // null means descendants remain but the original group leader is gone.
+  const groups = new Map();
   for (const line of output.split("\n")) {
     const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/);
     if (!match) continue;
     const timestamp = Date.parse(match[3]);
     if (!Number.isFinite(timestamp)) continue;
     processes.set(Number(match[1]), timestamp);
-    groups.add(Number(match[2]));
+    const pid = Number(match[1]), pgid = Number(match[2]);
+    if (!groups.has(pgid)) groups.set(pgid, null);
+    if (pid === pgid) groups.set(pgid, timestamp);
   }
   processes.groups = groups;
   return processes.has(process.pid) ? processes : null;
@@ -49,10 +52,13 @@ function originalProcessAlive(record, processStartTimes) {
   const pid = record.pid;
   const started = dateMs(record.startedAt);
   if (!Number.isSafeInteger(pid) || pid <= 1 || started === null) return true;
-  // Descendants may survive a finished shell while retaining its original
-  // process group. Preserve their log files while any member of that PGID lives.
+  // Protect orphaned descendants, but do not confuse a recycled PGID with
+  // the original job. A *present* leader whose start time differs proves reuse.
   const pgid = record.processGroupId;
-  if (Number.isSafeInteger(pgid) && pgid > 1 && processStartTimes.groups?.has(pgid)) return true;
+  if (Number.isSafeInteger(pgid) && pgid > 1 && processStartTimes.groups?.has(pgid)) {
+    const leaderStart = processStartTimes.groups.get(pgid);
+    if (leaderStart === null || Math.abs(leaderStart - started) < 120_000) return true;
+  }
   const processStart = processStartTimes.get(pid);
   if (processStart === undefined) return false;
   return Math.abs(processStart - started) < 120_000;

@@ -88,3 +88,22 @@ test("GC never unlinks foreign log paths, symlinks or recent PTY sessions",async
     } finally {await fs.rm(other,{recursive:true,force:true});}
   });
 });
+
+test("recycled process-group leader is not mistaken for a surviving job", async () => {
+  await withFixture(async root => {
+    const now=Date.now(), original=now-10*24*3600_000;
+    await createJob(root,'recycled',{now,pid:431000,started:original,finished:original+10_000});
+    await createJob(root,'orphaned',{now,pid:431001,started:original,finished:original+10_000});
+    await createJob(root,'original',{now,pid:431002,started:original,finished:original+10_000});
+    const snapshot=new Map([[431000,now-3600_000],[431002,original]]);
+    snapshot.groups=new Map([[431000,now-3600_000],[431001,null],[431002,original]]);
+    const dry=await collectJobGarbage({jobDir:root,dryRun:true,now,maxDeletes:20,processStartTimes:snapshot});
+    assert.equal(dry.eligible,3);
+    assert.equal(dry.verified,1,'only proven-recycled PGID may be deleted');
+    const applied=await collectJobGarbage({jobDir:root,now,maxDeletes:20,processStartTimes:snapshot});
+    assert.equal(applied.verified,1);
+    assert.ok(!(await fs.readdir(root)).includes('recycled.json'));
+    assert.ok((await fs.readdir(root)).includes('orphaned.json'));
+    assert.ok((await fs.readdir(root)).includes('original.json'));
+  });
+});

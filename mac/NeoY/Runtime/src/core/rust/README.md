@@ -112,7 +112,7 @@ runtime reconnects the `core` stdio provider without restarting NeoY. Check
 receipt. `core provider node` immediately selects the managed Node runtime
 again. The Core binary itself does not publish or manage WebHelm sessions.
 
-## Background-job garbage collection (Rust 0.2.3)
+## Background-job garbage collection (Rust 0.2.4)
 
 `gc.rs` owns native, hourly, background cleanup of the Core-owned `jobs/`
 metadata directory. Keep the same policy as Node `tools/job-gc.mjs`: preserve
@@ -120,7 +120,8 @@ up to 2,000 most recent completed jobs and expire completed jobs after 72 hours,
 whichever removes more. Each automatic pass deletes at most 1,000 verified
 records; foreground MCP calls never wait for a GC sweep. The executor never
 kills a process as part of GC. Running process IDs **and their process groups**
-are checked against macOS `ps`; a missing or unparseable snapshot fails closed.
+are checked against macOS `ps`; recycled group leaders are distinguished by
+creation time, while leaderless groups with descendants remain protected; a missing or unparseable snapshot fails closed.
 Stale uncompleted metadata older than 72 hours is eligible only once the
 original process and its group are gone. Legacy PTY metadata is kept for at
 least seven days and excluded from `shell.job.list`. Only exact named Core-owned

@@ -126,7 +126,8 @@ Node and Rust Core enforce the same private, automatic job GC policy. Completed
 jobs are retained for **72 hours or the most recent 2,000**, whichever removes
 more entries; a nonblocking hourly sweep removes at most 1,000 verified
 records. The sweeper does not kill any process. macOS process creation times
-and process groups protect running jobs and surviving descendants; if process
+and process groups protect running jobs and surviving descendants without
+mistaking recycled group leaders for the original jobs; if process
 identity cannot be verified, uncertain jobs stay. Unfinished jobs become
 eligible only after 72 hours and a confirmed stale process identity. Legacy PTY
 records require seven days before cleanup and are excluded from shell job lists.

@@ -2,7 +2,7 @@
 //! Never signals/kills a process. Jobs with uncertain identities are protected.
 use crate::context::unix_ms;
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -83,7 +83,8 @@ fn elapsed_seconds(raw: &str) -> Option<u64> {
 
 struct ProcessSnapshot {
     starts: HashMap<i32, u64>,
-    groups: HashSet<i32>,
+    // None: orphan descendants without their leader; Some: leader start time.
+    groups: HashMap<i32, Option<u64>>,
 }
 
 fn process_start_times(now: u64) -> Option<ProcessSnapshot> {
@@ -97,7 +98,7 @@ fn process_start_times(now: u64) -> Option<ProcessSnapshot> {
     let stdout = String::from_utf8(output.stdout).ok()?;
     let mut processes = ProcessSnapshot {
         starts: HashMap::new(),
-        groups: HashSet::new(),
+        groups: HashMap::new(),
     };
     for line in stdout.lines() {
         let mut fields = line.split_whitespace();
@@ -117,7 +118,12 @@ fn process_start_times(now: u64) -> Option<ProcessSnapshot> {
                 .starts
                 .insert(pid, now.saturating_sub(elapsed.saturating_mul(1000)));
             if pgid > 1 {
-                processes.groups.insert(pgid);
+                processes.groups.entry(pgid).or_insert(None);
+                if pgid == pid {
+                    processes
+                        .groups
+                        .insert(pgid, Some(now.saturating_sub(elapsed.saturating_mul(1000))));
+                }
             }
         }
     }
@@ -141,13 +147,19 @@ fn original_alive(document: &Value, process_starts: Option<&ProcessSnapshot>) ->
     if pid <= 1 {
         return true;
     }
-    // A finished shell may leave live descendants in its original process group.
-    // Protect their logs until the group is actually gone.
-    if document["processGroupId"]
+    // Preserve orphan descendants. But a present PGID leader whose creation
+    // timestamp differs from the job proves the PGID has been recycled.
+    if let Some(pgid) = document["processGroupId"]
         .as_i64()
-        .is_some_and(|p| p > 1 && starts.groups.contains(&(p as i32)))
+        .and_then(|p| i32::try_from(p).ok())
     {
-        return true;
+        if pgid > 1 {
+            if let Some(leader_start) = starts.groups.get(&pgid) {
+                if leader_start.is_none_or(|at| at.abs_diff(start) < 120_000) {
+                    return true;
+                }
+            }
+        }
     }
     starts
         .starts
@@ -524,5 +536,39 @@ mod integration {
         assert!(fixture.0.join("symlink.json").exists());
         assert_eq!(fs::read_to_string(external).unwrap(), "preserve");
         assert!(!metadata.exists());
+    }
+}
+
+#[cfg(test)]
+mod recycled_group_regression {
+    use super::*;
+    #[test]
+    fn protects_orphaned_group_but_not_recycled_leader() {
+        let original = unix_ms() - 10 * 24 * 3600 * 1000;
+        let job = serde_json::json!({"pid":431000,"processGroupId":431000,"startedAt":original});
+        let mut snapshot = ProcessSnapshot {
+            starts: HashMap::new(),
+            groups: HashMap::new(),
+        };
+        snapshot
+            .starts
+            .insert(431000, original + 9 * 24 * 3600 * 1000);
+        snapshot
+            .groups
+            .insert(431000, Some(original + 9 * 24 * 3600 * 1000));
+        assert!(
+            !original_alive(&job, Some(&snapshot)),
+            "recycled group leader cannot preserve old job forever"
+        );
+        snapshot.groups.insert(431000, None);
+        assert!(
+            original_alive(&job, Some(&snapshot)),
+            "orphan descendants must remain protected"
+        );
+        snapshot.groups.insert(431000, Some(original));
+        assert!(
+            original_alive(&job, Some(&snapshot)),
+            "same-original leader must remain protected"
+        );
     }
 }

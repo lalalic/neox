@@ -18,7 +18,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 
-const CORE_VERSION = "0.2.3";
+const CORE_VERSION = "0.2.4";
 const SERVER_NAME = "neo-core-tools";
 const SERVER_TITLE = "Neo Core Tools";
 const MODERN_PROTOCOL = "2026-07-28";
