@@ -1,11 +1,11 @@
 use crate::context::{unix_ms, Context};
 use crate::error::{ToolError, ToolResult, UnitResult};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -39,19 +39,20 @@ pub(crate) fn kill_in_flight_exec_groups() {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Job {
-    #[serde(rename = "jobId")]
+    #[serde(rename = "id", alias = "jobId")]
     pub job_id: String,
     pub command: String,
     pub label: String,
     pub cwd: String,
-    pub env: BTreeMap<String, String>,
     pub pid: i32,
     #[serde(rename = "processGroupId")]
     pub process_group_id: i32,
     #[serde(rename = "startedAt")]
-    pub started_at: u64,
+    #[serde(deserialize_with = "deserialize_timestamp")]
+    pub started_at: String,
     #[serde(rename = "finishedAt")]
-    pub finished_at: Option<u64>,
+    #[serde(default, deserialize_with = "deserialize_optional_timestamp")]
+    pub finished_at: Option<String>,
     #[serde(rename = "exitCode")]
     pub exit_code: Option<i32>,
     pub signal: Option<String>,
@@ -65,6 +66,69 @@ pub struct Job {
 pub struct JobManager {
     context: Context,
     jobs: Arc<Mutex<BTreeMap<String, Job>>>,
+}
+
+fn iso_time(milliseconds: u64) -> String {
+    let seconds = (milliseconds / 1_000) as libc::time_t;
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    unsafe {
+        libc::gmtime_r(&seconds, &mut tm);
+    }
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        tm.tm_year + 1900,
+        tm.tm_mon + 1,
+        tm.tm_mday,
+        tm.tm_hour,
+        tm.tm_min,
+        tm.tm_sec,
+        milliseconds % 1_000
+    )
+}
+
+fn deserialize_timestamp<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    use serde::de::Error;
+    let value = Value::deserialize(deserializer)?;
+    match value {
+        Value::String(value) => Ok(value),
+        Value::Number(value) => value
+            .as_u64()
+            .map(iso_time)
+            .ok_or_else(|| D::Error::custom("invalid timestamp")),
+        _ => Err(D::Error::custom(
+            "timestamp must be an ISO string or legacy milliseconds",
+        )),
+    }
+}
+
+fn deserialize_optional_timestamp<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    use serde::de::Error;
+    let value = Value::deserialize(deserializer)?;
+    match value {
+        Value::Null => Ok(None),
+        Value::String(value) => Ok(Some(value)),
+        Value::Number(value) => value
+            .as_u64()
+            .map(|ms| Some(iso_time(ms)))
+            .ok_or_else(|| D::Error::custom("invalid timestamp")),
+        _ => Err(D::Error::custom(
+            "timestamp must be an ISO string, null or legacy milliseconds",
+        )),
+    }
+}
+
+fn signal_name(number: libc::c_int) -> String {
+    match number {
+        libc::SIGTERM => "SIGTERM",
+        libc::SIGKILL => "SIGKILL",
+        libc::SIGINT => "SIGINT",
+        libc::SIGHUP => "SIGHUP",
+        libc::SIGQUIT => "SIGQUIT",
+        _ => return number.to_string(),
+    }
+    .into()
 }
 
 fn child_env(
@@ -155,9 +219,28 @@ fn output_snapshot(path: &str, max_bytes: u64) -> ToolResult {
     file.take(returned)
         .read_to_end(&mut bytes)
         .map_err(|error| ToolError::new(error.to_string()))?;
+    // Node returns a private immutable copy rather than the mutable durable-job log.
+    let output_file = if size > max_bytes {
+        let directory = std::env::temp_dir().join(format!(
+            "neoy-outputs-{}-{}",
+            std::process::id(),
+            random_id()
+        ));
+        std::fs::create_dir(&directory).map_err(|error| ToolError::new(error.to_string()))?;
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))
+            .map_err(|error| ToolError::new(error.to_string()))?;
+        let name = std::path::Path::new(path).file_name().unwrap_or_default();
+        let destination = directory.join(name);
+        std::fs::copy(path, &destination).map_err(|error| ToolError::new(error.to_string()))?;
+        std::fs::set_permissions(&destination, std::fs::Permissions::from_mode(0o600))
+            .map_err(|error| ToolError::new(error.to_string()))?;
+        Some(destination)
+    } else {
+        None
+    };
     Ok(json!({
         "text": String::from_utf8_lossy(&bytes),
-        "file": if size > max_bytes { Value::String(path.to_string()) } else { Value::Null },
+        "file": output_file,
         "bytes": size
     }))
 }
@@ -297,10 +380,9 @@ impl JobManager {
             command,
             label: label.unwrap_or_else(|| "background-job".to_string()),
             cwd: effective_cwd.to_string_lossy().into_owned(),
-            env: BTreeMap::new(),
             pid: child.id() as i32,
             process_group_id: child.id() as i32,
-            started_at: unix_ms(),
+            started_at: iso_time(unix_ms()),
             finished_at: None,
             exit_code: None,
             signal: None,
@@ -350,10 +432,10 @@ impl JobManager {
             if libc::WIFEXITED(status) {
                 finished.exit_code = Some(libc::WEXITSTATUS(status));
             } else if libc::WIFSIGNALED(status) {
-                finished.signal = Some(libc::WTERMSIG(status).to_string());
-                finished.exit_code = Some(128 + libc::WTERMSIG(status));
+                finished.signal = Some(signal_name(libc::WTERMSIG(status)));
+                finished.exit_code = None;
             }
-            finished.finished_at = Some(unix_ms());
+            finished.finished_at = Some(iso_time(unix_ms()));
             let path = data_dir.join(format!("{}.json", finished.job_id));
             if let Err(error) = write_job_metadata(&path, &finished) {
                 eprintln!("could not persist completed shell job metadata: {error}");
@@ -383,7 +465,7 @@ impl JobManager {
             stdin,
             true,
         )?;
-        let job_id = job["jobId"]
+        let job_id = job["id"]
             .as_str()
             .ok_or_else(|| ToolError::new("spawned shell job did not return a jobId"))?;
         let pgid = job["processGroupId"].as_i64().unwrap_or_default() as libc::pid_t;
@@ -487,10 +569,10 @@ impl JobManager {
                 if libc::WIFEXITED(code) {
                     job.exit_code = Some(libc::WEXITSTATUS(code));
                 } else if libc::WIFSIGNALED(code) {
-                    job.signal = Some(libc::WTERMSIG(code).to_string());
-                    job.exit_code = Some(128 + libc::WTERMSIG(code));
+                    job.signal = Some(signal_name(libc::WTERMSIG(code)));
+                    job.exit_code = None;
                 }
-                job.finished_at = Some(unix_ms());
+                job.finished_at = Some(iso_time(unix_ms()));
                 self.write_metadata(&job)?;
                 self.jobs
                     .lock()
@@ -502,7 +584,7 @@ impl JobManager {
                 let running = unsafe { libc::kill(job.pid, 0) == 0 }
                     || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
                 if !running {
-                    job.finished_at = Some(unix_ms());
+                    job.finished_at = Some(iso_time(unix_ms()));
                     self.write_metadata(&job)?;
                 }
             }

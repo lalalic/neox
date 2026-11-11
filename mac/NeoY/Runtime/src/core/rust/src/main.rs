@@ -1,5 +1,6 @@
 mod context;
 mod error;
+mod gui;
 mod handlers;
 mod jobs;
 mod pty;
@@ -10,12 +11,23 @@ use handlers::Handlers;
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicI32, AtomicUsize, Ordering},
     Arc, Mutex,
 };
 use std::time::Duration;
 
 const MAX_IN_FLIGHT_CALLS: usize = 32;
+static SHUTDOWN_SIGNAL: AtomicI32 = AtomicI32::new(0);
+
+extern "C" fn on_shutdown_signal(signal: libc::c_int) {
+    SHUTDOWN_SIGNAL.store(signal, Ordering::SeqCst);
+}
+
+fn cleanup(handlers: &Handlers) {
+    handlers::kill_in_flight_commands();
+    // Durable shell jobs deliberately survive transport shutdown, as in Node.
+    handlers.ptys.teardown_all();
+}
 
 fn main() {
     let context = match Context::from_env() {
@@ -26,6 +38,16 @@ fn main() {
         }
     };
     let handlers = Arc::new(Handlers::new(context.clone()));
+    unsafe {
+        libc::signal(
+            libc::SIGTERM,
+            on_shutdown_signal as *const () as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGINT,
+            on_shutdown_signal as *const () as libc::sighandler_t,
+        );
+    }
     stderr_line(&format!(
         "{} {} started (pid {})",
         context::SERVER_NAME,
@@ -34,18 +56,29 @@ fn main() {
     ));
 
     let watcher = handlers.clone();
-    std::thread::spawn(move || loop {
-        std::thread::sleep(Duration::from_secs(3));
-        watcher.ptys.expire_sessions();
-        if !watcher.context.unlocked() {
-            handlers::kill_in_flight_commands();
-            jobs::kill_in_flight_exec_groups();
-            watcher.ptys.teardown_all();
-            eprintln!(
-                "Full-access unlock revoked ({}); reclaiming PTY sessions and exiting.",
-                watcher.context.unlock_file.display()
-            );
-            std::process::exit(0);
+    std::thread::spawn(move || {
+        let mut last_sweep = std::time::Instant::now();
+        loop {
+            std::thread::sleep(Duration::from_millis(100));
+            if SHUTDOWN_SIGNAL.load(Ordering::SeqCst) != 0 {
+                cleanup(&watcher);
+                std::process::exit(0);
+            }
+            if last_sweep.elapsed() < Duration::from_secs(3) {
+                continue;
+            }
+            last_sweep = std::time::Instant::now();
+            watcher.ptys.expire_sessions();
+            if !watcher.context.unlocked() {
+                handlers::kill_in_flight_commands();
+                jobs::kill_in_flight_exec_groups();
+                watcher.ptys.teardown_all();
+                eprintln!(
+                    "Full-access unlock revoked ({}); reclaiming PTY sessions and exiting.",
+                    watcher.context.unlock_file.display()
+                );
+                std::process::exit(78);
+            }
         }
     });
 
@@ -69,12 +102,18 @@ fn main() {
                 let response = json!({
                     "jsonrpc": "2.0",
                     "id": Value::Null,
-                    "error": {"code": -32700, "message": "Parse error", "data": error.to_string()}
+                    "error": {"code": -32700, "message": "Parse error", "data": {"detail": error.to_string()}}
                 });
                 write_line(&stdout, &response);
                 continue;
             }
         };
+        if !message.get("method").is_some_and(Value::is_string) {
+            if let Some(id) = message.get("id") {
+                send_error(&stdout, id.clone(), -32600, "Invalid Request", None);
+            }
+            continue;
+        }
         let method = message
             .get("method")
             .and_then(Value::as_str)
@@ -141,7 +180,11 @@ fn main() {
                 send_result(
                     &stdout,
                     id,
-                    complete(json!({"tools": tools::tools()}), modern(&message), cache),
+                    complete(
+                        json!({"tools": tools::tools(handlers.ptys.available())}),
+                        modern(&message),
+                        cache,
+                    ),
                 );
             }
             "tools/call" => {
@@ -175,7 +218,7 @@ fn main() {
                     }
                     continue;
                 }
-                if !tools::tools()
+                if !tools::tools(handlers.ptys.available())
                     .iter()
                     .any(|tool| tool["name"].as_str() == Some(name.as_str()))
                 {
@@ -183,6 +226,57 @@ fn main() {
                         send_error(&stdout, id, -32601, format!("Unknown tool: {name}"), None);
                     }
                     continue;
+                }
+                let advertised = tools::tools(handlers.ptys.available());
+                let schema = advertised
+                    .iter()
+                    .find(|tool| tool["name"].as_str() == Some(name.as_str()))
+                    .map(|tool| &tool["inputSchema"]);
+                if name == "apply_file_patch" {
+                    let missing: Vec<_> = schema
+                        .and_then(|s| s["required"].as_array())
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .filter(|key| {
+                            !arguments
+                                .get(*key)
+                                .and_then(Value::as_str)
+                                .is_some_and(|value| !value.trim().is_empty())
+                        })
+                        .collect();
+                    if !missing.is_empty() {
+                        if let Some(id) = id.clone() {
+                            let required =
+                                schema.map(|s| s["required"].clone()).unwrap_or(Value::Null);
+                            send_error(&stdout, id, -32602,
+                                format!("Invalid arguments for {name}: required non-empty parameter(s): {}", missing.join(", ")),
+                                Some(json!({"missing":missing,"required":required})));
+                        }
+                        continue;
+                    }
+                }
+                if let (Some(schema), Some(args)) = (schema, arguments.as_object()) {
+                    if schema["additionalProperties"] == false {
+                        let declared = schema["properties"].as_object();
+                        let unknown: Vec<_> = args
+                            .keys()
+                            .filter(|key| !declared.is_some_and(|props| props.contains_key(*key)))
+                            .map(String::as_str)
+                            .collect();
+                        if !unknown.is_empty() {
+                            if let Some(id) = id.clone() {
+                                let allowed: Vec<_> = declared
+                                    .into_iter()
+                                    .flat_map(|props| props.keys().map(String::as_str))
+                                    .collect();
+                                send_error(&stdout, id, -32602,
+                                    format!("Invalid arguments for {name}: unknown parameter(s): {}. Allowed: {}", unknown.join(", "), allowed.join(", ")),
+                                    Some(json!({"unknown":unknown,"allowed":allowed})));
+                            }
+                            continue;
+                        }
+                    }
                 }
                 if in_flight.fetch_add(1, Ordering::AcqRel) >= MAX_IN_FLIGHT_CALLS {
                     in_flight.fetch_sub(1, Ordering::AcqRel);
@@ -201,12 +295,17 @@ fn main() {
                     }))
                     .unwrap_or_else(|_| Err(error::ToolError::new("internal tool panic")));
                     let result = match outcome {
-                        Ok(value) => text_result(value, false, modern_request),
+                        Ok(value) => {
+                            let is_error = name == "apply_file_patch"
+                                && value
+                                    .get("exitCode")
+                                    .and_then(Value::as_i64)
+                                    .is_some_and(|code| code != 0);
+                            text_result(value, is_error, modern_request)
+                        }
                         Err(tool_error) => text_result(tool_error.payload(), true, modern_request),
                     };
-                    if id.is_some() {
-                        send_result(&call_stdout, id, result);
-                    }
+                    send_result(&call_stdout, id, result);
                     call_in_flight.fetch_sub(1, Ordering::AcqRel);
                 }));
             }
@@ -223,10 +322,10 @@ fn main() {
             }
         }
     }
-    for call in calls {
-        let _ = call.join();
-    }
-    handlers.ptys.teardown_all();
+    // Do not wait for an unbounded tool call: Node exits on transport close.
+    drop(calls);
+    cleanup(&handlers);
+    std::process::exit(0);
 }
 
 fn dispatch(handlers: &Handlers, name: &str, arguments: &Value) -> error::ToolResult {
@@ -245,7 +344,9 @@ fn dispatch(handlers: &Handlers, name: &str, arguments: &Value) -> error::ToolRe
 
 fn modern(message: &Value) -> bool {
     message
-        .pointer("/params/_meta/io.modelcontextprotocol/protocolVersion")
+        .get("params")
+        .and_then(|params| params.get("_meta"))
+        .and_then(|meta| meta.get("io.modelcontextprotocol/protocolVersion"))
         .and_then(Value::as_str)
         == Some(context::MODERN_PROTOCOL)
         || message.get("method").and_then(Value::as_str) == Some("server/discover")
@@ -282,9 +383,15 @@ fn complete(mut payload: Value, modern_request: bool, cache: Option<(u64, &str)>
 }
 
 fn text_result(value: Value, is_error: bool, modern_request: bool) -> Value {
-    let text = serde_json::to_string_pretty(&value)
-        .unwrap_or_else(|_| "\"serialization error\"".to_string());
-    let content = json!({"content":[{"type":"text","text":text}],"structuredContent":value,"isError":is_error});
+    let (text, structured) = match value {
+        Value::String(text) => (text.clone(), json!({"text":text})),
+        value => (
+            serde_json::to_string_pretty(&value)
+                .unwrap_or_else(|_| "\"serialization error\"".to_string()),
+            value,
+        ),
+    };
+    let content = json!({"content":[{"type":"text","text":text}],"structuredContent":structured,"isError":is_error});
     complete(content, modern_request, None)
 }
 

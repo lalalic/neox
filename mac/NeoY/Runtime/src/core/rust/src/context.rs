@@ -18,6 +18,7 @@ pub struct Context {
     pub unlock_file: PathBuf,
     startup_authorized: bool,
     pub shell: PathBuf,
+    pub tunnel_key_was_present: bool,
     pub codex_bin: String,
     pub default_output_bytes: usize,
     pub max_output_bytes: usize,
@@ -53,6 +54,7 @@ impl Context {
                     .expect("at least one POSIX shell is present on macOS")
             });
 
+        let tunnel_key_was_present = env::var_os("CONTROL_PLANE_API_KEY").is_some();
         env::remove_var("CONTROL_PLANE_API_KEY");
         let env_unlock = env::var("NEO_CORE_FULL_ACCESS_ACK").ok();
         env::remove_var("NEO_CORE_FULL_ACCESS_ACK");
@@ -81,6 +83,7 @@ impl Context {
             unlock_file,
             startup_authorized,
             shell,
+            tunnel_key_was_present,
             codex_bin: env::var("CODEX_BIN").unwrap_or_else(|_| "codex".to_string()),
             default_output_bytes: bounded_env(
                 "NEO_CORE_DEFAULT_OUTPUT_BYTES",

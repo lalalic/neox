@@ -445,22 +445,148 @@ fn list_directory(
     Ok(())
 }
 
+// Match Node fs.rm / fs.cp semantics without spawning shell commands.
+fn remove_managed_path(path: &Path, recursive: bool, force: bool) -> UnitResult {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && force => return Ok(()),
+        Err(error) => return Err(ToolError::new(error.to_string())),
+    };
+    let result = if metadata.is_dir() {
+        if recursive {
+            fs::remove_dir_all(path)
+        } else {
+            return Err(ToolError::new(
+                "Cannot remove a directory without recursive=true",
+            ));
+        }
+    } else {
+        fs::remove_file(path)
+    };
+    result.map_err(|error| ToolError::new(error.to_string()))
+}
+
+fn copy_managed_path(from: &Path, to: &Path, recursive: bool, force: bool) -> UnitResult {
+    let meta = fs::symlink_metadata(from).map_err(|error| ToolError::new(error.to_string()))?;
+    if from == to || (meta.is_dir() && to.starts_with(from)) {
+        return Err(ToolError::new(
+            "Source and destination must be distinct; cannot copy a directory into itself",
+        ));
+    }
+    if let (Ok(source), Ok(destination)) = (fs::canonicalize(from), fs::canonicalize(to)) {
+        if source == destination {
+            return Err(ToolError::new("Source and destination are the same file"));
+        }
+    }
+    if meta.is_dir() {
+        if let (Ok(source), Some(parent)) = (fs::canonicalize(from), to.parent()) {
+            if fs::canonicalize(parent).is_ok_and(|path| path.starts_with(&source)) {
+                return Err(ToolError::new("Cannot copy a directory into itself"));
+            }
+        }
+    }
+    if fs::symlink_metadata(to).is_ok() {
+        if !force {
+            return Err(ToolError::new(format!(
+                "Destination already exists: {}",
+                to.display()
+            )));
+        }
+        remove_managed_path(to, true, true)?;
+    }
+    if meta.file_type().is_symlink() {
+        let target = fs::read_link(from).map_err(|error| ToolError::new(error.to_string()))?;
+        std::os::unix::fs::symlink(target, to)
+            .map_err(|error| ToolError::new(error.to_string()))?;
+    } else if meta.is_dir() {
+        if !recursive {
+            return Err(ToolError::new("Recursive copy requires recursive=true"));
+        }
+        fs::create_dir(to).map_err(|error| ToolError::new(error.to_string()))?;
+        for entry in fs::read_dir(from).map_err(|error| ToolError::new(error.to_string()))? {
+            let entry = entry.map_err(|error| ToolError::new(error.to_string()))?;
+            copy_managed_path(&entry.path(), &to.join(entry.file_name()), true, force)?;
+        }
+        fs::set_permissions(to, meta.permissions())
+            .map_err(|error| ToolError::new(error.to_string()))?;
+        preserve_file_times(to, &meta)?;
+    } else if meta.is_file() {
+        fs::copy(from, to).map_err(|error| ToolError::new(error.to_string()))?;
+        preserve_file_times(to, &meta)?;
+    } else {
+        return Err(ToolError::new(format!(
+            "Unsupported file type: {}",
+            from.display()
+        )));
+    }
+    Ok(())
+}
+
+fn preserve_file_times(to: &Path, original: &fs::Metadata) -> UnitResult {
+    let times = fs::FileTimes::new()
+        .set_accessed(
+            original
+                .accessed()
+                .map_err(|error| ToolError::new(error.to_string()))?,
+        )
+        .set_modified(
+            original
+                .modified()
+                .map_err(|error| ToolError::new(error.to_string()))?,
+        );
+    fs::File::open(to)
+        .and_then(|file| file.set_times(times))
+        .map_err(|error| ToolError::new(error.to_string()))
+}
+
 impl Handlers {
     pub fn status(&self) -> ToolResult {
         self.require_unlocked()?;
+        let (mut limits, sessions) = self.ptys.status();
+        limits["unlockRecheckMs"] = json!(3_000);
+        let pty_available = self.ptys.available();
+        let architecture = match std::env::consts::ARCH {
+            "aarch64" => "arm64",
+            "x86_64" => "x64",
+            other => other,
+        };
+        let runtime_version: Value = serde_json::from_str(include_str!("../../../../package.json"))
+            .map(|package: Value| package["version"].clone())
+            .unwrap_or(Value::Null);
+        let mut uname: libc::utsname = unsafe { std::mem::zeroed() };
+        let release = if unsafe { libc::uname(&mut uname) } == 0 {
+            unsafe { std::ffi::CStr::from_ptr(uname.release.as_ptr()) }
+                .to_string_lossy()
+                .to_string()
+        } else {
+            String::new()
+        };
+        let data_dir = &self.context.data_dir;
+        let settings_file = std::env::var_os("NEO_CORE_SETTINGS_FILE")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| data_dir.join("settings.json"));
         Ok(json!({
-            "platform": std::env::consts::OS,
-            "hostname": hostname(),
-            "home": self.context.home,
-            "appSupportDir": self.context.data_dir,
-            "jobsDir": self.context.job_dir,
-            "unlockFile": self.context.unlock_file,
-            "fullAccess": "unlocked",
-            "shell": self.context.shell,
-            "codexExecutable": self.context.codex_bin,
-            "coreVersion": crate::context::CORE_VERSION,
-            "defaultOutputBytes": self.context.default_output_bytes,
-            "maxOutputBytes": self.context.max_output_bytes
+            "version":std::env::var("NEOY_VERSION").ok(),
+            "runtimeVersion": runtime_version,
+            "coreVersion":crate::context::CORE_VERSION,
+            "pid":std::process::id(),
+            "hostname":hostname(),
+            "username": std::env::var("USER").unwrap_or_default(),
+            "uid":unsafe {libc::getuid()},"gid":unsafe {libc::getgid()},
+            "home":self.context.home,
+            "platform":std::env::consts::OS,"architecture":architecture,"release":release,
+            "node":null,"shell":self.context.shell,"codexBin":self.context.codex_bin,
+            "tunnelRuntimeKeyScrubbedFromChildEnvironment":self.context.tunnel_key_was_present,
+            "cwd":std::env::current_dir().unwrap_or_default(),
+            "dataDir":data_dir,"jobDir":self.context.job_dir,
+            "guiFocusPolicy":std::env::var("NEO_CORE_GUI_FOCUS_POLICY").unwrap_or_else(|_| "background-first".into()),
+            "operatorSettings":crate::gui::operator_settings(&self.context)?,
+            "settingsFile":settings_file,"foregroundGuiApproved":crate::gui::foreground_approval_info(&self.context),
+            "fullAccessUnlocked":true,"fullAccessUnlockFile":self.context.unlock_file,
+            "ptyAvailable":pty_available,
+            "ptyHelper":if pty_available {json!({"interpreter":"native","script":"libc::openpty"})} else {Value::Null},
+            "ptyLimits":limits,"ptySessions":sessions,
+            "accessModel":"No bridge sandbox or path allowlist. Effective access equals the macOS account running tunnel-client/this server, subject to macOS TCC, Full Disk Access, ACLs, and sudo authentication."
         }))
     }
 
@@ -490,6 +616,7 @@ impl Handlers {
                 } else {
                     requested_max_output
                 };
+                crate::gui::guard(&self.context, &command)?;
                 self.jobs.exec(
                     command,
                     args.get("cwd").and_then(Value::as_str).map(str::to_string),
@@ -501,14 +628,18 @@ impl Handlers {
                     max_output,
                 )
             }
-            "start" => self.jobs.spawn(
-                require_string(args, "command")?,
-                args.get("cwd").and_then(Value::as_str).map(str::to_string),
-                args.get("env").cloned().unwrap_or(Value::Null),
-                args.get("label")
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
-            ),
+            "start" => {
+                let command = require_string(args, "command")?;
+                crate::gui::guard(&self.context, &command)?;
+                self.jobs.spawn(
+                    command,
+                    args.get("cwd").and_then(Value::as_str).map(str::to_string),
+                    args.get("env").cloned().unwrap_or(Value::Null),
+                    args.get("label")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                )
+            }
             "job.status" => self.jobs.status(
                 &require_string(args, "job_id")?,
                 optional_u64(args, "max_log_bytes", 100_000, 1_024, 8_000_000)?,
@@ -817,46 +948,110 @@ impl Handlers {
         let operation = require_string(args, "operation")?;
         let path = self.context.resolve_path(&require_string(args, "path")?);
         let recursive = optional_bool(args, "recursive", false)?;
-        let result = match operation.as_str() {
-            "mkdir" => std::fs::create_dir_all(&path),
-            "remove" => {
+        let force = optional_bool(args, "force", false)?;
+        let mode = args
+            .get("mode")
+            .map(|_| optional_u64(args, "mode", 0, 0, 0o7777))
+            .transpose()?;
+        let destination_input = args
+            .get("destination")
+            .map(|_| require_string(args, "destination"))
+            .transpose()?;
+        let destination = destination_input.as_deref().map(|input| {
+            if operation == "symlink" && !input.starts_with('/') && !input.starts_with("~/") {
+                std::path::PathBuf::from(input)
+            } else {
+                self.context.resolve_path(input)
+            }
+        });
+        match operation.as_str() {
+            "mkdir" => {
                 if recursive {
-                    std::fs::remove_dir_all(&path)
+                    fs::create_dir_all(&path)
                 } else {
-                    std::fs::remove_file(&path)
+                    fs::create_dir(&path)
+                }
+                .map_err(|error| ToolError::new(error.to_string()))?;
+                if let Some(mode) = mode {
+                    fs::set_permissions(&path, fs::Permissions::from_mode(mode as u32))
+                        .map_err(|error| ToolError::new(error.to_string()))?;
                 }
             }
-            "move" => {
-                let destination = self
-                    .context
-                    .resolve_path(&require_string(args, "destination")?);
-                std::fs::rename(&path, destination)
-            }
-            "copy" => {
-                let destination = self
-                    .context
-                    .resolve_path(&require_string(args, "destination")?);
-                std::fs::copy(&path, destination).map(|_| ())
-            }
-            "symlink" => {
-                let target = self
-                    .context
-                    .resolve_path(&require_string(args, "destination")?);
-                std::os::unix::fs::symlink(target, &path)
+            "remove" => remove_managed_path(&path, recursive, force)?,
+            "move" | "copy" => {
+                let target = destination
+                    .as_ref()
+                    .ok_or_else(|| ToolError::new("'destination' is required for move/copy"))?;
+                // A forced move also removes the old target. Guard aliasing
+                // before either operation can delete the only copy.
+                if path == *target
+                    || (path.exists()
+                        && target.exists()
+                        && fs::canonicalize(&path).ok() == fs::canonicalize(target).ok())
+                {
+                    return Err(ToolError::new("Source and destination are the same file"));
+                }
+                if path.is_dir()
+                    && (target.starts_with(&path)
+                        || fs::canonicalize(&path).ok().is_some_and(|source| {
+                            target
+                                .parent()
+                                .and_then(|parent| fs::canonicalize(parent).ok())
+                                .is_some_and(|parent| parent.starts_with(source))
+                        }))
+                {
+                    return Err(ToolError::new(
+                        "Cannot move or copy a directory into itself",
+                    ));
+                }
+                if force {
+                    remove_managed_path(target, true, true)?;
+                }
+                if let Some(parent) = target.parent() {
+                    fs::create_dir_all(parent)
+                        .map_err(|error| ToolError::new(error.to_string()))?;
+                }
+                if operation == "move" {
+                    match fs::rename(&path, target) {
+                        Ok(()) => {}
+                        Err(error) if error.raw_os_error() == Some(libc::EXDEV) => {
+                            copy_managed_path(&path, target, true, force)?;
+                            remove_managed_path(&path, true, false)?;
+                        }
+                        Err(error) => return Err(ToolError::new(error.to_string())),
+                    }
+                } else {
+                    copy_managed_path(&path, target, recursive, force)?;
+                }
             }
             "chmod" => {
-                use std::os::unix::fs::PermissionsExt;
-                let mode = args.get("mode").and_then(Value::as_u64).unwrap_or_default() as u32;
-                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))
+                let mode = mode.ok_or_else(|| ToolError::new("'mode' is required for chmod"))?;
+                fs::set_permissions(&path, fs::Permissions::from_mode(mode as u32))
+                    .map_err(|error| ToolError::new(error.to_string()))?;
+            }
+            "symlink" => {
+                let target = destination.as_ref().ok_or_else(|| {
+                    ToolError::new("'destination' is required as the symlink target")
+                })?;
+                if force {
+                    remove_managed_path(&path, true, true)?;
+                }
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)
+                        .map_err(|error| ToolError::new(error.to_string()))?;
+                }
+                std::os::unix::fs::symlink(target, &path)
+                    .map_err(|error| ToolError::new(error.to_string()))?;
             }
             _ => {
-                return Err(ToolError::new(
-                    "operation must be mkdir, remove, move, copy, chmod, or symlink",
-                ))
+                return Err(ToolError::new(format!(
+                    "Unsupported operation: {operation}"
+                )))
             }
-        };
-        result.map_err(|error| ToolError::new(error.to_string()))?;
-        Ok(json!({"operation":operation,"path":path}))
+        }
+        Ok(
+            json!({"operation":operation,"path":path,"destination":destination,"recursive":recursive,"force":force,"mode":mode}),
+        )
     }
 
     fn filesystem_grep(&self, args: &serde_json::Map<String, Value>) -> ToolResult {

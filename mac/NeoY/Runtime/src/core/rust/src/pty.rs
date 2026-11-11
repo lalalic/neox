@@ -7,6 +7,8 @@ use std::io::Read;
 use std::os::unix::ffi::OsStringExt;
 use std::os::unix::io::RawFd;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -15,6 +17,7 @@ pub struct Session {
     pub master: RawFd,
     pub pid: i32,
     pub command: String,
+    pub args: Vec<String>,
     pub cols: u16,
     pub rows: u16,
     pub output: Vec<u8>,
@@ -27,6 +30,9 @@ pub struct Session {
     pub created_at_ms: u64,
     pub idle_timeout_ms: u64,
     pub canonical_pending_bytes: usize,
+    pub tty_path: Option<String>,
+    pub tty_targets: HashMap<i32, String>,
+    pub tty_last_scan_ms: u64,
 }
 
 impl Drop for Session {
@@ -103,7 +109,177 @@ fn random_id() -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+// Node Core tracks background terminal members in other process groups; a
+// leader-group kill alone cannot contain e.g. "nohup sleep &". Keep a bounded
+// start-time-qualified membership record before the PTY device disappears.
+fn tty_path(fd: RawFd) -> Option<String> {
+    let mut bytes = [0_i8; 256];
+    if unsafe { libc::ttyname_r(fd, bytes.as_mut_ptr(), bytes.len()) } != 0 {
+        return None;
+    }
+    let cstr = unsafe { std::ffi::CStr::from_ptr(bytes.as_ptr()) };
+    let path = cstr.to_str().ok()?;
+    let name = path.strip_prefix("/dev/tty")?;
+    if (1..=12).contains(&name.len())
+        && name
+            .bytes()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+    {
+        Some(path.to_string())
+    } else {
+        None
+    }
+}
+
+fn ps_rows(args: &[&str]) -> HashMap<i32, String> {
+    let mut child = match Command::new("/bin/ps")
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => return HashMap::new(),
+    };
+    let deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(5)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return HashMap::new();
+            }
+        }
+    }
+    let mut raw = Vec::new();
+    if let Some(output) = child.stdout.take() {
+        let _ = output.take(1_000_000).read_to_end(&mut raw);
+    }
+    let mut rows = HashMap::new();
+    for line in String::from_utf8_lossy(&raw).lines() {
+        let line = line.trim();
+        if let Some(pos) = line.find(char::is_whitespace) {
+            if let Ok(pid) = line[..pos].parse::<i32>() {
+                if pid > 1 {
+                    rows.insert(pid, line[pos..].trim().to_string());
+                }
+            }
+        }
+    }
+    rows
+}
+
+fn process_present(pid: i32) -> bool {
+    pid > 1
+        && (unsafe { libc::kill(pid, 0) } == 0
+            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM))
+}
+
+fn snapshot_tty_targets(session: &mut Session, force: bool) {
+    if session.exited {
+        return;
+    }
+    let Some(path) = session.tty_path.as_deref() else {
+        return;
+    };
+    let now = now_ms();
+    if !force && now.saturating_sub(session.tty_last_scan_ms) < 150 {
+        return;
+    }
+    session.tty_last_scan_ms = now;
+    session.tty_targets.retain(|pid, _| process_present(*pid));
+    for (pid, lstart) in ps_rows(&["-t", path, "-o", "pid=,lstart="]) {
+        if pid == session.pid
+            || pid == std::process::id() as i32
+            || pid == unsafe { libc::getppid() }
+        {
+            continue;
+        }
+        if session.tty_targets.len() >= 64 {
+            break;
+        }
+        session.tty_targets.entry(pid).or_insert(lstart);
+    }
+}
+
+fn kill_tty_stragglers(session: &Session) {
+    let candidates: Vec<_> = session
+        .tty_targets
+        .iter()
+        .filter(|(pid, _)| process_present(**pid))
+        .map(|(pid, _)| *pid)
+        .collect();
+    if candidates.is_empty() {
+        return;
+    }
+    let pids = candidates
+        .iter()
+        .map(i32::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let current = ps_rows(&["-o", "pid=,lstart=", "-p", &pids]);
+    for pid in candidates {
+        if current.get(&pid) == session.tty_targets.get(&pid) && process_present(pid) {
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
+        }
+    }
+}
+
 impl PtyManager {
+    pub fn available(&self) -> bool {
+        static AVAILABLE: OnceLock<bool> = OnceLock::new();
+        *AVAILABLE.get_or_init(|| {
+            let mut master: libc::c_int = -1;
+            let mut slave: libc::c_int = -1;
+            let ok = unsafe {
+                libc::openpty(
+                    &mut master,
+                    &mut slave,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            } == 0;
+            if master >= 0 {
+                unsafe {
+                    libc::close(master);
+                }
+            }
+            if slave >= 0 {
+                unsafe {
+                    libc::close(slave);
+                }
+            }
+            ok
+        })
+    }
+
+    pub fn status(&self) -> (serde_json::Value, serde_json::Value) {
+        let limits = json!({
+            "maxSessions":self.max_sessions,
+            "ringBytesPerSession":self.max_output_bytes,
+            "ringBytesGlobal":self.max_output_bytes * self.max_sessions,
+            "idleTimeoutMs":self.idle_timeout_ms,
+            "maxLifetimeMs":self.max_lifetime_ms,
+            "writeMaxBytes":65536
+        });
+        let now = now_ms();
+        let sessions: Vec<_> = self.sessions.lock().unwrap().iter().map(|(id, session)| json!({
+            "id":id,"command":session.command,"args":session.args,"leaderPid":session.pid,
+            "pts":session.tty_path,"cols":session.cols,"rows":session.rows,
+            "totalBytes":session.total_output_bytes,"idleTimeoutMs":session.idle_timeout_ms,
+            "idleMs":now.saturating_sub(session.last_activity_ms),
+            "exited":session.exited,"exitCode":session.exit_code,"exitSignal":session.signal,
+            "closeReason":null
+        })).collect();
+        (limits, json!(sessions))
+    }
+
     pub fn new() -> Self {
         let max_sessions = std::env::var("NEO_CORE_PTY_MAX_SESSIONS")
             .ok()
@@ -178,6 +354,7 @@ impl PtyManager {
                 Ok((key, value))
             })
             .collect::<Result<_, ToolError>>()?;
+        let original_arguments = arguments.clone();
         let mut c_arguments = vec![program.clone()];
         for argument in arguments {
             c_arguments
@@ -262,6 +439,7 @@ impl PtyManager {
         if result != 0 {
             return Err(ToolError::new(std::io::Error::last_os_error().to_string()));
         }
+        let tty_path = tty_path(slave);
         let cwd_for_child = cwd;
         let pid = unsafe { libc::fork() };
         if pid < 0 {
@@ -309,6 +487,7 @@ impl PtyManager {
             master,
             pid,
             command: executable.clone(),
+            args: original_arguments,
             cols,
             rows,
             output: Vec::new(),
@@ -321,6 +500,9 @@ impl PtyManager {
             created_at_ms: now,
             idle_timeout_ms: idle_timeout_ms.min(self.idle_timeout_ms),
             canonical_pending_bytes: 0,
+            tty_path,
+            tty_targets: HashMap::new(),
+            tty_last_scan_ms: 0,
         };
         sessions.insert(session_id.clone(), session);
         Ok(json!({
@@ -340,6 +522,8 @@ impl PtyManager {
         let session = sessions.get_mut(session_id).ok_or_else(|| {
             ToolError::code(format!("Unknown PTY session: {session_id}"), "ENOENT")
         })?;
+        snapshot_tty_targets(session, false);
+        let was_exited = session.exited;
         let mut buffer = [0_u8; 65_536];
         loop {
             let count =
@@ -382,11 +566,14 @@ impl PtyManager {
                     session.exit_code = Some(libc::WEXITSTATUS(code));
                 }
                 if libc::WIFSIGNALED(code) {
-                    session.signal = Some(libc::WTERMSIG(code).to_string());
+                    session.signal = Some(signal_name(libc::WTERMSIG(code)));
                     session.exit_code = Some(128 + libc::WTERMSIG(code));
                 }
                 session.exited = true;
             }
+        }
+        if session.exited && !was_exited {
+            kill_tty_stragglers(session);
         }
         Ok(SessionSnapshot {
             command: session.command.clone(),
@@ -544,6 +731,10 @@ impl PtyManager {
             }
             offset += count as usize;
         }
+        if bytes.contains(&b'\r') || bytes.contains(&b'\n') {
+            std::thread::sleep(Duration::from_millis(15));
+            snapshot_tty_targets(session, true);
+        }
         session.canonical_pending_bytes = if canonical_mode == Some(false) {
             0
         } else if has_terminator {
@@ -619,9 +810,13 @@ impl PtyManager {
                 ToolError::code(format!("Unknown PTY session: {session_id}"), "ENOENT")
             })?
         };
+        snapshot_tty_targets(&mut session, true);
         unsafe {
             libc::killpg(session.pid, libc::SIGHUP);
             libc::killpg(session.pid, libc::SIGTERM);
+        }
+        kill_tty_stragglers(&session);
+        unsafe {
             libc::close(session.master);
             session.master = -1;
             let mut status = std::mem::MaybeUninit::<libc::c_int>::uninit();
@@ -671,6 +866,12 @@ impl PtyManager {
     }
 
     pub fn expire_sessions(&self) {
+        // A natural shell exit also revokes its controlling terminal. Refresh
+        // without a client read so detached terminal members are reclaimed.
+        let ids: Vec<_> = self.sessions.lock().unwrap().keys().cloned().collect();
+        for id in ids {
+            let _ = self.refresh(&id);
+        }
         let now = now_ms();
         let expired: Vec<String> = self
             .sessions
@@ -687,6 +888,18 @@ impl PtyManager {
             let _ = self.close(&id);
         }
     }
+}
+
+fn signal_name(number: libc::c_int) -> String {
+    match number {
+        libc::SIGTERM => "SIGTERM",
+        libc::SIGKILL => "SIGKILL",
+        libc::SIGINT => "SIGINT",
+        libc::SIGHUP => "SIGHUP",
+        libc::SIGQUIT => "SIGQUIT",
+        _ => return number.to_string(),
+    }
+    .to_string()
 }
 
 fn signal_number(name: &str) -> Result<libc::c_int, ToolError> {

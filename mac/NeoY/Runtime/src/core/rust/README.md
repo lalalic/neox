@@ -55,6 +55,8 @@ available.
 
 ## Architecture
 
+- `gui.rs` owns Node-compatible strict foreground-GUI operator approvals,
+  including single-use approval grants before shell execution.
 - `context.rs` owns configuration, authorization capture, private storage paths,
   and safe path expansion.
 - `jobs.rs` owns durable process-group jobs, output files, status polling,
@@ -89,10 +91,11 @@ byte offsets and report bytes lost before the retained window.
 
 ## Compatibility status
 
-See [`docs/parity-matrix.md`](docs/parity-matrix.md). This is a partial
-development alternative and has not passed the full Node Core parity, security,
-or lifecycle acceptance gates. Concurrent request correlation, cancellation
-notification behavior, and basic file unlock revocation have targeted tests,
-but these do not establish complete parity. It is not activated in NeoY. Keep
-the Node provider unchanged until each documented gap has executable proof and
-an independent review approves the compatibility claim.
+See [`docs/parity-matrix.md`](docs/parity-matrix.md). The head-to-head review
+hotfix closes identified differences in filesystem management, shell/PTY
+containment, job persistence/metadata, GUI approval, modern MCP framing and
+status fields, backed by new focused differential regression tests. A passing
+suite is not proof of complete behavioral identity over every possible input.
+This alternative is **not activated in NeoY**; retain Node as production until
+a separately authorized, independently reviewed Swift federation canary and
+rollback verification succeed.

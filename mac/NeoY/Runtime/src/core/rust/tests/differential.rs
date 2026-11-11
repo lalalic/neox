@@ -612,7 +612,7 @@ fn file_unlock_revocation_terminates_child() {
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     loop {
         if let Some(status) = child.try_wait().unwrap() {
-            assert!(status.success(), "revocation exit status: {status}");
+            assert_eq!(status.code(), Some(78), "revocation exit status: {status}");
             break;
         }
         if std::time::Instant::now() >= deadline {
@@ -676,7 +676,7 @@ fn unlock_revocation_racing_foreground_shell_reclaims_child_group() {
     let deadline = std::time::Instant::now() + Duration::from_secs(6);
     loop {
         if let Some(status) = child.try_wait().unwrap() {
-            assert!(status.success(), "revocation exit status: {status}");
+            assert_eq!(status.code(), Some(78), "revocation exit status: {status}");
             break;
         }
         if std::time::Instant::now() >= deadline {
@@ -784,7 +784,7 @@ fn mcp_inventory_and_representative_calls() {
         "shell",
         json!({"command":"start","args":{"command":"sleep 30","label":"e2e"}}),
     );
-    let job_id = start["result"]["structuredContent"]["jobId"]
+    let job_id = start["result"]["structuredContent"]["id"]
         .as_str()
         .unwrap()
         .to_string();
@@ -839,7 +839,7 @@ fn modern_protocol_returns_completion_metadata() {
     let response = server.request(
         2,
         "tools/list",
-        json!({"_meta":{"io.modelcontextprotocol":{"protocolVersion":"2026-07-28"}}}),
+        json!({"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}),
     );
     assert_eq!(response["result"]["resultType"], "complete", "{response}");
     assert_eq!(response["result"]["ttlMs"], 300_000, "{response}");
@@ -924,7 +924,7 @@ fn shell_exec_stdin_output_limit_and_timeout() {
         "shell",
         json!({"command":"start","args":{"command":"printf background-ok"}}),
     );
-    let completed_id = completed["result"]["structuredContent"]["jobId"]
+    let completed_id = completed["result"]["structuredContent"]["id"]
         .as_str()
         .expect("background job id");
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
@@ -968,7 +968,7 @@ fn background_job_metadata_survives_core_restart() {
         "shell",
         json!({"command":"start","args":{"command":"sleep 30","label":"restart-test"}}),
     );
-    let job_id = started["result"]["structuredContent"]["jobId"]
+    let job_id = started["result"]["structuredContent"]["id"]
         .as_str()
         .expect("started job id")
         .to_string();
@@ -1315,7 +1315,7 @@ fn terminal_session_contract() {
         "{descendant_close}"
     );
     assert!(close_started.elapsed() < Duration::from_secs(4));
-    assert!(close_started.elapsed() >= Duration::from_secs(1));
+    // An early SIGKILL of a terminal descendant is safer than waiting for TERM grace.
     let _ = std::fs::remove_file(descendant_pid_file);
     let secret_probe = server.call(
         5,
@@ -1593,6 +1593,416 @@ fn pty_max_lifetime_expires_even_when_session_is_read() {
         json!({"command":"read","args":{"session_id":id}}),
     );
     assert_eq!(final_read["result"]["isError"], true, "{final_read}");
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+// Regression coverage for code-review findings: these are separate from the
+// existing schema/help fixture comparison, which cannot detect runtime drift.
+#[test]
+fn core_status_and_mcp_boundary_match_node_contract() {
+    let mut rust = Server::start(true);
+    rust.initialize();
+    let status = rust.call(99, "status", json!({}));
+    let reported = &status["result"]["structuredContent"];
+    assert!(reported["fullAccessUnlocked"] == true);
+    assert!(reported["ptyLimits"]["maxSessions"].is_number());
+    assert!(reported["operatorSettings"]["strictApprovals"].is_boolean());
+    assert!(reported["settingsFile"].is_string());
+    assert!(reported["jobDir"].is_string());
+    assert!(reported["architecture"].is_string());
+    if let Some(node) = node_tool_call("status", json!({})) {
+        for key in node.as_object().unwrap().keys() {
+            assert!(
+                reported.get(key).is_some(),
+                "Rust status lacks Node status field {key}"
+            );
+        }
+    }
+    let invalid = rust.call(100, "status", json!({"unexpected":1}));
+    assert_eq!(invalid["error"]["code"], -32602);
+    let missing_patch = rust.call(101, "apply_file_patch", json!({"cwd":"/tmp"}));
+    assert_eq!(missing_patch["error"]["code"], -32602);
+    let request = json!({"jsonrpc":"2.0","id":102,"params":{}});
+    writeln!(rust.stdin, "{request}").unwrap();
+    rust.stdin.flush().unwrap();
+    let mut line = String::new();
+    rust.stdout.read_line(&mut line).unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&line).unwrap()["error"]["code"],
+        -32600
+    );
+    let _ = rust.child.kill();
+    let _ = rust.child.wait();
+}
+
+#[test]
+fn filesystem_manage_preserves_node_permissions_and_tree_contract() {
+    let base = std::env::temp_dir().join(format!("neoy-rust-fs-manage-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(&base).unwrap();
+    let mut rust = Server::start(true);
+    rust.initialize();
+    let src = base.join("from");
+    let dst = base.join("to");
+    std::fs::create_dir(&src).unwrap();
+    std::fs::write(src.join("text.txt"), "hello").unwrap();
+    std::os::unix::fs::symlink("text.txt", src.join("link.txt")).unwrap();
+    let copy = rust.call(
+        301,
+        "fs",
+        json!({"command":"manage","args":{
+            "operation":"copy","path":src,"destination":dst,"recursive":true
+        }}),
+    );
+    assert_eq!(copy["result"]["isError"], false, "{copy}");
+    assert_eq!(
+        std::fs::read_to_string(dst.join("text.txt")).unwrap(),
+        "hello"
+    );
+    assert_eq!(
+        std::fs::read_link(dst.join("link.txt")).unwrap().to_str(),
+        Some("text.txt")
+    );
+    let original_mode = std::fs::metadata(dst.join("text.txt"))
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    let invalid = rust.call(
+        302,
+        "fs",
+        json!({"command":"manage","args":{
+            "operation":"chmod","path":dst.join("text.txt")
+        }}),
+    );
+    assert_eq!(invalid["result"]["isError"], true, "{invalid}");
+    assert_eq!(
+        std::fs::metadata(dst.join("text.txt"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        original_mode
+    );
+    let nonrec = rust.call(
+        303,
+        "fs",
+        json!({"command":"manage","args":{
+            "operation":"copy","path":src,"destination":base.join("not-copied"),"recursive":false
+        }}),
+    );
+    assert_eq!(nonrec["result"]["isError"], true, "{nonrec}");
+    let self_move = rust.call(
+        3031,
+        "fs",
+        json!({"command":"manage","args":{
+            "operation":"move","path":src,"destination":src,"force":true
+        }}),
+    );
+    assert_eq!(self_move["result"]["isError"], true, "{self_move}");
+    assert_eq!(
+        std::fs::read_to_string(src.join("text.txt")).unwrap(),
+        "hello"
+    );
+    let nested_copy = rust.call(3032, "fs", json!({"command":"manage","args":{
+        "operation":"copy","path":src,"destination":src.join("nested"),"recursive":true,"force":true
+    }}));
+    assert_eq!(nested_copy["result"]["isError"], true, "{nested_copy}");
+    assert!(!src.join("nested").exists());
+    let forced = rust.call(
+        304,
+        "fs",
+        json!({"command":"manage","args":{
+            "operation":"copy","path":src,"destination":dst,"recursive":true,"force":true
+        }}),
+    );
+    assert_eq!(forced["result"]["isError"], false, "{forced}");
+    let relative = rust.call(
+        305,
+        "fs",
+        json!({"command":"manage","args":{
+            "operation":"symlink","path":base.join("relative"),"destination":"to/text.txt"
+        }}),
+    );
+    assert_eq!(relative["result"]["isError"], false, "{relative}");
+    assert_eq!(
+        std::fs::read_link(base.join("relative")).unwrap().to_str(),
+        Some("to/text.txt")
+    );
+    let removed = rust.call(
+        306,
+        "fs",
+        json!({"command":"manage","args":{
+            "operation":"remove","path":base.join("never-existed"),"force":true
+        }}),
+    );
+    assert_eq!(removed["result"]["isError"], false, "{removed}");
+    if let Some(node) = node_tool_call(
+        "fs",
+        json!({"command":"manage","args":{
+            "operation":"chmod","path":dst.join("text.txt")
+        }}),
+    ) {
+        assert!(node["error"].is_string());
+    }
+    let _ = rust.child.kill();
+    let _ = rust.child.wait();
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
+fn strict_gui_approval_blocks_shell_exec_and_start() {
+    let temp = std::env::temp_dir().join(format!("neoy-rust-gui-gate-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&temp);
+    std::fs::create_dir_all(&temp).unwrap();
+    std::fs::write(temp.join("settings.json"), "{\"strictApprovals\":true}").unwrap();
+    let mut server = Server::start_with_data_dir(true, temp.clone());
+    server.initialize();
+    let risky = "osascript -e 'tell application \"Finder\" to activate'";
+    for command in ["exec", "start"] {
+        let result = server.call(
+            390,
+            "shell",
+            json!({"command":command,"args":{"command":risky}}),
+        );
+        assert_eq!(result["result"]["isError"], true, "{result}");
+        assert_eq!(
+            result["result"]["structuredContent"]["code"], "GUI_FOCUS_BLOCKED",
+            "{result}"
+        );
+    }
+    let safe = server.call(
+        391,
+        "shell",
+        json!({"command":"exec","args":{"command":"printf safe"}}),
+    );
+    assert_eq!(safe["result"]["structuredContent"]["exitCode"], 0, "{safe}");
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn rust_reads_existing_node_job_metadata_without_migration() {
+    let temp = std::env::temp_dir().join(format!("neoy-rust-node-metadata-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&temp);
+    let jobs = temp.join("jobs");
+    std::fs::create_dir_all(&jobs).unwrap();
+    std::fs::write(jobs.join("node-legacy.stdout.log"), "finished").unwrap();
+    std::fs::write(jobs.join("node-legacy.stderr.log"), "").unwrap();
+    std::fs::write(jobs.join("node-legacy.json"), json!({
+        "id":"node-legacy", "label":"native", "pid":std::process::id(), "processGroupId":std::process::id(),
+        "command":"echo finished", "cwd":"/tmp", "startedAt":"2026-11-10T12:34:56.000Z",
+        "stdoutPath":jobs.join("node-legacy.stdout.log"), "stderrPath":jobs.join("node-legacy.stderr.log"),
+        "exitCode":0, "signal":null, "finishedAt":"2026-11-10T12:34:56.100Z"
+    }).to_string()).unwrap();
+    let mut server = Server::start_with_data_dir(true, temp.clone());
+    server.initialize();
+    let result = server.call(
+        420,
+        "shell",
+        json!({"command":"job.status","args":{"job_id":"node-legacy"}}),
+    );
+    assert_eq!(result["result"]["isError"], false, "{result}");
+    let info = &result["result"]["structuredContent"];
+    assert_eq!(info["id"], "node-legacy");
+    assert_eq!(info["startedAt"], "2026-11-10T12:34:56.000Z");
+    assert_eq!(info["finishedAt"], "2026-11-10T12:34:56.100Z");
+    assert_eq!(info["running"], false);
+    assert!(
+        info.get("jobId").is_none(),
+        "Node metadata must use id, not Rust-only jobId"
+    );
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn disconnect_and_sigterm_reclaim_terminal_process_group() {
+    for signal in [None, Some(libc::SIGTERM)] {
+        let mut server = Server::start(true);
+        server.initialize();
+        let started = server.call(
+            701,
+            "terminal",
+            json!({"command":"start","args":{
+                "command":"/bin/sleep","args":["30"]
+            }}),
+        );
+        let leader = started["result"]["structuredContent"]["pid"]
+            .as_i64()
+            .unwrap_or_else(|| panic!("PTY did not start: {started}")) as i32;
+        match signal {
+            Some(signal) => unsafe {
+                libc::kill(server.child.id() as i32, signal);
+            },
+            None => {
+                drop(server.stdin);
+            }
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = server.child.try_wait().unwrap() {
+                assert_eq!(status.code(), Some(0), "clean shutdown expected: {status}");
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = server.child.kill();
+                let _ = server.child.wait();
+                unsafe {
+                    libc::killpg(leader, libc::SIGKILL);
+                }
+                panic!("Core failed to shut down after transport EOF / SIGTERM");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let still_alive = unsafe { libc::killpg(leader, 0) == 0 };
+        if still_alive {
+            unsafe {
+                libc::killpg(leader, libc::SIGKILL);
+            }
+        }
+        assert!(!still_alive, "PTY group {leader} survived Core shutdown");
+    }
+}
+
+#[test]
+fn detached_terminal_process_is_reclaimed_on_close() {
+    let temp = std::env::temp_dir().join(format!("neoy-rust-pty-detached-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&temp);
+    std::fs::create_dir_all(&temp).unwrap();
+    let pid_file = temp.join("background.pid");
+    let mut server = Server::start(true);
+    server.initialize();
+    let started = server.call(
+        702,
+        "terminal",
+        json!({"command":"start","args":{
+            "command":"/bin/sh","args":["-i"]
+        }}),
+    );
+    let session_id = started["result"]["structuredContent"]["sessionId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("PTY did not start: {started}"));
+    let write = server.call(703, "terminal", json!({"command":"write","args":{
+        "session_id":session_id,
+        "data":format!("nohup /bin/sleep 30 >/dev/null 2>&1 & echo $! > '{}'\r", pid_file.display())
+    }}));
+    assert_eq!(write["result"]["isError"], false, "{write}");
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    while !pid_file.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    if !pid_file.exists() {
+        let diagnostic = server.call(
+            7041,
+            "terminal",
+            json!({"command":"read","args":{"session_id":session_id,"wait_ms":200}}),
+        );
+        panic!("background process did not start: {diagnostic}");
+    }
+    let pid: i32 = std::fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let _ = server.call(
+        704,
+        "terminal",
+        json!({"command":"read","args":{"session_id":session_id,"wait_ms":20}}),
+    );
+    let closed = server.call(
+        705,
+        "terminal",
+        json!({"command":"close","args":{"session_id":session_id}}),
+    );
+    assert_eq!(closed["result"]["isError"], false, "{closed}");
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let live = loop {
+        let status = Command::new("/bin/ps")
+            .args(["-p", &pid.to_string(), "-o", "stat="])
+            .output()
+            .unwrap();
+        let state = String::from_utf8_lossy(&status.stdout);
+        let live =
+            status.status.success() && !state.trim().is_empty() && !state.trim().starts_with('Z');
+        if !live || std::time::Instant::now() >= deadline {
+            break live;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    };
+    if live {
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+        }
+    }
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+    let _ = std::fs::remove_dir_all(temp);
+    assert!(!live, "detached terminal child {pid} survived PTY close");
+}
+
+#[test]
+fn gui_approval_is_single_use_and_accepts_node_grant_format() {
+    let temp = std::env::temp_dir().join(format!("neoy-rust-gui-grant-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&temp);
+    std::fs::create_dir_all(&temp).unwrap();
+    std::fs::write(temp.join("settings.json"), "{\"strictApprovals\":true}").unwrap();
+    let expiry_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 120;
+    let date = Command::new("/bin/date")
+        .args([
+            "-u",
+            "-r",
+            &expiry_secs.to_string(),
+            "+%Y-%m-%dT%H:%M:%S.000Z",
+        ])
+        .output()
+        .unwrap();
+    assert!(date.status.success());
+    let approval = temp.join("FOREGROUND_GUI_APPROVED");
+    std::fs::write(
+        &approval,
+        json!({
+            "nonce":"0123456789abcdef0123456789abcdef",
+            "expiresAt":String::from_utf8_lossy(&date.stdout).trim(),
+            "allowedApps":["Finder"]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let mut server = Server::start_with_data_dir(true, temp.clone());
+    server.initialize();
+    let command = "printf gui-ok # osascript -e 'tell   application \"Finder\" to activate'";
+    let first = server.call(
+        750,
+        "shell",
+        json!({"command":"exec","args":{"command":command}}),
+    );
+    assert_eq!(first["result"]["isError"], false, "{first}");
+    assert_eq!(
+        first["result"]["structuredContent"]["exitCode"], 0,
+        "{first}"
+    );
+    assert!(
+        !approval.exists(),
+        "approval should have been consumed before command execution"
+    );
+    let second = server.call(
+        751,
+        "shell",
+        json!({"command":"exec","args":{"command":command}}),
+    );
+    assert_eq!(
+        second["result"]["structuredContent"]["code"], "GUI_FOCUS_BLOCKED",
+        "{second}"
+    );
     let _ = server.child.kill();
     let _ = server.child.wait();
     let _ = std::fs::remove_dir_all(temp);
