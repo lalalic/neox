@@ -70,3 +70,13 @@ test('default invokes latest WebHelm via noninteractive npx',()=>{
  assert.equal(executable,'npx');
  assert.deepEqual(argumentsSeen.slice(0,2),['--yes','webhelm@latest']);
 });
+
+test('lifecycle helper output cap matches Rust Core boundary',()=>{
+ let options;
+ call('thread',{message:'bounded capture'}, {cli:'browser-workspace',spawnSyncImpl:(_cli,_args,received)=>{
+   options=received;
+   return {status:0,stdout:JSON.stringify({result:{ok:true,stdout:JSON.stringify(thread)}})};
+ }});
+ assert.equal(options.maxBuffer,4*1024*1024);
+ assert.throws(()=>call('thread',{message:'overflow'}, {cli:'browser-workspace',spawnSyncImpl:()=>({status:null,error:Object.assign(new Error('maxBuffer exceeded'),{code:'ENOBUFS'})})}),/maxBuffer exceeded/);
+});
