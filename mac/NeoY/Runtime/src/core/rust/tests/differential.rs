@@ -1,7 +1,13 @@
 use serde_json::{json, Value};
+use std::env;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
+use std::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    Arc, Barrier, Mutex,
+};
+use std::thread;
 use std::time::Duration;
 
 struct Server {
@@ -1338,6 +1344,79 @@ fn terminal_session_contract() {
         "terminal",
         json!({"command":"close","args":{"session_id":secret_session}}),
     );
+    let shared_server = Arc::new(Mutex::new(server));
+    let concurrent_start_receivers = Arc::new(Barrier::new(9));
+    let mutator_active = Arc::new(AtomicBool::new(true));
+    let completed_starts = Arc::new(AtomicUsize::new(0));
+    let environment_mutator = {
+        let receiver = Arc::clone(&concurrent_start_receivers);
+        let active = Arc::clone(&mutator_active);
+        thread::spawn(move || {
+            receiver.wait();
+            let mut round = 0;
+            while active.load(Ordering::Acquire) {
+                let label = format!("fork-safety-{round}");
+                env::set_var("NEO_CORE_PTY_FORK_SAFETY", &label);
+                env::remove_var("NEO_CORE_PTY_FORK_SAFETY");
+                round += 1;
+            }
+        })
+    };
+    let mut concurrent_sessions = Vec::new();
+    let concurrent_starts = (0..8)
+        .map(|id| {
+            let receiver = Arc::clone(&concurrent_start_receivers);
+            let server = Arc::clone(&shared_server);
+            let completions = Arc::clone(&completed_starts);
+            let active = Arc::clone(&mutator_active);
+            thread::spawn(move || {
+                receiver.wait();
+                let mut server = server.lock().unwrap();
+                let response = server.call(
+                    500 + id,
+                    "terminal",
+                json!({"command":"start","args":{"command":"/bin/echo","args":["fork-safety"]}}),
+                );
+                drop(server);
+                if completions.fetch_add(1, Ordering::AcqRel) + 1 == 8 {
+                    active.store(false, Ordering::Release);
+                }
+                response
+            })
+        })
+        .collect::<Vec<_>>();
+    for started in concurrent_starts {
+        let response = started.join().expect("concurrent PTY start thread");
+        assert_eq!(
+            response["result"]["isError"], false,
+            "fork-safe PTY startup failed under environment contention: {response}"
+        );
+        assert!(
+            response["result"]["structuredContent"]["sessionId"]
+                .as_str()
+                .is_some(),
+            "{response}"
+        );
+        concurrent_sessions.push(
+            response["result"]["structuredContent"]["sessionId"]
+                .as_str()
+                .expect("PTY session id")
+                .to_string(),
+        );
+    }
+    for (id, session_id) in concurrent_sessions.iter().enumerate() {
+        let _ = shared_server.lock().unwrap().call(
+            600 + id as u64,
+            "terminal",
+            json!({"command":"close","args":{"session_id":session_id}}),
+        );
+    }
+    environment_mutator.join().expect("environment mutator");
+    env::remove_var("NEO_CORE_PTY_FORK_SAFETY");
+    let mut server = match Arc::try_unwrap(shared_server) {
+        Ok(server) => server.into_inner().unwrap(),
+        Err(_) => unreachable!("concurrent PTY starts have completed"),
+    };
     let mut sessions = Vec::new();
     for id in 0..8 {
         let started = server.call(

@@ -62,7 +62,12 @@ available.
   durable Job ID when the synchronous wait ends; it never retries the command.
 - `pty.rs` owns short-lived in-memory PTY sessions with process groups,
   nonblocking reads, resize, signal, and teardown on transport close, signal, or
-  unlock revocation.
+  unlock revocation. PTY starts build the complete child environment and argv
+  before `fork`, then use `execve` with explicit `envp`; no environment mutation
+  happens after fork, so concurrent MCP tool threads cannot hold allocator or
+  environment locks into a PTY child. `terminal_session_contract` starts all
+  manager PTY slots concurrently while another thread mutates process
+  environment state.
 - `handlers.rs` owns tool behavior, loopback-only Discord delivery, read-only
   Codex app-server negotiation, Browser Workspace delegation for ChatGPT lifecycle,
   and compact, human-readable terminal outcomes.

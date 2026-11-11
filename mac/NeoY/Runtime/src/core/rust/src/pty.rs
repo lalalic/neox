@@ -1,8 +1,10 @@
 use crate::error::{ToolError, ToolResult};
 use serde_json::json;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::ffi::CString;
+use std::ffi::{CString, OsStr};
 use std::io::Read;
+use std::os::unix::ffi::OsStringExt;
 use std::os::unix::io::RawFd;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -165,7 +167,6 @@ impl PtyManager {
             .map_err(|_| ToolError::new("executable contains NUL"))?;
         let cwd = CString::new(cwd.to_string_lossy().as_bytes())
             .map_err(|_| ToolError::new("working directory contains NUL"))?;
-        let term_variable = CString::new(term).map_err(|_| ToolError::new("TERM contains NUL"))?;
         let env_for_child: Vec<(CString, Option<CString>)> = env
             .into_iter()
             .map(|(key, value)| {
@@ -188,6 +189,58 @@ impl PtyManager {
             .map(|value| value.as_ptr())
             .collect();
         argv.push(std::ptr::null());
+
+        // A multithreaded MCP server forks while other threads may hold
+        // allocator or process-environment locks. Mutating environ in a
+        // forked child is therefore unsafe. Build and own the complete
+        // envp before fork; fork/exec performs only async-signal-safe calls.
+        let mut child_environment: BTreeMap<CString, CString> = std::env::vars_os()
+            .filter(|(key, _)| {
+                key.as_os_str() != OsStr::new("NEO_CORE_FULL_ACCESS_ACK")
+                    && key.as_os_str() != OsStr::new("CONTROL_PLANE_API_KEY")
+            })
+            .map(|(key, value)| {
+                let key = key.into_vec();
+                let value = value.into_vec();
+                let key = CString::new(key).map_err(|_| ToolError::new("env key contains NUL"))?;
+                let value =
+                    CString::new(value).map_err(|_| ToolError::new("env value contains NUL"))?;
+                Ok((key, value))
+            })
+            .collect::<Result<_, ToolError>>()?;
+        child_environment.insert(
+            CString::new("TERM").expect("TERM has no NUL"),
+            CString::new(term.clone()).map_err(|_| ToolError::new("TERM contains NUL"))?,
+        );
+        for (key, value) in &env_for_child {
+            if key.as_bytes() == b"NEO_CORE_FULL_ACCESS_ACK"
+                || key.as_bytes() == b"CONTROL_PLANE_API_KEY"
+            {
+                continue;
+            }
+            match value {
+                Some(value) => {
+                    child_environment.insert(key.clone(), value.clone());
+                }
+                None => {
+                    child_environment.remove(key);
+                }
+            }
+        }
+        let owned_environment: Vec<CString> = child_environment
+            .into_iter()
+            .map(|(key, value)| {
+                let mut entry = key.into_bytes();
+                entry.push(b'=');
+                entry.extend_from_slice(value.as_bytes());
+                CString::new(entry).map_err(|_| ToolError::new("environment entry contains NUL"))
+            })
+            .collect::<Result<_, ToolError>>()?;
+        let mut environment_pointers: Vec<*const libc::c_char> = owned_environment
+            .iter()
+            .map(|entry| entry.as_ptr())
+            .collect();
+        environment_pointers.push(std::ptr::null());
 
         let mut master: RawFd = -1;
         let mut slave: RawFd = -1;
@@ -238,23 +291,11 @@ impl PtyManager {
                 if libc::chdir(cwd_for_child.as_ptr()) != 0 {
                     libc::_exit(126);
                 }
-                libc::setenv(c"TERM".as_ptr(), term_variable.as_ptr(), 1);
-                for (key, value) in &env_for_child {
-                    if key.to_bytes() == b"NEO_CORE_FULL_ACCESS_ACK"
-                        || key.to_bytes() == b"CONTROL_PLANE_API_KEY"
-                    {
-                        continue;
-                    }
-                    match value {
-                        Some(value) => {
-                            libc::setenv(key.as_ptr(), value.as_ptr(), 1);
-                        }
-                        None => {
-                            libc::unsetenv(key.as_ptr());
-                        }
-                    }
-                }
-                libc::execvp(program.as_ptr(), argv.as_ptr());
+                libc::execve(
+                    program.as_ptr(),
+                    argv.as_ptr(),
+                    environment_pointers.as_ptr(),
+                );
                 libc::_exit(127);
             }
         }
