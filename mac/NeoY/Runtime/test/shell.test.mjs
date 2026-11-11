@@ -225,3 +225,16 @@ test("shell_exec timeout=0 returns a running job immediately", async () => {
     await new Promise(resolve => setTimeout(resolve, 150));
   } finally { await fsp.rm(root, { recursive: true, force: true }); }
 });
+
+test("shell_job_list ignores legacy PTY metadata without hiding valid jobs", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "neoy-job-list-"));
+  try {
+    const context = await makeContext(root);
+    await fsp.writeFile(path.join(context.JOB_DIR, "pty_legacy.json"), JSON.stringify({kind:"pty",id:"pty_legacy"}));
+    const started = await handleShell("shell_start", { command: "exit 0", label: "list-test" }, context);
+    await waitForExit(context,started.id);
+    const results = await handleShell("shell_job_list", {}, context);
+    assert.ok(results.jobs.some(j=>j.id===started.id));
+    assert.ok(!results.jobs.some(j=>j.metadataFile==="pty_legacy.json"));
+  } finally { await fsp.rm(root,{recursive:true,force:true}); }
+});

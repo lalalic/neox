@@ -1,5 +1,6 @@
 mod context;
 mod error;
+mod gc;
 mod gui;
 mod handlers;
 mod jobs;
@@ -80,6 +81,16 @@ fn main() {
                 std::process::exit(78);
             }
         }
+    });
+
+    // The GC runs outside the request path; its bounded one-hour sweep does not
+    // signal active jobs or change any MCP contract.
+    let garbage_dir = context.job_dir.clone();
+    std::thread::spawn(move || loop {
+        if let Err(error) = gc::sweep(&garbage_dir, gc::MAX_SWEEP_DELETES) {
+            eprintln!("Core job GC sweep failed: {error}");
+        }
+        std::thread::sleep(gc::GC_INTERVAL);
     });
 
     let stdin = std::io::stdin();

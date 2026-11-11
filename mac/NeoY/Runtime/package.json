@@ -1,6 +1,6 @@
 {
   "name": "@lalalic/neoy-core",
-  "version": "0.1.20-local.20261107",
+  "version": "0.1.21-local.20261111",
   "type": "module",
   "description": "Installable Node.js runtime for NeoY core MCP providers.",
   "engines": {

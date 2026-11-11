@@ -120,6 +120,25 @@ The total size of the active log plus managed archives is bounded at about
 **104 MiB**. Previously hand-archived files in `~/Library/Logs/NeoY/archive/`
 are deliberately outside this automatic deletion policy.
 
+## Core background-job retention
+
+Node and Rust Core enforce the same private, automatic job GC policy. Completed
+jobs are retained for **72 hours or the most recent 2,000**, whichever removes
+more entries; a nonblocking hourly sweep removes at most 1,000 verified
+records. The sweeper does not kill any process. macOS process creation times
+and process groups protect running jobs and surviving descendants; if process
+identity cannot be verified, uncertain jobs stay. Unfinished jobs become
+eligible only after 72 hours and a confirmed stale process identity. Legacy PTY
+records require seven days before cleanup and are excluded from shell job lists.
+Only exact Core-owned metadata, stdout/stderr and leftover stdin files may be
+removed; external paths and symlinks are not followed. Relay job/JEL history
+and media are unaffected.
+
+For an explicit first-time backlog cleanup, use the bundled Node Core's
+`src/core/tools/job-gc.mjs` CLI with `--job-dir` and `--max-deletes`. It defaults
+to a read-only dry run; `--apply` is required for deletion. The CLI and native
+Rust sweeper use the same policy and have dedicated synthetic-filesystem tests.
+
 ## Build and test
 
 ```bash

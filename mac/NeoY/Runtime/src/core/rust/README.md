@@ -1,8 +1,9 @@
 # Native Rust NeoY Core
 
-This is an opt-in development alternative to the stable Node.js Core. It is
-**not** installed, packaged, selected by NeoY, or used by any production
-provider. The Node.js implementation remains authoritative for deployment.
+This is a native, opt-in Core alternative with a supported reversible local
+provider selection. NeoY can run the independently signed Rust binary on macOS;
+Node Core remains installed as the fallback implementation. Test both providers
+against the same MCP and retention contracts before changing production.
 
 ## Security model
 
@@ -110,3 +111,23 @@ runtime reconnects the `core` stdio provider without restarting NeoY. Check
 `core status` and `status`/`shell.exec` MCP behavior, not only the selection
 receipt. `core provider node` immediately selects the managed Node runtime
 again. The Core binary itself does not publish or manage WebHelm sessions.
+
+## Background-job garbage collection (Rust 0.2.3)
+
+`gc.rs` owns native, hourly, background cleanup of the Core-owned `jobs/`
+metadata directory. Keep the same policy as Node `tools/job-gc.mjs`: preserve
+up to 2,000 most recent completed jobs and expire completed jobs after 72 hours,
+whichever removes more. Each automatic pass deletes at most 1,000 verified
+records; foreground MCP calls never wait for a GC sweep. The executor never
+kills a process as part of GC. Running process IDs **and their process groups**
+are checked against macOS `ps`; a missing or unparseable snapshot fails closed.
+Stale uncompleted metadata older than 72 hours is eligible only once the
+original process and its group are gone. Legacy PTY metadata is kept for at
+least seven days and excluded from `shell.job.list`. Only exact named Core-owned
+stdout/stderr files beside each metadata record may be removed. Symlinks and
+foreign paths are ignored. Relay JEL and business job history are not touched.
+
+For controlled first-time cleanup, run the Node release's private
+`tools/job-gc.mjs` script with `--job-dir <absolute Core jobs directory>`
+(default dry run). After reviewing the candidates, add `--apply` and
+`--max-deletes 100000`. It uses the same policy as the native Rust sweeper.

@@ -6,6 +6,7 @@ import { handleCodex, CODEX_TOOLS } from "./codex.mjs";
 import { handleDiscord, DISCORD_TOOLS } from "./discord.mjs";
 import { configurePty, handlePty, ptyReady, ptyStatus, teardownPty, PTY_TOOLS } from "./pty.mjs";
 import { commandFacade } from "./command-facade.mjs";
+import { collectJobGarbage, JOB_GC_INTERVAL_MS } from "./job-gc.mjs";
 import { XCHAT_LIFECYCLE_TOOLS, scheduleXChatLifecycle } from "./xchat.mjs";
 
 import { execFileSync, spawn } from "node:child_process";
@@ -17,7 +18,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 
-const CORE_VERSION = "0.2.0";
+const CORE_VERSION = "0.2.3";
 const SERVER_NAME = "neo-core-tools";
 const SERVER_TITLE = "Neo Core Tools";
 const MODERN_PROTOCOL = "2026-07-28";
@@ -85,6 +86,19 @@ if (!fullAccessUnlocked) {
   stderr(`Refusing to start unrestricted Neo Core Tools. Create ${FULL_ACCESS_UNLOCK_FILE} containing ${FULL_ACCESS_ACK}, or set NEO_CORE_FULL_ACCESS_ACK to that exact value.`);
   process.exit(78);
 }
+
+// Bounded, non-blocking Core-owned cleanup. Do not tie it to MCP calls or
+// claim durable execution success just because a background job was submitted.
+let gcInFlight = false;
+async function gcSweep() {
+  if (gcInFlight) return;
+  gcInFlight = true;
+  try { await collectJobGarbage({ jobDir: JOB_DIR }); }
+  catch (error) { stderr(`Core job GC failed: ${String(error?.message || error)}`); }
+  finally { gcInFlight = false; }
+}
+setImmediate(() => { gcSweep(); });
+setInterval(gcSweep, JOB_GC_INTERVAL_MS).unref();
 
 let legacyInitialized = false;
 

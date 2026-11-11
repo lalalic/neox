@@ -616,7 +616,12 @@ impl JobManager {
         let mut files: Vec<_> = entries
             .filter_map(Result::ok)
             .map(|entry| entry.path())
-            .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("json"))
+            .filter(|path| {
+                path.extension().and_then(|value| value.to_str()) == Some("json")
+                    && !path
+                        .file_name()
+                        .is_some_and(|name| name.to_string_lossy().starts_with("pty_"))
+            })
             .collect();
         files.sort();
         for path in files.into_iter().rev().take(1_000) {

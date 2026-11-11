@@ -2144,3 +2144,32 @@ fn pty_fork_survives_concurrent_shell_and_fs_calls() {
     let _ = server.child.kill();
     let _ = server.child.wait();
 }
+
+#[test]
+fn shell_job_list_ignores_legacy_pty_metadata() {
+    let temp = std::env::temp_dir().join(format!("neoy-rust-job-list-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&temp);
+    let jobs = temp.join("jobs");
+    std::fs::create_dir_all(&jobs).unwrap();
+    std::fs::write(
+        jobs.join("pty_legacy.json"),
+        r#"{"id":"pty_legacy","kind":"pty"}"#,
+    )
+    .unwrap();
+    let mut server = Server::start_with_data_dir(true, temp.clone());
+    server.initialize();
+    let response = server.call(1088, "shell", json!({"command":"job.list","args":{}}));
+    assert_eq!(response["result"]["isError"], false, "{response}");
+    let jobs = response["result"]["structuredContent"]["jobs"]
+        .as_array()
+        .unwrap();
+    assert!(
+        !jobs
+            .iter()
+            .any(|job| job["metadataFile"] == "pty_legacy.json"),
+        "{response}"
+    );
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+    let _ = std::fs::remove_dir_all(temp);
+}

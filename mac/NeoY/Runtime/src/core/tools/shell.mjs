@@ -298,7 +298,7 @@ export async function handleShell(name, args, context) {
         }
     
         case "shell_job_list": {
-          const files = (await fsp.readdir(JOB_DIR)).filter((entry) => entry.endsWith(".json")).sort().reverse();
+          const files = (await fsp.readdir(JOB_DIR)).filter((entry) => entry.endsWith(".json") && !entry.startsWith("pty_")).sort().reverse();
           const jobs = [];
           for (const file of files.slice(0, 1000)) {
             try {
