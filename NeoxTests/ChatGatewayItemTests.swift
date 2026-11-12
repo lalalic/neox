@@ -2,6 +2,26 @@ import XCTest
 @testable import NeoxApp
 
 final class ChatGatewayItemTests: XCTestCase {
+    @MainActor
+    func testLocalChatClearPersistsWithoutDeletingQueuedWork() throws {
+        let suite = "NeoChatClear.\(UUID().uuidString)"
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let outbox = ChatGatewayOutbox(file: directory.appendingPathComponent("outbox.json"))
+        try outbox.enqueue("Unsent message", at: Date(timeIntervalSince1970: 1762900000))
+        let store = ChatGatewayStore(outbox: outbox, preferences: preferences)
+        XCTAssertEqual(store.visibleItems.count, 1)
+        store.clearVisibleHistory(at: Date(timeIntervalSince1970: 1762900050))
+        XCTAssertTrue(store.visibleItems.isEmpty)
+        XCTAssertEqual(store.queued.count, 1, "Clear must not discard unsent work")
+        let restored = ChatGatewayStore(outbox: ChatGatewayOutbox(file: directory.appendingPathComponent("outbox.json")),
+                                        preferences: preferences)
+        XCTAssertTrue(restored.visibleItems.isEmpty)
+        XCTAssertEqual(restored.queued.count, 1)
+    }
+
     func testJobEventVisibleWithoutRawPrompt() throws {
         let item = try ChatGatewayItem(wire: [
             "id": "job:123:COMPLETED:now", "kind": "job",

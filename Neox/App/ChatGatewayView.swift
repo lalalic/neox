@@ -55,14 +55,36 @@ final class ChatGatewayStore: ObservableObject {
     @Published private(set) var queued: [QueuedChatMessage] = []
     @Published var draft = ""
     @Published var draftAttachments: [ChatLocalAttachment] = []
+    @Published private(set) var clearedAt: Date?
 
+    private let preferences: UserDefaults
+    private static let historyClearKey = "neo.chat.history.hidden-before.v1"
     private let outbox: ChatGatewayOutbox
     private var refreshing = false
     private var flushing = false
 
-    init(outbox: ChatGatewayOutbox = ChatGatewayOutbox()) {
+    init(outbox: ChatGatewayOutbox = ChatGatewayOutbox(), preferences: UserDefaults = .standard) {
         self.outbox = outbox
+        self.preferences = preferences
+        clearedAt = preferences.object(forKey: Self.historyClearKey) as? Date
         queued = outbox.messages
+    }
+
+    /// Hide old timeline entries on this phone only. Never mutate the Mac's
+    /// durable feed or discard unsent outbox messages and attachments.
+    func clearVisibleHistory(at time: Date = Date()) {
+        clearedAt = time
+        preferences.set(time, forKey: Self.historyClearKey)
+    }
+
+    private func isVisibleSinceClear(_ item: ChatGatewayItem) -> Bool {
+        guard let clearedAt else { return true }
+        let parser = ISO8601DateFormatter()
+        guard let timestamp = parser.date(from: item.at) ?? {
+            parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return parser.date(from: item.at)
+        }() else { return false }
+        return timestamp > clearedAt
     }
 
     var visibleItems: [ChatGatewayItem] {
@@ -77,7 +99,7 @@ final class ChatGatewayStore: ObservableObject {
                     "status": "pending",
                 ])
             }
-        return (items + local).sorted { left, right in
+        return (items + local).filter(isVisibleSinceClear).sorted { left, right in
             if left.at == right.at { return left.id < right.id }
             return left.at < right.at
         }
@@ -177,6 +199,7 @@ struct ChatGatewayView: View {
     @State private var pickedPhoto: PhotosPickerItem?
     @State private var importingFile = false
     @State private var dictationPrefix = ""
+    @State private var showClearHistoryConfirmation = false
     @FocusState private var composerFocused: Bool
 
     var body: some View {
@@ -203,6 +226,15 @@ struct ChatGatewayView: View {
             }
 
             composer
+        }
+        .confirmationDialog("Clear chat messages on this phone?", isPresented: $showClearHistoryConfirmation,
+                            titleVisibility: .visible) {
+            Button("Clear displayed history", role: .destructive) {
+                store.clearVisibleHistory()
+            }
+            .accessibilityIdentifier("neoChatConfirmClear")
+        } message: {
+            Text("This hides old messages in Neo Mobile. It does not delete Neo Master history or cancel queued messages.")
         }
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
@@ -302,6 +334,16 @@ struct ChatGatewayView: View {
                 }
                 .accessibilityLabel("Add")
                 .accessibilityIdentifier("neoChatAdd")
+
+                Button { showClearHistoryConfirmation = true } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 34, height: 34)
+                        .contentShape(Circle())
+                }
+                .accessibilityLabel("Clear chat history")
+                .accessibilityIdentifier("neoChatClearHistory")
 
                 Spacer(minLength: 0)
 

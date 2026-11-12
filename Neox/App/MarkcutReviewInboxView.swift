@@ -32,20 +32,26 @@ struct MarkcutReviewInboxView: View {
     @State private var playbackPosition: MarkcutPlaybackPosition?
     @State private var message: String?
     @State private var syncing = false
-    @State private var reviewFilter = "All"
     private var sessions: [[String: Any]] { fixtureSessions ?? inbox.groupedSessions }
 
+    // One chronological list, no modes: each revision is its own review row.
     private var groups: [MarkcutReviewGroup] {
-        let visible: [[String: Any]]
-        switch reviewFilter {
-        case "Pending":
-            visible = sessions.filter {
-                $0["status"] as? String == "ready" && ($0["reviewActionable"] as? Bool ?? true)
+        MarkcutReviewGrouping.groups(from: sessions).flatMap { group in
+            group.sessions.map { revision in
+                MarkcutReviewGroup(id: group.id + ":" + revision.id,
+                    title: group.sessions.count > 1 ? revision.title : group.title,
+                    jobID: group.jobID, sessions: [revision],
+                    pendingCount: revision.value["status"] as? String == "ready" &&
+                        (revision.value["reviewActionable"] as? Bool ?? true) ? 1 : 0)
             }
-        case "History": visible = sessions.filter { $0["status"] as? String == "decided" }
-        default: visible = sessions
+        }.sorted {
+            let left = $0.sessions[0].value
+            let right = $1.sessions[0].value
+            let lt = (left["createdAt"] as? String) ?? ""
+            let rt = (right["createdAt"] as? String) ?? ""
+            if lt == rt { return $0.id > $1.id }
+            return lt > rt
         }
-        return MarkcutReviewGrouping.groups(from: visible)
     }
     private func selectedItem(in group: MarkcutReviewGroup) -> [String: Any]? {
         return group.sessions.filter { $0.reviewSessionID == selectedSessionID }.first?.value
@@ -69,13 +75,6 @@ struct MarkcutReviewInboxView: View {
                         }
                     }
                 }
-                Picker("Review status", selection: $reviewFilter) {
-                    Text("All").tag("All")
-                    Text("Pending").tag("Pending")
-                    Text("History").tag("History")
-                }
-                .pickerStyle(.segmented)
-                .accessibilityIdentifier("markcutReviewStatusFilter")
                 ForEach(groups) { group in
                     HStack(spacing: 0) {
                         Button { open(group) } label: { ReviewGroupRow(group: group) }
@@ -645,9 +644,10 @@ struct MarkcutReviewInboxView: View {
                 try await remote.deliverMarkcutReviewFeedback(request: request, feedback: pending)
                 inbox.acknowledge(pending)
                 await ReviewPushCoordinator.shared.complete(request.id)
-                // Never leave the reviewed (now removed) revision in an open sheet.
+                // Keep the saved review visible in the chronological list;
+                // close its editing sheet after the accepted submission.
                 if selectedSessionID == pending.requestId { selectedGroup = nil }
-                message = "Review sent and saved in History (consumer processing is separate)."
+                message = "Review sent and kept in this list (consumer processing is separate)."
             } catch {
                 failures += 1
                 message = "Review not submitted: " + error.localizedDescription + ". It remains queued with the original idempotency key."
@@ -668,21 +668,27 @@ private struct ReviewGroupRow: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text(group.title).font(.headline).lineLimit(1)
                 HStack(spacing: 7) {
-                    Text("\(group.sessions.count) \(group.sessions.count == 1 ? "revision" : "revisions")")
-                    Text("·")
-                    Text(group.pendingCount > 0 ? "\(group.pendingCount) pending review" :
-                         (group.sessions.contains { ($0.value["reviewActionable"] as? Bool) == true }
-                          ? "No pending reviews" : "Preview only"))
+                    Text(MarkcutReviewGrouping.statusText(group.sessions[0].value))
+                    if let created = group.sessions[0].value["createdAt"] as? String,
+                       let date = ISO8601DateFormatter().date(from: created) {
+                        Text("·")
+                        Text(date.formatted(date: .abbreviated, time: .shortened))
+                    }
                 }
                 .font(.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)
-            if group.pendingCount > 0 {
-                Text("\(group.pendingCount)").font(.caption.weight(.bold))
-                    .foregroundStyle(.white).frame(minWidth: 24, minHeight: 24)
-                    .background(Color.orange, in: Circle())
-                    .accessibilityHidden(true) // row's text already reports the pending count
-            }
+            let status = group.sessions.first?.value ?? [:]
+            let decision = (status["decision"] as? [String: Any])?["decision"] as? String
+            Image(systemName: decision == "approved" ? "checkmark.circle.fill" :
+                    decision == "changes_requested" ? "arrow.uturn.backward.circle.fill" :
+                    status["status"] as? String == "superseded" ? "clock.arrow.circlepath" :
+                    group.pendingCount > 0 ? "circle.dotted" : "eye")
+                .font(.title3)
+                .foregroundStyle(decision == "approved" ? Color.green :
+                    decision == "changes_requested" ? Color.orange :
+                    group.pendingCount > 0 ? Color.accentColor : Color.secondary)
+                .accessibilityIdentifier("markcutReviewStatusIcon")
             Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
         }
         .padding(.vertical, 5)

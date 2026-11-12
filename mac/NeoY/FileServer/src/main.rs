@@ -310,6 +310,15 @@ async fn handle(req: HttpRequest, state: web::Data<State>) -> HttpResponse {
                     }
                 }
             }
+            if route == "preview" {
+                // Preview URLs can change their target when Visioner normalizes
+                // media or a new proxy is created. Never let CDN cache a stale
+                // original under the same video path.
+                response.headers_mut().insert(
+                    header::CACHE_CONTROL,
+                    header::HeaderValue::from_static("no-store, max-age=0"),
+                );
+            }
             response.headers_mut().insert(
                 header::ACCESS_CONTROL_ALLOW_ORIGIN,
                 header::HeaderValue::from_static("*"),

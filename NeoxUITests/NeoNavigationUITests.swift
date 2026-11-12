@@ -7,12 +7,13 @@ final class NeoNavigationUITests: XCTestCase {
         app.launchArguments.append("-neo-jobs-ui-fixture")
         app.launch()
 
-        let tabs = app.tabBars
-        for title in ["Chat", "Jobs", "Review Inbox", "Connector"] {
-            XCTAssertTrue(tabs.buttons[title].waitForExistence(timeout: 15), "Missing \(title) tab")
+        for key in ["Chat", "Jobs", "Reviews", "Connector"] {
+            XCTAssertTrue(app.buttons["neoTopTab" + key].waitForExistence(timeout: 15),
+                          "Missing top navigation " + key)
         }
+        XCTAssertFalse(app.tabBars.firstMatch.exists, "Native bottom bar must be hidden")
 
-        tabs.buttons["Jobs"].tap()
+        app.buttons["neoTopTabJobs"].tap()
         XCTAssertTrue(app.staticTexts["Running vlog edit"].waitForExistence(timeout: 6))
         XCTAssertFalse(app.navigationBars.staticTexts["Jobs"].exists,
                        "The Jobs tab identity is enough; omit the duplicate page title")
@@ -32,12 +33,12 @@ final class NeoNavigationUITests: XCTestCase {
             format: "label CONTAINS %@", "currently provides Job summaries only"
         )).firstMatch.exists)
 
-        tabs.buttons["Review Inbox"].tap()
+        app.buttons["neoTopTabReviews"].tap()
         XCTAssertTrue(app.staticTexts["Review Inbox"].waitForExistence(timeout: 6))
         XCTAssertFalse(app.buttons["markcutReviewInboxClose"].exists)
         XCTAssertFalse(app.staticTexts["No previews yet"].exists)
 
-        tabs.buttons["Connector"].tap()
+        app.buttons["neoTopTabConnector"].tap()
         XCTAssertTrue(app.buttons["connectorCreateVlog"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["connectorClearTemp"].exists)
         XCTAssertFalse(app.buttons["markcutReviewInboxOpen"].exists)
@@ -51,7 +52,7 @@ final class NeoNavigationUITests: XCTestCase {
         app.launchArguments.append("-neo-jobs-ui-fixture")
         app.launch()
 
-        let jobsTab = app.tabBars.buttons["Jobs"]
+        let jobsTab = app.buttons["neoTopTabJobs"]
         XCTAssertTrue(jobsTab.waitForExistence(timeout: 15))
         jobsTab.tap()
         let waitingRow = app.staticTexts["Waiting for event"]
@@ -68,7 +69,7 @@ final class NeoNavigationUITests: XCTestCase {
         app.launchArguments += ["-markcut-review-ui-multi-fixture",
                                  "-markcut-notification-route-fixture"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Review Inbox"].waitForExistence(timeout: 12))
+        XCTAssertTrue(app.buttons["neoTopTabReviews"].waitForExistence(timeout: 12))
         XCTAssertTrue(app.buttons["markcutReviewPreviewClose"].waitForExistence(timeout: 15))
         XCTAssertFalse(app.buttons["markcutReviewInboxClose"].exists)
     }

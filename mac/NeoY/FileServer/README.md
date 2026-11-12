@@ -28,7 +28,10 @@ to the original for whole-file requests; explicit time slices return 503 rather
 than silently using the wrong part of a video. The existing Swift file-serving
 fallback remains for regular whole-file requests. All mounts
 are dynamically re-read from NeoY's existing `file-mounts.json` configuration.
-Direct original file URLs and `video.md` content never change. Preview
+Preview responses send `Cache-Control: no-store`; Markcut supplies a
+source-versioned `pv` query key (16 hexadecimal digits) so previously cached
+Cloudflare responses cannot shadow a new proxy. The server validates but
+otherwise ignores that key. Direct original file URLs and `video.md` content never change. Preview
 requests use `/preview-files/` only; `/files/` always serves originals.
 
 On sidecar connection failure **before any response bytes**, the gateway uses

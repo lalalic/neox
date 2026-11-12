@@ -20,23 +20,29 @@ A dedicated password key enters the saved Mac password into the focused Mac
 input when the owner explicitly taps it. Closing or leaving the view ends
 the session.
 
-Neo Mobile provides **Chat**, **Jobs**, **Review Inbox**, and **Connector** tabs. The Connector includes the existing iPhone media MCP server so a desktop agent can search, analyze, and pull photos/videos over Wi-Fi.
+Neo Mobile provides four compact **top navigation** buttons (Chat, Jobs, Review, Connector), keeping the chat composer against the bottom safe area without a bottom tab bar. The Connector includes the existing iPhone media MCP server so a desktop agent can search, analyze, and pull photos/videos over Wi-Fi.
 
 ## Neo Mobile Review Inbox
 
 The Review Inbox keeps submissions on the phone after Approve or Request Changes.
-Use **All**, **Pending**, or **History** to filter records. History keeps each
-review's decision, feedback, submitted time and preview identity; submission
-acceptance does **not** mean that the owning Job has finished. History is
-read-only: it cannot accidentally submit another decision. Delete individual
-revisions from their preview menu, or delete a group with the row menu or
-swipe. Deletion is phone-owned and prevents a late APNs repeat from restoring
+The single list is sorted newest-first and displays a per-review status icon
+(pending, approved, changes requested, preview-only, or superseded). The app
+retains the review decision, feedback, submitted time and preview identity;
+submission acceptance does **not** mean that the owning Job has finished.
+Completed reviews are read-only and cannot accidentally submit another decision.
+Delete individual reviews from their preview menu, row menu, or swipe gesture. Deletion is phone-owned and prevents a late APNs repeat from restoring
 the deleted row. Items pending feedback delivery cannot be deleted. Previously
 deleted reviews cannot be recovered automatically.
 
 The review metadata is stored on the phone across app relaunches. Video
 replay still requires the Neo Master to retain the referenced Markcut compiled
 preview and media; this feature does not copy full videos into phone storage.
+
+In Chat, the trash icon immediately to the right of the `+` opens a confirmation
+to clear the visible message history *on this phone only*. The Neo Master feed
+remains intact, and pending outbox messages/attachments are still delivered.
+The local clear cutoff persists across app restarts, and future messages appear
+normally.
 
 ## Relay Jobs on Neo Mobile
 

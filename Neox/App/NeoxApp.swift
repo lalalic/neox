@@ -18,22 +18,30 @@ struct NeoxApp: App {
 
     var body: some Scene {
         WindowGroup {
-            TabView(selection: $selectedTab) {
+            VStack(spacing: 0) {
+                topNavigation
+                TabView(selection: $selectedTab) {
                 ChatGatewayView(master: savedMaster, isActive: selectedTab == .chat)
                     .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }
                     .tag(MobileTab.chat)
+                    .toolbar(.hidden, for: .tabBar)
                 RelayJobsView(master: savedMaster)
                     .tabItem { Label("Jobs", systemImage: "list.bullet.rectangle") }
                     .tag(MobileTab.jobs)
+                    .toolbar(.hidden, for: .tabBar)
                 MarkcutReviewInboxView(
                     requestedPreviewID: reviewPush.tappedRequestID, asTab: true,
                     isPilotActive: selectedTab == .reviews
                 )
                     .tabItem { Label("Review Inbox", systemImage: "checkmark.rectangle.stack") }
                     .tag(MobileTab.reviews)
+                    .toolbar(.hidden, for: .tabBar)
                 StatusView()
                     .tabItem { Label("Connector", systemImage: "cable.connector") }
                     .tag(MobileTab.connector)
+                    .toolbar(.hidden, for: .tabBar)
+                }
+                .toolbar(.hidden, for: .tabBar)
             }
                 .environmentObject(savedMaster)
                 .environmentObject(bridge)
@@ -41,8 +49,6 @@ struct NeoxApp: App {
                 // parent doesn't reach .overlay content on all iOS versions
                 // and crashes DemoOverlayView's @EnvironmentObject lookup.
                 .overlay { DemoOverlayView().environmentObject(bridge.agentKit.demoRuntime) }
-                .onAppear { registerPilotTabs() }
-                .onDisappear { unregisterPilotTabs() }
                 .onReceive(NotificationCenter.default.publisher(for: .markcutReviewNotificationTapped)) { _ in
                     selectedTab = .reviews
                 }
@@ -80,25 +86,40 @@ struct NeoxApp: App {
         }
     }
 
-    /// Explicit app-owned SwiftUI state changes: no private touch synthesis.
-    /// The public package resolves UITabBar item frames at invocation time.
-    private func registerPilotTabs() {
-        let actions: [(String, String, MobileTab)] = [
-            ("chat", "Chat", .chat),
-            ("jobs", "Jobs", .jobs),
-            ("reviews", "Review Inbox", .reviews),
-            ("connector", "Connector", .connector)
-        ]
-        for (index, item) in actions.enumerated() {
-            AppCopilotActionRegistry.shared.registerTab(
-                id: "neox.tab.\(item.0)", label: item.1, index: index
-            ) { selectedTab = item.2 }
+    private var topNavigation: some View {
+        HStack(spacing: 4) {
+            topButton(.chat, "Chat", "bubble.left.and.bubble.right", "chat")
+            topButton(.jobs, "Jobs", "list.bullet.rectangle", "jobs")
+            topButton(.reviews, "Review", "checkmark.rectangle.stack", "reviews")
+            topButton(.connector, "Connector", "cable.connector", "connector")
         }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .background(Color(uiColor: .systemBackground))
+        .overlay(alignment: .bottom) { Divider() }
     }
 
-    private func unregisterPilotTabs() {
-        for id in ["chat", "jobs", "reviews", "connector"] {
-            AppCopilotActionRegistry.shared.unregister(id: "neox.tab.\(id)")
+    private func topButton(_ destination: MobileTab, _ title: String,
+                           _ symbol: String, _ key: String) -> some View {
+        let selected = selectedTab == destination
+        return Button { selectedTab = destination } label: {
+            VStack(spacing: 3) {
+                Image(systemName: symbol).font(.system(size: 17, weight: .medium))
+                Text(title).font(.system(size: 11, weight: selected ? .semibold : .medium))
+                    .lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+            .frame(maxWidth: .infinity)
+            .frame(height: 43)
+            .background(selected ? Color.accentColor.opacity(0.10) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 9))
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+        .accessibilityIdentifier("neoTopTab" + key.capitalized)
+        .appCopilotAction(id: "neox.tab." + key, label: title,
+                          isVisible: true) { selectedTab = destination }
     }
 }

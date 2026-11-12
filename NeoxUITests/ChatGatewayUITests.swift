@@ -5,12 +5,13 @@ final class ChatGatewayUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
         // Chat remains the default top-level tab even before setup.
-        XCTAssertTrue(app.tabBars.buttons["Chat"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["neoTopTabChat"].waitForExistence(timeout: 15))
         XCTAssertFalse(app.navigationBars["Chat"].exists)
         XCTAssertFalse(app.buttons["neoChatRefresh"].exists)
         XCTAssertTrue(app.textFields["neoChatComposer"].exists ||
                       app.textViews["neoChatComposer"].exists)
         XCTAssertTrue(app.buttons["neoChatAdd"].exists)
+        XCTAssertTrue(app.buttons["neoChatClearHistory"].exists)
         XCTAssertTrue(app.buttons["neoChatMicrophone"].exists)
         XCTAssertTrue(app.buttons["neoChatSend"].exists)
         XCTAssertFalse(app.buttons["neoChatSend"].isEnabled)
@@ -37,10 +38,10 @@ final class ChatGatewayUITests: XCTestCase {
         XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 3))
         app.buttons["Done"].tap()
         XCTAssertTrue(app.keyboards.element.waitForNonExistence(timeout: 3))
-        let jobsTab = app.tabBars.buttons["Jobs"]
+        let jobsTab = app.buttons["neoTopTabJobs"]
         jobsTab.tap()
         XCTAssertTrue(jobsTab.isSelected)
-        let chatTab = app.tabBars.buttons["Chat"]
+        let chatTab = app.buttons["neoTopTabChat"]
         chatTab.tap()
         XCTAssertTrue(chatTab.isSelected)
         XCTAssertTrue(app.keyboards.element.waitForNonExistence(timeout: 3))
@@ -50,9 +51,7 @@ final class ChatGatewayUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Orchestrator thread not connected"].exists)
         XCTAssertFalse(app.otherElements["neoChatError"].exists)
         XCTAssertFalse(app.otherElements["neoChatUnbound"].exists)
-        // The keyboard can cover the tab bar while composing. The assertion
-        // above already verifies the Chat tab and its interactive outbox;
-        // tab switching is covered separately by the app's navigation tests.
+        // Top navigation remains outside the bottom keyboard/composer region.
     }
 }
 
@@ -76,5 +75,19 @@ extension ChatGatewayUITests {
         XCTAssertTrue(mic.waitForExistence(timeout: 12))
         XCTAssertEqual(mic.label, "Dictate")
         XCTAssertTrue(mic.isEnabled)
+    }
+}
+
+extension ChatGatewayUITests {
+    func testClearHistoryRequiresConfirmationAndPreservesComposer() {
+        let app = XCUIApplication()
+        app.launch()
+        let clear = app.buttons["neoChatClearHistory"]
+        XCTAssertTrue(clear.waitForExistence(timeout: 12))
+        clear.tap()
+        XCTAssertTrue(app.buttons["Clear displayed history"].waitForExistence(timeout: 4))
+        app.buttons["neoChatConfirmClear"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["neoChatAdd"].exists)
+        XCTAssertTrue(app.buttons["neoChatSend"].exists)
     }
 }
