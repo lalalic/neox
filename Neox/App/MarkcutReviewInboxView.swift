@@ -43,6 +43,20 @@ struct MarkcutReviewInboxView: View {
     var body: some View {
         NavigationStack {
             List {
+                if let syncError = reviewPush.syncError {
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label(syncError, systemImage: "wifi.exclamationmark")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .accessibilityIdentifier("markcutReviewSyncError")
+                            Button("Retry review sync") {
+                                Task { await reviewPush.syncPending() }
+                            }
+                            .accessibilityIdentifier("markcutReviewSyncRetry")
+                        }
+                    }
+                }
                 ForEach(groups) { group in
                     HStack(spacing: 0) {
                         Button { open(group) } label: { ReviewGroupRow(group: group) }
@@ -91,8 +105,21 @@ struct MarkcutReviewInboxView: View {
                         .accessibilityIdentifier("markcutReviewInboxClose")
                     }
                     Spacer(minLength: 4)
-                    Text("Review Inbox").font(.headline).lineLimit(1)
-                    Spacer().frame(width: 44)
+                    VStack(spacing: 2) {
+                        Text("Review Inbox").font(.headline).lineLimit(1)
+                        if let syncedAt = reviewPush.lastSyncedAt {
+                            Text("Synced \(syncedAt.formatted(date: .omitted, time: .shortened))")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    Button {
+                        Task { await reviewPush.syncPending() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("Refresh reviews")
+                    .accessibilityIdentifier("markcutReviewRefresh")
                 }
                 .buttonStyle(.plain)
                 .padding(.horizontal, 8)

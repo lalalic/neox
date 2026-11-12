@@ -12,7 +12,7 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         // A real iPhone may already have durable local Review items. The
         // UI must open regardless of whether the inbox is empty or populated.
         XCTAssertTrue(app.staticTexts["Review Inbox"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["Refresh local reviews"].exists)
+        XCTAssertTrue(app.buttons["markcutReviewRefresh"].exists)
     }
 
     @MainActor
@@ -50,7 +50,7 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         app.launchArguments.append("-markcut-review-ui-fixture")
         app.launch()
         app.tabBars.buttons["Review Inbox"].tap()
-        XCTAssertFalse(app.buttons["Refresh local reviews"].exists)
+        XCTAssertTrue(app.buttons["markcutReviewRefresh"].exists)
         let options = app.buttons["markcutReviewOptions"]
         XCTAssertTrue(options.waitForExistence(timeout: 5))
         options.tap()

@@ -10,6 +10,7 @@ final class ReviewPushCoordinator: ObservableObject {
     static let shared = ReviewPushCoordinator()
     @Published private(set) var tappedRequestID: String?
     @Published private(set) var syncError: String?
+    @Published private(set) var lastSyncedAt: Date?
 
     func notificationTapped(_ id: String) { tappedRequestID = id }
 
@@ -70,6 +71,7 @@ final class ReviewPushCoordinator: ObservableObject {
             for request in requests.reversed() {
                 _ = MarkcutReviewInboxStore.shared.accept(request, notify: false)
             }
+            lastSyncedAt = Date()
             syncError = nil
         } catch {
             // Never turn an HTTP/auth/decoding failure into a misleading empty
