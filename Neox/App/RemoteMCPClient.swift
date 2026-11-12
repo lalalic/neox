@@ -201,6 +201,9 @@ final class RemoteMCPClient: ObservableObject {
             terminalTool = names.first { $0 == "terminal" || $0.hasSuffix(".terminal") || $0 == "neo_terminal" } ?? ""
             connected = true
             rememberCurrentMac()
+            // Device registration is part of connecting to a verified Master.
+            // APNs credentials may arrive later and update this same record.
+            Task { [weak self] in try? await self?.registerDevice() }
         } catch {
             connected = false
             self.error = error.localizedDescription
@@ -423,40 +426,63 @@ final class RemoteMCPClient: ObservableObject {
         }
     }
 
-    /// APNs token registration automatically follows a saved Master Access Code
-    /// connection through Neo.app Core's authenticated review service.
-    func registerAPNsDevice(deviceID: String, token: String, environment: String) async throws {
-        let result = try await mobileReviewREST(method: "POST", path: "/mobile/review/register", body: [
-            "deviceId": deviceID, "token": token, "environment": environment
-        ])
-        guard result["registered"] as? Bool == true else {
-            throw RemoteError.toolFailure("APNs device registration was not acknowledged")
+    /// One generic device registration after the Master Access Code is verified.
+    /// A refreshed APNs token updates the same device record.
+    func registerDevice(deviceID: String? = nil, token: String? = nil,
+                        environment: String? = nil) async throws {
+        // Status/connect probes run frequently. Do not rewrite the device store
+        // every 30 seconds; a token refresh always bypasses this throttle.
+        let cacheKey = "neox.deviceRegistration." + Self.credentialAccount(for: endpoint)
+        if token == nil && Date().timeIntervalSince1970 - UserDefaults.standard.double(forKey: cacheKey) < 3600 {
+            return
         }
+        var device: [String: Any] = ["deviceId": deviceID ?? Self.persistentDeviceID()]
+        if let token, let environment {
+            device["token"] = token
+            device["environment"] = environment
+        }
+        let result = try await mobileDeviceREST(body: device)
+        guard result["registered"] as? Bool == true else {
+            throw RemoteError.toolFailure("Neo Master did not acknowledge device registration")
+        }
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: cacheKey)
     }
 
-    /// All Markcut Preview requests (MCP and CLI) are queued on Neo Master.
-    /// APNs wakes the app; the authenticated pending list is authoritative.
-    func pendingMarkcutReviews() async throws -> [MarkcutReviewRequest] {
-        let result = try await mobileReviewREST(method: "GET", path: "/mobile/review/pending")
+    /// The wrapper is the delivery queue. Only the phone stores review history.
+    func acquireMarkcutReviews(requestID: String? = nil, ackIDs: [String] = []) async throws -> [MarkcutReviewRequest] {
+        var arguments: [String: Any] = ["deviceId": Self.persistentDeviceID(), "ackIds": ackIDs]
+        if let requestID { arguments["requestId"] = requestID }
+        let result = try await callAuthenticatedTool("review.preview.acquire", arguments)
         guard let items = result["requests"] as? [[String: Any]] else {
-            throw RemoteError.toolFailure("Neo Master returned no review request list")
+            throw RemoteError.toolFailure("Preview acquisition did not return a request list")
         }
         return try items.enumerated().map { index, dictionary in
             do {
-                let encoded = try JSONSerialization.data(withJSONObject: dictionary)
-                return try JSONDecoder().decode(MarkcutReviewRequest.self, from: encoded)
+                let bytes = try JSONSerialization.data(withJSONObject: dictionary)
+                return try JSONDecoder().decode(MarkcutReviewRequest.self, from: bytes)
             } catch {
-                // A corrupt response must not silently turn a nonempty Master
-                // inbox into an empty phone list.
-                throw RemoteError.toolFailure("Preview list item \(index + 1) could not be decoded: \(error.localizedDescription)")
+                throw RemoteError.toolFailure("Preview request \(index + 1) cannot be decoded: \(error.localizedDescription)")
             }
         }
     }
 
-    func completeMarkcutReview(_ id: String) async throws {
-        let receipt = try await mobileReviewREST(method: "POST", path: "/mobile/review/complete", body: ["id": id])
-        guard receipt["acknowledged"] as? Bool == true else {
-            throw RemoteError.toolFailure("Neo Master did not acknowledge completed review")
+    private static func persistentDeviceID() -> String {
+        let key = "neox.masterDeviceId"
+        if let saved = UserDefaults.standard.string(forKey: key), UUID(uuidString: saved) != nil {
+            return saved.lowercased()
+        }
+        let value = (UIDevice.current.identifierForVendor ?? UUID()).uuidString.lowercased()
+        UserDefaults.standard.set(value, forKey: key)
+        return value
+    }
+
+    func acknowledgeAcquiredReviews(_ ids: [String]) async throws {
+        guard !ids.isEmpty else { return }
+        let result = try await callAuthenticatedTool("review.preview.acquire", [
+            "deviceId": Self.persistentDeviceID(), "ackIds": ids
+        ])
+        guard let acked = result["acked"] as? [String], Set(acked) == Set(ids) else {
+            throw RemoteError.toolFailure("Neo Master did not acknowledge acquired reviews")
         }
     }
 
@@ -513,31 +539,24 @@ final class RemoteMCPClient: ObservableObject {
         try MarkcutReviewFeedback.requireAcknowledgement(result)
     }
 
-    /// Review operations use Neo.app's protected REST service, never Agent MCP.
-    /// Use the saved HTTPS identity (not a URL received in review content).
-    private func mobileReviewREST(method: String, path: String,
-                                  body: [String: Any]? = nil) async throws -> [String: Any] {
+    /// Generic device registration is protected by the existing Master Access Code.
+    private func mobileDeviceREST(body: [String: Any]) async throws -> [String: Any] {
         guard let source = URL(string: endpoint), source.scheme == "https", !bearer.isEmpty,
-              ["/mobile/review/register", "/mobile/review/pending", "/mobile/review/complete"].contains(path),
               var components = URLComponents(url: source, resolvingAgainstBaseURL: false) else {
             throw RemoteError.missingCredential
         }
-        components.path = path
+        components.path = "/mobile/device/register"
         components.query = nil
         components.fragment = nil
         guard let url = components.url else { throw RemoteError.invalidEndpoint }
         var request = URLRequest(url: url)
-        request.httpMethod = method
+        request.httpMethod = "POST"
         request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.timeoutInterval = 30
-        if let body {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        }
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 15
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse,
-              http.statusCode == 200 else {
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw RemoteError.http((response as? HTTPURLResponse)?.statusCode ?? 0)
         }
         guard let result = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {

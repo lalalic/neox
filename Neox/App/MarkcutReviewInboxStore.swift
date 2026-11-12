@@ -352,6 +352,9 @@ final class MarkcutReviewInboxStore: ObservableObject {
     }
 
     func request(id: String) -> MarkcutReviewRequest? { requests.first { $0.id == id } }
+    func hasSavedOrDismissed(_ id: String) -> Bool {
+        requests.contains(where: { $0.id == id }) || dismissedIDs.contains(id)
+    }
 
     // A newer accepted review for the same video supersedes older revisions.
     // Keep historical requests visible, but never let them submit as current.

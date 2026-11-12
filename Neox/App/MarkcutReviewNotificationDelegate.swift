@@ -35,7 +35,7 @@ final class MarkcutReviewNotificationDelegate: NSObject, UIApplicationDelegate, 
         // The APNs payload contains only the request UUID, never the review template.
         if let id = notification.request.content.userInfo["neoReviewRequestId"] as? String,
            UUID(uuidString: id) != nil {
-            await ReviewPushCoordinator.shared.syncPending()
+            await ReviewPushCoordinator.shared.syncPending(requestID: id)
         }
         return [.banner, .sound]
     }
@@ -52,6 +52,6 @@ final class MarkcutReviewNotificationDelegate: NSObject, UIApplicationDelegate, 
             ReviewPushCoordinator.shared.notificationTapped(id)
             NotificationCenter.default.post(name: .markcutReviewNotificationTapped, object: nil)
         }
-        if remote != nil { await ReviewPushCoordinator.shared.syncPending() }
+        if let remote { await ReviewPushCoordinator.shared.syncPending(requestID: remote) }
     }
 }

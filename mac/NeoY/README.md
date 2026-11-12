@@ -316,33 +316,21 @@ Mount definitions live in `~/Library/Application Support/NeoY/file-mounts.json` 
 
 NeoY publishes the logical service ID `neoy/app` under the shared `<skillname>/<service-name>` convention. Its native launchd label remains `com.neox.neoy.keepalive` for existing installations, watchdog rollback, and macOS service continuity. Do not rename the signed bundle identifier or launchd label as part of logical service naming.
 
-## Neo Mobile review Core REST Service
+## Neo Mobile device registration and preview delivery
 
-Neo.app uses its existing HTTP listener to provide authenticated REST endpoints,
-backed by the Core runtime's single `Runtime/src/core/tools/review.mjs` module:
+NeoY's signed native gateway has only two generic mobile endpoints:
+`POST /mobile/device/register` (existing Master Access Code; optional APNs
+token) and loopback-only `POST /mobile/notify` (pointer-only APNs wake-up).
+Device registration occurs when an authenticated Neo Mobile connection is
+established and refreshes its APNs token afterward. There is no Core Review
+REST API, `review.mjs`, server-side Review Inbox history, or APNs MCP Tool.
 
-- `POST /mobile/review/register`: iPhone APNs Token registration
-- `GET /mobile/review/pending`: fetch the durable review Inbox
-- `POST /mobile/review/complete`: acknowledge a submitted decision
-- `POST /mobile/review/notify`: private loopback-only notification ingress
-
-Neo Mobile discovers Neo Master using Bonjour, then uses the existing Master
-Access Code stored in its Keychain as the `Authorization: Bearer` credential
-for the first three HTTPS endpoints. OAuth Agent tokens are not accepted.
-`notify` is accepted only from direct local loopback HTTP requests with a
-loopback Host and JSON content type. It is never exposed as an MCP Tool or
-through the authenticated mobile REST surface. No Review MCP provider or
-`NeoxAPNs/` directory is needed; both senders and the phone share the durable
-Core Inbox at `~/Library/Application Support/NeoY/apns/`.
-
-The independent `neo` repository owns the Markcut integration wrapper. It
-calls Neo.app's `notify` REST endpoint, and calls Agents Relay through its CLI.
-
-Review requests survive a missed APNs notification. Mobile foreground sync
-fetches pending entries before an acknowledged decision triggers `complete`.
-After successful submission, Neo Mobile retains the local decision as read-only
-History until the owner deletes it; Core's pending queue is not the phone's
-long-term review-history store.
+Neo's wrapped `review.preview` creates and retains pending deliveries in
+`~/Library/Application Support/NeoY/apns/preview-requests/` (30-day
+recoverability). The authenticated MCP `review.preview.acquire` supports
+single-request acquisition, foreground list recovery, and post-import ACKs.
+Neo Mobile owns the sole persistent user Review history; Relay owns only its
+Task review state. A review ACK never approves or resumes a Relay Task.
 
 ## Rust file-serving sidecar
 

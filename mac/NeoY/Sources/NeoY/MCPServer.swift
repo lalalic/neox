@@ -595,15 +595,15 @@ public final class MCPServer {
             }
         }
 
-        // Review REST API is not an MCP capability. Enforce authorization
-        // before dispatch: the endpoint remains private even for OAuth clients.
-        if path.hasPrefix(NeoYMobileReviewREST.prefix) {
-            guard NeoYMobileReviewREST.actions.contains(where: { $0.0 == method && $0.1 == path }) else {
+        // Mobile device registration is protected by the Master Access Code.
+        // Notification submission is strictly loopback-only. Neither is MCP.
+        if path.hasPrefix("/mobile/") {
+            guard NeoYMobileDeviceNotifications.actions.contains(where: { $0.0 == method && $0.1 == path }) else {
                 sendHTTP(connection: connection, status: 404, body: nil)
                 return
             }
             let masterCode = _snapshotPrivilegedAccessToken
-            guard NeoYMobileReviewREST.allowed(path: path, isLocal: isDirectLoopback,
+            guard NeoYMobileDeviceNotifications.allowed(path: path, isLocal: isDirectLoopback,
                                                  headers: headers, masterAccessCode: masterCode) else {
                 sendHTTP(connection: connection, status: 403, body: nil,
                          extraHeaders: ["Cache-Control": "no-store"])
@@ -631,7 +631,7 @@ public final class MCPServer {
                 let response = await route(method, headers, queryValues, body)
                 sendHTTP(connection: connection, status: response.status, body: response.body,
                           contentType: response.contentType ?? "application/json",
-                          extraHeaders: (path == "/xchat/bootstrap" || path.hasPrefix(NeoYMobileReviewREST.prefix))
+                          extraHeaders: (path == "/xchat/bootstrap" || path.hasPrefix("/mobile/"))
                             ? ["Cache-Control": "no-store"] : [:])
             }
             return
@@ -656,6 +656,7 @@ public final class MCPServer {
                 connection: connection,
                 isLocal: isDirectLoopback,
                 authorized: isPrivileged,
+                masterAuthorized: bearerToken != nil && _snapshotPrivilegedAccessToken != nil && bearerToken == _snapshotPrivilegedAccessToken,
                 principal: presentedToken.map { token in SHA256.hash(data: Data(token.utf8)).map { String(format: "%02x", $0) }.joined() }
             )
 
@@ -744,6 +745,12 @@ public final class MCPServer {
         }
     }
 
+    /// The private delivery acquisition tool is not a generic OAuth agent tool.
+    /// It can only be used locally or by the user's Master Access Code.
+    nonisolated static func requiresMasterCode(_ name: String) -> Bool {
+        name == "review.preview.acquire" || name.hasSuffix(".review.preview.acquire")
+    }
+
     nonisolated private static func isLoopback(_ endpoint: NWEndpoint) -> Bool {
         let value = String(describing: endpoint).lowercased()
         return value.contains("127.0.0.1") || value.contains("::1") || value.contains("localhost")
@@ -752,7 +759,8 @@ public final class MCPServer {
     // MARK: - MCP JSON-RPC Handler (nonisolated)
 
     nonisolated private func handleMCPPostNonisolated(
-        body: Data?, connection: NWConnection, isLocal: Bool, authorized: Bool, principal: String?
+        body: Data?, connection: NWConnection, isLocal: Bool, authorized: Bool,
+        masterAuthorized: Bool, principal: String?
     ) {
         guard let body,
               let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
@@ -860,6 +868,7 @@ public final class MCPServer {
                 visibleTools = _snapshotTools.filter {
                     guard let name = $0["name"] as? String else { return false }
                     guard !_snapshotDisabledFeatureTools.contains(name) else { return false }
+                    guard masterAuthorized || !Self.requiresMasterCode(name) else { return false }
                     return _snapshotRemoteAllowedTools.contains(name)
                         || Self.remoteProvider(forToolName: name, ownership: _snapshotFederatedToolProviders).map { _snapshotRemoteAllowedProviders.contains($0) } == true
                 }.map(Self.normalizeRemoteTool)
@@ -890,6 +899,13 @@ public final class MCPServer {
                 origin: isLocal ? .local : .remote,
                 provider: provider
             )
+            if !isLocal && Self.requiresMasterCode(toolName) && !masterAuthorized {
+                toolCallAudit.record(callID: callID, toolName: toolName,
+                    provenance: provenance, status: .denied, errorCode: .authorizationDenied)
+                sendJSONRPCError(connection: connection, id: id, code: -32003,
+                    message: "Review acquisition requires the Master Access Code")
+                return
+            }
             if _snapshotDisabledFeatureTools.contains(toolName) {
                 toolCallAudit.record(
                     callID: callID, toolName: toolName, provenance: provenance,

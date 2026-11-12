@@ -40,7 +40,6 @@ final class ReviewPushCoordinator: ObservableObject {
               master.hasCredential, master.hasConfiguredAddress else { return }
         let address = master.endpoint
         guard lastRegistration?.token != token || lastRegistration?.master != address else { return }
-        guard let deviceID = UIDevice.current.identifierForVendor?.uuidString else { return }
         registrationInFlight = true
         defer { registrationInFlight = false }
         // A Release-built app installed via Xcode can carry a development
@@ -50,7 +49,7 @@ final class ReviewPushCoordinator: ObservableObject {
             .flatMap { try? Data(contentsOf: $0) }
         let environment = Self.apnsEnvironment(from: profile)
         do {
-            try await master.registerAPNsDevice(deviceID: deviceID, token: token, environment: environment)
+            try await master.registerDevice(token: token, environment: environment)
             lastRegistration = (token, address)
         } catch {
             // No token is stored in UserDefaults or logs. Try again on next
@@ -58,33 +57,41 @@ final class ReviewPushCoordinator: ObservableObject {
         }
     }
 
-    func syncPending() async {
+    func syncPending(requestID: String? = nil) async {
         let master = RemoteMCPClient()
         guard master.hasCredential, master.hasConfiguredAddress else {
             syncError = "Connect to Neo Master with its Master Access Code to load previews."
             return
         }
         do {
-            let requests = try await master.pendingMarkcutReviews()
-            // Import oldest-first so newer revisions stay current. This also
-            // includes read-only text-mode previews with no human decision.
-            for request in requests.reversed() {
-                _ = MarkcutReviewInboxStore.shared.accept(request, notify: false)
+            func storeAndAck(_ requests: [MarkcutReviewRequest]) async throws {
+                var ackIDs: [String] = []
+                for request in requests.reversed() {
+                    _ = MarkcutReviewInboxStore.shared.accept(request, notify: false)
+                    if MarkcutReviewInboxStore.shared.hasSavedOrDismissed(request.id) {
+                        ackIDs.append(request.id)
+                    }
+                }
+                try await master.acknowledgeAcquiredReviews(ackIDs)
+            }
+            if let requestID {
+                let requested = try await master.acquireMarkcutReviews(requestID: requestID)
+                try await storeAndAck(requested)
+            }
+            // APNs is lossy; fetch all unacknowledged pages on each foreground.
+            // Each page is acknowledged after local persistence so the next
+            // acquire advances. Never clear the phone history on an empty page.
+            for _ in 0..<100 {
+                let requests = try await master.acquireMarkcutReviews()
+                if requests.isEmpty { break }
+                try await storeAndAck(requests)
+                if requests.count < 100 { break }
             }
             lastSyncedAt = Date()
             syncError = nil
         } catch {
-            // Never turn an HTTP/auth/decoding failure into a misleading empty
-            // inbox. The user can retry from the Inbox or on next foreground.
-            syncError = "Cannot load Neo Master previews: " + error.localizedDescription
+            syncError = "Cannot acquire Neo Master previews: " + error.localizedDescription
         }
-    }
-
-    func complete(_ id: String) async {
-        let master = RemoteMCPClient()
-        // The human event has already been accepted by Events MCP. If this
-        // acknowledgement fails, the phone's recorded decision prevents replay.
-        try? await master.completeMarkcutReview(id)
     }
 
     static func reviewRequestID(_ userInfo: [AnyHashable: Any]) -> String? {

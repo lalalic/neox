@@ -630,7 +630,6 @@ struct MarkcutReviewInboxView: View {
             do {
                 try await remote.deliverMarkcutReviewFeedback(request: request, feedback: pending)
                 inbox.acknowledge(pending)
-                await ReviewPushCoordinator.shared.complete(request.id)
                 // Keep the saved review visible in the chronological list;
                 // close its editing sheet after the accepted submission.
                 if selectedSessionID == pending.requestId { selectedGroup = nil }
