@@ -102,24 +102,44 @@ struct NeoxApp: App {
     private func topButton(_ destination: MobileTab, _ title: String,
                            _ symbol: String, _ key: String) -> some View {
         let selected = selectedTab == destination
+        let color = destination == .connector ? connectorStatusColor :
+            (selected ? Color.accentColor : Color.secondary)
         return Button { selectedTab = destination } label: {
             VStack(spacing: 3) {
                 Image(systemName: symbol).font(.system(size: 17, weight: .medium))
                 Text(title).font(.system(size: 11, weight: selected ? .semibold : .medium))
                     .lineLimit(1).minimumScaleFactor(0.8)
             }
-            .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+            .foregroundStyle(color)
             .frame(maxWidth: .infinity)
             .frame(height: 43)
-            .background(selected ? Color.accentColor.opacity(0.10) : Color.clear,
+            .background(selected ? color.opacity(0.10) : Color.clear,
                         in: RoundedRectangle(cornerRadius: 9))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
+        .accessibilityValue(destination == .connector ? connectorStatusLabel : "")
         .accessibilityAddTraits(selected ? [.isSelected] : [])
         .accessibilityIdentifier("neoTopTab" + key.capitalized)
         .appCopilotAction(id: "neox.tab." + key, label: title,
                           isVisible: true) { selectedTab = destination }
     }
+    private var connectorStatusColor: Color {
+        switch bridge.state {
+        case .running: .green
+        case .failed: .red
+        case .starting, .idle: .orange
+        }
+    }
+
+    private var connectorStatusLabel: String {
+        switch bridge.state {
+        case .running: "iPhone connector ready"
+        case .failed: "iPhone connector failed"
+        case .starting: "iPhone connector starting"
+        case .idle: "iPhone connector idle"
+        }
+    }
+
 }

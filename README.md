@@ -20,13 +20,16 @@ A dedicated password key enters the saved Mac password into the focused Mac
 input when the owner explicitly taps it. Closing or leaving the view ends
 the session.
 
-Neo Mobile provides four compact **top navigation** buttons (Chat, Jobs, Review, Connector), keeping the chat composer against the bottom safe area without a bottom tab bar. The Connector includes the existing iPhone media MCP server so a desktop agent can search, analyze, and pull photos/videos over Wi-Fi.
+Neo Mobile provides four compact **top navigation** buttons (Chat, Jobs, Review, Connector), keeping the chat composer against the bottom safe area without a bottom tab bar. Connector uses the phone server's actual state to color its top icon/label: green when running, orange while idle/starting, and red on failure. The redundant Connector page title/status banner has been removed; Neo Master connectivity remains visible inside the page. The Connector includes the existing iPhone media MCP server so a desktop agent can search, analyze, and pull photos/videos over Wi-Fi.
 
 ## Neo Mobile Review Inbox
 
 The Review Inbox keeps submissions on the phone after Approve or Request Changes.
-The single list is sorted newest-first and displays a per-review status icon
-(pending, approved, changes requested, preview-only, or superseded). The app
+The Review page has no redundant title or refresh button. Pull down anywhere
+on the list (including when empty) to synchronize with Neo Master; the existing
+foreground/periodic refresh remains. The single list is sorted newest-first and
+displays a per-review status icon (pending, approved, changes requested,
+preview-only, or superseded). The app
 retains the review decision, feedback, submitted time and preview identity;
 submission acceptance does **not** mean that the owning Job has finished.
 Completed reviews are read-only and cannot accidentally submit another decision.

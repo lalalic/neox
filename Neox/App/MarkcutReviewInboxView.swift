@@ -110,38 +110,25 @@ struct MarkcutReviewInboxView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .refreshable {
+                await reviewPush.syncPending()
+                openRequestedPreviewIfAvailable()
+            }
             .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .top, spacing: 0) {
-                HStack(spacing: 8) {
-                    if asTab {
-                        Spacer().frame(width: 44)
-                    } else {
+                if !asTab {
+                    HStack {
                         Button { dismiss() } label: {
                             Image(systemName: "xmark").frame(width: 44, height: 44)
                         }
                         .accessibilityLabel("Close")
                         .accessibilityIdentifier("markcutReviewInboxClose")
+                        Spacer()
                     }
-                    Spacer(minLength: 4)
-                    VStack(spacing: 2) {
-                        Text("Review Inbox").font(.headline).lineLimit(1)
-                        if let syncedAt = reviewPush.lastSyncedAt {
-                            Text("Synced \(syncedAt.formatted(date: .omitted, time: .shortened))")
-                                .font(.caption2).foregroundStyle(.secondary)
-                        }
-                    }
-                    Button {
-                        Task { await reviewPush.syncPending() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .frame(width: 44, height: 44)
-                    }
-                    .accessibilityLabel("Refresh reviews")
-                    .accessibilityIdentifier("markcutReviewRefresh")
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 8)
+                    .background(Color(uiColor: .systemBackground))
                 }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 8)
-                .background(Color(uiColor: .systemBackground))
             }
             .task(id: inbox.feedbackQueue.count) {
                 // Do not block an already-tapped notification behind Master sync.

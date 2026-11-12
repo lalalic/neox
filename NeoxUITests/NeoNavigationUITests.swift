@@ -34,11 +34,18 @@ final class NeoNavigationUITests: XCTestCase {
         )).firstMatch.exists)
 
         app.buttons["neoTopTabReviews"].tap()
-        XCTAssertTrue(app.staticTexts["Review Inbox"].waitForExistence(timeout: 6))
+        XCTAssertFalse(app.staticTexts["Review Inbox"].exists)
+        XCTAssertFalse(app.buttons["markcutReviewRefresh"].exists)
         XCTAssertFalse(app.buttons["markcutReviewInboxClose"].exists)
         XCTAssertFalse(app.staticTexts["No previews yet"].exists)
 
-        app.buttons["neoTopTabConnector"].tap()
+        let connectorTab = app.buttons["neoTopTabConnector"]
+        XCTAssertTrue(connectorTab.waitForExistence(timeout: 10))
+        XCTAssertTrue((connectorTab.value as? String ?? "").contains("iPhone connector"),
+                      "Connector tab must expose its connection state")
+        connectorTab.tap()
+        XCTAssertFalse(app.staticTexts["iPhone ready"].exists)
+        XCTAssertFalse(app.staticTexts["Starting…"].exists)
         XCTAssertTrue(app.buttons["connectorCreateVlog"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["connectorClearTemp"].exists)
         XCTAssertFalse(app.buttons["markcutReviewInboxOpen"].exists)

@@ -21,22 +21,6 @@ struct StatusView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Top: running indicator + endpoint
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(stateColor)
-                    .frame(width: 14, height: 14)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Neo").font(.headline)
-                    Text(bridge.state == .running ? "iPhone ready" : "Starting…")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 18)
-
-            Divider()
-
             if let transaction = bridge.transaction {
                 PhoneTransactionBanner(snapshot: transaction)
                     .task(id: transaction.id) {
@@ -300,13 +284,6 @@ struct StatusView: View {
         return bridge.registeredTools.map { ToolRow(name: $0, summary: descriptions[$0] ?? "") }
     }
 
-    private var stateColor: Color {
-        switch bridge.state {
-        case .running: .green
-        case .failed: .red
-        default: .orange
-        }
-    }
 }
 
 private struct PhoneTransactionBanner: View {

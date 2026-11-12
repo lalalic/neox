@@ -11,8 +11,12 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         inbox.tap()
         // A real iPhone may already have durable local Review items. The
         // UI must open regardless of whether the inbox is empty or populated.
-        XCTAssertTrue(app.staticTexts["Review Inbox"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["markcutReviewRefresh"].exists)
+        XCTAssertFalse(app.staticTexts["Review Inbox"].exists)
+        XCTAssertFalse(app.buttons["markcutReviewRefresh"].exists)
+        // Pull-to-refresh is available even when the local inbox is empty.
+        let list = app.collectionViews.firstMatch
+        XCTAssertTrue(list.waitForExistence(timeout: 5))
+        list.swipeDown()
     }
 
     @MainActor
@@ -70,14 +74,15 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         app.launchArguments.append("-markcut-review-ui-fixture")
         app.launch()
         app.buttons["neoTopTabReviews"].tap()
-        XCTAssertTrue(app.buttons["markcutReviewRefresh"].exists)
-        let options = app.buttons["markcutReviewOptions"]
+        XCTAssertFalse(app.buttons["markcutReviewRefresh"].exists)
+        let options = app.buttons["markcutReviewOptions"].firstMatch
         XCTAssertTrue(options.waitForExistence(timeout: 5))
         options.tap()
         let remove = app.buttons["markcutReviewRemoveMenuItem"]
         XCTAssertTrue(remove.waitForExistence(timeout: 5))
         remove.tap()
-        XCTAssertEqual(app.buttons.matching(identifier: "markcutReviewGroup").count, 0)
+        XCTAssertEqual(app.buttons.matching(identifier: "markcutReviewGroup").count, 1,
+                       "Deleting one review must preserve the other revision")
         XCTAssertFalse(app.staticTexts["No previews yet"].exists)
     }
 
@@ -93,7 +98,8 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         let remove = app.buttons["markcutReviewRemoveGroup"]
         XCTAssertTrue(remove.waitForExistence(timeout: 3))
         remove.tap()
-        XCTAssertEqual(app.buttons.matching(identifier: "markcutReviewGroup").count, 0)
+        XCTAssertEqual(app.buttons.matching(identifier: "markcutReviewGroup").count, 1,
+                       "Deleting one review must preserve the other revision")
         XCTAssertFalse(app.staticTexts["No previews yet"].exists)
     }
 
