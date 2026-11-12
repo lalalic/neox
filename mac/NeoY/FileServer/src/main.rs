@@ -218,6 +218,15 @@ async fn handle(req: HttpRequest, state: web::Data<State>) -> HttpResponse {
     let (root, rel) = if route != "public" && components.len() >= 2 {
         if let Some(root) = mounted_root(&state, components[0]) {
             (Some(root), components[1..].join("/"))
+        } else if route == "preview"
+            && components.len() >= 5
+            && components[0] == "_neoy"
+            && components[1] == "markcut"
+            && components[2] == "generated"
+        {
+            // Markcut snapshots media under the existing public export root,
+            // not under a user mount. Only generated media may use this route.
+            (state.static_root.clone(), decoded.to_string())
         } else if route == "preview" {
             (None, String::new())
         } else {
@@ -417,6 +426,9 @@ mod tests {
         )
         .unwrap();
         fs::write(static_root.join("public.txt"), b"public-static-content").unwrap();
+        let exported = static_root.join("_neoy/markcut/generated/fixture");
+        fs::create_dir_all(&exported).unwrap();
+        fs::write(exported.join("clip.mp4"), b"exported-preview-source").unwrap();
         fs::write(mount.join("run/vision-normalized-manifest.json"),
             r#"{"sources":[{"originalPath":"input/media/original.mp4","normalizedPath":"input/media/.normalized/proxy.mp4"}]}"#).unwrap();
         let mounts = temp.path().join("mounts.json");
@@ -499,6 +511,51 @@ mod tests {
             .to_request();
         let res = test::call_service(&app, req).await;
         assert_eq!(res.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+    }
+
+    #[actix_web::test]
+    async fn supports_markcut_generated_preview_with_strict_namespace() {
+        let (_temp, state) = fixture();
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(state))
+                .default_service(web::to(handle)),
+        )
+        .await;
+        let token = "testsecret123456789012345678901234";
+        let original = "/files/_neoy/markcut/generated/fixture/clip.mp4";
+        let preview = "/preview-files/_neoy/markcut/generated/fixture/clip.mp4?pv=1234567890abcdef";
+        for path in [original, preview] {
+            let req = test::TestRequest::get()
+                .uri(path)
+                .insert_header(("x-neo-file-token", token))
+                .to_request();
+            let res = test::call_service(&app, req).await;
+            assert_eq!(res.status(), StatusCode::OK, "{path}");
+            if path == preview {
+                assert!(res
+                    .headers()
+                    .get(header::CACHE_CONTROL)
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .contains("no-store"));
+            }
+            assert_eq!(&test::read_body(res).await[..], b"exported-preview-source");
+        }
+        for path in [
+            "/preview-files/_neoy/markcut/player/sneaky.mp4",
+            "/preview-files/_neoy/markcut/cache/sneaky.mp4",
+            "/preview-files/_neoy/other/fixture/clip.mp4",
+            "/preview-files/_neoy/markcut/generated/fixture/%2e%2e/clip.mp4",
+        ] {
+            let req = test::TestRequest::get()
+                .uri(path)
+                .insert_header(("x-neo-file-token", token))
+                .to_request();
+            let res = test::call_service(&app, req).await;
+            assert!(res.status().is_client_error(), "{path}: {}", res.status());
+        }
     }
 
     #[actix_web::test]

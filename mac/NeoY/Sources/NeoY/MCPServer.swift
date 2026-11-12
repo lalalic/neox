@@ -712,6 +712,22 @@ public final class MCPServer {
                     }
                 }
             } else if ["GET", "HEAD"].contains(method),
+               path.hasPrefix("/preview-files/_neoy/markcut/generated/"),
+               let root = _staticFileRoot {
+                let relative = String(path.dropFirst("/preview-files/".count))
+                let hasTimeSlice = URLComponents(string: "http://localhost\(requestTarget)")?.queryItems?
+                    .contains(where: { $0.name == "startSeconds" || $0.name == "durationSeconds" }) ?? false
+                serveRustOrSwift(method: method, path: requestTarget, requestHeaders: immutableFileHeaders,
+                                 connection: connection) { [weak self] in
+                    if hasTimeSlice {
+                        self?.sendHTTP(connection: connection, status: 503, body: nil)
+                    } else {
+                        self?.serveStaticFile(relativePath: relative, root: root,
+                                              rangeHeader: immutableRangeHeader,
+                                              headOnly: method == "HEAD", connection: connection)
+                    }
+                }
+            } else if ["GET", "HEAD"].contains(method),
                path.hasPrefix("/files/") || path.hasPrefix("/public/"),
                let root = _staticFileRoot {
                 let prefix = path.hasPrefix("/files/") ? "/files/" : "/public/"

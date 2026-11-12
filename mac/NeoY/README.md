@@ -353,7 +353,9 @@ range responses, conditional caching, exact unsampled manifest-selected normaliz
 media, and a private on-demand preview-transcode cache for full films or exact time slices
 through the same public `/files/`, `/public/`, `/preview-files/` URLs.
 Swift remains an automatic fallback if the helper cannot start or connect.
-There are no new public URLs or MCP tools. Existing mount/unmount settings,
+Markcut-generated previews also use the existing `/preview-files/` namespace
+under `_neoy/markcut/generated/`, preserving `video.md` and the ordinary
+`/files/` original-media behavior. No new MCP tools are needed. Existing mount/unmount settings,
 public CORS behavior and Markcut `video.md` references are unchanged. Native
 integration uses Actix Web, `actix-files::NamedFile::from_file` and `cap-std`
 for race-safe capability-confined file opening. The installer signs the helper

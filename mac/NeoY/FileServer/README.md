@@ -15,7 +15,11 @@ only on a randomly chosen localhost port and requires a per-launch token sent
 solely by NeoY's reverse proxy. It exits when its parent disappears.
 
 Mounted files retain `/files/<mount>/<relative>`; the old `/files/...` and
-`/public/...` static-root routes remain supported. For
+`/public/...` static-root routes remain supported. Markcut-generated video snapshots
+also use `/preview-files/_neoy/markcut/generated/<revision>/<file>.mp4`, strictly
+scoped to that existing public export directory. This closes the bypass where
+Markcut historically served generated movie assets as full-sized `/files/_neoy/…`
+media; other `_neoy` preview paths remain denied. For
 `/preview-files/<mount>/<relative>`, `vision-normalized-manifest.json` selects an
 existing `.normalized` proxy only when it is timeline-faithful (`sampled` is
 false) and covers exactly the requested media. Entries can optionally include
