@@ -16,6 +16,26 @@ final class MarkcutReviewInboxUITests: XCTestCase {
     }
 
     @MainActor
+    func testApprovedReviewPersistsAsReadOnlyHistoryUntilDeleted() {
+        let app = XCUIApplication()
+        app.launchArguments.append("-markcut-review-completed-fixture")
+        app.launch()
+        app.tabBars.buttons["Review Inbox"].tap()
+        let history = app.segmentedControls.buttons["History"]
+        XCTAssertTrue(history.waitForExistence(timeout: 5))
+        history.tap()
+        let group = app.buttons["markcutReviewGroup"].firstMatch
+        XCTAssertTrue(group.waitForExistence(timeout: 5))
+        group.tap()
+        XCTAssertTrue(app.staticTexts["Approved · sent"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["markcutReviewApprove"].exists)
+        app.buttons["markcutReviewPreviewClose"].tap()
+        app.buttons["markcutReviewOptions"].firstMatch.tap()
+        app.buttons["markcutReviewRemoveMenuItem"].tap()
+        XCTAssertEqual(app.buttons.matching(identifier: "markcutReviewGroup").count, 0)
+    }
+
+    @MainActor
     func testNotificationRoutesToExactlyThePreviewItem() {
         let app = XCUIApplication()
         app.launchArguments += [

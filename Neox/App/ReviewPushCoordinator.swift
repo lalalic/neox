@@ -83,7 +83,7 @@ final class ReviewPushCoordinator: ObservableObject {
     func complete(_ id: String) async {
         let master = RemoteMCPClient()
         // The human event has already been accepted by Events MCP. If this
-        // acknowledgement fails, the local dedup tombstone prevents replay.
+        // acknowledgement fails, the phone's recorded decision prevents replay.
         try? await master.completeMarkcutReview(id)
     }
 

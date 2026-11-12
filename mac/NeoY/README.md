@@ -338,15 +338,19 @@ Core Inbox at `~/Library/Application Support/NeoY/apns/`.
 The independent `neo` repository owns the Markcut integration wrapper. It
 calls Neo.app's `notify` REST endpoint, and calls Agents Relay through its CLI.
 
-Review requests survive a missed APNs notification, and mobile foreground sync
+Review requests survive a missed APNs notification. Mobile foreground sync
 fetches pending entries before an acknowledged decision triggers `complete`.
+After successful submission, Neo Mobile retains the local decision as read-only
+History until the owner deletes it; Core's pending queue is not the phone's
+long-term review-history store.
 
 ## Rust file-serving sidecar
 
 NeoY optionally runs a separate private Rust file server bundled and signed
 with the app. See [`FileServer/README.md`](FileServer/README.md). NeoY stays the
-sole external HTTP/MCP gateway; the Rust helper provides read-only streaming,
-range responses, conditional caching and manifest-selected normalized media
+sole external HTTP/MCP gateway; the Rust helper provides read-only original-media streaming,
+range responses, conditional caching, exact unsampled manifest-selected normalized
+media, and a private on-demand preview-transcode cache for full films or exact time slices
 through the same public `/files/`, `/public/`, `/preview-files/` URLs.
 Swift remains an automatic fallback if the helper cannot start or connect.
 There are no new public URLs or MCP tools. Existing mount/unmount settings,

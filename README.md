@@ -22,6 +22,22 @@ the session.
 
 Neo Mobile provides **Chat**, **Jobs**, **Review Inbox**, and **Connector** tabs. The Connector includes the existing iPhone media MCP server so a desktop agent can search, analyze, and pull photos/videos over Wi-Fi.
 
+## Neo Mobile Review Inbox
+
+The Review Inbox keeps submissions on the phone after Approve or Request Changes.
+Use **All**, **Pending**, or **History** to filter records. History keeps each
+review's decision, feedback, submitted time and preview identity; submission
+acceptance does **not** mean that the owning Job has finished. History is
+read-only: it cannot accidentally submit another decision. Delete individual
+revisions from their preview menu, or delete a group with the row menu or
+swipe. Deletion is phone-owned and prevents a late APNs repeat from restoring
+the deleted row. Items pending feedback delivery cannot be deleted. Previously
+deleted reviews cannot be recovered automatically.
+
+The review metadata is stored on the phone across app relaunches. Video
+replay still requires the Neo Master to retain the referenced Markcut compiled
+preview and media; this feature does not copy full videos into phone storage.
+
 ## Relay Jobs on Neo Mobile
 
 The Jobs tab reads the selected Master's authenticated Chat Gateway. Active Jobs are listed first, followed by recent terminal Jobs. Each row shows the title (or Job ID fallback), the Gateway-projected runtime status (including `WAITING`, `IDLE`, `REVIEWING`, and `MERGE_PENDING`), and **creation time** (from Relay `createdAt`, not the last update). The detail view reads the latest Job snapshot while open and shows the repository and a sanitized activity timeline; no raw prompts, private paths, arbitrary event messages or exception text are displayed.

@@ -113,7 +113,15 @@ final class MarkcutReviewDecisionTests: XCTestCase {
         XCTAssertNoThrow(try MarkcutReviewFeedback.requireAcknowledgement(["acknowledged": true]))
         store.acknowledge(feedback)
         let afterAcknowledgement = MarkcutReviewInboxStore(defaults: defaults).requests
-        XCTAssertTrue(afterAcknowledgement.isEmpty)
+        XCTAssertEqual(afterAcknowledgement, [request])
+        let reopened = MarkcutReviewInboxStore(defaults: defaults)
+        XCTAssertEqual(reopened.completed[request.id]?.feedback, feedback)
+        XCTAssertEqual(reopened.groupedSessions.first?["status"] as? String, "decided")
+        XCTAssertEqual((reopened.groupedSessions.first?["decision"] as? [String: Any])?["decision"] as? String, "approved")
+        XCTAssertTrue(reopened.feedbackQueue.isEmpty)
+        reopened.remove(request.id)
+        XCTAssertTrue(MarkcutReviewInboxStore(defaults: defaults).completed.isEmpty)
+        XCTAssertTrue(MarkcutReviewInboxStore(defaults: defaults).requests.isEmpty)
     }
 
     @MainActor
@@ -222,7 +230,8 @@ final class MarkcutReviewDecisionTests: XCTestCase {
                        "retry-key-preserved")
         XCTAssertEqual(restored.feedbackQueue[0].reviewResult(request: request)["comments"] as? [[String: String]], [])
         restored.acknowledge(queued)
-        XCTAssertEqual(MarkcutReviewInboxStore(defaults: defaults).requests.count, 0)
+        XCTAssertEqual(MarkcutReviewInboxStore(defaults: defaults).requests, [request])
+        XCTAssertEqual(MarkcutReviewInboxStore(defaults: defaults).completed[request.id]?.feedback, queued)
     }
 
     @MainActor

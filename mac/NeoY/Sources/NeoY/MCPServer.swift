@@ -697,11 +697,19 @@ public final class MCPServer {
                let mount = NeoYFileMounts.load()[String(tail[..<slash])] {
                 let relative = String(tail[tail.index(after: slash)...])
                 let selected = Self.previewProxyPath(relativePath: relative, root: mount) ?? relative
-                serveRustOrSwift(method: method, path: path, requestHeaders: immutableFileHeaders,
+                let hasTimeSlice = URLComponents(string: "http://localhost\(requestTarget)")?.queryItems?
+                    .contains(where: { $0.name == "startSeconds" || $0.name == "durationSeconds" }) ?? false
+                // Forward the query: the Rust server uses it to request a
+                // frame-accurate clip. Swift cannot serve that slice itself.
+                serveRustOrSwift(method: method, path: requestTarget, requestHeaders: immutableFileHeaders,
                                  connection: connection) { [weak self] in
-                    self?.serveStaticFile(relativePath: selected, root: mount, rangeHeader: immutableRangeHeader,
-                                          headOnly: method == "HEAD", connection: connection,
-                                          allowVisionProxy: selected != relative)
+                    if hasTimeSlice {
+                        self?.sendHTTP(connection: connection, status: 503, body: nil)
+                    } else {
+                        self?.serveStaticFile(relativePath: selected, root: mount, rangeHeader: immutableRangeHeader,
+                                              headOnly: method == "HEAD", connection: connection,
+                                              allowVisionProxy: selected != relative)
+                    }
                 }
             } else if ["GET", "HEAD"].contains(method),
                path.hasPrefix("/files/") || path.hasPrefix("/public/"),
@@ -1252,7 +1260,11 @@ public final class MCPServer {
                let sources = json["sources"] as? [[String: Any]] {
                 let relativeOriginal = original.path.replacingOccurrences(of: directory.path + "/", with: "", range: original.path.range(of: directory.path + "/"))
                 for item in sources where item["originalPath"] as? String == relativeOriginal {
-                    guard let proxy = item["normalizedPath"] as? String,
+                    // A sampled or time-sliced proxy cannot replace a full,
+                    // timeline-faithful media request in the Swift fallback.
+                    guard item["sampled"] as? Bool != true,
+                          item["startSeconds"] == nil, item["durationSeconds"] == nil,
+                          let proxy = item["normalizedPath"] as? String,
                           !proxy.split(separator: "/").contains(where: { $0 == ".." || $0 == "." }),
                           proxy.hasPrefix("input/media/.normalized/") else { return nil }
                     let candidate = directory.appendingPathComponent(proxy).resolvingSymlinksInPath()

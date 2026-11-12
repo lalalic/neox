@@ -262,11 +262,17 @@ struct MarkcutReviewFeedback: Codable, Equatable, Identifiable {
     }
 }
 
+struct MarkcutReviewCompleted: Codable, Equatable {
+    let feedback: MarkcutReviewFeedback
+    let submittedAt: Date
+}
+
 @MainActor
 final class MarkcutReviewInboxStore: ObservableObject {
     static let shared = MarkcutReviewInboxStore()
     private let requestsKey = "markcut.review.inbox.v2"
     private let feedbackKey = "markcut.review.feedback.v2"
+    private let completedKey = "markcut.review.completed.v1"
     private let dismissedKey = "markcut.review.dismissed.v1"
     private let latestGroupKey = "markcut.review.latest-group.v1"
     private var latestGroupRequestIDs: [String: String]
@@ -274,6 +280,7 @@ final class MarkcutReviewInboxStore: ObservableObject {
     private let defaults: UserDefaults
     @Published private(set) var requests: [MarkcutReviewRequest]
     @Published private(set) var feedbackQueue: [MarkcutReviewFeedback]
+    @Published private(set) var completed: [String: MarkcutReviewCompleted]
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -282,6 +289,8 @@ final class MarkcutReviewInboxStore: ObservableObject {
             from: defaults.data(forKey: requestsKey) ?? Data())) ?? []
         feedbackQueue = (try? JSONDecoder().decode([MarkcutReviewFeedback].self,
             from: defaults.data(forKey: feedbackKey) ?? Data())) ?? []
+        completed = (try? JSONDecoder().decode([String: MarkcutReviewCompleted].self,
+            from: defaults.data(forKey: completedKey) ?? Data())) ?? [:]
         latestGroupRequestIDs = defaults.dictionary(forKey: latestGroupKey) as? [String: String] ?? [:]
         // On upgrade, recover the newest request for each group without losing
         // tombstones that already outlived their acknowledged requests.
@@ -318,6 +327,8 @@ final class MarkcutReviewInboxStore: ObservableObject {
     func remove(_ id: String) {
         guard !feedbackQueue.contains(where: { $0.requestId == id }) else { return }
         requests.removeAll { $0.id == id }
+        completed.removeValue(forKey: id)
+        saveCompleted()
         rememberDismissed(id)
         saveRequests()
         clearNotifications(id)
@@ -330,11 +341,13 @@ final class MarkcutReviewInboxStore: ObservableObject {
     }
 
     func acknowledge(_ feedback: MarkcutReviewFeedback) {
+        // Transport accepted the exact user decision. Keep the review and media
+        // identity as a local, read-only record until the user deletes it.
+        guard requests.contains(where: { $0.id == feedback.requestId }) else { return }
+        completed[feedback.requestId] = MarkcutReviewCompleted(feedback: feedback, submittedAt: Date())
         feedbackQueue.removeAll { $0.id == feedback.id }
-        requests.removeAll { $0.id == feedback.requestId }
-        rememberDismissed(feedback.requestId)
+        saveCompleted()
         saveFeedback()
-        saveRequests()
         clearNotifications(feedback.requestId)
     }
 
@@ -350,7 +363,12 @@ final class MarkcutReviewInboxStore: ObservableObject {
     var groupedSessions: [[String: Any]] {
         requests.map { request in
             var item = request.groupingValue
-            if !isCurrent(request) { item["status"] = "superseded" }
+            if let recorded = completed[request.id] {
+                item["status"] = "decided"
+                item["decision"] = ["decision": recorded.feedback.decision.rawValue,
+                                    "feedback": recorded.feedback.feedback,
+                                    "submittedAt": ISO8601DateFormatter().string(from: recorded.submittedAt)]
+            } else if !isCurrent(request) { item["status"] = "superseded" }
             return item
         }
     }
@@ -377,6 +395,10 @@ final class MarkcutReviewInboxStore: ObservableObject {
 
     private func saveFeedback() {
         if let data = try? JSONEncoder().encode(feedbackQueue) { defaults.set(data, forKey: feedbackKey) }
+    }
+
+    private func saveCompleted() {
+        if let data = try? JSONEncoder().encode(completed) { defaults.set(data, forKey: completedKey) }
     }
 
     private func notifyForNewRequest(_ request: MarkcutReviewRequest) {

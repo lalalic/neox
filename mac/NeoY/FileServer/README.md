@@ -3,7 +3,9 @@
 This is an **unprivileged-in-purpose, loopback-only** HTTP file-serving sidecar.
 The NeoY Swift gateway still owns public URLs, tunnel/credentials, mount and
 unmount commands, and the native application lifecycle. No MCP tools are added.
-Unlike unrestricted Rust Core, this helper has no shell or filesystem write API.
+Unlike unrestricted Rust Core, this helper exposes no shell or filesystem write API.
+Its only writes are private, derived preview media in `preview-media-cache` next to
+NeoY's `file-mounts.json`; mounted source media is never modified.
 
 The sidecar uses **Actix Web + `actix-files::NamedFile`** for streaming, ranges,
 conditional caching and MIME handling. `cap-std` opens a capability-confined
@@ -15,9 +17,19 @@ solely by NeoY's reverse proxy. It exits when its parent disappears.
 Mounted files retain `/files/<mount>/<relative>`; the old `/files/...` and
 `/public/...` static-root routes remain supported. For
 `/preview-files/<mount>/<relative>`, `vision-normalized-manifest.json` selects an
-existing `.normalized` proxy or falls back to the original media. All mounts
+existing `.normalized` proxy only when it is timeline-faithful (`sampled` is
+false) and covers exactly the requested media. Entries can optionally include
+`startSeconds` and `durationSeconds` to identify a pre-generated clip. The
+internal preview URL accepts the same two query parameters to request a
+frame-accurate time slice of a larger source. If no matching proxy exists,
+FFmpeg generates a cached, mobile-sized H.264/AAC proxy, preserving the full
+original or exactly the requested time interval. Conversion failure falls back
+to the original for whole-file requests; explicit time slices return 503 rather
+than silently using the wrong part of a video. The existing Swift file-serving
+fallback remains for regular whole-file requests. All mounts
 are dynamically re-read from NeoY's existing `file-mounts.json` configuration.
-Direct user URLs and `video.md` content never change.
+Direct original file URLs and `video.md` content never change. Preview
+requests use `/preview-files/` only; `/files/` always serves originals.
 
 On sidecar connection failure **before any response bytes**, the gateway uses
 the original Swift file handler. Responses that have started streaming are

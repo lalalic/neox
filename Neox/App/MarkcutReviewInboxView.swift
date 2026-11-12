@@ -32,9 +32,21 @@ struct MarkcutReviewInboxView: View {
     @State private var playbackPosition: MarkcutPlaybackPosition?
     @State private var message: String?
     @State private var syncing = false
+    @State private var reviewFilter = "All"
     private var sessions: [[String: Any]] { fixtureSessions ?? inbox.groupedSessions }
 
-    private var groups: [MarkcutReviewGroup] { MarkcutReviewGrouping.groups(from: sessions) }
+    private var groups: [MarkcutReviewGroup] {
+        let visible: [[String: Any]]
+        switch reviewFilter {
+        case "Pending":
+            visible = sessions.filter {
+                $0["status"] as? String == "ready" && ($0["reviewActionable"] as? Bool ?? true)
+            }
+        case "History": visible = sessions.filter { $0["status"] as? String == "decided" }
+        default: visible = sessions
+        }
+        return MarkcutReviewGrouping.groups(from: visible)
+    }
     private func selectedItem(in group: MarkcutReviewGroup) -> [String: Any]? {
         return group.sessions.filter { $0.reviewSessionID == selectedSessionID }.first?.value
             ?? group.sessions.first?.value
@@ -57,6 +69,13 @@ struct MarkcutReviewInboxView: View {
                         }
                     }
                 }
+                Picker("Review status", selection: $reviewFilter) {
+                    Text("All").tag("All")
+                    Text("Pending").tag("Pending")
+                    Text("History").tag("History")
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("markcutReviewStatusFilter")
                 ForEach(groups) { group in
                     HStack(spacing: 0) {
                         Button { open(group) } label: { ReviewGroupRow(group: group) }
@@ -68,7 +87,7 @@ struct MarkcutReviewInboxView: View {
                                 isVisible: isPilotActive && selectedGroup == nil
                             ) { open(group) }
                         Menu {
-                            Button("Remove from Inbox", systemImage: "trash", role: .destructive) {
+                            Button("Delete review", systemImage: "trash", role: .destructive) {
                                 removeGroup(group)
                             }
                             .disabled(queuedFeedback(in: group))
@@ -129,7 +148,15 @@ struct MarkcutReviewInboxView: View {
                 // Do not block an already-tapped notification behind Master sync.
                 // A slow network can otherwise leave the target revision unselected.
                 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("-markcut-review-ui-multi-fixture") {
+                if ProcessInfo.processInfo.arguments.contains("-markcut-review-completed-fixture") {
+                    if let request = try? MarkcutReviewRequest(id: UUID().uuidString,
+                        contentHash: String(repeating: "f", count: 64), revisionID: "fixture-approved",
+                        title: "Completed film", ownerCallbackTool: "review.feedback") {
+                        inbox.accept(request, notify: false)
+                        inbox.acknowledge(MarkcutReviewFeedback(requestId: request.id,
+                            decision: .approved, feedback: "Looks good", idempotencyKey: UUID().uuidString))
+                    }
+                } else if ProcessInfo.processInfo.arguments.contains("-markcut-review-ui-multi-fixture") {
                     fixtureSessions = MarkcutReviewGrouping.multiModeFixture
                 } else if ProcessInfo.processInfo.arguments.contains("-markcut-review-ui-fixture") {
                     fixtureSessions = MarkcutReviewGrouping.uiFixture
@@ -186,7 +213,7 @@ struct MarkcutReviewInboxView: View {
                             preview(for: item)
                                 .frame(width: proxy.size.width, height: proxy.size.height)
                             if let decision = item["decision"] as? [String: Any] {
-                                Label((decision["decision"] as? String) == "approved" ? "Approved" : "Changes requested",
+                                Label((decision["decision"] as? String) == "approved" ? "Approved · sent" : "Changes requested · sent",
                                       systemImage: (decision["decision"] as? String) == "approved" ? "checkmark.seal.fill" : "arrow.uturn.backward.circle.fill")
                                     .font(.caption.weight(.medium))
                                     .padding(7)
@@ -211,6 +238,22 @@ struct MarkcutReviewInboxView: View {
                 .padding(.vertical, 6)
                 // Do not place action buttons after a potentially 40-second film
                 // in the scroll view. The decision dock remains reachable.
+                if let item = selectedItem(in: group),
+                   let decision = item["decision"] as? [String: Any] {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let date = decision["submittedAt"] as? String,
+                           let submittedAt = ISO8601DateFormatter().date(from: date) {
+                            Text("Sent \(submittedAt.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let note = decision["feedback"] as? String, !note.isEmpty {
+                            Text(note).font(.subheadline)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14).padding(.bottom, 8)
+                    .accessibilityIdentifier("markcutReviewHistoryDetails")
+                }
                 if let item = selectedItem(in: group), item["status"] as? String == "ready",
                    !(item["decision"] is [String: Any]) {
                     Divider()
@@ -245,6 +288,20 @@ struct MarkcutReviewInboxView: View {
                     .accessibilityIdentifier("markcutReviewPreviewClose")
                     Spacer(minLength: 2)
                     Menu {
+                        if let item = selectedItem(in: group),
+                           let requestID = item["id"] as? String {
+                            Button("Delete this review", systemImage: "trash", role: .destructive) {
+                                guard !inbox.feedbackQueue.contains(where: { $0.requestId == requestID }) else { return }
+                                if fixtureSessions != nil {
+                                    fixtureSessions?.removeAll { $0["id"] as? String == requestID }
+                                } else {
+                                    inbox.remove(requestID)
+                                }
+                                selectedGroup = nil
+                            }
+                            .disabled(inbox.feedbackQueue.contains(where: { $0.requestId == requestID }))
+                            .accessibilityIdentifier("markcutReviewDeleteRevision")
+                        }
                         ForEach(group.sessions, id: \.reviewSessionID) { revision in
                             Button {
                                 guard revision.reviewSessionID != selectedSessionID else { return }
@@ -590,8 +647,7 @@ struct MarkcutReviewInboxView: View {
                 await ReviewPushCoordinator.shared.complete(request.id)
                 // Never leave the reviewed (now removed) revision in an open sheet.
                 if selectedSessionID == pending.requestId { selectedGroup = nil }
-                if inbox.requests.isEmpty { dismiss() }
-                message = "Review submitted (transport accepted; consumer processing is separate)."
+                message = "Review sent and saved in History (consumer processing is separate)."
             } catch {
                 failures += 1
                 message = "Review not submitted: " + error.localizedDescription + ". It remains queued with the original idempotency key."
