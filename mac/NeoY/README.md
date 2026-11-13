@@ -327,7 +327,10 @@ REST API, `review.mjs`, server-side Review Inbox history, or APNs MCP Tool.
 
 Neo's wrapped `review.preview` creates and retains pending deliveries in
 `~/Library/Application Support/NeoY/apns/preview-requests/` (30-day
-recoverability). The authenticated MCP `review.preview.acquire` supports
+recoverability). Federated Markcut review tools publish the Neo-owned direct
+names `review.preview` (agent-facing preview) and `review.preview.acquire`
+(Neo Mobile app-only); `markcut.preview` and `markcut.preview.media` retain
+Markcut's original names and responsibilities. The authenticated MCP `review.preview.acquire` supports
 single-request acquisition, foreground list recovery, and post-import ACKs.
 Neo Mobile owns the sole persistent user Review history; Relay owns only its
 Task review state. A review ACK never approves or resumes a Relay Task.

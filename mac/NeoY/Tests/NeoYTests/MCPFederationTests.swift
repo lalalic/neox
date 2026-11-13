@@ -213,7 +213,13 @@ final class MCPFederationTests: XCTestCase {
         defer { Task { @MainActor in federation.stop() } }
 
         let names = await MainActor.run { server.toolNames }
-        XCTAssertEqual(names, ["markcut.output", "markcut.preview", "markcut.preview.submit", "mcp.markcut"])
+        XCTAssertEqual(names, ["markcut.output", "markcut.preview", "markcut.preview.submit", "mcp.markcut", "review.preview", "review.preview.acquire"])
+        XCTAssertFalse(names.contains("markcut.review.preview"))
+        XCTAssertFalse(names.contains("markcut.review.preview.acquire"))
+        XCTAssertEqual(MCPServer.remoteProvider(forToolName: "review.preview",
+                                                ownership: ["review.preview": "markcut"]), "markcut")
+        XCTAssertEqual(MCPServer.remoteProvider(forToolName: "review.preview.acquire",
+                                                ownership: ["review.preview.acquire": "markcut"]), "markcut")
         let descriptorData = await MainActor.run { Data(server.toolDescriptorsJSON.utf8) }
         let descriptors = try XCTUnwrap(try JSONSerialization.jsonObject(with: descriptorData) as? [[String: Any]])
         let preview = try XCTUnwrap(descriptors.first { $0["name"] as? String == "markcut.preview" })
@@ -226,6 +232,17 @@ final class MCPFederationTests: XCTestCase {
         let actionUI = try XCTUnwrap(actionMeta["ui"] as? [String: Any])
         XCTAssertEqual(actionUI["visibility"] as? [String], ["app"])
         XCTAssertNil(actionMeta["ui/resourceUri"])
+
+        let acquisition = try XCTUnwrap(descriptors.first { $0["name"] as? String == "review.preview.acquire" })
+        let acquisitionMeta = try XCTUnwrap(acquisition["_meta"] as? [String: Any])
+        let acquisitionUI = try XCTUnwrap(acquisitionMeta["ui"] as? [String: Any])
+        XCTAssertEqual(acquisitionUI["visibility"] as? [String], ["app"])
+        XCTAssertNil(acquisitionMeta["ui/resourceUri"])
+
+        let review = try XCTUnwrap(descriptors.first { $0["name"] as? String == "review.preview" })
+        let reviewMeta = try XCTUnwrap(review["_meta"] as? [String: Any])
+        let reviewUI = try XCTUnwrap(reviewMeta["ui"] as? [String: Any])
+        XCTAssertTrue((reviewUI["resourceUri"] as? String)?.hasPrefix("ui://markcut/") == true)
 
         let output = try XCTUnwrap(descriptors.first { $0["name"] as? String == "markcut.output" })
         let outputMeta = try XCTUnwrap(output["_meta"] as? [String: Any])
@@ -259,6 +276,11 @@ final class MCPFederationTests: XCTestCase {
         }
         let submit = try await server.invokeRegisteredTool("markcut.preview.submit", arguments: .object([:]))
         XCTAssertTrue(try Self.text(submit).contains("submit-called"))
+        let reviewCall = try await server.invokeRegisteredTool("review.preview", arguments: .object([:]))
+        XCTAssertTrue(try Self.text(reviewCall).contains("review-called"))
+        let acquireCall = try await server.invokeRegisteredTool("review.preview.acquire", arguments: .object([:]))
+        XCTAssertTrue(try Self.text(acquireCall).contains("acquire-called"))
+        await XCTAssertThrowsErrorAsync { _ = try await server.invokeRegisteredTool("markcut.review.preview", arguments: .object([:])) }
         await XCTAssertThrowsErrorAsync { _ = try await server.invokeRegisteredTool("mcp.markcut", arguments: .object([
             "command": .string("preview.submit")
         ])) }
@@ -340,6 +362,8 @@ final class MCPFederationTests: XCTestCase {
         })).concat(includeUIMetadata ? [
           { name: "preview", description: "Preview", inputSchema: { type: "object", properties: {} }, _meta: { ui: { resourceUri: "ui://markcut/preview.html" } } },
           { name: "markcut.preview.submit", description: "Submit", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["app"] } } },
+          { name: "review.preview", description: "Review", inputSchema: { type: "object", properties: {} }, _meta: { ui: { resourceUri: "ui://markcut/preview.html" } } },
+          { name: "review.preview.acquire", description: "Acquire", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["app"] } } },
           { name: "output", description: "Output", inputSchema: { type: "object", properties: {} }, _meta: { "openai/outputTemplate": "ui://markcut/output.html" } }
         ] : []);
         const result = text => ({ content: [{ type: "text", text }] });
@@ -382,6 +406,8 @@ final class MCPFederationTests: XCTestCase {
               }
             };
             if (name === "markcut.preview.submit") value = result("submit-called");
+            if (name === "review.preview") value = result("review-called");
+            if (name === "review.preview.acquire") value = result("acquire-called");
           }
           process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: value }) + "\n");
         });
