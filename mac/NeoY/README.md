@@ -63,7 +63,16 @@ deployment set hostname <host>
 
 Changing deployment settings persists them, restarts the MCP listener after the current response completes, and reconciles the Cloudflare tunnel. The menu-bar **Setup…** window exposes the same port/tunnel values plus local/public test buttons and MCP app credentials.
 
-Optional/product MCP providers appear as one CLI-style facade per provider (`events` or `mcp.<server>`) and are configured in the control plane. Runtime code is grouped by owner under `Runtime/src/core`: `tools/` owns Core capabilities; `tools/xchat.mjs` is the thin Browser Workspace lifecycle adapter; and `lib/` contains Core helpers. The migrated implementation and MIT attribution are documented in `core/UPSTREAM.md`. MacBridge is not an npm dependency or separate installed service. `~/Workspace/neox/mac/NeoY/Runtime` is the single runtime source of truth: Swift starts the Core stdio provider from that repo directory, while NeoY itself owns the local and public HTTP MCP transport. Runtime source changes require restarting the Core provider; no runtime package copy is installed under Application Support.
+Optional/product MCP providers appear as one CLI-style facade per provider
+(`events` or `mcp.<server>`) and are configured in the control plane.
+The single Core implementation lives in [`CoreRust`](CoreRust/README.md).
+NeoY packages and separately signs `neoy-core-rust`, boots it via stdio,
+validates real MCP `initialize` and `tools/list`, and versions it under
+`~/Library/Application Support/NeoY/core/rust/versions/` with atomic selection,
+recovery from the signed app seed, and explicit version rollback. Node Core,
+Node fallback and npm Core packages are no longer installed or loaded.
+MacBridge is not a separate installed service. The gateway and native
+permissions remain owned by the signed NeoY app.
 
 NeoY explicitly authorizes only that trusted Core child at spawn time; unrelated stdio providers receive no such authorization. Federation initializes the child, requires a successful `tools/list` before publishing it as ready, routes concurrent JSON-RPC responses by request ID, removes stale registrations on an unexpected exit, and respawns with bounded backoff without restarting NeoY.
 
@@ -122,23 +131,12 @@ are deliberately outside this automatic deletion policy.
 
 ## Core background-job retention
 
-Node and Rust Core enforce the same private, automatic job GC policy. Completed
+Rust Core owns the private, automatic shell-job retention policy. Completed
 jobs are retained for **72 hours or the most recent 2,000**, whichever removes
-more entries; a nonblocking hourly sweep removes at most 1,000 verified
-records. The sweeper does not kill any process. macOS process creation times
-and process groups protect running jobs and surviving descendants without
-mistaking recycled group leaders for the original jobs; if process
-identity cannot be verified, uncertain jobs stay. Unfinished jobs become
-eligible only after 72 hours and a confirmed stale process identity. Legacy PTY
-records require seven days before cleanup and are excluded from shell job lists.
-Only exact Core-owned metadata, stdout/stderr and leftover stdin files may be
-removed; external paths and symlinks are not followed. Relay job/JEL history
-and media are unaffected.
-
-For an explicit first-time backlog cleanup, use the bundled Node Core's
-`src/core/tools/job-gc.mjs` CLI with `--job-dir` and `--max-deletes`. It defaults
-to a read-only dry run; `--apply` is required for deletion. The CLI and native
-Rust sweeper use the same policy and have dedicated synthetic-filesystem tests.
+more; the hourly sweeper removes at most 1,000 verified records and never kills
+an active job. Verified process creation times and groups protect live jobs;
+legacy PTY records get seven days before cleanup. Relay Jobs and media are
+not part of this cleanup. Core job data remains at its existing location.
 
 ## Build and test
 
@@ -175,11 +173,10 @@ NeoY can report/open permission settings, but Screen Recording, Accessibility, c
 
 ## NeoY 2.2 Core Agent Runtime
 
-An experimental Rust Core development alternative is maintained under
-[`Runtime/src/core/rust`](Runtime/src/core/rust/README.md). It is not packaged
-or selected by NeoY; the Node.js Core remains the production provider. See its
-[parity matrix](Runtime/src/core/rust/docs/parity-matrix.md) before relying on
-Rust behavior.
+The production Core is the signed, independently supervised Rust child
+[`CoreRust`](CoreRust/README.md). There is no Node Core backend.
+Core status/upgrade/rollback are exposed via `neo setup core` without
+changing the user-facing `shell`, `fs`, `terminal` or `codex` tool surfaces.
 
 NeoY 2.2 keeps the privileged agent surface intentionally small:
 

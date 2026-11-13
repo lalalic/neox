@@ -42,7 +42,7 @@ final class NeoYSetupModel: ObservableObject {
     @Published private(set) var oauthClientID = ""
     @Published private(set) var oauthToken = ""
     @Published var result = ""
-    @Published var coreRuntimeStatus = NeoYManagedCoreRuntime.active()?.lastPathComponent ?? "bootstrap Core (not installed)"
+    @Published var coreRuntimeStatus = NeoYManagedRustCoreRuntime.active()?.deletingLastPathComponent().lastPathComponent ?? "bootstrap Core (not installed)"
     @Published var neoCLIReport = "Checking Neo CLI…"
     @Published var toolkitUninstallable = false
     @Published var toolkitInstalled = false
@@ -77,7 +77,7 @@ final class NeoYSetupModel: ObservableObject {
     }
 
     func refreshCoreRuntime() {
-        coreRuntimeStatus = NeoYManagedCoreRuntime.active()?.lastPathComponent ?? "bootstrap Core (not installed)"
+        coreRuntimeStatus = NeoYManagedRustCoreRuntime.active()?.deletingLastPathComponent().lastPathComponent ?? "bootstrap Core (not installed)"
     }
 
 
@@ -140,20 +140,16 @@ final class NeoYSetupModel: ObservableObject {
         Task.detached { [weak self] in
             let message: String
             do {
-                if let selected = try NeoYManagedCoreRuntime.upgradeIfAvailable() {
-                    message = "Core updated to \(selected)."
-                    await MainActor.run {
-                        NotificationCenter.default.post(name: Notification.Name("neoYCoreRuntimeChanged"), object: nil)
-                    }
-                } else {
-                    message = "Core is up to date."
+                let version = try NeoYManagedRustCoreRuntime.reconcileStartup()
+                message = "Signed Rust Core is healthy (version \(version))."
+                await MainActor.run {
+                    NotificationCenter.default.post(name: Notification.Name("neoYCoreRuntimeChanged"), object: nil)
                 }
             } catch {
-                message = "Update check failed: \(error.localizedDescription)"
+                message = "Rust Core recovery check failed: \(error.localizedDescription)"
             }
             await MainActor.run {
-                self?.result = message
-                self?.refreshCoreRuntime()
+                self?.coreRuntimeStatus = message
                 self?.isBusy = false
             }
         }
@@ -983,12 +979,12 @@ struct NeoYSetupView: View {
             GroupBox("Neo Core") {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Updates automatically").font(.subheadline)
+                        Text("Signed Rust Core · versioned recovery").font(.subheadline)
                         Text("Installed: \(model.coreRuntimeStatus)")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("Check now") { model.checkCoreUpdates() }
+                    Button("Verify / repair") { model.checkCoreUpdates() }
                         .disabled(model.isBusy)
                 }
                 .padding(8)

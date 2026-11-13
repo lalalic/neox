@@ -1,3 +1,5 @@
+> **Historical archive (pre-Rust Core).** This P0 evidence documents a retired Node/npm distribution; it is not the current NeoY install, release, or signing contract. See `../p2/independent-core-runtime.md`.
+
 # Neo Unified Distribution — P0 release contract
 
 Status: P0 design and source inspection; **NOT a shipped installer**. Owner: `lalalic/neox` product control plane. Source owners remain separate.

@@ -42,13 +42,13 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertEqual(try NeoYOAuthRedirectStore(directory: directory).list(), [])
     }
 
-    func testCoreUpgradeCommands() throws {
+    func testRustOnlyCoreSetupCommands() throws {
         XCTAssertEqual(try NeoYSetupParser.parse("core status"), .coreStatus)
-        XCTAssertEqual(try NeoYSetupParser.parse("core provider rust"), .coreProvider("rust"))
-        XCTAssertEqual(try NeoYSetupParser.parse("core provider node"), .coreProvider("node"))
-        XCTAssertThrowsError(try NeoYSetupParser.parse("core provider python"))
-        XCTAssertEqual(try NeoYSetupParser.parse("core upgrade latest"), .coreUpgrade("latest"))
-        XCTAssertEqual(try NeoYSetupParser.parse("core upgrade 0.1.10"), .coreUpgrade("0.1.10"))
+        XCTAssertEqual(try NeoYSetupParser.parse("core upgrade bundled"), .coreUpgrade("bundled"))
+        XCTAssertEqual(try NeoYSetupParser.parse("core upgrade /tmp/signed-core"), .coreUpgrade("/tmp/signed-core"))
+        XCTAssertEqual(try NeoYSetupParser.parse("core rollback"), .coreRollback)
+        XCTAssertThrowsError(try NeoYSetupParser.parse("core provider node"))
+        XCTAssertThrowsError(try NeoYSetupParser.parse("core provider rust"))
         XCTAssertEqual(try NeoYSetupParser.parse("help core"), .help(topic: .core))
         XCTAssertThrowsError(try NeoYSetupParser.parse("core upgrade"))
     }
@@ -413,43 +413,14 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertFalse(normalized.contains("\"name\" : \"macbridge\""))
     }
 
-    func testMissingPackagedCoreDoesNotHideExternalProviders() {
-        let absent = Self.makeDirectory().appendingPathComponent("not-installed", isDirectory: true)
+    func testMissingRustCoreDoesNotHideOtherFederatedProviders() throws {
+        let absent = Self.makeDirectory().appendingPathComponent("missing-rust-core")
         let external = NeoYMCPServerConfiguration(name: "events", url: "http://127.0.0.1:9999/mcp", isEnabled: true)
         let legacy = NeoYMCPServerConfiguration(name: "macbridge", url: "stdio:///tmp/legacy", isEnabled: true)
-        // Explicitly select an absent Node fixture. A developer machine may
-        // legitimately be running a live Rust Core while tests execute.
-        let rust = absent.appendingPathComponent("missing-rust-core")
-        let marker = absent.appendingPathComponent("no-provider-marker")
-        let resolved = NeoYBundledRuntime.resolvedMCPServers(
-            userServers: [external, legacy], runtimeURL: absent,
-            rustBinary: rust, marker: marker
-        )
+        let resolved = NeoYBundledRuntime.resolvedMCPServers(userServers: [external, legacy], binary: absent)
         XCTAssertEqual(resolved.map(\.name), ["events"])
         XCTAssertEqual(resolved.first?.url, external.url)
-        XCTAssertTrue(NeoYBundledRuntime.coreMCPServers(runtimeURL: absent,
-                                                           rustBinary: rust, marker: marker).isEmpty)
-    }
-
-    func testRustCoreOptInSelectionAndRollback() throws {
-        let directory = Self.makeDirectory()
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let marker = directory.appendingPathComponent("provider")
-        let rust = directory.appendingPathComponent("neoy-core-rust")
-        // This is an independent stdio executable, not a wrapper around Node.
-        try "#!/bin/sh\nexit 0\n".write(to: rust, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: rust.path)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        XCTAssertEqual(NeoYBundledRuntime.preferredBackend(marker: marker), "node")
-        try NeoYBundledRuntime.selectBackend("rust", rustBinary: rust, marker: marker)
-        XCTAssertEqual(NeoYBundledRuntime.preferredBackend(marker: marker), "rust")
-        let providers = NeoYBundledRuntime.coreMCPServers(runtimeURL: directory.appendingPathComponent("node-absent"),
-                                                           rustBinary: rust, marker: marker)
-        XCTAssertEqual(providers.map(\.name), ["core"])
-        XCTAssertTrue(providers[0].url.contains(rust.path))
-        try NeoYBundledRuntime.selectBackend("node", rustBinary: rust, marker: marker)
-        XCTAssertEqual(NeoYBundledRuntime.preferredBackend(marker: marker), "node")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+        XCTAssertTrue(NeoYBundledRuntime.coreMCPServers(binary: absent).isEmpty)
     }
 
     func testBundledCoreToolsAreFlat() {
@@ -503,12 +474,11 @@ final class SetupServiceTests: XCTestCase {
         XCTAssertTrue(NeoYBundledRuntime.coreEnvironment["NEO_CORE_LOG_DIR"]?.contains("Library/Logs/NeoY/Core") == true)
         XCTAssertFalse(NeoYBundledRuntime.coreEnvironment.keys.contains { $0.hasPrefix("MAC_DEV_BRIDGE_") })
         XCTAssertEqual(NeoYBundledRuntime.coreEnvironment["NEO_CORE_FULL_ACCESS_ACK"], "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS")
-        // When tests run from an Xcode workspace, the built test bundle also
-        // lives under Workspace; the contract is that Runtime comes from the
-        // app bundle, not from a source-checkout fallback.
-        let packaged = NeoYBundledRuntime.packagedRuntimeURL
+        // Only the individually signed Rust seed in the app bundle can
+        // recover a missing Core; no developer checkout or Node fallback.
+        let packaged = NeoYManagedRustCoreRuntime.packaged
         let expected = (Bundle.main.resourceURL ?? Bundle.main.bundleURL)
-            .appendingPathComponent("Runtime", isDirectory: true)
+            .appendingPathComponent("neoy-core-rust")
         XCTAssertEqual(packaged.standardizedFileURL, expected.standardizedFileURL)
     }
 

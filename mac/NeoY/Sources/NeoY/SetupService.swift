@@ -10,7 +10,7 @@ enum NeoYSetupCommand: Equatable, Sendable {
     case configuration
     case coreStatus
     case coreUpgrade(String)
-    case coreProvider(String)
+    case coreRollback
     case deploymentShow
     case deploymentSetPort(UInt16)
     case deploymentSetTunnel(NeoYTunnelMode)
@@ -89,9 +89,7 @@ enum NeoYSetupParser {
         case "core":
             if tokens == ["core", "status"] { return .coreStatus }
             if tokens.count == 3, tokens[1] == "upgrade" { return .coreUpgrade(tokens[2]) }
-            if tokens.count == 3, tokens[1] == "provider", ["node", "rust"].contains(tokens[2]) {
-                return .coreProvider(tokens[2])
-            }
+            if tokens == ["core", "rollback"] { return .coreRollback }
             throw NeoYSetupError.unknownCommand(tokens.joined(separator: " "))
         case "deployment": return try deployment(tokens)
         case "diagnostics": return try diagnostics(tokens)
@@ -429,32 +427,30 @@ actor NeoYSetupService {
             return Self.json(await snapshot())
         case .coreStatus:
             return Self.json([
-                "version": NeoYManagedCoreRuntime.active()?.lastPathComponent ?? "not installed",
-                "preferredProvider": NeoYBundledRuntime.preferredBackend(),
-                "rustInstalled": FileManager.default.isExecutableFile(atPath: NeoYBundledRuntime.rustBinaryURL.path) ? "true" : "false"
+                "version": NeoYManagedRustCoreRuntime.active()?.deletingLastPathComponent().lastPathComponent ?? "not installed",
+                "provider": "rust",
+                "rustInstalled": NeoYManagedRustCoreRuntime.active() == nil ? "false" : "true"
             ])
-        case .coreProvider(let backend):
+        case .coreRollback:
             do {
-                try NeoYBundledRuntime.selectBackend(backend)
+                let selected = try await Task.detached(priority: .userInitiated) {
+                    try NeoYManagedRustCoreRuntime.rollbackPrevious()
+                }.value
                 await MainActor.run {
                     NotificationCenter.default.post(name: Notification.Name("neoYCoreRuntimeChanged"), object: nil)
                 }
-                return Self.json(["provider": backend, "status": "selected"])
-            } catch {
-                return Self.json(["provider": backend, "status": "failed", "error": error.localizedDescription])
-            }
-        case .coreUpgrade(let version):
+                return Self.json(["version": selected, "status": "rolled_back"])
+            } catch { return Self.json(["status": "failed", "error": error.localizedDescription]) }
+        case .coreUpgrade(let binary):
             do {
                 let selected = try await Task.detached(priority: .userInitiated) {
-                    try NeoYManagedCoreRuntime.registryUpgrade(version: version)
+                    try NeoYManagedRustCoreRuntime.upgrade(binary)
                 }.value
                 await MainActor.run {
                     NotificationCenter.default.post(name: Notification.Name("neoYCoreRuntimeChanged"), object: nil)
                 }
                 return Self.json(["version": selected, "status": "upgraded"])
-            } catch {
-                return Self.json(["status": "failed", "error": error.localizedDescription])
-            }
+            } catch { return Self.json(["status": "failed", "error": error.localizedDescription]) }
         case .deploymentShow:
             return Self.json(NeoYDeploymentSettingsStore.load())
         case .deploymentSetPort(let port):
@@ -686,7 +682,7 @@ actor NeoYSetupService {
         case .configuration:
             "'config show' returns versioned validated configuration without making storage paths part of the normal UX."
         case .core:
-            "core status | core provider node|rust | core upgrade <latest|version|absolute-tgz-path> — switch the local Core provider with an immediate Node rollback; Rust requires an installed executable."
+            "core status | core upgrade <bundled|absolute-signed-rust-binary> | core rollback — signed native Rust Core only; test the MCP child before activation and recover from last healthy version."
         case .deployment:
             """
             deployment show

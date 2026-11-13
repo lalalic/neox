@@ -1,0 +1,1967 @@
+use serde_json::{json, Value};
+use std::env;
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::fs::PermissionsExt;
+use std::process::{Command, Stdio};
+use std::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    Arc, Barrier, Mutex,
+};
+use std::thread;
+use std::time::Duration;
+
+struct Server {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    stdout: BufReader<std::process::ChildStdout>,
+}
+
+impl Server {
+    fn start(authorized: bool) -> Self {
+        let temp = std::env::temp_dir().join(format!(
+            "neoy-rust-e2e-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        Self::start_with_data_dir(authorized, temp)
+    }
+
+    fn start_with_data_dir(authorized: bool, temp: std::path::PathBuf) -> Self {
+        Self::start_with_idle_timeout(authorized, temp, None)
+    }
+
+    fn start_with_idle_timeout(
+        authorized: bool,
+        temp: std::path::PathBuf,
+        idle_timeout_ms: Option<u64>,
+    ) -> Self {
+        Self::start_with_webhelm_cli(authorized, temp, idle_timeout_ms, None)
+    }
+
+    fn start_with_webhelm_cli(
+        authorized: bool,
+        temp: std::path::PathBuf,
+        idle_timeout_ms: Option<u64>,
+        webhelm_cli: Option<&std::path::Path>,
+    ) -> Self {
+        Self::start_with_runtime_commands(
+            authorized,
+            temp,
+            idle_timeout_ms,
+            webhelm_cli,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+
+    fn start_with_codex_bin(
+        authorized: bool,
+        temp: std::path::PathBuf,
+        codex_bin: &std::path::Path,
+    ) -> Self {
+        Self::start_with_runtime_commands(
+            authorized,
+            temp,
+            None,
+            None,
+            Some(codex_bin),
+            None,
+            None,
+            None,
+        )
+    }
+
+    fn start_with_discord_url(
+        authorized: bool,
+        temp: std::path::PathBuf,
+        discord_url: &str,
+    ) -> Self {
+        Self::start_with_runtime_commands(
+            authorized,
+            temp,
+            None,
+            None,
+            None,
+            Some(discord_url),
+            None,
+            None,
+        )
+    }
+
+    fn start_with_ring_bytes(authorized: bool, temp: std::path::PathBuf, ring_bytes: u64) -> Self {
+        Self::start_with_runtime_commands(
+            authorized,
+            temp,
+            None,
+            None,
+            None,
+            None,
+            Some(ring_bytes),
+            None,
+        )
+    }
+
+    fn start_with_max_lifetime(
+        authorized: bool,
+        temp: std::path::PathBuf,
+        lifetime_ms: u64,
+    ) -> Self {
+        Self::start_with_runtime_commands(
+            authorized,
+            temp,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(lifetime_ms),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn start_with_runtime_commands(
+        authorized: bool,
+        temp: std::path::PathBuf,
+        idle_timeout_ms: Option<u64>,
+        webhelm_cli: Option<&std::path::Path>,
+        codex_bin: Option<&std::path::Path>,
+        discord_url: Option<&str>,
+        ring_bytes: Option<u64>,
+        max_lifetime_ms: Option<u64>,
+    ) -> Self {
+        std::fs::create_dir_all(&temp).unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_neoy-core-rust"));
+        command.env("NEO_CORE_DATA_DIR", &temp);
+        if let Some(timeout) = idle_timeout_ms {
+            command.env("NEO_CORE_PTY_IDLE_TIMEOUT_MS", timeout.to_string());
+        }
+        if let Some(size) = ring_bytes {
+            command.env("NEO_CORE_PTY_RING_BYTES", size.to_string());
+        }
+        if let Some(lifetime) = max_lifetime_ms {
+            command.env("NEO_CORE_PTY_MAX_LIFETIME_MS", lifetime.to_string());
+        }
+        if authorized {
+            command.env(
+                "NEO_CORE_FULL_ACCESS_ACK",
+                "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS",
+            );
+        }
+        if let Some(cli) = webhelm_cli {
+            command.env("WEBHELM_CLI", cli);
+        }
+        if let Some(binary) = codex_bin {
+            command.env("CODEX_BIN", binary);
+        }
+        if let Some(endpoint) = discord_url {
+            command.env("NEO_DISCORD_REPLY_URL", endpoint);
+        }
+        let mut child = command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let stdin = child.stdin.take().unwrap();
+        let stdout = BufReader::new(child.stdout.take().unwrap());
+        Self {
+            child,
+            stdin,
+            stdout,
+        }
+    }
+
+    fn request(&mut self, id: u64, method: &str, params: Value) -> Value {
+        let message = json!({"jsonrpc":"2.0","id":id,"method":method,"params":params});
+        writeln!(self.stdin, "{message}").unwrap();
+        self.stdin.flush().unwrap();
+        let mut line = String::new();
+        self.stdout.read_line(&mut line).unwrap();
+        serde_json::from_str(&line).unwrap()
+    }
+
+    fn initialize(&mut self) {
+        let initialize = self.request(1, "initialize", json!({"protocolVersion":"2025-11-25"}));
+        assert_eq!(initialize["result"]["serverInfo"]["name"], "neo-core-tools");
+        writeln!(
+            self.stdin,
+            "{}",
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"})
+        )
+        .unwrap();
+        self.stdin.flush().unwrap();
+    }
+
+    fn call(&mut self, id: u64, name: &str, arguments: Value) -> Value {
+        self.request(id, "tools/call", json!({"name":name,"arguments":arguments}))
+    }
+}
+
+#[test]
+fn chatgpt_lifecycle_validates_and_verifies_submission_receipts() {
+    let temp = std::env::temp_dir().join(format!(
+        "neoy-rust-chatgpt-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&temp).unwrap();
+    let cli = temp.join("fake-webhelm");
+    std::fs::write(
+        &cli,
+        r#"#!/bin/sh
+for arg do config=$arg; done
+[ "$(/usr/bin/stat -f '%Lp' "$config")" = 600 ] || exit 20
+[ "$(/usr/bin/stat -f '%Lp' "$(/usr/bin/dirname "$config")")" = 700 ] || exit 21
+case "$*" in
+  *new-thread*) mode=new-thread; thread=',"thread_id":"thread123","thread_url":"https://chatgpt.com/c/thread123"' ;;
+  *new-turn*) mode=new-turn; thread='' ;;
+  *) exit 22 ;;
+esac
+if grep -q 'reject-receipt' "$config"; then printf '{"status":"rejected","mode":"%s"}\n' "$mode"; exit 0; fi
+if grep -q 'provider-failure' "$config"; then echo provider-failure >&2; exit 7; fi
+printf '{"status":"submitted","mode":"%s"%s}\n' "$mode" "$thread"
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+    let mut server = Server::start_with_webhelm_cli(true, temp.clone(), None, Some(&cli));
+    server.initialize();
+    let invalid = server.call(
+        2,
+        "chatgpt",
+        json!({"command":"thread","args":{"message":"hello","project_id":"bad","temporary":true}}),
+    );
+    assert_eq!(invalid["result"]["isError"], true, "{invalid}");
+    let thread = server.call(
+        3,
+        "chatgpt",
+        json!({"command":"thread","args":{"message":"hello"}}),
+    );
+    assert_eq!(
+        thread["result"]["structuredContent"]["thread_id"], "thread123",
+        "{thread}"
+    );
+    let turn = server.call(
+        6,
+        "chatgpt",
+        json!({"command":"turn","args":{"thread_id":"thread123","message":"continue"}}),
+    );
+    assert_eq!(
+        turn["result"]["structuredContent"]["mode"], "new-turn",
+        "{turn}"
+    );
+    let rejected = server.call(
+        7,
+        "chatgpt",
+        json!({"command":"thread","args":{"message":"reject-receipt"}}),
+    );
+    assert_eq!(rejected["result"]["isError"], true, "{rejected}");
+    assert!(
+        rejected["result"]["structuredContent"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("did not verify submission"),
+        "{rejected}"
+    );
+    let failed = server.call(
+        8,
+        "chatgpt",
+        json!({"command":"thread","args":{"message":"provider-failure"}}),
+    );
+    assert_eq!(failed["result"]["isError"], true, "{failed}");
+    assert!(
+        failed["result"]["structuredContent"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("code=7"),
+        "{failed}"
+    );
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn codex_app_server_preserves_coalesced_lines_and_reaps_child() {
+    let temp = std::env::temp_dir().join(format!(
+        "neoy-rust-codex-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&temp).unwrap();
+    let pid_file = temp.join("codex.pid");
+    let cli = temp.join("fake-codex");
+    std::fs::write(
+        &cli,
+        format!(
+            "#!/bin/sh\necho $$ > '{}'\nprintf '{{\\\"id\\\":0,\\\"result\\\":{{}}}}\\n{{\\\"method\\\":\\\"notice\\\"}}\\n'\nread -r initialized\nread -r request\nprintf '{{\\\"id\\\":1,\\\"result\\\":{{\\\"echo\\\":\\\"ok\\\"}}}}\\n'\nexec /bin/sleep 30\n",
+            pid_file.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+    let mut server = Server::start_with_codex_bin(true, temp.clone(), &cli);
+    server.initialize();
+    let response = server.call(
+        2,
+        "codex",
+        json!({"command":"thread.read","args":{"thread_id":"thread123","include_turns":false}}),
+    );
+    assert_eq!(
+        response["result"]["structuredContent"]["echo"], "ok",
+        "{response}"
+    );
+    let pid: i32 = std::fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert_ne!(
+        unsafe { libc::kill(pid, 0) },
+        0,
+        "Codex app-server child survived completed request"
+    );
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn malformed_protocol_and_tool_arguments_return_errors_without_crashing() {
+    let mut server = Server::start(true);
+    server.initialize();
+    writeln!(server.stdin, "{{ malformed json").unwrap();
+    server.stdin.flush().unwrap();
+    let mut line = String::new();
+    server.stdout.read_line(&mut line).unwrap();
+    let parse_error: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(parse_error["error"]["code"], -32700, "{parse_error}");
+
+    let invalid = server.call(2, "fs", json!({"command":"read","args":{"path":1}}));
+    assert_eq!(invalid["result"]["isError"], true, "{invalid}");
+    let unknown = server.call(3, "missing", json!({}));
+    assert_eq!(unknown["error"]["code"], -32601, "{unknown}");
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+}
+
+#[test]
+fn command_facades_reject_unknown_nested_commands_and_invalid_arguments() {
+    let mut server = Server::start(true);
+    server.initialize();
+    for (id, tool) in ["shell", "fs", "terminal", "codex", "discord", "chatgpt"]
+        .into_iter()
+        .enumerate()
+    {
+        let response = server.call(
+            100 + id as u64,
+            tool,
+            json!({"command":"__unknown_nested_command__","args":{}}),
+        );
+        assert_eq!(response["result"]["isError"], true, "{tool}: {response}");
+        assert!(
+            response["result"]["structuredContent"]["error"].is_string(),
+            "{tool}: {response}"
+        );
+    }
+    let invalid = server.call(200, "fs", json!({"command":"grep","args":{"pattern":""}}));
+    assert_eq!(invalid["result"]["isError"], true, "{invalid}");
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+}
+
+#[test]
+fn discord_rejects_non_loopback_delivery_endpoint() {
+    let endpoint = "https://example.com/discord/reply";
+    let temp = std::env::temp_dir().join(format!("neoy-rust-discord-{}", std::process::id()));
+    let mut server = Server::start_with_discord_url(true, temp.clone(), endpoint);
+    server.initialize();
+    let arguments = json!({"command":"reply","args":{"correlationId":"correlation-identifier-123","text":"reply"}});
+    let rust = server.call(2, "discord", arguments.clone());
+    assert_eq!(rust["result"]["isError"], true, "{rust}");
+    assert!(rust.to_string().contains("loopback"), "{rust}");
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+fn tool_contract(tool: &Value) -> Value {
+    tool.clone()
+}
+
+#[test]
+fn unauthorized_startup_writes_no_stdout() {
+    let mut server = Server::start(false);
+    let _ = server.child.kill();
+    let status = server.child.wait().unwrap();
+    assert!(!status.success());
+}
+
+#[test]
+fn file_unlock_revocation_terminates_child() {
+    let temp = std::env::temp_dir().join(format!(
+        "neoy-rust-unlock-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&temp).unwrap();
+    let unlock_file = temp.join("FULL_ACCESS_ENABLED");
+    std::fs::write(&unlock_file, "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS\n").unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_neoy-core-rust"))
+        .env("NEO_CORE_DATA_DIR", &temp)
+        .env("NEO_CORE_UNLOCK_FILE", &unlock_file)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    writeln!(stdin, "{}", json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}})).unwrap();
+    stdin.flush().unwrap();
+    let mut response = String::new();
+    stdout.read_line(&mut response).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&response).unwrap()["id"], 1);
+
+    std::fs::remove_file(&unlock_file).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            assert_eq!(status.code(), Some(78), "revocation exit status: {status}");
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("child remained alive after unlock revocation");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    drop(stdin);
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn unlock_revocation_racing_foreground_shell_reclaims_child_group() {
+    let temp = std::env::temp_dir().join(format!(
+        "neoy-rust-unlock-race-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&temp).unwrap();
+    let unlock_file = temp.join("FULL_ACCESS_ENABLED");
+    let pid_file = temp.join("foreground.pid");
+    std::fs::write(&unlock_file, "I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS\n").unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_neoy-core-rust"))
+        .env("NEO_CORE_DATA_DIR", &temp)
+        .env("NEO_CORE_UNLOCK_FILE", &unlock_file)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    writeln!(stdin, "{}", json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}})).unwrap();
+    stdin.flush().unwrap();
+    let mut response = String::new();
+    stdout.read_line(&mut response).unwrap();
+    writeln!(
+        stdin,
+        "{}",
+        json!({"jsonrpc":"2.0","method":"notifications/initialized"})
+    )
+    .unwrap();
+    writeln!(stdin, "{}", json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"shell","arguments":{"command":"exec","args":{"command":format!("echo $$ > {}; exec /bin/sleep 30",pid_file.display()),"timeout_ms":30_000}}}})).unwrap();
+    stdin.flush().unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !pid_file.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(pid_file.exists(), "foreground command never started");
+    let pid: i32 = std::fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    std::fs::remove_file(&unlock_file).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(6);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            assert_eq!(status.code(), Some(78), "revocation exit status: {status}");
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
+            panic!("core remained alive after unlock revocation");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let state = Command::new("/bin/ps")
+        .args(["-o", "stat=", "-p"])
+        .arg(pid.to_string())
+        .output()
+        .unwrap();
+    let process_state = String::from_utf8_lossy(&state.stdout).trim().to_string();
+    let alive = !process_state.is_empty() && !process_state.starts_with('Z');
+    if alive {
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+        }
+    }
+    assert!(
+        !alive,
+        "foreground process group survived unlock revocation"
+    );
+    drop(stdin);
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn concurrent_calls_keep_response_ids_correlated() {
+    let mut server = Server::start(true);
+    server.initialize();
+    let slow = json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"shell","arguments":{"command":"exec","args":{"command":"sleep 1; printf slow","timeout":5000}}}});
+    let fast = json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"shell","arguments":{"command":"exec","args":{"command":"printf fast","timeout":5000}}}});
+    writeln!(server.stdin, "{slow}").unwrap();
+    writeln!(server.stdin, "{fast}").unwrap();
+    writeln!(server.stdin, "{}", json!({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":2,"reason":"test"}})).unwrap();
+    server.stdin.flush().unwrap();
+
+    let mut responses = Vec::new();
+    for _ in 0..2 {
+        let mut line = String::new();
+        server.stdout.read_line(&mut line).unwrap();
+        responses.push(serde_json::from_str::<Value>(&line).unwrap());
+    }
+    assert_eq!(
+        responses[0]["id"], 3,
+        "fast response should not wait for slow call"
+    );
+    assert_eq!(
+        responses[0]["result"]["structuredContent"]["stdout"],
+        "fast"
+    );
+    assert_eq!(responses[1]["id"], 2);
+    assert_eq!(
+        responses[1]["result"]["structuredContent"]["stdout"],
+        "slow"
+    );
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+}
+
+#[test]
+fn mcp_inventory_and_representative_calls() {
+    let mut rust = Server::start(true);
+    rust.initialize();
+    let rust_tools = rust.request(2, "tools/list", json!({}))["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let names: Vec<String> = rust_tools
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "status",
+            "shell",
+            "fs",
+            "apply_file_patch",
+            "codex",
+            "discord",
+            "chatgpt",
+            "terminal"
+        ]
+    );
+    let status = rust.call(3, "status", json!({}));
+    assert_eq!(status["result"]["isError"], false);
+    let shell = rust.call(
+        4,
+        "shell",
+        json!({"command":"exec","args":{"command":"printf rust-ok","timeout":5000}}),
+    );
+    let result = shell["result"]["structuredContent"].clone();
+    assert_eq!(result["exitCode"], 0);
+    assert!(result["stdout"].as_str().unwrap().contains("rust-ok"));
+
+    let start = rust.call(
+        3,
+        "shell",
+        json!({"command":"start","args":{"command":"sleep 30","label":"e2e"}}),
+    );
+    let job_id = start["result"]["structuredContent"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let kill = rust.call(
+        6,
+        "shell",
+        json!({"command":"job.kill","args":{"job_id":job_id,"signal":"SIGKILL"}}),
+    );
+    assert_eq!(kill["result"]["isError"], false);
+
+    writeln!(rust.stdin, "{{not-json").unwrap();
+    rust.stdin.flush().unwrap();
+    let mut parse_line = String::new();
+    rust.stdout.read_line(&mut parse_line).unwrap();
+    let parse: Value = serde_json::from_str(&parse_line).unwrap();
+    assert_eq!(parse["error"]["code"], -32700, "{parse}");
+    let unknown = rust.call(8, "__missing__", json!({}));
+    assert_eq!(unknown["error"]["code"], -32601);
+
+    // Stable native Core tool schema, independent from retired Node Core.
+    let expected: Vec<Value> =
+        serde_json::from_str(include_str!("../fixtures/core-tools.json")).unwrap();
+    assert_eq!(
+        rust_tools.iter().map(tool_contract).collect::<Vec<_>>(),
+        expected
+    );
+    let _ = rust.child.kill();
+    let _ = rust.child.wait();
+}
+
+#[test]
+fn modern_protocol_returns_completion_metadata() {
+    let mut server = Server::start(true);
+    server.initialize();
+    let response = server.request(
+        2,
+        "tools/list",
+        json!({"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}),
+    );
+    assert_eq!(response["result"]["resultType"], "complete", "{response}");
+    assert_eq!(response["result"]["ttlMs"], 300_000, "{response}");
+    assert_eq!(
+        response["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"], "neo-core-tools",
+        "{response}"
+    );
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+}
+
+#[test]
+fn shell_exec_stdin_output_limit_and_timeout() {
+    let mut server = Server::start(true);
+    server.initialize();
+    let stdin = server.call(
+        2,
+        "shell",
+        json!({"command":"exec","args":{"command":"cat","stdin":"input-from-caller","timeout":5000}}),
+    );
+    let result = &stdin["result"]["structuredContent"];
+    assert_eq!(result["exitCode"], 0, "{stdin}");
+    assert_eq!(result["stdout"], "input-from-caller", "{stdin}");
+
+    let scrubbed = server.call(
+        3,
+        "shell",
+        json!({"command":"exec","args":{"command":"printf '%s,%s' \"${NEO_CORE_FULL_ACCESS_ACK:-missing}\" \"${CONTROL_PLANE_API_KEY:-missing}\"","env":{"NEO_CORE_FULL_ACCESS_ACK":"I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS","CONTROL_PLANE_API_KEY":"secret"},"timeout":5000}}),
+    );
+    assert_eq!(
+        scrubbed["result"]["structuredContent"]["stdout"], "missing,missing",
+        "{scrubbed}"
+    );
+
+    let limited = server.call(
+        4,
+        "shell",
+        json!({"command":"exec","args":{"command":"printf 123456789","timeout":5000,"max_output_bytes":4}}),
+    );
+    let result = &limited["result"]["structuredContent"];
+    assert_eq!(result["stdout"], "1234", "{limited}");
+    assert_eq!(result["stdoutTruncated"], false, "{limited}");
+    let output_file = result["stdoutFile"].as_str().expect("large output file");
+    assert_eq!(std::fs::read_to_string(output_file).unwrap(), "123456789");
+    assert_eq!(
+        std::fs::metadata(output_file).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+
+    let timed_out = server.call(
+        5,
+        "shell",
+        json!({"command":"exec","args":{"command":"sleep 10","timeout":100}}),
+    );
+    let job_id = timed_out["result"]["structuredContent"]["jobId"]
+        .as_str()
+        .expect("running command returns its durable job ID");
+    let status = server.call(
+        6,
+        "shell",
+        json!({"command":"job.status","args":{"job_id":job_id}}),
+    );
+    assert_eq!(
+        status["result"]["structuredContent"]["running"], true,
+        "{status}"
+    );
+    let kill = server.call(
+        7,
+        "shell",
+        json!({"command":"job.kill","args":{"job_id":job_id,"signal":"SIGTERM"}}),
+    );
+    assert_eq!(kill["result"]["isError"], false, "{kill}");
+    let invalid_id = server.call(
+        8,
+        "shell",
+        json!({"command":"job.status","args":{"job_id":"../../etc/passwd"}}),
+    );
+    assert_eq!(invalid_id["result"]["isError"], true, "{invalid_id}");
+
+    let completed = server.call(
+        9,
+        "shell",
+        json!({"command":"start","args":{"command":"printf background-ok"}}),
+    );
+    let completed_id = completed["result"]["structuredContent"]["id"]
+        .as_str()
+        .expect("background job id");
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let status = server.call(
+            10,
+            "shell",
+            json!({"command":"job.status","args":{"job_id":completed_id}}),
+        );
+        if status["result"]["structuredContent"]["running"] == false {
+            assert_eq!(
+                status["result"]["structuredContent"]["exitCode"], 0,
+                "{status}"
+            );
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "job did not complete: {status}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+}
+
+#[test]
+fn background_job_metadata_survives_core_restart() {
+    let temp = std::env::temp_dir().join(format!(
+        "neoy-rust-job-restart-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let mut first = Server::start_with_data_dir(true, temp.clone());
+    first.initialize();
+    let started = first.call(
+        2,
+        "shell",
+        json!({"command":"start","args":{"command":"sleep 30","label":"restart-test"}}),
+    );
+    let job_id = started["result"]["structuredContent"]["id"]
+        .as_str()
+        .expect("started job id")
+        .to_string();
+    let _ = first.child.kill();
+    let _ = first.child.wait();
+
+    let mut second = Server::start_with_data_dir(true, temp.clone());
+    second.initialize();
+    let status = second.call(
+        2,
+        "shell",
+        json!({"command":"job.status","args":{"job_id":job_id}}),
+    );
+    assert_eq!(
+        status["result"]["structuredContent"]["running"], true,
+        "{status}"
+    );
+    let kill = second.call(
+        3,
+        "shell",
+        json!({"command":"job.kill","args":{"job_id":job_id,"signal":"SIGKILL"}}),
+    );
+    assert_eq!(kill["result"]["isError"], false, "{kill}");
+    let _ = second.child.kill();
+    let _ = second.child.wait();
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn filesystem_and_patch_contracts() {
+    let root = std::env::temp_dir().join(format!("neoy-rust-files-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("fixture.txt");
+    std::fs::write(&path, b"native-core").unwrap();
+    let nested = root.join("nested");
+    std::fs::create_dir_all(&nested).unwrap();
+    let searchable = nested.join("search.txt");
+    std::fs::write(&searchable, "before\nNeedle one\nafter\nneedle two\n").unwrap();
+    std::fs::write(root.join(".gitignore"), "*.skip\n").unwrap();
+    std::fs::write(root.join("ignored.skip"), "needle must be ignored\n").unwrap();
+    let mut server = Server::start(true);
+    server.initialize();
+    let grep_args = json!({"command":"grep","args":{"pattern":"needle","path":root,"ignore_case":true,"literal":true,"context":1}});
+    let grep = server.call(20, "fs", grep_args.clone());
+    assert_eq!(grep["result"]["isError"], false, "{grep}");
+    let matches = grep["result"]["structuredContent"]["matches"]
+        .as_array()
+        .unwrap();
+    assert_eq!(matches.len(), 2, "{grep}");
+    assert_eq!(matches[0]["path"], "nested/search.txt", "{grep}");
+    assert_eq!(matches[0]["before"][0]["text"], "before", "{grep}");
+    assert_eq!(matches[0]["after"][0]["text"], "after", "{grep}");
+    let find_args = json!({"command":"find","args":{"pattern":"search.txt","path":root}});
+    let find = server.call(21, "fs", find_args.clone());
+    assert_eq!(find["result"]["isError"], false, "{find}");
+    assert_eq!(
+        find["result"]["structuredContent"]["paths"][0], "nested/search.txt",
+        "{find}"
+    );
+    let glob_grep = server.call(22, "fs", json!({"command":"grep","args":{"pattern":"needle","path":root,"ignore_case":true,"literal":true,"glob":"*.txt"}}));
+    assert_eq!(glob_grep["result"]["isError"], false, "{glob_grep}");
+    assert_eq!(
+        glob_grep["result"]["structuredContent"]["count"], 2,
+        "{glob_grep}"
+    );
+    let ignored_find = server.call(
+        23,
+        "fs",
+        json!({"command":"find","args":{"pattern":"*.skip","path":root}}),
+    );
+    assert_eq!(ignored_find["result"]["isError"], false, "{ignored_find}");
+    assert_eq!(
+        ignored_find["result"]["structuredContent"]["count"], 0,
+        "{ignored_find}"
+    );
+    let bad_glob = server.call(
+        24,
+        "fs",
+        json!({"command":"grep","args":{"pattern":"needle","path":root,"glob":"["}}),
+    );
+    assert_eq!(bad_glob["result"]["isError"], true, "{bad_glob}");
+    let write = server.call(
+        2,
+        "fs",
+        json!({"command":"write","args":{"path":path,"content":"changed","mode":384}}),
+    );
+    assert_eq!(write["result"]["isError"], false);
+    let read = server.call(3, "fs", json!({"command":"read","args":{"path":path}}));
+    let payload = read["result"]["structuredContent"].clone();
+    assert_eq!(payload["content"], "changed");
+    let stat = server.call(13, "fs", json!({"command":"stat","args":{"path":path}}));
+    assert_eq!(
+        stat["result"]["structuredContent"]["type"], "file",
+        "{stat}"
+    );
+    assert_eq!(stat["result"]["structuredContent"]["mode"], 384, "{stat}");
+    assert!(stat["result"]["structuredContent"]["modifiedAt"]
+        .as_str()
+        .unwrap()
+        .ends_with('Z'));
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    let append = server.call(
+        5,
+        "fs",
+        json!({"command":"write","args":{"path":path,"content":"-tail","append":true}}),
+    );
+    assert_eq!(append["result"]["isError"], false, "{append}");
+    let read = server.call(6, "fs", json!({"command":"read","args":{"path":path}}));
+    assert_eq!(
+        read["result"]["structuredContent"]["content"],
+        "changed-tail"
+    );
+    let no_parents = server.call(
+        7,
+        "fs",
+        json!({"command":"write","args":{"path":root.join("missing/file.txt"),"content":"x","create_parents":false}}),
+    );
+    assert_eq!(no_parents["result"]["isError"], true, "{no_parents}");
+    let lines_path = root.join("lines.txt");
+    std::fs::write(&lines_path, "one\ntwo\nthree\n").unwrap();
+    let line_read = server.call(
+        8,
+        "fs",
+        json!({"command":"read","args":{"path":lines_path,"start_line":2,"endLine":3}}),
+    );
+    assert_eq!(
+        line_read["result"]["structuredContent"]["content"], "two\nthree\n",
+        "{line_read}"
+    );
+    let conflicting_aliases = server.call(
+        9,
+        "fs",
+        json!({"command":"read","args":{"path":lines_path,"start_line":1,"startLine":1}}),
+    );
+    assert_eq!(
+        conflicting_aliases["result"]["isError"], true,
+        "{conflicting_aliases}"
+    );
+    std::fs::create_dir_all(root.join("z-dir")).unwrap();
+    std::fs::write(root.join("z-dir/nested.txt"), "nested").unwrap();
+    std::fs::write(root.join(".hidden"), "hidden").unwrap();
+    let listed = server.call(
+        11,
+        "fs",
+        json!({"command":"list","args":{"path":root,"recursive":true,"include_hidden":false,"max_entries":10}}),
+    );
+    let entries = listed["result"]["structuredContent"]["entries"]
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        listed["result"]["structuredContent"]["count"], 7,
+        "{listed}"
+    );
+    assert!(entries.iter().all(|entry| entry["name"] != ".hidden"));
+    assert!(entries
+        .iter()
+        .any(|entry| entry["relativePath"] == "z-dir/nested.txt"));
+    assert!(entries
+        .iter()
+        .all(|entry| entry["modifiedAt"].as_str().unwrap().ends_with('Z')));
+    let limited_list = server.call(
+        12,
+        "fs",
+        json!({"command":"list","args":{"path":root,"max_entries":2}}),
+    );
+    assert_eq!(
+        limited_list["result"]["structuredContent"]["truncated"],
+        true
+    );
+    let patch = server.call(
+        10,
+        "apply_file_patch",
+        json!({"patch":"not-a-diff\n","cwd":root,"check_only":true}),
+    );
+    assert_eq!(patch["result"]["isError"], true);
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn terminal_session_contract() {
+    let mut server = Server::start(true);
+    server.initialize();
+    let started = server.call(2, "terminal", json!({"command":"start","args":{"command":"/bin/echo","args":["ready"],"rows":5,"cols":20}}));
+    let session_id = started["result"]["structuredContent"]["sessionId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("PTY failed to start: {started}"))
+        .to_string();
+    std::thread::sleep(Duration::from_millis(150));
+    let read = server.call(
+        3,
+        "terminal",
+        json!({"command":"read","args":{"session_id":session_id,"cursor":0,"max_bytes":1024,"strip_ansi":true,"collapse_carriage_returns":true,"wait_ms":1000}}),
+    );
+    let payload = read["result"]["structuredContent"].clone();
+    assert!(
+        payload["output"].as_str().unwrap_or("").contains("ready"),
+        "PTY read response: {read}"
+    );
+    assert_eq!(payload["cursor"], 0, "{read}");
+    assert!(payload["nextCursor"].as_u64().unwrap() > 0, "{read}");
+    assert!(payload["totalBytes"].as_u64().unwrap() > 0, "{read}");
+    assert_eq!(payload["cols"], 20, "{read}");
+    assert!(payload["idleMs"].as_u64().unwrap() >= 100, "{read}");
+    let resized = server.call(
+        14,
+        "terminal",
+        json!({"command":"resize","args":{"session_id":session_id,"cols":80,"rows":24}}),
+    );
+    assert_eq!(
+        resized["result"]["structuredContent"]["cols"], 80,
+        "{resized}"
+    );
+    assert_eq!(
+        resized["result"]["structuredContent"]["rows"], 24,
+        "{resized}"
+    );
+    let _ = server.call(
+        4,
+        "terminal",
+        json!({"command":"close","args":{"session_id":session_id}}),
+    );
+    let cat = server.call(
+        8,
+        "terminal",
+        json!({"command":"start","args":{"command":"/bin/cat"}}),
+    );
+    let cat_id = cat["result"]["structuredContent"]["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let written = server.call(
+        9,
+        "terminal",
+        json!({"command":"write","args":{"session_id":cat_id,"data":"hello\n"}}),
+    );
+    assert_eq!(
+        written["result"]["structuredContent"]["bytesWritten"], 6,
+        "{written}"
+    );
+    let continued = server.call(
+        15,
+        "terminal",
+        json!({"command":"signal","args":{"session_id":cat_id,"signal":"CONT"}}),
+    );
+    assert_eq!(
+        continued["result"]["structuredContent"]["delivered"], true,
+        "{continued}"
+    );
+    let bad_signal = server.call(
+        16,
+        "terminal",
+        json!({"command":"signal","args":{"session_id":cat_id,"signal":"BOGUS"}}),
+    );
+    assert_eq!(bad_signal["result"]["isError"], true, "{bad_signal}");
+    let oversized_line = server.call(
+        10,
+        "terminal",
+        json!({"command":"write","args":{"session_id":cat_id,"data":"x".repeat(1024)}}),
+    );
+    assert_eq!(
+        oversized_line["result"]["isError"], true,
+        "{oversized_line}"
+    );
+    assert_eq!(
+        oversized_line["result"]["structuredContent"]["code"], "PTY_WRITE_CANON_LIMIT",
+        "{oversized_line}"
+    );
+    let too_large = server.call(
+        11,
+        "terminal",
+        json!({"command":"write","args":{"session_id":cat_id,"data":"x".repeat(65_537)}}),
+    );
+    assert_eq!(
+        too_large["result"]["structuredContent"]["code"],
+        "PTY_WRITE_TOO_LARGE"
+    );
+    let _ = server.call(
+        12,
+        "terminal",
+        json!({"command":"close","args":{"session_id":cat_id}}),
+    );
+    let stopped = server.call(
+        13,
+        "terminal",
+        json!({"command":"start","args":{"command":"/bin/sleep","args":["30"]}}),
+    );
+    let stopped_id = stopped["result"]["structuredContent"]["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let _ = server.call(
+        14,
+        "terminal",
+        json!({"command":"signal","args":{"session_id":stopped_id,"signal":"SIGSTOP"}}),
+    );
+    let close_started = std::time::Instant::now();
+    let stopped_close = server.call(
+        15,
+        "terminal",
+        json!({"command":"close","args":{"session_id":stopped_id}}),
+    );
+    assert_eq!(stopped_close["result"]["isError"], false, "{stopped_close}");
+    assert!(close_started.elapsed() < Duration::from_secs(4));
+    let descendant_pid_file = std::env::temp_dir().join(format!(
+        "neoy-rust-pty-descendant-{}.pid",
+        std::process::id()
+    ));
+    let descendant = server.call(
+        16,
+        "terminal",
+        json!({"command":"start","args":{"command":"/bin/sh","args":["-c",format!("(trap '' HUP TERM; echo ready > {}; exec /bin/sleep 30) & wait",descendant_pid_file.display())]}}),
+    );
+    let descendant_id = descendant["result"]["structuredContent"]["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let wait_deadline = std::time::Instant::now() + Duration::from_secs(1);
+    while !descendant_pid_file.exists() && std::time::Instant::now() < wait_deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        descendant_pid_file.exists(),
+        "PTY descendant did not reach the signal-ignoring state"
+    );
+    let close_started = std::time::Instant::now();
+    let descendant_close = server.call(
+        17,
+        "terminal",
+        json!({"command":"close","args":{"session_id":descendant_id}}),
+    );
+    assert_eq!(
+        descendant_close["result"]["isError"], false,
+        "{descendant_close}"
+    );
+    assert!(close_started.elapsed() < Duration::from_secs(4));
+    // An early SIGKILL of a terminal descendant is safer than waiting for TERM grace.
+    let _ = std::fs::remove_file(descendant_pid_file);
+    let secret_probe = server.call(
+        5,
+        "terminal",
+        json!({"command":"start","args":{"command":"/bin/sh","args":["-c","/usr/bin/env"],"env":{"NEO_CORE_FULL_ACCESS_ACK":"I_UNDERSTAND_THIS_GRANTS_FULL_ACCESS","CONTROL_PLANE_API_KEY":"secret"}}}),
+    );
+    let secret_session = secret_probe["result"]["structuredContent"]["sessionId"]
+        .as_str()
+        .expect("PTY session starts");
+    std::thread::sleep(Duration::from_millis(100));
+    let secret_output = server.call(
+        6,
+        "terminal",
+        json!({"command":"read","args":{"session_id":secret_session}}),
+    );
+    let output = secret_output["result"]["structuredContent"]["output"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        !output.contains("NEO_CORE_FULL_ACCESS_ACK"),
+        "{secret_output}"
+    );
+    assert!(!output.contains("CONTROL_PLANE_API_KEY"), "{secret_output}");
+    let _ = server.call(
+        7,
+        "terminal",
+        json!({"command":"close","args":{"session_id":secret_session}}),
+    );
+    let shared_server = Arc::new(Mutex::new(server));
+    let concurrent_start_receivers = Arc::new(Barrier::new(9));
+    let mutator_active = Arc::new(AtomicBool::new(true));
+    let completed_starts = Arc::new(AtomicUsize::new(0));
+    let environment_mutator = {
+        let receiver = Arc::clone(&concurrent_start_receivers);
+        let active = Arc::clone(&mutator_active);
+        thread::spawn(move || {
+            receiver.wait();
+            let mut round = 0;
+            while active.load(Ordering::Acquire) {
+                let label = format!("fork-safety-{round}");
+                env::set_var("NEO_CORE_PTY_FORK_SAFETY", &label);
+                env::remove_var("NEO_CORE_PTY_FORK_SAFETY");
+                round += 1;
+            }
+        })
+    };
+    let mut concurrent_sessions = Vec::new();
+    let concurrent_starts = (0..8)
+        .map(|id| {
+            let receiver = Arc::clone(&concurrent_start_receivers);
+            let server = Arc::clone(&shared_server);
+            let completions = Arc::clone(&completed_starts);
+            let active = Arc::clone(&mutator_active);
+            thread::spawn(move || {
+                receiver.wait();
+                let mut server = server.lock().unwrap();
+                let response = server.call(
+                    500 + id,
+                    "terminal",
+                json!({"command":"start","args":{"command":"/bin/echo","args":["fork-safety"]}}),
+                );
+                drop(server);
+                if completions.fetch_add(1, Ordering::AcqRel) + 1 == 8 {
+                    active.store(false, Ordering::Release);
+                }
+                response
+            })
+        })
+        .collect::<Vec<_>>();
+    for started in concurrent_starts {
+        let response = started.join().expect("concurrent PTY start thread");
+        assert_eq!(
+            response["result"]["isError"], false,
+            "fork-safe PTY startup failed under environment contention: {response}"
+        );
+        assert!(
+            response["result"]["structuredContent"]["sessionId"]
+                .as_str()
+                .is_some(),
+            "{response}"
+        );
+        concurrent_sessions.push(
+            response["result"]["structuredContent"]["sessionId"]
+                .as_str()
+                .expect("PTY session id")
+                .to_string(),
+        );
+    }
+    for (id, session_id) in concurrent_sessions.iter().enumerate() {
+        let _ = shared_server.lock().unwrap().call(
+            600 + id as u64,
+            "terminal",
+            json!({"command":"close","args":{"session_id":session_id}}),
+        );
+    }
+    environment_mutator.join().expect("environment mutator");
+    env::remove_var("NEO_CORE_PTY_FORK_SAFETY");
+    let mut server = match Arc::try_unwrap(shared_server) {
+        Ok(server) => server.into_inner().unwrap(),
+        Err(_) => unreachable!("concurrent PTY starts have completed"),
+    };
+    let mut sessions = Vec::new();
+    for id in 0..8 {
+        let started = server.call(
+            10 + id,
+            "terminal",
+            json!({"command":"start","args":{"command":"/bin/sleep","args":["30"]}}),
+        );
+        sessions.push(
+            started["result"]["structuredContent"]["sessionId"]
+                .as_str()
+                .expect("PTY session id")
+                .to_string(),
+        );
+    }
+    let limited = server.call(
+        30,
+        "terminal",
+        json!({"command":"start","args":{"command":"/bin/sleep","args":["30"]}}),
+    );
+    assert_eq!(limited["result"]["isError"], true, "{limited}");
+    assert_eq!(
+        limited["result"]["structuredContent"]["code"], "PTY_SESSION_LIMIT",
+        "{limited}"
+    );
+    for (index, session_id) in sessions.iter().enumerate() {
+        let _ = server.call(
+            40 + index as u64,
+            "terminal",
+            json!({"command":"close","args":{"session_id":session_id}}),
+        );
+    }
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+}
+
+#[test]
+fn pty_cursor_ring_and_text_normalization_match_contract() {
+    let temp = std::env::temp_dir().join(format!(
+        "neoy-rust-pty-ring-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let mut server = Server::start_with_ring_bytes(true, temp, 4_096);
+    server.initialize();
+    let start = server.call(2, "terminal", json!({"command":"start","args":{"command":"/usr/bin/printf","args":["\\033[31mprogress\\033[0m\\rready\\n"]}}));
+    let id = start["result"]["structuredContent"]["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    std::thread::sleep(Duration::from_millis(200));
+    let normalized = server.call(3, "terminal", json!({"command":"read","args":{"session_id":id,"cursor":0,"max_bytes":1024,"wait_ms":1000}}));
+    assert_eq!(
+        normalized["result"]["structuredContent"]["output"], "ready\n",
+        "{normalized}"
+    );
+    assert!(
+        normalized["result"]["structuredContent"]["nextCursor"]
+            .as_u64()
+            .unwrap()
+            > 0,
+        "{normalized}"
+    );
+    let _ = server.call(
+        4,
+        "terminal",
+        json!({"command":"close","args":{"session_id":id}}),
+    );
+    let start = server.call(5, "terminal", json!({"command":"start","args":{"command":"/bin/sh","args":["-c","/usr/bin/printf '%010000d' 0"]}}));
+    let id = start["result"]["structuredContent"]["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    std::thread::sleep(Duration::from_millis(200));
+    let mut read = server.call(6, "terminal", json!({"command":"read","args":{"session_id":id,"cursor":0,"max_bytes":1024,"wait_ms":1000}}));
+    for _ in 0..100 {
+        if read["result"]["structuredContent"]["totalBytes"]
+            .as_u64()
+            .unwrap_or(0)
+            > 4096
+        {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+        read = server.call(7, "terminal", json!({"command":"read","args":{"session_id":id,"cursor":0,"max_bytes":1024,"wait_ms":10}}));
+    }
+    let content = &read["result"]["structuredContent"];
+    assert!(content["lostBytes"].as_u64().unwrap() > 0, "{read}");
+    assert_eq!(content["retainedBytes"], 4096, "{read}");
+    assert!(content["truncated"].as_bool().unwrap(), "{read}");
+    assert!(
+        content["nextCursor"].as_u64().unwrap() > content["lostBytes"].as_u64().unwrap(),
+        "{read}"
+    );
+    let _ = server.call(
+        8,
+        "terminal",
+        json!({"command":"close","args":{"session_id":id}}),
+    );
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+}
+
+#[test]
+fn idle_pty_session_is_reclaimed() {
+    let temp = std::env::temp_dir().join(format!(
+        "neoy-rust-pty-idle-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let mut server = Server::start_with_idle_timeout(true, temp.clone(), Some(1_000));
+    server.initialize();
+    let started = server.call(
+        2,
+        "terminal",
+        json!({"command":"start","args":{"command":"/bin/sleep","args":["30"]}}),
+    );
+    let session_id = started["result"]["structuredContent"]["sessionId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("PTY failed to start: {started}"))
+        .to_string();
+    std::thread::sleep(Duration::from_millis(3_500));
+    let read = server.call(
+        3,
+        "terminal",
+        json!({"command":"read","args":{"session_id":session_id}}),
+    );
+    assert_eq!(read["result"]["isError"], true, "{read}");
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn pty_max_lifetime_expires_even_when_session_is_read() {
+    let temp = std::env::temp_dir().join(format!(
+        "neoy-rust-pty-lifetime-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let mut server = Server::start_with_max_lifetime(true, temp.clone(), 5_000);
+    server.initialize();
+    let started = server.call(
+        2,
+        "terminal",
+        json!({"command":"start","args":{"command":"/bin/sleep","args":["30"]}}),
+    );
+    let id = started["result"]["structuredContent"]["sessionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    for index in 0..7 {
+        std::thread::sleep(Duration::from_millis(1_000));
+        let read = server.call(
+            3 + index,
+            "terminal",
+            json!({"command":"read","args":{"session_id":id,"wait_ms":0}}),
+        );
+        if read["result"]["isError"] == true {
+            break;
+        }
+    }
+    let final_read = server.call(
+        12,
+        "terminal",
+        json!({"command":"read","args":{"session_id":id}}),
+    );
+    assert_eq!(final_read["result"]["isError"], true, "{final_read}");
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+// Regression coverage for code-review findings: these are separate from the
+// existing schema/help fixture comparison, which cannot detect runtime drift.
+#[test]
+fn core_status_and_mcp_boundary_match_native_contract() {
+    let mut rust = Server::start(true);
+    rust.initialize();
+    let status = rust.call(99, "status", json!({}));
+    let reported = &status["result"]["structuredContent"];
+    assert!(reported["fullAccessUnlocked"] == true);
+    assert!(reported["ptyLimits"]["maxSessions"].is_number());
+    assert!(reported["operatorSettings"]["strictApprovals"].is_boolean());
+    assert!(reported["settingsFile"].is_string());
+    assert!(reported["jobDir"].is_string());
+    assert!(reported["architecture"].is_string());
+    let invalid = rust.call(100, "status", json!({"unexpected":1}));
+    assert_eq!(invalid["error"]["code"], -32602);
+    let missing_patch = rust.call(101, "apply_file_patch", json!({"cwd":"/tmp"}));
+    assert_eq!(missing_patch["error"]["code"], -32602);
+    let request = json!({"jsonrpc":"2.0","id":102,"params":{}});
+    writeln!(rust.stdin, "{request}").unwrap();
+    rust.stdin.flush().unwrap();
+    let mut line = String::new();
+    rust.stdout.read_line(&mut line).unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&line).unwrap()["error"]["code"],
+        -32600
+    );
+    let _ = rust.child.kill();
+    let _ = rust.child.wait();
+}
+
+#[test]
+fn filesystem_manage_preserves_permissions_and_tree_contract() {
+    let base = std::env::temp_dir().join(format!("neoy-rust-fs-manage-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(&base).unwrap();
+    let mut rust = Server::start(true);
+    rust.initialize();
+    let src = base.join("from");
+    let dst = base.join("to");
+    std::fs::create_dir(&src).unwrap();
+    std::fs::write(src.join("text.txt"), "hello").unwrap();
+    std::os::unix::fs::symlink("text.txt", src.join("link.txt")).unwrap();
+    let copy = rust.call(
+        301,
+        "fs",
+        json!({"command":"manage","args":{
+            "operation":"copy","path":src,"destination":dst,"recursive":true
+        }}),
+    );
+    assert_eq!(copy["result"]["isError"], false, "{copy}");
+    assert_eq!(
+        std::fs::read_to_string(dst.join("text.txt")).unwrap(),
+        "hello"
+    );
+    assert_eq!(
+        std::fs::read_link(dst.join("link.txt")).unwrap().to_str(),
+        Some("text.txt")
+    );
+    let original_mode = std::fs::metadata(dst.join("text.txt"))
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    let invalid = rust.call(
+        302,
+        "fs",
+        json!({"command":"manage","args":{
+            "operation":"chmod","path":dst.join("text.txt")
+        }}),
+    );
+    assert_eq!(invalid["result"]["isError"], true, "{invalid}");
+    assert_eq!(
+        std::fs::metadata(dst.join("text.txt"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        original_mode
+    );
+    let nonrec = rust.call(
+        303,
+        "fs",
+        json!({"command":"manage","args":{
+            "operation":"copy","path":src,"destination":base.join("not-copied"),"recursive":false
+        }}),
+    );
+    assert_eq!(nonrec["result"]["isError"], true, "{nonrec}");
+    let self_move = rust.call(
+        3031,
+        "fs",
+        json!({"command":"manage","args":{
+            "operation":"move","path":src,"destination":src,"force":true
+        }}),
+    );
+    assert_eq!(self_move["result"]["isError"], true, "{self_move}");
+    assert_eq!(
+        std::fs::read_to_string(src.join("text.txt")).unwrap(),
+        "hello"
+    );
+    let nested_copy = rust.call(3032, "fs", json!({"command":"manage","args":{
+        "operation":"copy","path":src,"destination":src.join("nested"),"recursive":true,"force":true
+    }}));
+    assert_eq!(nested_copy["result"]["isError"], true, "{nested_copy}");
+    assert!(!src.join("nested").exists());
+    let forced = rust.call(
+        304,
+        "fs",
+        json!({"command":"manage","args":{
+            "operation":"copy","path":src,"destination":dst,"recursive":true,"force":true
+        }}),
+    );
+    assert_eq!(forced["result"]["isError"], false, "{forced}");
+    let relative = rust.call(
+        305,
+        "fs",
+        json!({"command":"manage","args":{
+            "operation":"symlink","path":base.join("relative"),"destination":"to/text.txt"
+        }}),
+    );
+    assert_eq!(relative["result"]["isError"], false, "{relative}");
+    assert_eq!(
+        std::fs::read_link(base.join("relative")).unwrap().to_str(),
+        Some("to/text.txt")
+    );
+    let removed = rust.call(
+        306,
+        "fs",
+        json!({"command":"manage","args":{
+            "operation":"remove","path":base.join("never-existed"),"force":true
+        }}),
+    );
+    assert_eq!(removed["result"]["isError"], false, "{removed}");
+    let _ = rust.child.kill();
+    let _ = rust.child.wait();
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
+fn strict_gui_approval_blocks_shell_exec_and_start() {
+    let temp = std::env::temp_dir().join(format!("neoy-rust-gui-gate-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&temp);
+    std::fs::create_dir_all(&temp).unwrap();
+    std::fs::write(temp.join("settings.json"), "{\"strictApprovals\":true}").unwrap();
+    let mut server = Server::start_with_data_dir(true, temp.clone());
+    server.initialize();
+    let risky = "osascript -e 'tell application \"Finder\" to activate'";
+    for command in ["exec", "start"] {
+        let result = server.call(
+            390,
+            "shell",
+            json!({"command":command,"args":{"command":risky}}),
+        );
+        assert_eq!(result["result"]["isError"], true, "{result}");
+        assert_eq!(
+            result["result"]["structuredContent"]["code"], "GUI_FOCUS_BLOCKED",
+            "{result}"
+        );
+    }
+    let safe = server.call(
+        391,
+        "shell",
+        json!({"command":"exec","args":{"command":"printf safe"}}),
+    );
+    assert_eq!(safe["result"]["structuredContent"]["exitCode"], 0, "{safe}");
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn rust_reads_existing_job_metadata_without_migration() {
+    let temp = std::env::temp_dir().join(format!("neoy-rust-node-metadata-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&temp);
+    let jobs = temp.join("jobs");
+    std::fs::create_dir_all(&jobs).unwrap();
+    std::fs::write(jobs.join("node-legacy.stdout.log"), "finished").unwrap();
+    std::fs::write(jobs.join("node-legacy.stderr.log"), "").unwrap();
+    std::fs::write(jobs.join("node-legacy.json"), json!({
+        "id":"node-legacy", "label":"native", "pid":std::process::id(), "processGroupId":std::process::id(),
+        "command":"echo finished", "cwd":"/tmp", "startedAt":"2026-11-10T12:34:56.000Z",
+        "stdoutPath":jobs.join("node-legacy.stdout.log"), "stderrPath":jobs.join("node-legacy.stderr.log"),
+        "exitCode":0, "signal":null, "finishedAt":"2026-11-10T12:34:56.100Z"
+    }).to_string()).unwrap();
+    let mut server = Server::start_with_data_dir(true, temp.clone());
+    server.initialize();
+    let result = server.call(
+        420,
+        "shell",
+        json!({"command":"job.status","args":{"job_id":"node-legacy"}}),
+    );
+    assert_eq!(result["result"]["isError"], false, "{result}");
+    let info = &result["result"]["structuredContent"];
+    assert_eq!(info["id"], "node-legacy");
+    assert_eq!(info["startedAt"], "2026-11-10T12:34:56.000Z");
+    assert_eq!(info["finishedAt"], "2026-11-10T12:34:56.100Z");
+    assert_eq!(info["running"], false);
+    assert!(
+        info.get("jobId").is_none(),
+        "Node metadata must use id, not Rust-only jobId"
+    );
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn disconnect_and_sigterm_reclaim_terminal_process_group() {
+    for signal in [None, Some(libc::SIGTERM)] {
+        let mut server = Server::start(true);
+        server.initialize();
+        let started = server.call(
+            701,
+            "terminal",
+            json!({"command":"start","args":{
+                "command":"/bin/sleep","args":["30"]
+            }}),
+        );
+        let leader = started["result"]["structuredContent"]["pid"]
+            .as_i64()
+            .unwrap_or_else(|| panic!("PTY did not start: {started}")) as i32;
+        match signal {
+            Some(signal) => unsafe {
+                libc::kill(server.child.id() as i32, signal);
+            },
+            None => {
+                drop(server.stdin);
+            }
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = server.child.try_wait().unwrap() {
+                assert_eq!(status.code(), Some(0), "clean shutdown expected: {status}");
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = server.child.kill();
+                let _ = server.child.wait();
+                unsafe {
+                    libc::killpg(leader, libc::SIGKILL);
+                }
+                panic!("Core failed to shut down after transport EOF / SIGTERM");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let still_alive = unsafe { libc::killpg(leader, 0) == 0 };
+        if still_alive {
+            unsafe {
+                libc::killpg(leader, libc::SIGKILL);
+            }
+        }
+        assert!(!still_alive, "PTY group {leader} survived Core shutdown");
+    }
+}
+
+#[test]
+fn detached_terminal_process_is_reclaimed_on_close() {
+    let temp = std::env::temp_dir().join(format!("neoy-rust-pty-detached-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&temp);
+    std::fs::create_dir_all(&temp).unwrap();
+    let pid_file = temp.join("background.pid");
+    let mut server = Server::start(true);
+    server.initialize();
+    let started = server.call(
+        702,
+        "terminal",
+        json!({"command":"start","args":{
+            "command":"/bin/sh","args":["-i"]
+        }}),
+    );
+    let session_id = started["result"]["structuredContent"]["sessionId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("PTY did not start: {started}"));
+    let write = server.call(703, "terminal", json!({"command":"write","args":{
+        "session_id":session_id,
+        "data":format!("nohup /bin/sleep 30 >/dev/null 2>&1 & echo $! > '{}'\r", pid_file.display())
+    }}));
+    assert_eq!(write["result"]["isError"], false, "{write}");
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    while !pid_file.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    if !pid_file.exists() {
+        let diagnostic = server.call(
+            7041,
+            "terminal",
+            json!({"command":"read","args":{"session_id":session_id,"wait_ms":200}}),
+        );
+        panic!("background process did not start: {diagnostic}");
+    }
+    let pid: i32 = std::fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let _ = server.call(
+        704,
+        "terminal",
+        json!({"command":"read","args":{"session_id":session_id,"wait_ms":20}}),
+    );
+    let closed = server.call(
+        705,
+        "terminal",
+        json!({"command":"close","args":{"session_id":session_id}}),
+    );
+    assert_eq!(closed["result"]["isError"], false, "{closed}");
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let live = loop {
+        let status = Command::new("/bin/ps")
+            .args(["-p", &pid.to_string(), "-o", "stat="])
+            .output()
+            .unwrap();
+        let state = String::from_utf8_lossy(&status.stdout);
+        let live =
+            status.status.success() && !state.trim().is_empty() && !state.trim().starts_with('Z');
+        if !live || std::time::Instant::now() >= deadline {
+            break live;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    };
+    if live {
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+        }
+    }
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+    let _ = std::fs::remove_dir_all(temp);
+    assert!(!live, "detached terminal child {pid} survived PTY close");
+}
+
+#[test]
+fn gui_approval_is_single_use_and_accepts_node_grant_format() {
+    let temp = std::env::temp_dir().join(format!("neoy-rust-gui-grant-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&temp);
+    std::fs::create_dir_all(&temp).unwrap();
+    std::fs::write(temp.join("settings.json"), "{\"strictApprovals\":true}").unwrap();
+    let expiry_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 120;
+    let date = Command::new("/bin/date")
+        .args([
+            "-u",
+            "-r",
+            &expiry_secs.to_string(),
+            "+%Y-%m-%dT%H:%M:%S.000Z",
+        ])
+        .output()
+        .unwrap();
+    assert!(date.status.success());
+    let approval = temp.join("FOREGROUND_GUI_APPROVED");
+    std::fs::write(
+        &approval,
+        json!({
+            "nonce":"0123456789abcdef0123456789abcdef",
+            "expiresAt":String::from_utf8_lossy(&date.stdout).trim(),
+            "allowedApps":["Finder"]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let mut server = Server::start_with_data_dir(true, temp.clone());
+    server.initialize();
+    let command = "printf gui-ok # osascript -e 'tell   application \"Finder\" to activate'";
+    let first = server.call(
+        750,
+        "shell",
+        json!({"command":"exec","args":{"command":command}}),
+    );
+    assert_eq!(first["result"]["isError"], false, "{first}");
+    assert_eq!(
+        first["result"]["structuredContent"]["exitCode"], 0,
+        "{first}"
+    );
+    assert!(
+        !approval.exists(),
+        "approval should have been consumed before command execution"
+    );
+    let second = server.call(
+        751,
+        "shell",
+        json!({"command":"exec","args":{"command":command}}),
+    );
+    assert_eq!(
+        second["result"]["structuredContent"]["code"], "GUI_FOCUS_BLOCKED",
+        "{second}"
+    );
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn short_lived_pty_preserves_output_and_reaps_exit_status() {
+    let mut server = Server::start(true);
+    server.initialize();
+    for index in 0..12 {
+        let started = server.call(
+            1800 + index * 3,
+            "terminal",
+            json!({
+                "command":"start","args":{"command":"/bin/echo","args":["rust-pty-exit-ok"]}
+            }),
+        );
+        let session_id = started["result"]["structuredContent"]["sessionId"]
+            .as_str()
+            .unwrap_or_else(|| panic!("PTY failed: {started}"))
+            .to_owned();
+        // Delay deliberately: a fast child has exited before the first read.
+        std::thread::sleep(Duration::from_millis(250));
+        let mut output = String::new();
+        let mut exit_code = Value::Null;
+        let mut cursor = 0;
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while std::time::Instant::now() < deadline {
+            let result = server.call(
+                1801 + index * 3,
+                "terminal",
+                json!({
+                    "command":"read","args":{"session_id":session_id,"cursor":cursor,"wait_ms":100}
+                }),
+            );
+            assert_ne!(result["result"]["isError"], true, "{result}");
+            let state = &result["result"]["structuredContent"];
+            assert_eq!(
+                state["text"], state["output"],
+                "Node-compatible PTY text field missing"
+            );
+            assert!(state["exited"].is_boolean());
+            output.push_str(state["text"].as_str().unwrap_or(""));
+            cursor = state["nextCursor"].as_u64().unwrap_or(cursor);
+            exit_code = state["exitCode"].clone();
+            if exit_code == 0 && output.contains("rust-pty-exit-ok") {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            output.contains("rust-pty-exit-ok"),
+            "PTY round {index} had no output: {output:?}, exit={exit_code}"
+        );
+        assert_eq!(exit_code, 0, "PTY round {index} lost exit status");
+        let closed = server.call(
+            1802 + index * 3,
+            "terminal",
+            json!({
+                "command":"close","args":{"session_id":session_id}
+            }),
+        );
+        assert_eq!(closed["result"]["isError"], false, "{closed}");
+    }
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+}
+
+#[test]
+fn pty_fork_survives_concurrent_shell_and_fs_calls() {
+    let mut server = Server::start(true);
+    server.initialize();
+    for round in 0..8_u64 {
+        let base = 2200 + round * 5;
+        let requests = [
+            json!({"jsonrpc":"2.0","id":base,"method":"tools/call","params":{
+                "name":"shell","arguments":{"command":"start","args":{"command":"sleep 0.15; printf done"}}
+            }}),
+            json!({"jsonrpc":"2.0","id":base+1,"method":"tools/call","params":{
+                "name":"fs","arguments":{"command":"stat","args":{"path":"/bin/echo"}}
+            }}),
+            json!({"jsonrpc":"2.0","id":base+2,"method":"tools/call","params":{
+                "name":"terminal","arguments":{"command":"start","args":{"command":"/bin/echo","args":["concurrent-pty-ok"]}}
+            }}),
+        ];
+        for request in requests {
+            writeln!(server.stdin, "{request}").unwrap();
+        }
+        server.stdin.flush().unwrap();
+        let mut session_id = None;
+        for _ in 0..3 {
+            let mut line = String::new();
+            server.stdout.read_line(&mut line).unwrap();
+            let result: Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(result["result"]["isError"], false, "{result}");
+            if result["id"] == base + 2 {
+                session_id = result["result"]["structuredContent"]["sessionId"]
+                    .as_str()
+                    .map(str::to_string);
+            }
+        }
+        let session_id = session_id.expect("concurrent PTY session started");
+        let mut output = String::new();
+        let mut cursor = 0_u64;
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let mut exit_code = Value::Null;
+        while std::time::Instant::now() < deadline {
+            let result = server.call(
+                base + 3,
+                "terminal",
+                json!({
+                    "command":"read","args":{"session_id":session_id,"cursor":cursor,"wait_ms":100}
+                }),
+            );
+            assert_eq!(result["result"]["isError"], false, "{result}");
+            let state = &result["result"]["structuredContent"];
+            output.push_str(state["output"].as_str().unwrap_or(""));
+            cursor = state["nextCursor"].as_u64().unwrap_or(cursor);
+            exit_code = state["exitCode"].clone();
+            if exit_code == 0 && output.contains("concurrent-pty-ok") {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            output.contains("concurrent-pty-ok"),
+            "PTY concurrent round {round}, output={output:?}, exit={exit_code}"
+        );
+        assert_eq!(
+            exit_code, 0,
+            "PTY concurrent round {round} failed to reap child"
+        );
+        let _ = server.call(
+            base + 4,
+            "terminal",
+            json!({"command":"close","args":{"session_id":session_id}}),
+        );
+    }
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+}
+
+#[test]
+fn shell_job_list_ignores_legacy_pty_metadata() {
+    let temp = std::env::temp_dir().join(format!("neoy-rust-job-list-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&temp);
+    let jobs = temp.join("jobs");
+    std::fs::create_dir_all(&jobs).unwrap();
+    std::fs::write(
+        jobs.join("pty_legacy.json"),
+        r#"{"id":"pty_legacy","kind":"pty"}"#,
+    )
+    .unwrap();
+    let mut server = Server::start_with_data_dir(true, temp.clone());
+    server.initialize();
+    let response = server.call(1088, "shell", json!({"command":"job.list","args":{}}));
+    assert_eq!(response["result"]["isError"], false, "{response}");
+    let jobs = response["result"]["structuredContent"]["jobs"]
+        .as_array()
+        .unwrap();
+    assert!(
+        !jobs
+            .iter()
+            .any(|job| job["metadataFile"] == "pty_legacy.json"),
+        "{response}"
+    );
+    let _ = server.child.kill();
+    let _ = server.child.wait();
+    let _ = std::fs::remove_dir_all(temp);
+}

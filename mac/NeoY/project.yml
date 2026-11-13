@@ -14,16 +14,9 @@ targets:
       - Sources/NeoY
       - path: Resources/Scripts/neo-node/neo-node.mjs
         buildPhase: resources
-      - path: Resources/Scripts/core-mcp-probe.mjs
-        buildPhase: resources
-      - path: Resources/Scripts/core-mcp-probe.mjs
-        buildPhase: resources
       - path: Resources/features.json
         buildPhase: resources
       - path: Resources/Assets.xcassets
-      - path: Runtime
-        type: folder
-        buildPhase: resources
     resources:
       - Resources/Scripts
     settings:

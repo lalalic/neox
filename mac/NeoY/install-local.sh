@@ -27,20 +27,16 @@ if [[ -z "$identity" ]]; then
   exit 1
 fi
 
-for dependency in xcodegen xcodebuild node npm cargo; do
+for dependency in xcodegen xcodebuild cargo; do
   if ! command -v "$dependency" >/dev/null 2>&1; then
     print -u2 "NeoY local install requires '$dependency' on PATH."
     exit 1
   fi
 done
-if ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' ; then
-  print -u2 "NeoY local install requires Node.js >=18."
-  exit 1
-fi
-
-npm test --prefix "$HERE/Runtime"
-# Build/test the least-privileged private file server as part of the one
-# canonical signed-app install. It is NOT the unrestricted Core provider.
+# Rust Core is the only packaged executor. No npm Core, Node syntax probe,
+# or Node fallback is required on fresh installs.
+cargo test --locked --manifest-path "$HERE/CoreRust/Cargo.toml"
+cargo build --release --locked --manifest-path "$HERE/CoreRust/Cargo.toml"
 cargo test --locked --manifest-path "$HERE/FileServer/Cargo.toml"
 cargo build --release --locked --manifest-path "$HERE/FileServer/Cargo.toml"
 
@@ -49,30 +45,35 @@ rm -rf "$APP"
 xcodebuild -project "$PROJECT" -scheme NeoY -configuration Debug \
   -derivedDataPath "$DERIVED" build
 
-# Package a separately signed Rust helper, then sign the outer native app.
-# The Swift file handler continues to work if the helper ever fails to start.
+# Independently sign both private Rust children before signing the outer app.
+CORE_HELPER="$HERE/CoreRust/target/release/neoy-core-rust"
 FILE_HELPER="$HERE/FileServer/target/release/neoy-file-server"
-[[ -x "$FILE_HELPER" ]] || { print -u2 "Rust file-server binary missing"; exit 1; }
-cp "$FILE_HELPER" "$APP/Contents/Resources/neoy-file-server"
-chmod 755 "$APP/Contents/Resources/neoy-file-server"
-codesign --force --sign "$identity" --timestamp=none "$APP/Contents/Resources/neoy-file-server"
-codesign --verify --strict "$APP/Contents/Resources/neoy-file-server"
+[[ -x "$CORE_HELPER" && -x "$FILE_HELPER" ]] || {
+  print -u2 "NeoY preflight requires built Rust Core and file-server binaries."
+  exit 1
+}
+for helper in neoy-core-rust neoy-file-server; do
+  if [[ "$helper" == "neoy-core-rust" ]]; then source="$CORE_HELPER"; else source="$FILE_HELPER"; fi
+  cp "$source" "$APP/Contents/Resources/$helper"
+  chmod 755 "$APP/Contents/Resources/$helper"
+  codesign --force --sign "$identity" --timestamp=none "$APP/Contents/Resources/$helper"
+  codesign --verify --strict "$APP/Contents/Resources/$helper"
+done
 codesign --force --deep --sign "$identity" \
   --entitlements "$ENTITLEMENTS" --timestamp=none "$APP"
 codesign --verify --deep --strict "$APP"
 
-# Fail before staging, changing launchd or replacing the currently running app.
-# An app without packaged Core would silently lose the Core MCP provider.
-[[ -x "$APP/Contents/Resources/neoy-file-server" ]] || {
-  print -u2 "NeoY install preflight failed: signed app lacks Rust file server."
+# Fail closed before replacing the currently healthy app. The signed native
+# Rust Core must answer initialize/tools/list in the installed binary. The
+# signed NeoY host repeats that probe during startup and can roll back.
+[[ -x "$APP/Contents/Resources/neoy-file-server" && -x "$APP/Contents/Resources/neoy-core-rust" ]] || {
+  print -u2 "NeoY install preflight failed: signed app lacks one of its Rust helpers."
   exit 1
 }
-CORE_ENTRY="$APP/Contents/Resources/Runtime/src/core/tools/index.mjs"
-CORE_PACKAGE="$APP/Contents/Resources/Runtime/package.json"
-if [[ ! -f "$CORE_ENTRY" || ! -f "$CORE_PACKAGE" ]]; then
-  print -u2 "NeoY install preflight failed: signed app does not contain packaged Core."
+[[ "$("$APP/Contents/Resources/neoy-core-rust" --version)" == "$(grep -E '^version = ' "$HERE/CoreRust/Cargo.toml" | head -1 | cut -d'"' -f2)" ]] || {
+  print -u2 "NeoY install preflight failed: signed Rust Core identity mismatch."
   exit 1
-fi
+}
 # Stage the candidate and install a rollback watchdog before touching the working app.
 mkdir -p "$HOME/Library/Application Support/NeoY/bin" "$HOME/Library/Logs/NeoY"
 cp "$HERE/Resources/Scripts/upgrade-watchdog.sh" "$WATCHDOG"
@@ -107,6 +108,7 @@ cat > "$WATCHDOG_PLIST" <<PLIST
     <key>NEOY_BACKUP</key><string>$BACKUP</string>
     <key>NEOY_UPGRADE_LOG</key><string>$UPGRADE_LOG</string>
     <key>NEOY_TRIGGER_FILE</key><string>$UPGRADE_TRIGGER</string>
+    <key>NEOY_REQUIRE_CORE_HEALTH</key><string>1</string>
   </dict>
   <key>StandardOutPath</key><string>$HOME/.neoy/upgrade-watchdog.out.log</string>
   <key>StandardErrorPath</key><string>$HOME/.neoy/upgrade-watchdog.err.log</string>
@@ -130,10 +132,12 @@ mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.neoy"
 
 # NeoY and its cloudflared child are supervised without PM2. Remove obsolete
 # PM2 entries once during installation; optional products may still use PM2.
-for process_name in neoy neoy-tunnel neoy-runtime-gateway neoy-mcp-gateway; do
-  npx --yes pm2 delete "$process_name" >/dev/null 2>&1 || true
-done
-npx --yes pm2 save --force >/dev/null 2>&1 || true
+if command -v pm2 >/dev/null 2>&1; then
+  for process_name in neoy neoy-tunnel neoy-runtime-gateway neoy-mcp-gateway; do
+    pm2 delete "$process_name" >/dev/null 2>&1 || true
+  done
+  pm2 save --force >/dev/null 2>&1 || true
+fi
 rm -f "$HOME/Library/Application Support/NeoY/neoy-pm2.config.cjs"
 
 cat > "$LAUNCH_PLIST" <<PLIST

@@ -10,7 +10,7 @@ TCC grants, and on-disk user data during this release.
 | --- | --- | --- |
 | macOS GUI, gateway, native permissions | `lalalic/neox` | `Neo.app`, `com.neox.neoy` |
 | Agent CLI, project/skill routes | `lalalic/neo` | `@lalalic/neo`, executable `neo` |
-| Federated shell/fs/PTY provider | `lalalic/neox/mac/NeoY/Runtime` | `@lalalic/neoy-core` |
+| Federated shell/fs/PTY provider | `lalalic/neox/mac/NeoY/CoreRust` | `neoy-core-rust` signed child |
 | Browser automation | `lalalic/browser-workspace` | WebHelm, independently managed |
 | Durable agent tasks | `lalalic/agents-relay` | Agents Relay, independently managed |
 
@@ -45,7 +45,7 @@ An Apple Development certificate cannot substitute for Developer ID.
 ## Release gates
 
 1. CLI source identity and macOS package-owner collision tests pass.
-2. The signed application contains the pinned Core runtime without requiring
+2. The signed application contains the signed native Rust Core executable without requiring
    the developer's Git checkout.
 3. On a clean Mac, mounting DMG and launching Neo completes with Gatekeeper
    under default settings; notarization and staple validation pass.

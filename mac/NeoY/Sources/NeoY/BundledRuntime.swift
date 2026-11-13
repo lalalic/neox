@@ -20,84 +20,16 @@ enum NeoYBundledRuntime {
         name == coreProviderName || name == legacyMacBridgeProviderName
     }
 
-    // Copy Core into the signed app bundle at build time. Never use a developer checkout
-    // as an implicit production fallback. Missing Core remains an unavailable provider.
-    static var packagedRuntimeURL: URL {
-        (Bundle.main.resourceURL ?? Bundle.main.bundleURL)
-            .appendingPathComponent("Runtime", isDirectory: true)
-    }
-
-    // Rust is an opt-in, independently installed Core child. Keep the existing
-    // managed Node version as the immediate rollback path.
-    static var rustBinaryURL: URL {
-        NeoYPaths.supportDirectory.appendingPathComponent("core/rust/neoy-core-rust")
-    }
-    static var coreProviderSelectionURL: URL {
-        NeoYPaths.supportDirectory.appendingPathComponent("core/rust/provider")
-    }
-
-    static func preferredBackend(marker: URL = coreProviderSelectionURL) -> String {
-        (try? String(contentsOf: marker, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) == "rust"
-            ? "rust" : "node"
-    }
-
-    static func selectBackend(
-        _ backend: String,
-        rustBinary: URL = rustBinaryURL,
-        marker: URL = coreProviderSelectionURL,
-        fileManager: FileManager = .default
-    ) throws {
-        guard backend == "node" || backend == "rust" else {
-            throw NSError(domain: "NeoYCore", code: 30,
-                          userInfo: [NSLocalizedDescriptionKey: "core provider must be node or rust"])
-        }
-        if backend == "node" {
-            if fileManager.fileExists(atPath: marker.path) { try fileManager.removeItem(at: marker) }
-            return
-        }
-        guard fileManager.isExecutableFile(atPath: rustBinary.path) else {
-            throw NSError(domain: "NeoYCore", code: 31,
-                          userInfo: [NSLocalizedDescriptionKey: "Rust Core executable has not been installed"])
-        }
-        try fileManager.createDirectory(at: marker.deletingLastPathComponent(),
-                                        withIntermediateDirectories: true,
-                                        attributes: [.posixPermissions: 0o700])
-        try Data("rust\n".utf8).write(to: marker, options: .atomic)
-        try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: marker.path)
-    }
-
+    // Only the independently installed Rust child (or the signed app seed)
+    // may provide Core. Never use a Node runtime as an implicit fallback.
     static func coreMCPServers(
-        runtimeURL: URL = NeoYManagedCoreRuntime.selected(),
-        fileManager: FileManager = .default,
-        rustBinary: URL = rustBinaryURL,
-        marker: URL = coreProviderSelectionURL
+        binary: URL? = NeoYManagedRustCoreRuntime.selected(),
+        fileManager: FileManager = .default
     ) -> [NeoYMCPServerConfiguration] {
-        if preferredBackend(marker: marker) == "rust", fileManager.isExecutableFile(atPath: rustBinary.path) {
-            var components = URLComponents()
-            components.scheme = "stdio"
-            components.path = rustBinary.path
-            guard let url = components.string else { return [] }
-            return [.init(name: coreProviderName, url: url, isEnabled: true)]
-        }
-        let tools = runtimeURL
-            .appendingPathComponent("src", isDirectory: true)
-            .appendingPathComponent("core", isDirectory: true)
-            .appendingPathComponent("tools", isDirectory: true)
-            .appendingPathComponent("index.mjs")
-        guard fileManager.isReadableFile(atPath: tools.path) else { return [] }
-
-        let nodeCandidates = [
-            "/opt/homebrew/bin/node",
-            "/usr/local/bin/node",
-            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".volta/bin/node").path,
-            "/usr/bin/node",
-        ]
-        guard let node = nodeCandidates.first(where: fileManager.isExecutableFile(atPath:)) else { return [] }
-
+        guard let binary, fileManager.isExecutableFile(atPath: binary.path) else { return [] }
         var components = URLComponents()
         components.scheme = "stdio"
-        components.path = node
-        components.queryItems = [URLQueryItem(name: "arg", value: tools.path)]
+        components.path = binary.path
         guard let url = components.string else { return [] }
         return [.init(name: coreProviderName, url: url, isEnabled: true)]
     }
@@ -115,13 +47,10 @@ enum NeoYBundledRuntime {
 
     static func resolvedMCPServers(
         userServers: [NeoYMCPServerConfiguration],
-        runtimeURL: URL = NeoYManagedCoreRuntime.selected(),
-        fileManager: FileManager = .default,
-        rustBinary: URL = rustBinaryURL,
-        marker: URL = coreProviderSelectionURL
+        binary: URL? = NeoYManagedRustCoreRuntime.selected(),
+        fileManager: FileManager = .default
     ) -> [NeoYMCPServerConfiguration] {
         let external = userServers.filter { !isBundledProviderName($0.name) }
-        return coreMCPServers(runtimeURL: runtimeURL, fileManager: fileManager,
-                              rustBinary: rustBinary, marker: marker) + external
+        return coreMCPServers(binary: binary, fileManager: fileManager) + external
     }
 }

@@ -1,19 +1,7 @@
-name: Publish NeoY Core Runtime
+name: Publish Neo Harness CLI
 
 on:
-  push:
-    tags:
-      - 'runtime-v*'
   workflow_dispatch:
-    inputs:
-      package:
-        description: Package to publish
-        required: true
-        type: choice
-        default: core
-        options:
-          - core
-          - neo-cli
 
 permissions:
   contents: read
@@ -22,53 +10,7 @@ permissions:
   id-token: write
 
 jobs:
-  publish:
-    if: github.event_name != 'workflow_dispatch' || inputs.package == 'core'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: mac/NeoY/Runtime
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
-      - run: npm install --global npm@11.15.0
-      - run: npm ci
-      - run: npm test
-      - name: Resolve publication identity
-        id: publication
-        shell: bash
-        run: |
-          echo "name=$(node -p 'require("./package.json").name')" >> "$GITHUB_OUTPUT"
-          echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
-      - name: Verify release has not already been published
-        shell: bash
-        run: |
-          version="${{ steps.publication.outputs.version }}"
-          if npm view "@lalalic/neoy-core@$version" version --json 2>/dev/null | grep -Fq "\"$version\""; then
-            echo "Refusing to republish existing @lalalic/neoy-core@$version"
-            exit 1
-          fi
-      - run: npm publish --provenance --access public
-      - name: Report verified publication
-        uses: lalalic/agents-relay/.github/actions/report-publication@publication-v1
-        with:
-          token: ${{ github.token }}
-          artifact: ${{ steps.publication.outputs.name }}
-          version: ${{ steps.publication.outputs.version }}
-          channel: https://registry.npmjs.org
-      - name: Report release failure
-        if: ${{ failure() }}
-        continue-on-error: true
-        uses: lalalic/agents-relay/.github/actions/report-publication-failure@publication-v1
-        with:
-          token: ${{ github.token }}
-          stage: runtime npm publish workflow
-
   publish-neo-cli:
-    if: github.event_name == 'workflow_dispatch' && inputs.package == 'neo-cli'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -73,30 +73,20 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         // Seed Core synchronously, then validate it without blocking the UI.
-        do { try NeoYManagedCoreRuntime.bootstrapIfMissing() }
+        do { try NeoYManagedRustCoreRuntime.bootstrapIfMissing() }
         catch { NSLog("Neo Core bootstrap failed: %@", error.localizedDescription) }
         Task.detached {
-            let previous = NeoYManagedCoreRuntime.active()?.path
+            let previous = NeoYManagedRustCoreRuntime.active()?.path
             do {
-                _ = try NeoYManagedCoreRuntime.reconcileStartup()
-                if NeoYManagedCoreRuntime.active()?.path != previous {
+                _ = try NeoYManagedRustCoreRuntime.reconcileStartup()
+                if NeoYManagedRustCoreRuntime.active()?.path != previous {
                     NotificationCenter.default.post(name: Notification.Name("neoYCoreRuntimeChanged"), object: nil)
                 }
             } catch {
                 NSLog("Neo Core startup reconciliation failed: %@", error.localizedDescription)
             }
-            // Keep the Core current even if the menu-bar app runs for days.
-            while !Task.isCancelled {
-                do {
-                    if let installed = try NeoYManagedCoreRuntime.upgradeIfAvailable() {
-                        NSLog("Neo Core automatically updated to %@", installed)
-                        await MainActor.run {
-                            NotificationCenter.default.post(name: Notification.Name("neoYCoreRuntimeChanged"), object: nil)
-                        }
-                    }
-                } catch { NSLog("Neo Core automatic update unavailable: %@", error.localizedDescription) }
-                do { try await Task.sleep(for: .seconds(6 * 60 * 60)) } catch { break }
-            }
+            // Reconcile only from the installed, signed app seed. Upgrades
+            // from an external artifact require explicit `core upgrade`.
         }
         // Prepare the user-owned project workspace without touching existing Git repositories.
         do { try NeoWorkspaceConfiguration.prepareIfNeeded() }

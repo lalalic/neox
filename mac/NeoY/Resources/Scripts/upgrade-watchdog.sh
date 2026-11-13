@@ -24,7 +24,16 @@ health_ok() {
     actual="$(shasum -a 256 "$DEST/Contents/MacOS/NeoY" 2>/dev/null | awk '{print $1}')" || return 1
     [[ "$actual" == "$EXPECTED_HASH" ]] || return 1
   fi
-  /usr/bin/curl -fsS --max-time 2 "$HEALTH_URL" 2>/dev/null | /usr/bin/grep -q '"mcp_endpoint"'
+  /usr/bin/curl -fsS --max-time 2 "$HEALTH_URL" 2>/dev/null | /usr/bin/grep -q '"mcp_endpoint"' || return 1
+  # The gateway being online is insufficient if the Rust Core provider has
+  # failed to register. Opted in by the Rust-only native installer; the
+  # historic watchdog unit fixtures need no Core process.
+  if [[ "${NEOY_REQUIRE_CORE_HEALTH:-0}" == "1" ]]; then
+    /usr/bin/curl -fsS --max-time 3 -H 'Content-Type: application/json' \
+      --data '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
+      "http://127.0.0.1:${PORT}/mcp" 2>/dev/null | /usr/bin/grep -q '"name":"shell"' || return 1
+  fi
+  return 0
 }
 wait_for_health() {
   local timeout="$1" elapsed=0
