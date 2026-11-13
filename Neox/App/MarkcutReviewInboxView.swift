@@ -1,6 +1,12 @@
 import SwiftUI
 import UIKit
 
+private struct MarkcutQuestion: Identifiable {
+    let id: String
+    let name: String
+    let markdown: String
+}
+
 /// Phone-owned local inbox mirrored from Neo Master. Text-mode previews remain
 /// view-only; event-mode requests allow explicit human review.
 struct MarkcutReviewInboxView: View {
@@ -29,6 +35,8 @@ struct MarkcutReviewInboxView: View {
     @State private var previewRetry = 0
     @State private var landscapeExpanded = false
     @State private var feedback = ""
+    @State private var questionScenes: [MarkcutQuestion] = []
+    @State private var questionAnswers: [String: String] = [:]
     @State private var playbackPosition: MarkcutPlaybackPosition?
     @State private var message: String?
     @State private var syncing = false
@@ -39,7 +47,8 @@ struct MarkcutReviewInboxView: View {
         MarkcutReviewGrouping.groups(from: sessions).flatMap { group in
             group.sessions.map { revision in
                 MarkcutReviewGroup(id: group.id + ":" + revision.id,
-                    title: group.sessions.count > 1 ? revision.title : group.title,
+                    title: (revision.value["customTitle"] as? Bool == true) ? revision.title :
+                        (group.sessions.count > 1 ? revision.title : group.title),
                     jobID: group.jobID, sessions: [revision],
                     pendingCount: revision.value["status"] as? String == "ready" &&
                         (revision.value["reviewActionable"] as? Bool ?? true) ? 1 : 0)
@@ -296,6 +305,8 @@ struct MarkcutReviewInboxView: View {
                                 html = nil
                                 previewError = nil
                                 feedback = ""
+                                questionScenes = []
+                                questionAnswers = [:]
                                 Task { await loadPreview(revision.value) }
                             } label: {
                                 if revision.reviewSessionID == selectedSessionID {
@@ -374,12 +385,41 @@ struct MarkcutReviewInboxView: View {
         .statusBarHidden()
     }
 
+    @ViewBuilder
     private func preview(for item: [String: Any]) -> some View {
+        if item["mode"] as? String == "questions" {
+            if questionScenes.isEmpty {
+                ProgressView(previewError ?? "Loading questions…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    ForEach(questionScenes.indices, id: \.self) { index in
+                        let question = questionScenes[index]
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Q\(index + 1)").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                            Text((try? AttributedString(markdown: question.markdown)) ?? AttributedString(question.markdown))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            TextField("Your answer…", text: Binding(
+                                get: { questionAnswers[question.name] ?? "" },
+                                set: { questionAnswers[question.name] = $0 }), axis: .vertical)
+                                .lineLimit(3...8)
+                                .textFieldStyle(.roundedBorder)
+                                .accessibilityIdentifier("markcutQuestionAnswer-\(index + 1)")
+                        }
+                    }
+                }
+                .padding(16)
+            }
+            .accessibilityIdentifier("markcutQuestionnaire")
+            }
+        } else {
         // The sheet closure can outlive the parent View's captured @State values.
         // Let a dedicated Binding-backed child observe the asynchronous preview.
         MarkcutReviewSurface(html: $html, origin: $previewOrigin, playbackPosition: $playbackPosition,
             error: $previewError, loadingStage: $loadingStage, retry: $previewRetry) {
             Task { await loadPreview(item) }
+        }
         }
     }
 
@@ -388,7 +428,15 @@ struct MarkcutReviewInboxView: View {
         return !request.canDeliver || !inbox.isCurrent(request)
     }
 
+    @ViewBuilder
     private func decisionControls(for item: [String: Any]) -> some View {
+        if item["mode"] as? String == "questions" {
+            Button("Submit") { Task { await submit("approved", item: item) } }
+                .frame(maxWidth: .infinity)
+                .buttonStyle(.borderedProminent)
+                .disabled(syncing || cannotDeliver(item) || questionScenes.isEmpty)
+                .accessibilityIdentifier("markcutQuestionsSubmit")
+        } else {
         VStack(spacing: 7) {
             if let requestID = item["id"] as? String,
                inbox.request(id: requestID)?.canDeliver == false {
@@ -419,6 +467,7 @@ struct MarkcutReviewInboxView: View {
             }
             .controlSize(.regular)
         }
+        }
     }
 
     private func clearSelection() {
@@ -429,6 +478,8 @@ struct MarkcutReviewInboxView: View {
         previewOrigin = nil
         previewError = nil
         feedback = ""
+        questionScenes = []
+        questionAnswers = [:]
     }
 
     private func openRequestedPreviewIfAvailable() {
@@ -486,6 +537,23 @@ struct MarkcutReviewInboxView: View {
             // The compiled scene tree gives actual aspect ratio (landscape/portrait).
             let tree = compiled as? [String: Any] ?? [:]
             let root = tree["root"] as? [String: Any] ?? tree
+            if inbox.request(id: requestID)?.mode == "questions" {
+                let sceneNodes = root["children"] as? [[String: Any]] ?? []
+                questionScenes = sceneNodes.enumerated().compactMap { index, scene in
+                    guard scene["type"] as? String == "scene" else { return nil }
+                    let name = scene["name"] as? String ?? "Q\(index + 1)"
+                    let title = scene["title"] as? String ?? ""
+                    let text = title.hasPrefix("md64:") ?
+                        (Data(base64Encoded: String(title.dropFirst(5))).flatMap { String(data: $0, encoding: .utf8) } ?? title) : title
+                    return MarkcutQuestion(id: scene["id"] as? String ?? name, name: name, markdown: text)
+                }
+                if questionScenes.isEmpty {
+                    previewError = "No questions in compiled scenes"
+                } else {
+                    loadingStage = ""
+                }
+                return
+            }
             let width = (root["width"] as? NSNumber)?.doubleValue ?? 1080
             let height = (root["height"] as? NSNumber)?.doubleValue ?? 1920
             let data = try JSONSerialization.data(withJSONObject: compiled, options: [.fragmentsAllowed])
@@ -604,7 +672,14 @@ struct MarkcutReviewInboxView: View {
         }
         let choice: MarkcutReviewChoice = decision == "approved" ? .approved : .changesRequested
         let note = feedback.trimmingCharacters(in: .whitespacesAndNewlines)
-        let comments: [MarkcutReviewComment] = choice == .changesRequested ?
+        let comments: [MarkcutReviewComment] = request.mode == "questions" ?
+            questionScenes.map { question in
+                var comment = MarkcutReviewComment(sceneId: question.id, timeSeconds: 0,
+                    text: questionAnswers[question.name] ?? "", scope: "scene")
+                comment.sceneName = question.name
+                return comment
+            } :
+            choice == .changesRequested ?
             [MarkcutReviewComment(sceneId: playbackPosition?.sceneID,
                                   timeSeconds: playbackPosition?.timeSeconds ?? 0,
                                   text: note, scope: playbackPosition?.sceneID == nil ? "overall" : "spot")] : []

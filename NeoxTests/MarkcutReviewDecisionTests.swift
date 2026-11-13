@@ -80,6 +80,40 @@ final class MarkcutReviewDecisionTests: XCTestCase {
     }
 
     @MainActor
+    func testQuestionnaireMarkdownSceneAnswersSurviveMobileEventSubmit() throws {
+        let template = MarkcutReviewEventTemplate(type: "task.interactive_decision",
+            source: "job/1/task/2/execution/3",
+            data: ["interactive": .object(["jobId": .string("1"), "taskId": .string("2"),
+                "executionId": .string("3")])], responseKey: "interactive")
+        let request = try MarkcutReviewRequest(id: UUID().uuidString,
+            contentHash: String(repeating: "d", count: 64), revisionID: "ignored",
+            title: "Vlog 问题", mode: "questions", customTitle: true, delivery: "event", eventTemplate: template)
+        let roundTrip = try JSONDecoder().decode(MarkcutReviewRequest.self, from: JSONEncoder().encode(request))
+        XCTAssertEqual(roundTrip.mode, "questions")
+        XCTAssertEqual(roundTrip.customTitle, true)
+        XCTAssertEqual(roundTrip.groupingValue["mode"] as? String, "questions")
+        var answer1 = MarkcutReviewComment(sceneId: "scene-q1", timeSeconds: 0, text: "加拿大生活", scope: "scene")
+        answer1.sceneName = "Q1"
+        var answer2 = MarkcutReviewComment(sceneId: "scene-q2", timeSeconds: 0, text: "", scope: "scene")
+        answer2.sceneName = "Q2"
+        let feedback = MarkcutReviewFeedback(requestId: request.id, decision: .approved, feedback: "",
+            idempotencyKey: "stable-submit-key", comments: [answer1, answer2])
+        let event = try template.event(review: feedback.reviewResult(request: roundTrip))
+        let data = try XCTUnwrap(event["data"] as? [String: Any])
+        let response = try XCTUnwrap(data["interactive"] as? [String: Any])
+        XCTAssertEqual(response["decision"] as? String, "approved")
+        let comments = try XCTUnwrap(response["comments"] as? [[String: Any]])
+        XCTAssertEqual(comments.count, 2)
+        XCTAssertEqual(comments[0]["sceneName"] as? String, "Q1")
+        XCTAssertEqual(comments[0]["text"] as? String, "加拿大生活")
+        XCTAssertEqual(comments[1]["sceneName"] as? String, "Q2")
+        XCTAssertEqual(comments[1]["text"] as? String, "")
+        let normal = try MarkcutReviewRequest(id: UUID().uuidString,
+            contentHash: String(repeating: "e", count: 64), revisionID: "r1", title: "Normal")
+        XCTAssertTrue((feedback.reviewResult(request: normal)["comments"] as? [[String: Any]])?.isEmpty == true)
+    }
+
+    @MainActor
     func testAPNsCarriesOnlyRequestIdentityAndTextPreviewCanBeReadOnly() throws {
         let id = UUID().uuidString
         XCTAssertEqual(ReviewPushCoordinator.reviewRequestID(["neoReviewRequestId": id]), id)
