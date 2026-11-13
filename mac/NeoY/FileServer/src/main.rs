@@ -6,7 +6,6 @@ use actix_files::NamedFile;
 use actix_web::{http::header, web, App, HttpRequest, HttpResponse, HttpServer};
 use cap_std::ambient_authority;
 use cap_std::fs::Dir;
-use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
@@ -19,24 +18,8 @@ struct State {
     static_root: Option<PathBuf>,
 }
 
-#[derive(Deserialize)]
-struct Source {
-    #[serde(rename = "originalPath")]
-    original_path: String,
-    #[serde(rename = "normalizedPath")]
-    normalized_path: String,
-    #[serde(default)]
-    sampled: bool,
-    #[serde(default, rename = "startSeconds")]
-    start_seconds: Option<f64>,
-    #[serde(default, rename = "durationSeconds")]
-    duration_seconds: Option<f64>,
-}
-
-#[derive(Deserialize)]
-struct Manifest {
-    sources: Vec<Source>,
-}
+// The only proxy index is Markcut's source-folder metadata.json.
+type MediaMetadata = HashMap<String, serde_json::Value>;
 
 fn public_components(path: &str) -> Option<Vec<&str>> {
     if path.is_empty() || path.contains('\\') || path.contains('\0') || path.len() > 4096 {
@@ -92,55 +75,105 @@ fn mounted_root(state: &State, mount: &str) -> Option<PathBuf> {
     Some(PathBuf::from(root))
 }
 
-fn load_manifest(dir: &Dir, path: &Path) -> Option<Manifest> {
+fn load_metadata(dir: &Dir, path: &Path) -> Option<MediaMetadata> {
     let file = dir.open(path).ok()?;
-    if file.metadata().ok()?.len() > 2 * 1024 * 1024 {
+    if file.metadata().ok()?.len() > 4 * 1024 * 1024 {
         return None;
     }
     let mut json = String::new();
-    file.take(2 * 1024 * 1024).read_to_string(&mut json).ok()?;
+    file.take(4 * 1024 * 1024).read_to_string(&mut json).ok()?;
     serde_json::from_str(&json).ok()
 }
 
-fn resolve_preview(dir: &Dir, relative: &str, clip: Option<preview_media::Clip>) -> Option<String> {
-    let components = public_components(relative)?;
-    // Find the nearest run-root manifest, never walking above this mount.
-    for depth in (0..components.len()).rev() {
-        let directory = components[..depth].join("/");
-        let manifest_path = if directory.is_empty() {
-            PathBuf::from("vision-normalized-manifest.json")
-        } else {
-            PathBuf::from(&directory).join("vision-normalized-manifest.json")
-        };
-        if let Some(manifest) = load_manifest(dir, &manifest_path) {
-            let original = components[depth..].join("/");
-            let source = manifest
-                .sources
-                .into_iter()
-                // Sampled Vision files are not timeline-faithful video proxies.
-                .find(|s| {
-                    if s.original_path != original || s.sampled {
-                        return false;
-                    }
-                    match (clip, s.start_seconds, s.duration_seconds) {
-                        (None, None, None) => true,
-                        (Some(c), Some(start), Some(duration)) => {
-                            (c.start - start).abs() < 0.01 && (c.duration - duration).abs() < 0.01
-                        }
-                        _ => false,
-                    }
-                })?;
-            proxy_components(&source.normalized_path)?;
-            let proxy = if directory.is_empty() {
-                source.normalized_path
-            } else {
-                format!("{directory}/{}", source.normalized_path)
-            };
-            let handle = dir.open(&proxy).ok()?;
-            if handle.metadata().ok()?.is_file() {
-                return Some(proxy);
+fn segment_base<'a>(name: &str, metadata: &'a MediaMetadata) -> Option<&'a str> {
+    // Editor convention: <raw filename>-<startMs>to<endMs>.mp4.
+    // The source extension is retained so filenames cannot collide.
+    for filename in metadata.keys() {
+        if !name.starts_with(&format!("{filename}-")) || !name.ends_with(".mp4") {
+            continue;
+        }
+        let range = &name[filename.len() + 1..name.len() - 4];
+        if let Some((start, end)) = range.split_once("to") {
+            if let (Ok(start), Ok(end)) = (start.parse::<u64>(), end.parse::<u64>()) {
+                if end > start {
+                    return Some(filename.as_str());
+                }
             }
-            return None;
+        }
+    }
+    None
+}
+
+fn resolve_preview(dir: &Dir, relative: &str) -> Option<String> {
+    let components = public_components(relative)?;
+    let name = *components.last()?;
+    for depth in (0..components.len()).rev() {
+        let prefix = components[..depth].join("/");
+        // Metadata lives beside original media; extracted clips may live elsewhere in a run.
+        for media_dir in [
+            prefix.clone(),
+            if prefix.is_empty() {
+                "input/media".into()
+            } else {
+                format!("{prefix}/input/media")
+            },
+        ] {
+            let path = PathBuf::from(&media_dir).join("metadata.json");
+            let Some(metadata) = load_metadata(dir, &path) else {
+                continue;
+            };
+            let (source_name, derived) = if metadata.contains_key(name) {
+                (name, false)
+            } else if let Some(raw) = segment_base(name, &metadata) {
+                (raw, true)
+            } else {
+                continue;
+            };
+            let entry = metadata.get(source_name)?;
+            let proxy = if derived {
+                // Do not trim or transcode here. Only an existing, same-range
+                // normalized segment is valid for an extracted Editor clip.
+                let full = entry.get("normalized")?.as_str()?;
+                if !full.starts_with(".normalized/") {
+                    continue;
+                }
+                format!("{media_dir}/.normalized/{name}")
+            } else {
+                // Only direct sources in this media folder can use this entry.
+                if relative != format!("{media_dir}/{name}")
+                    && !(media_dir.is_empty() && relative == name)
+                {
+                    continue;
+                }
+                let path = entry.get("normalized")?.as_str()?;
+                if !path.starts_with(".normalized/") {
+                    continue;
+                }
+                format!("{media_dir}/{path}")
+            };
+            let normalized_rel = proxy
+                .strip_prefix(&format!("{media_dir}/"))
+                .unwrap_or(&proxy);
+            let parts: Vec<_> = normalized_rel.split('/').collect();
+            if parts.len() != 2
+                || parts[0] != ".normalized"
+                || parts[1].is_empty()
+                || parts[1].starts_with('.')
+                || parts[1].contains('\\')
+                || parts[1].contains('\0')
+                || parts[1] == ".."
+            {
+                continue;
+            }
+            if let Ok(handle) = dir.open(&proxy) {
+                if handle
+                    .metadata()
+                    .ok()
+                    .is_some_and(|m| m.is_file() && m.len() > 0)
+                {
+                    return Some(proxy);
+                }
+            }
         }
     }
     None
@@ -244,16 +277,16 @@ async fn handle(req: HttpRequest, state: web::Data<State>) -> HttpResponse {
         Ok(d) => d,
         Err(_) => return denied(actix_web::http::StatusCode::NOT_FOUND),
     };
-    let clip = if route == "preview" {
+    if route == "preview" {
+        // An explicit time slice cannot be served without conversion. The
+        // Editor creates named clips; callers must seek locally for raw files.
         match preview_media::parse_clip(req.uri().query().unwrap_or("")) {
-            Ok(clip) => clip,
-            Err(_) => return denied(actix_web::http::StatusCode::BAD_REQUEST),
+            Ok(None) => (),
+            _ => return denied(actix_web::http::StatusCode::BAD_REQUEST),
         }
-    } else {
-        None
-    };
+    }
     let selected = if route == "preview" {
-        resolve_preview(&dir, &rel, clip).unwrap_or_else(|| rel.clone())
+        resolve_preview(&dir, &rel).unwrap_or_else(|| rel.clone())
     } else {
         rel.clone()
     };
@@ -271,42 +304,16 @@ async fn handle(req: HttpRequest, state: web::Data<State>) -> HttpResponse {
     if !file.metadata().is_ok_and(|m| m.is_file()) {
         return denied(actix_web::http::StatusCode::NOT_FOUND);
     }
-    // Unknown sources or requested time slices get a bounded-bandwidth cached
-    // preview. Clip output starts at 0; the client requested this interval as
-    // its media source. If conversion fails, never substitute a wrong interval.
-    let source = root.join(&rel);
-    let candidate = if route == "preview" && selected == rel {
-        if let Some(cache) = preview_media::cache_dir(&state.mounts) {
-            let root_copy = root.clone();
-            let work = actix_web::rt::task::spawn_blocking(move || {
-                preview_media::cached_proxy(&source, &root_copy, &cache, clip)
-            });
-            work.await.ok().flatten()
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-    if clip.is_some() && selected == rel && candidate.is_none() {
-        // Returning the entire original for a requested time slice would be incorrect.
-        return denied(actix_web::http::StatusCode::SERVICE_UNAVAILABLE);
-    }
-    let proxy_used = candidate.is_some();
-    let selected_file = candidate
-        .and_then(|p| fs::File::open(p).ok())
-        .unwrap_or_else(|| file.into_std());
+    // Read-only lookup: no transcoding, slicing, file writes, or hidden cache.
+    // Missing normalized files fall back to the exact requested source.
+    let selected_file = file.into_std();
     // NamedFile::from_file serves an already opened file descriptor. In the
     // proxy case the cache is private and not inside any exposed file mount.
     match NamedFile::from_file(selected_file, &selected) {
         Ok(named) => {
             let length = named.file().metadata().ok().map(|m| m.len());
             let mut response = named
-                .set_content_type(if proxy_used {
-                    mimetype("preview.mp4")
-                } else {
-                    mimetype(&selected)
-                })
+                .set_content_type(mimetype(&selected))
                 .disable_content_disposition()
                 .into_response(&req);
             if req.method() == actix_web::http::Method::HEAD
@@ -425,12 +432,29 @@ mod tests {
             b"proxy-video-content",
         )
         .unwrap();
+        fs::write(mount.join("run/input/media/photo.heic"), b"raw-heic").unwrap();
+        fs::write(
+            mount.join("run/input/media/.normalized/photo.heic_384.jpg"),
+            b"normalized-jpeg",
+        )
+        .unwrap();
+        fs::create_dir_all(mount.join("run/assets/clips")).unwrap();
+        fs::write(
+            mount.join("run/assets/clips/original.mp4-1000to2500.mp4"),
+            b"segment-original",
+        )
+        .unwrap();
+        fs::write(
+            mount.join("run/input/media/.normalized/original.mp4-1000to2500.mp4"),
+            b"segment-proxy",
+        )
+        .unwrap();
         fs::write(static_root.join("public.txt"), b"public-static-content").unwrap();
         let exported = static_root.join("_neoy/markcut/generated/fixture");
         fs::create_dir_all(&exported).unwrap();
         fs::write(exported.join("clip.mp4"), b"exported-preview-source").unwrap();
-        fs::write(mount.join("run/vision-normalized-manifest.json"),
-            r#"{"sources":[{"originalPath":"input/media/original.mp4","normalizedPath":"input/media/.normalized/proxy.mp4"}]}"#).unwrap();
+        fs::write(mount.join("run/input/media/metadata.json"),
+            r#"{"original.mp4":{"normalized":".normalized/proxy.mp4"},"photo.heic":{"normalized":".normalized/photo.heic_384.jpg"}}"#).unwrap();
         let mounts = temp.path().join("mounts.json");
         fs::write(&mounts, serde_json::json!({"media":mount}).to_string()).unwrap();
         (
@@ -578,6 +602,23 @@ mod tests {
         let res = test::call_service(&app, req).await;
         assert_eq!(res.status(), StatusCode::OK);
         assert_eq!(&test::read_body(res).await[..], b"proxy-video-content");
+        let req = test::TestRequest::get()
+            .uri("/preview-files/media/run/assets/clips/original.mp4-1000to2500.mp4")
+            .insert_header(("x-neo-file-token", "testsecret123456789012345678901234"))
+            .to_request();
+        let res = test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(&test::read_body(res).await[..], b"segment-proxy");
+        fs::remove_file(
+            Path::new(&root).join("run/input/media/.normalized/original.mp4-1000to2500.mp4"),
+        )
+        .unwrap();
+        let req = test::TestRequest::get()
+            .uri("/preview-files/media/run/assets/clips/original.mp4-1000to2500.mp4")
+            .insert_header(("x-neo-file-token", "testsecret123456789012345678901234"))
+            .to_request();
+        let res = test::call_service(&app, req).await;
+        assert_eq!(&test::read_body(res).await[..], b"segment-original");
         fs::remove_file(Path::new(&root).join("run/input/media/.normalized/proxy.mp4")).unwrap();
         let req = test::TestRequest::get()
             .uri("/preview-files/media/run/input/media/original.mp4")
@@ -589,64 +630,42 @@ mod tests {
     }
 
     #[actix_web::test]
-    async fn uses_only_an_exact_time_segment_and_avoids_sampled_proxies() {
+    async fn preview_does_not_transcode_or_trim_on_query_range() {
         let (_temp, state) = fixture();
-        let root =
-            serde_json::from_slice::<HashMap<String, String>>(&fs::read(&state.mounts).unwrap())
-                .unwrap()["media"]
-                .clone();
-        let base = Path::new(&root);
-        fs::write(
-            base.join("run/input/media/long.mp4"),
-            b"unmodified-full-file",
-        )
-        .unwrap();
-        fs::write(
-            base.join("run/input/media/.normalized/segment.mp4"),
-            b"exact-clip",
-        )
-        .unwrap();
-        fs::write(
-            base.join("run/input/media/.normalized/sample.mp4"),
-            b"sampled-clip",
-        )
-        .unwrap();
-        fs::write(base.join("run/vision-normalized-manifest.json"), r#"{"sources":[
-            {"originalPath":"input/media/long.mp4","normalizedPath":"input/media/.normalized/segment.mp4","startSeconds":10,"durationSeconds":4},
-            {"originalPath":"input/media/original.mp4","normalizedPath":"input/media/.normalized/sample.mp4","sampled":true}
-        ]}"#).unwrap();
         let app = test::init_service(
             App::new()
                 .app_data(web::Data::new(state))
                 .default_service(web::to(handle)),
         )
         .await;
-        let uri = "/preview-files/media/run/input/media/long.mp4?startSeconds=10&durationSeconds=4";
         let req = test::TestRequest::get()
-            .uri(uri)
+            .uri("/preview-files/media/run/input/media/original.mp4?startSeconds=1&durationSeconds=2")
+            .insert_header(("x-neo-file-token", "testsecret123456789012345678901234"))
+            .to_request();
+        let res = test::call_service(&app, req).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[actix_web::test]
+    async fn preview_maps_images_without_converting() {
+        let (_temp, state) = fixture();
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(state))
+                .default_service(web::to(handle)),
+        )
+        .await;
+        let req = test::TestRequest::get()
+            .uri("/preview-files/media/run/input/media/photo.heic")
             .insert_header(("x-neo-file-token", "testsecret123456789012345678901234"))
             .to_request();
         let res = test::call_service(&app, req).await;
         assert_eq!(res.status(), StatusCode::OK);
-        assert_eq!(&test::read_body(res).await[..], b"exact-clip");
-        let req = test::TestRequest::get()
-            .uri("/preview-files/media/run/input/media/long.mp4")
-            .insert_header(("x-neo-file-token", "testsecret123456789012345678901234"))
-            .to_request();
-        let res = test::call_service(&app, req).await;
-        assert_eq!(&test::read_body(res).await[..], b"unmodified-full-file");
-        let req = test::TestRequest::get()
-            .uri("/preview-files/media/run/input/media/original.mp4")
-            .insert_header(("x-neo-file-token", "testsecret123456789012345678901234"))
-            .to_request();
-        let res = test::call_service(&app, req).await;
-        assert_eq!(&test::read_body(res).await[..], b"original-video-content");
-        let req = test::TestRequest::get()
-            .uri("/preview-files/media/run/input/media/long.mp4?startSeconds=9&durationSeconds=4")
-            .insert_header(("x-neo-file-token", "testsecret123456789012345678901234"))
-            .to_request();
-        let res = test::call_service(&app, req).await;
-        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            res.headers().get(header::CONTENT_TYPE).unwrap(),
+            "image/jpeg"
+        );
+        assert_eq!(&test::read_body(res).await[..], b"normalized-jpeg");
     }
 
     #[actix_web::test]

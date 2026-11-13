@@ -4,8 +4,12 @@ This is an **unprivileged-in-purpose, loopback-only** HTTP file-serving sidecar.
 The NeoY Swift gateway still owns public URLs, tunnel/credentials, mount and
 unmount commands, and the native application lifecycle. No MCP tools are added.
 Unlike unrestricted Rust Core, this helper exposes no shell or filesystem write API.
-Its only writes are private, derived preview media in `preview-media-cache` next to
-NeoY's `file-mounts.json`; mounted source media is never modified.
+It never writes media files: no FFmpeg, trimming, transcoding, or cache generation.
+Only the Markcut Vision/Editor pipeline creates normalized media.
+The existing private transport is scoped by NeoY gateway authentication and file mounts.
+Markcut owns normalization; Vlog owns editing; no new public MCP tool,
+external trust boundary, or background business state is introduced.
+Architecture: `mac/NeoY/docs/design-principles.md`.
 
 The sidecar uses **Actix Web + `actix-files::NamedFile`** for streaming, ranges,
 conditional caching and MIME handling. `cap-std` opens a capability-confined
@@ -20,16 +24,18 @@ also use `/preview-files/_neoy/markcut/generated/<revision>/<file>.mp4`, strictl
 scoped to that existing public export directory. This closes the bypass where
 Markcut historically served generated movie assets as full-sized `/files/_neoy/…`
 media; other `_neoy` preview paths remain denied. For
-`/preview-files/<mount>/<relative>`, `vision-normalized-manifest.json` selects an
-existing `.normalized` proxy only when it is timeline-faithful (`sampled` is
-false) and covers exactly the requested media. Entries can optionally include
-`startSeconds` and `durationSeconds` to identify a pre-generated clip. The
-internal preview URL accepts the same two query parameters to request a
-frame-accurate time slice of a larger source. If no matching proxy exists,
-FFmpeg generates a cached, mobile-sized H.264/AAC proxy, preserving the full
-original or exactly the requested time interval. Conversion failure falls back
-to the original for whole-file requests; explicit time slices return 503 rather
-than silently using the wrong part of a video. The existing Swift file-serving
+`/preview-files/<mount>/<relative>`, the server finds the media folder's
+`metadata.json` and maps the **full original filename** to its
+`normalized` field (e.g. `.normalized/001.mov_full.mp4`), only if that
+file already exists. An extracted Editor segment named
+`001.mov-1000to2500.mp4` may map to an existing
+`input/media/.normalized/001.mov-1000to2500.mp4` with exactly that name.
+The segment's original media is otherwise served unchanged.
+If the normalized file is absent, the server falls back to the exact original
+file. It never performs media conversion or slicing. Explicit
+`?startSeconds=...&durationSeconds=...` trim requests are rejected (400);
+the player must seek locally or use an already extracted Editor segment.
+The existing Swift file-serving
 fallback remains for regular whole-file requests. All mounts
 are dynamically re-read from NeoY's existing `file-mounts.json` configuration.
 Preview responses send `Cache-Control: no-store`; Markcut supplies a
