@@ -1,0 +1,11 @@
+{
+  "scheme": "NeoxApp",
+  "project": "Neox.xcodeproj",
+  "info_plist": "Neox/Info.plist",
+  "bundle_id": "com.neox.app",
+  "app_id": "6761634486",
+  "team_id": "JABNLDLN8G",
+  "key_id": "XQ45Y3FJUD",
+  "issuer_id": "f5eefdb4-5b3c-4d6f-890c-70787b2214d0",
+  "group_id": "6822f655-fd22-4123-a0fc-e5445a127028"
+}

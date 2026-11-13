@@ -8,3 +8,7 @@ mac/NeoY/NeoY.xcodeproj/
 mac/NeoY/build-signed/
 
 mac/NeoY/Runtime/node_modules/
+
+# Local Python release CLI/test bytecode
+__pycache__/
+*.py[cod]

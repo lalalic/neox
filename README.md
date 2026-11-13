@@ -266,6 +266,10 @@ open Neox.xcodeproj        # run on simulator or device
 See `AGENTS.md` for repo layout and the machine-room notes (remote build,
 signing quirks, deployment).
 
+## TestFlight release
+
+On Neo Master, use `scripts/testflight.py doctor` to verify the existing App Store Connect API key, target app/build numbers, and cached signing; then `scripts/testflight.py release --bump` to archive and upload. To reuse an existing signed Release archive, run `scripts/testflight.py release --archive /absolute/path/to/Neox.xcarchive`. Check final Apple status using `scripts/testflight.py status --build NUMBER`. See [scripts/README-testflight.md](scripts/README-testflight.md) for preflight, security, verification, and TestFlight tester-group gates. The script never relies on the intermittent Xcode GUI account-selection state.
+
 ## Scope notes
 
 - **LAN only.** No auth (personal device on home WiFi), no relay, no CDN.
