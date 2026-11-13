@@ -1,0 +1,16 @@
+{
+  "scheme": "NeoxApp",
+  "project": "Neox.xcodeproj",
+  "version_source": "plist",
+  "version_file": "Neox/Info.plist",
+  "bundle_id": "com.neox.app",
+  "app_id": "6761634486",
+  "team_id": "JABNLDLN8G",
+  "key_id": "XQ45Y3FJUD",
+  "issuer_id": "f5eefdb4-5b3c-4d6f-890c-70787b2214d0",
+  "group_id": "6822f655-fd22-4123-a0fc-e5445a127028",
+  "export_compliance": {
+    "uses_non_exempt_encryption": false,
+    "basis": "Prior reviewed Neox TestFlight build 14: RoyalVNCKit/CryptoSwift standard encryption was assessed as exempt from documentation; re-review before SDK or encryption changes. False does NOT mean no encryption."
+  }
+}

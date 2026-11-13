@@ -12,3 +12,6 @@ mac/NeoY/Runtime/node_modules/
 # Local Python release CLI/test bytecode
 __pycache__/
 *.py[cod]
+
+# Local Apple Delivery archives, logs and release evidence
+runs/
