@@ -311,14 +311,22 @@ final class RemoteMCPClient: ObservableObject {
 
     /// The Chat tab uses the existing saved authenticated HTTPS Master, never a
     /// second listener or credentials copied from a Bonjour discovery result.
-    func relayJobs() async throws -> [RelayJob] {
+    func relayJobs(offset: Int = 0, limit: Int = RelayJobsPage.pageSize) async throws -> RelayJobsPage {
         let result = try await callAuthenticatedTool(chatGatewayProvider, [
-            "command": "chat_jobs", "args": ["limit": 100]
+            "command": "chat_jobs", "args": ["limit": limit, "offset": offset]
         ])
-        guard let rows = result["jobs"] as? [[String: Any]] else {
+        guard let rows = result["jobs"] as? [[String: Any]],
+              let total = result["total"] as? Int, total >= 0,
+              let nextOffset = result["nextOffset"] as? Int,
+              nextOffset >= 0, nextOffset <= total,
+              let hasMore = result["hasMore"] as? Bool,
+              hasMore == (nextOffset < total),
+              (nextOffset >= offset || !hasMore),
+              rows.count <= limit else {
             throw RemoteError.invalidResponse
         }
-        return rows.compactMap { RelayJob(wire: $0) }
+        return RelayJobsPage(jobs: rows.compactMap { RelayJob(wire: $0) },
+                             total: total, nextOffset: nextOffset, hasMore: hasMore)
     }
 
     /// Read only allowlisted activity from the authenticated Master. Source

@@ -283,50 +283,102 @@ enum RelayJobCancellationError: LocalizedError, Equatable {
     }
 }
 
+private enum RelayJobsFetchError: Error { case notConnected }
+
+/// One server-side page, with an authoritative offset over the unfiltered Relay inventory.
+struct RelayJobsPage {
+    static let pageSize = 20
+    let jobs: [RelayJob]
+    let total: Int
+    let nextOffset: Int
+    let hasMore: Bool
+}
+
 @MainActor
 final class RelayJobsStore: ObservableObject {
     typealias CancelOperation = (RelayJob) async throws -> RelayJob
+    typealias PageOperation = (Int, Int) async throws -> RelayJobsPage
 
     @Published private(set) var jobs: [RelayJob] = []
     @Published private(set) var cancellingIDs = Set<String>()
     @Published private(set) var isLoading = false
+    @Published private(set) var isLoadingMore = false
+    @Published private(set) var hasMore = false
+    @Published private(set) var total = 0
     @Published private(set) var hasLoaded = false
     @Published private(set) var activities: [String: [RelayJobActivityEvent]] = [:]
     private var refreshing = false
+    private var nextOffset = 0
     private let cancelOperation: CancelOperation?
+    private let pageOperation: PageOperation?
 
     private func key(_ job: RelayJob) -> String { "\(job.repository)#\(job.id)" }
 
-    init(cancelOperation: CancelOperation? = nil) {
+    init(cancelOperation: CancelOperation? = nil, pageOperation: PageOperation? = nil) {
         self.cancelOperation = cancelOperation
+        self.pageOperation = pageOperation
+    }
+
+    private func fetchPage(from master: RemoteMCPClient, offset: Int) async throws -> RelayJobsPage {
+        if let pageOperation { return try await pageOperation(offset, RelayJobsPage.pageSize) }
+        guard master.hasConfiguredAddress && master.hasCredential else {
+            throw RelayJobsFetchError.notConnected
+        }
+        if !master.connected { await master.connect() }
+        guard master.connected else { throw RelayJobsFetchError.notConnected }
+        return try await master.relayJobs(offset: offset)
     }
 
     func refresh(from master: RemoteMCPClient) async {
-        guard !refreshing else { return }
+        guard !refreshing && !isLoadingMore else { return }
         refreshing = true
-        isLoading = jobs.isEmpty && !hasLoaded
-        defer { refreshing = false }
-        defer { isLoading = false }
-        guard master.hasConfiguredAddress && master.hasCredential else {
-            hasLoaded = true
-            return
-        }
-        if !master.connected { await master.connect() }
-        guard master.connected else {
-            hasLoaded = true
-            return
-        }
+        isLoading = jobs.isEmpty
+        defer { refreshing = false; isLoading = false; hasLoaded = true }
         do {
-            applySnapshot(try await master.relayJobs())
-            hasLoaded = true
+            applyPage(try await fetchPage(from: master, offset: 0), reset: true)
         } catch {
-            // Preserve the last good snapshot during temporary connection loss.
-            hasLoaded = true
+            // Retain the visible page during temporary network failures.
         }
+    }
+
+    func loadMore(from master: RemoteMCPClient) async {
+        guard hasLoaded && hasMore && !refreshing && !isLoadingMore else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+        do {
+            let page = try await fetchPage(from: master, offset: nextOffset)
+            applyPage(page, reset: false)
+        } catch {
+            // Preserve the accumulated rows and offset; a later bottom scroll can retry.
+        }
+    }
+
+    private func applyPage(_ page: RelayJobsPage, reset: Bool) {
+        if reset {
+            jobs = page.jobs
+        } else {
+            var merged = jobs
+            for item in page.jobs {
+                if let index = merged.firstIndex(where: { $0.id == item.id && $0.repository == item.repository }) {
+                    merged[index] = item
+                } else {
+                    merged.append(item)
+                }
+            }
+            jobs = merged
+        }
+        total = page.total
+        // Never advance backwards or infinitely re-fetch an empty page.
+        let advanced = reset || page.nextOffset > nextOffset
+        nextOffset = reset ? page.nextOffset : max(page.nextOffset, nextOffset)
+        hasMore = advanced && page.hasMore
     }
 
     func applySnapshot(_ snapshot: [RelayJob]) {
         jobs = snapshot
+        hasMore = false
+        nextOffset = snapshot.count
+        total = snapshot.count
     }
 
     func currentJob(matching job: RelayJob) -> RelayJob {
@@ -401,6 +453,23 @@ struct RelayJobsView: View {
 
     init(master: RemoteMCPClient) {
         self.master = master
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-neo-jobs-pagination-fixture") {
+            _store = StateObject(wrappedValue: RelayJobsStore(pageOperation: { offset, limit in
+                let rows = (1...47).compactMap { id in
+                    RelayJob(wire: ["id": String(id), "title": "Paginated Job \(id)",
+                                    "repository": "vlog", "status": "COMPLETED",
+                                    "createdAt": "2026-11-12T10:00:00Z",
+                                    "updatedAt": "2026-11-12T10:00:00Z"])
+                }
+                let page = Array(rows.dropFirst(offset).prefix(limit))
+                let next = offset + page.count
+                return RelayJobsPage(jobs: page, total: rows.count,
+                                     nextOffset: next, hasMore: next < rows.count)
+            }))
+            return
+        }
+        #endif
         _store = StateObject(wrappedValue: RelayJobsStore(cancelOperation: { job in
             try await master.cancelRelayJob(job)
         }))
@@ -422,6 +491,23 @@ struct RelayJobsView: View {
                             }
                             .disabled(store.isCancelling(job))
                         }
+                    }
+                }
+                if store.hasMore || store.isLoadingMore {
+                    HStack {
+                        Spacer()
+                        if store.isLoadingMore {
+                            ProgressView("Loading 20 more Jobs")
+                        } else {
+                            Text("\(store.jobs.count) / \(store.total) · Swipe up for 20 more")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    .accessibilityIdentifier("neoRelayJobsLoadMore")
+                    .onAppear {
+                        Task { await store.loadMore(from: master) }
                     }
                 }
             }
@@ -481,11 +567,7 @@ struct RelayJobsView: View {
                 return
             }
             #endif
-            while !Task.isCancelled {
-                await store.refresh(from: master)
-                do { try await Task.sleep(for: .seconds(8)) }
-                catch { return }
-            }
+            await store.refresh(from: master)
         }
     }
 }

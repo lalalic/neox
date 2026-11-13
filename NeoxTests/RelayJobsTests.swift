@@ -3,6 +3,64 @@ import XCTest
 
 @MainActor
 final class RelayJobsTests: XCTestCase {
+    func testPagesLoadTwentyAtATimeAndPullRefreshResetsToFirstPage() async throws {
+        let master = RemoteMCPClient()
+        let rows = (1...47).compactMap { id in
+            RelayJob(wire: ["id": String(id), "repository": "vlog",
+                            "status": "COMPLETED", "title": "Job \(id)",
+                            "createdAt": "2026-11-12T10:00:00Z",
+                            "updatedAt": "2026-11-12T10:00:00Z"])
+        }
+        var offsets: [Int] = []
+        let store = RelayJobsStore(pageOperation: { offset, limit in
+            offsets.append(offset)
+            let page = Array(rows.dropFirst(offset).prefix(limit))
+            let next = offset + page.count
+            return RelayJobsPage(jobs: page, total: rows.count,
+                                 nextOffset: next, hasMore: next < rows.count)
+        })
+        await store.refresh(from: master)
+        XCTAssertEqual(store.jobs.count, 20)
+        XCTAssertEqual(store.total, 47)
+        XCTAssertTrue(store.hasMore)
+        await store.loadMore(from: master)
+        XCTAssertEqual(store.jobs.count, 40)
+        await store.loadMore(from: master)
+        XCTAssertEqual(store.jobs.count, 47)
+        XCTAssertFalse(store.hasMore)
+        await store.loadMore(from: master)
+        XCTAssertEqual(offsets, [0, 20, 40], "Never fetch beyond the final page")
+        await store.refresh(from: master)
+        XCTAssertEqual(store.jobs.count, 20)
+        XCTAssertTrue(store.hasMore)
+        XCTAssertEqual(offsets, [0, 20, 40, 0])
+    }
+
+    func testPagesDeduplicateOverlappingJobsAndPreserveRowsOnFailure() async throws {
+        let master = RemoteMCPClient()
+        let first = try XCTUnwrap(RelayJob(wire: ["id": "619", "repository": "vlog", "status": "RUNNING"]))
+        let replacement = try XCTUnwrap(RelayJob(wire: ["id": "619", "repository": "vlog", "status": "COMPLETED"]))
+        let another = try XCTUnwrap(RelayJob(wire: ["id": "625", "repository": "content-distribution", "status": "COMPLETED"]))
+        var failRefresh = false
+        let store = RelayJobsStore(pageOperation: { offset, _ in
+            if failRefresh { throw CancellationError() }
+            switch offset {
+            case 0: return RelayJobsPage(jobs: [first], total: 3, nextOffset: 1, hasMore: true)
+            case 1: return RelayJobsPage(jobs: [replacement, another], total: 3, nextOffset: 3, hasMore: false)
+            default: throw CancellationError()
+            }
+        })
+        await store.refresh(from: master)
+        await store.loadMore(from: master)
+        XCTAssertEqual(store.jobs.count, 2)
+        XCTAssertEqual(store.currentJob(matching: first).status, "COMPLETED")
+        XCTAssertFalse(store.hasMore)
+        failRefresh = true
+        await store.refresh(from: master)
+        XCTAssertEqual(store.jobs.count, 2, "Failed refresh retains last successful snapshot")
+        XCTAssertEqual(store.currentJob(matching: first).status, "COMPLETED")
+    }
+
     func testJobsAreMetadataOnlyAndSanitized() throws {
         let job = try XCTUnwrap(RelayJob(wire: [
             "id": "902\n", "title": "Vlog export\u{0007}", "repository": "lalalic/neo",

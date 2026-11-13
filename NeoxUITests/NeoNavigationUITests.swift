@@ -54,6 +54,28 @@ final class NeoNavigationUITests: XCTestCase {
     }
 
     @MainActor
+    func testJobsPaginateAtBottomAndPullRefreshStartsFromFirstPage() {
+        let app = XCUIApplication()
+        app.launchArguments.append("-neo-jobs-pagination-fixture")
+        app.launch()
+        app.buttons["neoTopTabJobs"].tap()
+        XCTAssertTrue(app.staticTexts["Paginated Job 1"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Paginated Job 41"].exists)
+        for _ in 0..<18 where !app.staticTexts["Paginated Job 41"].exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(app.staticTexts["Paginated Job 41"].waitForExistence(timeout: 5),
+                      "Bottom-of-list swipes should fetch the third page")
+        for _ in 0..<18 where !app.staticTexts["Paginated Job 1"].exists {
+            app.swipeDown()
+        }
+        XCTAssertTrue(app.staticTexts["Paginated Job 1"].waitForExistence(timeout: 6))
+        // Pull-to-refresh keeps the list at the top and resets the server offset.
+        app.swipeDown()
+        XCTAssertTrue(app.staticTexts["Paginated Job 1"].waitForExistence(timeout: 6))
+    }
+
+    @MainActor
     func testWaitingShortcutStatusIsVisibleInJobsAndDetail() {
         let app = XCUIApplication()
         app.launchArguments.append("-neo-jobs-ui-fixture")
