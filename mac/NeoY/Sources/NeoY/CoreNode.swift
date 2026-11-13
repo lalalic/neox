@@ -204,7 +204,7 @@ actor NeoYNodeService {
 
         let probe = try NeoYSSHBootstrap.ssh(
             ssh,
-            command: "node_bin=\"$(command -v node 2>/dev/null || true)\"; for candidate in /opt/homebrew/bin/node /usr/local/bin/node \"$HOME/.local/bin/node\"; do if test -z \"$node_bin\" && test -x \"$candidate\"; then node_bin=\"$candidate\"; fi; done; printf 'NEOY_HOME=%s\\nNEOY_CONN=%s\\nNEOY_NODE=%s\\n' \"$HOME\" \"$SSH_CONNECTION\" \"$node_bin\""
+            command: "printf 'NEOY_HOME=%s\nNEOY_CONN=%s\nNEOY_OS=%s\nNEOY_ARCH=%s\n' \"$HOME\" \"$SSH_CONNECTION\" \"$(uname -s)\" \"$(uname -m)\""
         )
         guard probe.exitCode == 0 else {
             throw NeoYCoreError.operationFailed("SSH bootstrap failed: \(probe.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
@@ -213,11 +213,10 @@ actor NeoYNodeService {
             guard let split = line.firstIndex(of: "=") else { return nil }
             return (String(line[..<split]), String(line[line.index(after: split)...]))
         })
-        guard let remoteHome = probeValues["NEOY_HOME"], !remoteHome.isEmpty else {
-            throw NeoYCoreError.operationFailed("SSH bootstrap could not determine remote home directory")
-        }
-        guard let nodeBinary = probeValues["NEOY_NODE"], !nodeBinary.isEmpty else {
-            throw NeoYCoreError.operationFailed("neo-node requires Node.js on the remote Mac")
+        guard let remoteHome = probeValues["NEOY_HOME"], !remoteHome.isEmpty,
+              probeValues["NEOY_OS"] == "Darwin",
+              ["x86_64", "arm64"].contains(probeValues["NEOY_ARCH"] ?? "") else {
+            throw NeoYCoreError.operationFailed("neo-node requires an x86_64 or arm64 macOS host")
         }
 
         let hub: NeoYSSHBootstrap.ReverseSSH
@@ -250,18 +249,29 @@ actor NeoYNodeService {
             throw NeoYCoreError.operationFailed("failed to prepare neo-node directories: \(mkdir.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
         }
 
-        let legacyBootstrap = remoteRoot + "/bootstrap-mac-node.sh"
-        let currentRuntime = remoteRoot + "/neo-node.mjs"
+        // Stage and probe the signed universal native runtime BEFORE touching
+        // the existing Node/Rust service, so SSH bootstrap remains reversible.
+        let currentRuntime = remoteRoot + "/neo-cluster-rust"
+        let stagedRuntime = remoteRoot + "/neo-cluster-rust.next"
+        let previousRuntime = remoteRoot + "/neo-cluster-rust.previous"
+        let oldNodeRuntime = remoteRoot + "/neo-node.mjs"
         let oldConfig = remoteConfig + "/node.env"
-        _ = try NeoYSSHBootstrap.ssh(
-            ssh,
-            command: "if test -f \(shellQuote(oldConfig)); then if test -f \(shellQuote(currentRuntime)); then \(shellQuote(nodeBinary)) \(shellQuote(currentRuntime)) stop >/dev/null 2>&1 || true; \(shellQuote(nodeBinary)) \(shellQuote(currentRuntime)) uninstall-persistence >/dev/null 2>&1 || true; fi; if test -f \(shellQuote(legacyBootstrap)); then /bin/zsh \(shellQuote(legacyBootstrap)) stop >/dev/null 2>&1 || true; /bin/zsh \(shellQuote(legacyBootstrap)) uninstall-persistence >/dev/null 2>&1 || true; fi; /bin/sleep 1; fi"
-        )
-
-        let runtime = try nodeRuntimeResource("neo-node.mjs")
-        let copied = try NeoYSSHBootstrap.scp(runtime, to: ssh, remotePath: currentRuntime)
+        let runtime = try nodeRuntimeResource("neo-cluster-rust")
+        let localVersion = try NeoYSSHBootstrap.run(runtime.path, ["--version"])
+        guard localVersion.exitCode == 0 else {
+            throw NeoYCoreError.operationFailed("bundled Rust neo-node binary failed local verification")
+        }
+        let copied = try NeoYSSHBootstrap.scp(runtime, to: ssh, remotePath: stagedRuntime)
         guard copied.exitCode == 0 else {
-            throw NeoYCoreError.operationFailed("failed to copy neo-node runtime: \(copied.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
+            throw NeoYCoreError.operationFailed("failed to copy Rust neo-node runtime: \(copied.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
+        }
+        let checked = try NeoYSSHBootstrap.ssh(
+            ssh,
+            command: "chmod 755 \(shellQuote(stagedRuntime)); \(shellQuote(stagedRuntime)) --version"
+        )
+        guard checked.exitCode == 0,
+              checked.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == localVersion.stdout.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            throw NeoYCoreError.operationFailed("remote Rust neo-node binary failed architecture/version verification")
         }
 
         var identityFile = hub.identityFile
@@ -287,16 +297,61 @@ actor NeoYNodeService {
             "HUB_MCP_PORT=\(hubMCPPort)",
             "LOCAL_MCP_PORT=\(localMCPPort)",
             "NODE_ROOT=\(remoteRoot)",
-            "NODE_BIN=\(nodeBinary)",
             "NODE_SSH_KEY=\(identityFile ?? "")"
         ].joined(separator: "\n") + "\n"
         let encoded = Data(env.utf8).base64EncodedString()
-        let install = try NeoYSSHBootstrap.ssh(
-            ssh,
-            command: "printf %s \(shellQuote(encoded)) | base64 -D > \(shellQuote(remoteConfig + "/node.env")); chmod 755 \(shellQuote(currentRuntime)); \(shellQuote(nodeBinary)) \(shellQuote(currentRuntime)) install; \(shellQuote(nodeBinary)) \(shellQuote(currentRuntime)) start; rm -f \(shellQuote(remoteRoot + "/bootstrap-mac-node.sh")) \(shellQuote(remoteRoot + "/mac-node-server.py"))"
-        )
-        guard install.exitCode == 0 else {
-            throw NeoYCoreError.operationFailed("failed to install/start neo-node: \(install.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
+        let lookupOldNodeBinary = """
+        node_bin="$(command -v node 2>/dev/null || true)"
+        if test -z "$node_bin" && test -f \(shellQuote(oldConfig)); then
+            node_bin="$(sed -n 's/^NODE_BIN=//p' \(shellQuote(oldConfig)) | head -1)"
+        fi
+        """
+        let oldNodeStop = """
+        if test -f \(shellQuote(oldNodeRuntime)); then
+            \(lookupOldNodeBinary)
+            if test -n "$node_bin" && test -x "$node_bin"; then
+                "$node_bin" \(shellQuote(oldNodeRuntime)) stop >/dev/null 2>&1 || true
+                "$node_bin" \(shellQuote(oldNodeRuntime)) uninstall-persistence >/dev/null 2>&1 || true
+            fi
+        fi
+        """
+        let installCommand = [
+            "set -e",
+            "\(shellQuote(stagedRuntime)) --version >/dev/null",
+            "\(shellQuote(currentRuntime)) stop >/dev/null 2>&1 || true",
+            oldNodeStop,
+            "if test -f \(shellQuote(oldConfig)); then cp \(shellQuote(oldConfig)) \(shellQuote(oldConfig + ".previous")); fi",
+            "if test -f \(shellQuote(currentRuntime)); then mv -f \(shellQuote(currentRuntime)) \(shellQuote(previousRuntime)); fi",
+            "mv -f \(shellQuote(stagedRuntime)) \(shellQuote(currentRuntime))",
+            "printf %s \(shellQuote(encoded)) | base64 -D > \(shellQuote(oldConfig))",
+            "chmod 600 \(shellQuote(oldConfig))",
+            "\(shellQuote(currentRuntime)) install",
+            "\(shellQuote(currentRuntime)) start"
+        ].joined(separator: "; ")
+        let installed = try NeoYSSHBootstrap.ssh(ssh, command: installCommand)
+        // A failed SSH install OR a failed MCP pairing must restore the old
+        // functional node; never strand a registered tunnel endpoint.
+        let rollback = """
+        if test -x \(shellQuote(currentRuntime)); then
+            \(shellQuote(currentRuntime)) stop >/dev/null 2>&1 || true
+            \(shellQuote(currentRuntime)) uninstall-persistence >/dev/null 2>&1 || true
+        fi
+        if test -f \(shellQuote(oldConfig + ".previous")); then
+            mv -f \(shellQuote(oldConfig + ".previous")) \(shellQuote(oldConfig))
+        fi
+        if test -f \(shellQuote(previousRuntime)); then
+            mv -f \(shellQuote(previousRuntime)) \(shellQuote(currentRuntime))
+            \(shellQuote(currentRuntime)) install >/dev/null 2>&1 && \(shellQuote(currentRuntime)) start >/dev/null 2>&1
+        elif test -f \(shellQuote(oldNodeRuntime)); then
+            \(lookupOldNodeBinary)
+            if test -n "$node_bin" && test -x "$node_bin"; then
+                "$node_bin" \(shellQuote(oldNodeRuntime)) install >/dev/null 2>&1 && "$node_bin" \(shellQuote(oldNodeRuntime)) start >/dev/null 2>&1
+            fi
+        fi
+        """
+        guard installed.exitCode == 0 else {
+            _ = try? NeoYSSHBootstrap.ssh(ssh, command: rollback)
+            throw NeoYCoreError.operationFailed("failed to install/start Rust neo-node: \(installed.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
         }
 
         let mcpURL = "http://127.0.0.1:\(hubMCPPort)/mcp"
@@ -309,6 +364,7 @@ actor NeoYNodeService {
                 try? await Task.sleep(for: .milliseconds(250))
             }
         }
+        _ = try? NeoYSSHBootstrap.ssh(ssh, command: rollback)
         throw NeoYCoreError.operationFailed(lastError)
     }
 

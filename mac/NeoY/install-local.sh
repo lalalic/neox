@@ -39,21 +39,38 @@ cargo test --locked --manifest-path "$HERE/CoreRust/Cargo.toml"
 cargo build --release --locked --manifest-path "$HERE/CoreRust/Cargo.toml"
 cargo test --locked --manifest-path "$HERE/FileServer/Cargo.toml"
 cargo build --release --locked --manifest-path "$HERE/FileServer/Cargo.toml"
+cargo test --locked --manifest-path "$HERE/ClusterRust/Cargo.toml"
+for arch in aarch64-apple-darwin x86_64-apple-darwin; do
+  rustup target add "$arch"
+done
+# Universal native cluster helper: old home98 is x86_64 macOS 11.
+for arch in aarch64-apple-darwin x86_64-apple-darwin; do
+  cargo build --release --locked --target "$arch" --manifest-path "$HERE/ClusterRust/Cargo.toml"
+done
+lipo -create "$HERE/ClusterRust/target/aarch64-apple-darwin/release/neo-cluster-rust" \
+  "$HERE/ClusterRust/target/x86_64-apple-darwin/release/neo-cluster-rust" \
+  -output "$HERE/ClusterRust/target/neo-cluster-rust-universal"
+lipo "$HERE/ClusterRust/target/neo-cluster-rust-universal" -verify_arch arm64 x86_64
 
 xcodegen generate --spec "$HERE/project.yml"
 rm -rf "$APP"
 xcodebuild -project "$PROJECT" -scheme NeoY -configuration Debug \
   -derivedDataPath "$DERIVED" build
 
-# Independently sign both private Rust children before signing the outer app.
+# Independently sign all native Rust children before signing the outer app.
+CLUSTER_HELPER="$HERE/ClusterRust/target/neo-cluster-rust-universal"
 CORE_HELPER="$HERE/CoreRust/target/release/neoy-core-rust"
 FILE_HELPER="$HERE/FileServer/target/release/neoy-file-server"
-[[ -x "$CORE_HELPER" && -x "$FILE_HELPER" ]] || {
+[[ -x "$CORE_HELPER" && -x "$FILE_HELPER" && -x "$CLUSTER_HELPER" ]] || {
   print -u2 "NeoY preflight requires built Rust Core and file-server binaries."
   exit 1
 }
-for helper in neoy-core-rust neoy-file-server; do
-  if [[ "$helper" == "neoy-core-rust" ]]; then source="$CORE_HELPER"; else source="$FILE_HELPER"; fi
+for helper in neoy-core-rust neoy-file-server neo-cluster-rust; do
+  case "$helper" in
+    neoy-core-rust) source="$CORE_HELPER" ;;
+    neoy-file-server) source="$FILE_HELPER" ;;
+    neo-cluster-rust) source="$CLUSTER_HELPER" ;;
+  esac
   cp "$source" "$APP/Contents/Resources/$helper"
   chmod 755 "$APP/Contents/Resources/$helper"
   codesign --force --sign "$identity" --timestamp=none "$APP/Contents/Resources/$helper"
@@ -66,12 +83,16 @@ codesign --verify --deep --strict "$APP"
 # Fail closed before replacing the currently healthy app. The signed native
 # Rust Core must answer initialize/tools/list in the installed binary. The
 # signed NeoY host repeats that probe during startup and can roll back.
-[[ -x "$APP/Contents/Resources/neoy-file-server" && -x "$APP/Contents/Resources/neoy-core-rust" ]] || {
+[[ -x "$APP/Contents/Resources/neoy-file-server" && -x "$APP/Contents/Resources/neoy-core-rust" && -x "$APP/Contents/Resources/neo-cluster-rust" ]] || {
   print -u2 "NeoY install preflight failed: signed app lacks one of its Rust helpers."
   exit 1
 }
 [[ "$("$APP/Contents/Resources/neoy-core-rust" --version)" == "$(grep -E '^version = ' "$HERE/CoreRust/Cargo.toml" | head -1 | cut -d'"' -f2)" ]] || {
   print -u2 "NeoY install preflight failed: signed Rust Core identity mismatch."
+  exit 1
+}
+[[ "$("$APP/Contents/Resources/neo-cluster-rust" --version)" == "$(grep -E '^version = ' "$HERE/ClusterRust/Cargo.toml" | head -1 | cut -d'"' -f2)" ]] || {
+  print -u2 "NeoY install preflight failed: signed Rust Cluster identity mismatch."
   exit 1
 }
 # Stage the candidate and install a rollback watchdog before touching the working app.

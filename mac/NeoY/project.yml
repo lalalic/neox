@@ -12,8 +12,6 @@ targets:
     platform: macOS
     sources:
       - Sources/NeoY
-      - path: Resources/Scripts/neo-node/neo-node.mjs
-        buildPhase: resources
       - path: Resources/features.json
         buildPhase: resources
       - path: Resources/Assets.xcassets
