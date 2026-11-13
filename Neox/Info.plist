@@ -19,7 +19,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
-	<string>16</string>
+	<string>17</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>
@@ -32,27 +32,16 @@
 		<string>_mcp._tcp</string>
 		<string>_neoy._tcp</string>
 	</array>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>Neox serves an MCP server on your local network so your desktop agent can reach it.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Neox lets your desktop agent browse and export your photo library.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Neox uses the camera to guide and record Capture Tour shots.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Neox serves an MCP server on your local network so your desktop agent can reach it.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Neo uses the microphone for Chat dictation and Capture Tour recording.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Neox lets your desktop agent browse and export your photo library.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Neo transcribes speech for Chat dictation and video understanding.</string>
-	<key>UIApplicationSceneManifest</key>
-	<dict>
-		<key>UIApplicationSupportsMultipleScenes</key>
-		<false/>
-	</dict>
-	<key>UILaunchScreen</key>
-	<dict/>
-	<key>UISupportedInterfaceOrientations</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-	</array>
 	<key>NSUbiquitousContainers</key>
 	<dict>
 		<key>iCloud.com.neox.app</key>
@@ -65,5 +54,16 @@
 			<string>Any</string>
 		</dict>
 	</dict>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+	</dict>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
 </dict>
 </plist>
