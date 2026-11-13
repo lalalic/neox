@@ -573,17 +573,28 @@ final class RemoteMCPClient: ObservableObject {
         return result
     }
 
+    // These two app-internal tools retain direct MCP names at the Neo gateway.
+    // Do not depend on model-visible discovery for app-only capabilities.
+    private static let directAppOnlyToolNames: Set<String> = ["review.preview.acquire", "markcut.preview.media"]
+
+    static func resolvedToolName(_ requested: String, advertised: [String]) -> String? {
+        if directAppOnlyToolNames.contains(requested) { return requested }
+        return advertised.first { $0 == requested || $0.hasSuffix("." + requested) }
+    }
+
     private func callAuthenticatedTool(_ toolName: String, _ arguments: [String: Any]) async throws -> [String: Any] {
         // Resolve the requested provider tool on the saved HTTPS endpoint; never
         // redirect credentials to an endpoint carried by a review request.
         guard URL(string: endpoint)?.scheme == "https", !bearer.isEmpty else { throw RemoteError.missingCredential }
-        if remoteToolNames.isEmpty {
+        // App-only MCP tools are deliberately absent from generic tools/list.
+        // The app knows their exact, Neo-owned names; routing through discovery
+        // makes review acquisition and media playback fail with toolsUnavailable.
+        if !Self.directAppOnlyToolNames.contains(toolName) && remoteToolNames.isEmpty {
             let listing = try await requestRPC(method: "tools/list", params: [:], address: endpoint)
             remoteToolNames = (listing["tools"] as? [[String: Any]] ?? [])
                 .compactMap { $0["name"] as? String }
         }
-        let names = remoteToolNames
-        guard let name = names.first(where: { $0 == toolName || $0.hasSuffix("." + toolName) }) else {
+        guard let name = Self.resolvedToolName(toolName, advertised: remoteToolNames) else {
             throw RemoteError.toolsUnavailable
         }
         let response = try await requestRPC(method: "tools/call", params: ["name":name,"arguments":arguments], address:endpoint)
