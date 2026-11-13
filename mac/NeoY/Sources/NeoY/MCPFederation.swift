@@ -784,7 +784,7 @@ private func directFederatedToolName(provider: String, child: String) -> String 
     // Neo's review interface is owned by the Neo Wrapper, not by Markcut.
     // Preserve its intent-oriented names while retaining provider ownership
     // for routing and authorization. The acquire tool stays app-only.
-    if provider == "markcut", child == "review.preview" || child == "review.preview.acquire" {
+    if provider == "markcut", ["review.preview", "review.preview.acquire", "askquestions"].contains(child) {
         return child
     }
     return child.hasPrefix("\(provider).") ? child : "\(provider).\(child)"
