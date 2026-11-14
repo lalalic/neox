@@ -62,6 +62,7 @@ impl Config {
         let node_name = get("NODE_NAME", "node");
         if node_name.is_empty()
             || node_name.len() > 64
+            || !node_name.as_bytes()[0].is_ascii_alphanumeric()
             || !node_name
                 .bytes()
                 .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')

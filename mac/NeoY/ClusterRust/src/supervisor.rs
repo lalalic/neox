@@ -73,6 +73,16 @@ fn is_our_tunnel(pid: i32, cfg: &Config) -> bool {
         && command.contains(&cfg.hub_target)
 }
 
+fn tunnel_ready(cfg: &Config) -> bool {
+    if cfg.hub_target.is_empty() {
+        return true;
+    }
+    let pid = pid_read(&pid_file(cfg, "tunnel"));
+    pid.is_some()
+        && pid == pid_read(&cfg.run_dir().join("tunnel.ready"))
+        && pid.is_some_and(|p| is_our_tunnel(p, cfg))
+}
+
 async fn clean_orphan_tunnel(cfg: &Config) {
     let file = pid_file(cfg, "tunnel");
     if let Some(pid) = pid_read(&file) {
@@ -94,6 +104,7 @@ async fn clean_orphan_tunnel(cfg: &Config) {
         }
     }
     let _ = fs::remove_file(file);
+    let _ = fs::remove_file(cfg.run_dir().join("tunnel.ready"));
 }
 
 fn is_alive_run(cfg: &Config) -> bool {
@@ -108,9 +119,19 @@ fn install(cfg: &Config) -> Result<(), String> {
     let src = binary()?;
     let dest = cfg.binary_dest();
     if src != dest {
-        fs::copy(&src, &dest).map_err(|e| e.to_string())?;
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&dest, fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+        // Never overwrite the Mach-O backing a still-running process.
+        // Complete and verify the staged executable before atomic replacement.
+        let staged = dest.with_extension(format!("install-{}.tmp", std::process::id()));
+        let staged_result = (|| -> std::io::Result<()> {
+            fs::copy(&src, &staged)?;
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))?;
+            fs::rename(&staged, &dest)
+        })();
+        if staged_result.is_err() {
+            let _ = fs::remove_file(&staged);
+        }
+        staged_result.map_err(|e| e.to_string())?;
     }
     if let Some(parent) = cfg.cli().parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -204,8 +225,14 @@ async fn stop(cfg: &Config) {
 }
 
 async fn start(cfg: &Config) -> Result<(), String> {
-    if is_alive_run(cfg) && server::is_healthy(cfg.local_mcp_port).await {
-        return Ok(());
+    if is_alive_run(cfg) {
+        for _ in 0..40 {
+            if server::is_healthy(cfg.local_mcp_port).await && tunnel_ready(cfg) {
+                return Ok(());
+            }
+            time::sleep(Duration::from_millis(250)).await;
+        }
+        return Err("MCP running but reverse SSH tunnel is not ready".into());
     }
     for _ in 0..20 {
         if !is_alive_run(cfg) {
@@ -243,11 +270,7 @@ async fn start(cfg: &Config) -> Result<(), String> {
         child.spawn().map_err(|e| e.to_string())?;
     }
     for _ in 0..40 {
-        if is_alive_run(cfg)
-            && server::is_healthy(cfg.local_mcp_port).await
-            && (cfg.hub_target.is_empty()
-                || pid_read(&pid_file(cfg, "tunnel")).is_some_and(|pid| is_our_tunnel(pid, cfg)))
-        {
+        if is_alive_run(cfg) && server::is_healthy(cfg.local_mcp_port).await && tunnel_ready(cfg) {
             return Ok(());
         }
         time::sleep(Duration::from_millis(250)).await;
@@ -266,7 +289,7 @@ fn status(cfg: &Config) -> Result<(), String> {
         };
         let alive = pid.is_some_and(|p| {
             if role == "tunnel" {
-                is_our_tunnel(p, cfg)
+                tunnel_ready(cfg)
             } else {
                 is_our_server(p, cfg)
             }
@@ -297,6 +320,8 @@ async fn monitor_tunnel(cfg: Config, mut stop: watch::Receiver<bool>) {
         if *stop.borrow() {
             break;
         }
+        let ready_marker = cfg.run_dir().join("tunnel.ready");
+        let _ = fs::remove_file(&ready_marker);
         let stdout = fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -315,10 +340,22 @@ async fn monitor_tunnel(cfg: Config, mut stop: watch::Receiver<bool>) {
             Ok(mut child) => {
                 let pid = child.id().unwrap_or_default();
                 let _ = pid_write(&pid_file(&cfg, "tunnel"), pid as i32);
+                let settling = time::sleep(Duration::from_millis(1_000));
+                tokio::pin!(settling);
                 tokio::select! {
                     _=child.wait()=>{},
-                    _=stop.changed()=>{let _=child.start_kill();let _=child.wait().await;}
+                    _=stop.changed()=>{let _=child.start_kill();let _=child.wait().await;},
+                    _=&mut settling=>{
+                        if matches!(child.try_wait(),Ok(None)) {
+                            let _=pid_write(&ready_marker,pid as i32);
+                        }
+                        tokio::select!{
+                            _=child.wait()=>{},
+                            _=stop.changed()=>{let _=child.start_kill();let _=child.wait().await;}
+                        }
+                    }
                 }
+                let _ = fs::remove_file(&ready_marker);
                 let _ = fs::remove_file(pid_file(&cfg, "tunnel"));
                 if *stop.borrow() {
                     break;

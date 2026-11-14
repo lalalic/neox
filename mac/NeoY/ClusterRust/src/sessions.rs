@@ -14,6 +14,8 @@ use tokio::{
     time,
 };
 const MAX_OUTPUT: usize = 4 * 1024 * 1024;
+const MAX_ASYNC_SESSIONS: usize = 64;
+const MAX_INFLIGHT_EXEC: usize = 64;
 
 fn tail(dest: &mut Vec<u8>, input: &[u8]) {
     if input.len() >= MAX_OUTPUT {
@@ -166,9 +168,16 @@ async fn await_completion(s: Arc<Session>, mut child: tokio::process::Child) {
 
 impl Sessions {
     pub async fn exec(&self, cmd: &str, cwd: &str, timeout_ms: u64) -> Result<Value, String> {
-        let (s, child) = new_session(cmd, resolve_cwd(cwd))?;
-        let id = self.sequence.fetch_add(1, Ordering::Relaxed);
-        self.executing.lock().unwrap().insert(id, s.clone());
+        let (s, child, id) = {
+            let mut executing = self.executing.lock().unwrap();
+            if executing.len() >= MAX_INFLIGHT_EXEC {
+                return Err("too many synchronous shell processes".into());
+            }
+            let (s, child) = new_session(cmd, resolve_cwd(cwd))?;
+            let id = self.sequence.fetch_add(1, Ordering::Relaxed);
+            executing.insert(id, s.clone());
+            (s, child, id)
+        };
         let mut guard = ExecGuard {
             sessions: self,
             id,
@@ -204,10 +213,10 @@ impl Sessions {
         let mut active = self.active.lock().unwrap();
         // Bound retained completed session output and reject excess live jobs
         // *before* spawning an unmanaged process.
-        if active.len() >= 512 {
+        if active.len() >= MAX_ASYNC_SESSIONS {
             active.retain(|_, session| !session.data.lock().unwrap().done);
         }
-        if active.len() >= 512 {
+        if active.len() >= MAX_ASYNC_SESSIONS {
             return Err("too many live shell sessions".into());
         }
         let (s, child) = new_session(cmd, resolve_cwd(cwd))?;

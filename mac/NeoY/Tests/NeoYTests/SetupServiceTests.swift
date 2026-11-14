@@ -3,6 +3,19 @@ import XCTest
 @testable import NeoY
 
 final class SetupServiceTests: XCTestCase {
+    func testClusterRejectsUnsafeNodeNamesBeforeSSH() async throws {
+        let store = NeoYNodeStore(file: Self.makeDirectory().appendingPathComponent("nodes.json"))
+        let service = NeoYNodeService(store: store)
+        for name in ["../escape", "_bad", "x<xml>", "x;whoami"] {
+            do {
+                _ = try await service.execute("add \(name) --ssh test@127.0.0.1")
+                XCTFail("unsafe node name accepted: \(name)")
+            } catch {
+                XCTAssertTrue(error.localizedDescription.contains("node name"),"\(error)")
+            }
+        }
+    }
+
     func testAuthCallbackCommandsAreTyped() throws {
         let url = "https://example.app/oauth/callback"
         XCTAssertEqual(try NeoYSetupParser.parse("auth callback list"), .authCallbackList)

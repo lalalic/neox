@@ -199,6 +199,11 @@ actor NeoYNodeService {
             throw NeoYCoreError.invalidCommand("usage: add <name> --ssh <user>@<host>[#port=<port>]")
         }
         let name = tokens[1]
+        guard !name.isEmpty, name.utf8.count <= 64,
+              name.utf8.first.map({ ($0 >= 48 && $0 <= 57) || ($0 >= 65 && $0 <= 90) || ($0 >= 97 && $0 <= 122) }) == true,
+              name.utf8.allSatisfy({ ($0 >= 48 && $0 <= 57) || ($0 >= 65 && $0 <= 90) || ($0 >= 97 && $0 <= 122) || $0 == 45 || $0 == 95 }) else {
+            throw NeoYCoreError.invalidCommand("node name must be 1-64 ASCII letters/digits/_/- starting with a letter or digit")
+        }
         let ssh = try NeoYSSHAddress.parse(tokens[3])
         let reverseBootstrap = ssh.isLoopback && ssh.port != 22
 
