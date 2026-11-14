@@ -773,7 +773,7 @@ private struct ReviewGroupRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 9)
+        .padding(.vertical, 16)
         .contentShape(Rectangle())
     }
 }
