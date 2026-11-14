@@ -312,6 +312,40 @@ final class MarkcutReviewDecisionTests: XCTestCase {
         XCTAssertEqual(groups.first(where: { $0.jobID == "job-one" })?.title, "Job #job-one")
     }
 
+    func testInboxUsesPhoneLocalCalendarDateNotUTCDay() {
+        let toronto = TimeZone(identifier: "America/Toronto")!
+        XCTAssertEqual(MarkcutReviewGrouping.localDate("2026-11-14T01:05:31.628Z", timeZone: toronto), "2026-11-13")
+        XCTAssertEqual(MarkcutReviewGrouping.localDate("2026-11-13T13:03:32.159Z", timeZone: toronto), "2026-11-13")
+    }
+
+    func testInboxRowsShowJobIDsEvenWhenOriginalTitlesAreGhostFiles() {
+        let sessions: [[String: Any]] = [
+            ["id":"a", "title":".ghost.growth-review-growth-researcher", "status":"ready",
+             "createdAt":"2026-11-13T19:00:00Z", "relayCorrelations":[["jobId":"626"]]],
+            ["id":"b", "title":".ghost.growth-review-growth-researcher", "status":"ready",
+             "createdAt":"2026-11-13T19:01:00Z", "relayCorrelations":[["jobId":"626"]]],
+            ["id":"c", "title":".ghost.growth-review-growth-researcher", "status":"ready",
+             "createdAt":"2026-11-13T19:02:00Z", "relayCorrelations":[["jobId":"627"]]],
+            ["id":"d", "title":"Questions", "customTitle":true, "status":"ready",
+             "createdAt":"2026-11-13T19:03:00Z"],
+            ["id":"e", "title":".ghost.markcut", "status":"ready",
+             "videoGroupKey":"/tmp/.ghost.markcut.md", "createdAt":"2026-11-13T19:04:00Z"]
+        ]
+        let groups = MarkcutReviewGrouping.groups(from: sessions)
+        let jobTitles = ["626": "Growth 第一条爆款复刻 · 六阶段审核",
+                         "627": "Growth 复刻小红书收藏·千评评论动机·六阶段审核"]
+        let titles = groups.flatMap { group in
+            group.sessions.map { MarkcutReviewGrouping.rowTitle(group: group, revision: $0, jobTitles: jobTitles) }
+        }
+        XCTAssertEqual(titles.filter { $0 == "626:Growth 第一条爆款复刻 · 六阶段审核" }.count, 2)
+        XCTAssertEqual(titles.filter { $0 == "627:Growth 复刻小红书收藏·千评评论动机·六阶段审核" }.count, 1)
+        XCTAssertTrue(titles.contains(where: { $0.hasPrefix("Questions") }))
+        XCTAssertTrue(titles.contains("Preview"))
+        XCTAssertFalse(titles.contains(where: { $0.contains(".ghost") }))
+        XCTAssertEqual(MarkcutReviewGrouping.rowTitle(group: groups.first(where: { $0.jobID == "626" })!,
+            revision: groups.first(where: { $0.jobID == "626" })!.sessions[0]), "626")
+    }
+
     func testSessionWithMultipleRelayCorrelationsIsVisibleInEachCorrelatedJob() {
         let session: [String: Any] = ["id":"shared-session", "label":"clip", "status":"ready",
             "relayCorrelations":[["jobId":"job-one"], ["jobId":"job-two"]]]

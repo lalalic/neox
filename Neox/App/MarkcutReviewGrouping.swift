@@ -70,6 +70,26 @@ enum MarkcutReviewGrouping {
         }
     }
 
+    // The Inbox is a flat chronological list, but a multi-revision Relay Job
+    // still needs its Job ID on EVERY row. Never replace it with an internal
+    // .ghost.*.md artifact title just because the group has multiple revisions.
+    static func rowTitle(group: MarkcutReviewGroup, revision: MarkcutReviewGroup.Revision,
+                         jobTitles: [String: String] = [:]) -> String {
+        let source = revision.value["title"] as? String ?? ""
+        // An explicit caller title always wins over the Relay default.
+        if revision.value["customTitle"] as? Bool == true, !source.hasPrefix(".ghost.") {
+            return source
+        }
+        if let id = group.jobID {
+            if let title = jobTitles[id], !title.isEmpty { return "\(id):\(title)" }
+            if source.hasPrefix("\(id):") { return source }
+            if let groupTitle = revision.value["videoGroupTitle"] as? String,
+               groupTitle.hasPrefix("\(id):") { return groupTitle }
+            return id // Never expose a private ghost artifact while metadata loads.
+        }
+        return group.sessions.count > 1 ? revision.title : group.title
+    }
+
     static func statusText(_ item: [String: Any]) -> String {
         if let decision = item["decision"] as? [String: Any], let value = decision["decision"] as? String {
             return value == "approved" ? "Approved" : "Changes requested"
@@ -126,8 +146,20 @@ enum MarkcutReviewGrouping {
         if ["video", "video.md", "untitled"].contains(base.lowercased()),
            let relay = (item["relayCorrelations"] as? [[String: Any]])?.first,
            let task = relay["taskId"] { base = "Task \(task)" }
-        let date = (item["createdAt"] as? String).map { String($0.prefix(10)) }
+        let date = (item["createdAt"] as? String).map { localDate($0) }
         return date.map { "\(humanize(base)) · \($0)" } ?? humanize(base)
+    }
+
+    static func localDate(_ timestamp: String, timeZone: TimeZone = .current) -> String {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = fractional.date(from: timestamp) ?? ISO8601DateFormatter().date(from: timestamp) else {
+            return String(timestamp.prefix(10))
+        }
+        let formatter = DateFormatter()
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
     }
 
     private static func isPending(_ item: [String: Any]) -> Bool {
@@ -183,7 +215,8 @@ enum MarkcutReviewGrouping {
     }
 
     private static func humanize(_ value: String) -> String {
-        value.replacingOccurrences(of: #"\.md$"#, with: "", options: .regularExpression)
+        if value.lowercased().hasPrefix(".ghost.") { return "Preview" }
+        return value.replacingOccurrences(of: #"\.md$"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: "[-_]", with: " ", options: .regularExpression)
             .split(separator: " ").map { $0.capitalized }.joined(separator: " ")
     }

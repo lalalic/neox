@@ -40,6 +40,7 @@ struct MarkcutReviewInboxView: View {
     @State private var playbackPosition: MarkcutPlaybackPosition?
     @State private var message: String?
     @State private var syncing = false
+    @State private var jobTitles: [String: String] = [:]
     private var sessions: [[String: Any]] { fixtureSessions ?? inbox.groupedSessions }
 
     // One chronological list, no modes: each revision is its own review row.
@@ -47,8 +48,7 @@ struct MarkcutReviewInboxView: View {
         MarkcutReviewGrouping.groups(from: sessions).flatMap { group in
             group.sessions.map { revision in
                 MarkcutReviewGroup(id: group.id + ":" + revision.id,
-                    title: (revision.value["customTitle"] as? Bool == true) ? revision.title :
-                        (group.sessions.count > 1 ? revision.title : group.title),
+                    title: MarkcutReviewGrouping.rowTitle(group: group, revision: revision, jobTitles: jobTitles),
                     jobID: group.jobID, sessions: [revision],
                     pendingCount: revision.value["status"] as? String == "ready" &&
                         (revision.value["reviewActionable"] as? Bool ?? true) ? 1 : 0)
@@ -62,6 +62,27 @@ struct MarkcutReviewInboxView: View {
             return lt > rt
         }
     }
+    private func refreshJobTitles() async {
+        let wanted = Set(inbox.requests.compactMap(\.jobID))
+        guard !wanted.isEmpty, remote.hasConfiguredAddress, remote.hasCredential else { return }
+        if !remote.connected { await remote.connect() }
+        guard remote.connected else { return }
+        var names: [String: String] = [:]
+        var offset = 0
+        // The Jobs tab already provides the authenticated, paged Relay metadata.
+        // Read just enough pages to resolve locally saved reviews, including
+        // requests already ACKed by the phone (not returned by acquire again).
+        for _ in 0..<10 {
+            guard let page = try? await remote.relayJobs(offset: offset) else { break }
+            for job in page.jobs where wanted.contains(job.id) && !job.title.isEmpty {
+                names[job.id] = job.title
+            }
+            if wanted.isSubset(of: Set(names.keys)) || !page.hasMore || page.nextOffset <= offset { break }
+            offset = page.nextOffset
+        }
+        jobTitles.merge(names) { _, newer in newer }
+    }
+
     private func selectedItem(in group: MarkcutReviewGroup) -> [String: Any]? {
         return group.sessions.filter { $0.reviewSessionID == selectedSessionID }.first?.value
             ?? group.sessions.first?.value
@@ -121,6 +142,7 @@ struct MarkcutReviewInboxView: View {
             .listStyle(.insetGrouped)
             .refreshable {
                 await reviewPush.syncPending()
+                await refreshJobTitles()
                 openRequestedPreviewIfAvailable()
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -159,6 +181,7 @@ struct MarkcutReviewInboxView: View {
                 #endif
                 openRequestedPreviewIfAvailable()
                 await reviewPush.syncPending()
+                await refreshJobTitles()
                 // The notification may arrive before the remote inbox finishes syncing.
                 openRequestedPreviewIfAvailable()
                 while !Task.isCancelled {
