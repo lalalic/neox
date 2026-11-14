@@ -194,7 +194,17 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
         if let customTitle { value["customTitle"] = customTitle }
         if let groupID { value["videoGroupKey"] = groupID }
         if let groupTitle { value["videoGroupTitle"] = groupTitle }
-        if let jobID { value["relayCorrelations"] = [["jobId": jobID]] }
+        if let jobID {
+            var relay: [String: Any] = ["jobId": jobID]
+            if let groupID {
+                let parts = groupID.split(separator: "/").map(String.init)
+                if parts.count == 4, parts[0] == "job", parts[1] == jobID,
+                   parts[2] == "task", !parts[3].isEmpty {
+                    relay["taskId"] = parts[3]
+                }
+            }
+            value["relayCorrelations"] = [relay]
+        }
         if let playerURL { value["playerUrl"] = playerURL }
         if let createdAt { value["createdAt"] = createdAt }
         return value

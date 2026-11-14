@@ -329,6 +329,30 @@ final class RemoteMCPClient: ObservableObject {
                              total: total, nextOffset: nextOffset, hasMore: hasMore)
     }
 
+    /// Task titles are a distinct sanitized read-only Relay view. Never
+    /// transfer prompts, private file paths, objectives or task artifacts.
+    func relayJobTasks(_ job: RelayJob) async throws -> [String: String] {
+        let result = try await callAuthenticatedTool(chatGatewayProvider, [
+            "command": "chat_job_tasks",
+            "args": ["repository": job.repository, "jobId": job.id]
+        ])
+        guard result["jobId"] as? String == job.id,
+              result["repository"] as? String == job.repository,
+              let tasks = result["tasks"] as? [[String: Any]], tasks.count <= 500 else {
+            throw RemoteError.invalidResponse
+        }
+        var titles: [String: String] = [:]
+        for task in tasks {
+            guard let id = task["id"] as? String,
+                  let title = task["title"] as? String,
+                  !id.isEmpty, id.count <= 64, !title.isEmpty, title.count <= 160 else {
+                throw RemoteError.invalidResponse
+            }
+            titles[id] = title
+        }
+        return titles
+    }
+
     /// Read only allowlisted activity from the authenticated Master. Source
     /// events have no client ID; attach a stable position-based UI identity.
     func relayJobActivity(_ job: RelayJob) async throws -> [RelayJobActivityEvent] {

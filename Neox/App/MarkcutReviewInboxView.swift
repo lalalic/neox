@@ -41,6 +41,7 @@ struct MarkcutReviewInboxView: View {
     @State private var message: String?
     @State private var syncing = false
     @State private var jobTitles: [String: String] = [:]
+    @State private var taskTitles: [String: String] = [:]
     private var sessions: [[String: Any]] { fixtureSessions ?? inbox.groupedSessions }
 
     // One chronological list, no modes: each revision is its own review row.
@@ -68,6 +69,7 @@ struct MarkcutReviewInboxView: View {
         if !remote.connected { await remote.connect() }
         guard remote.connected else { return }
         var names: [String: String] = [:]
+        var matchedJobs: [String: RelayJob] = [:]
         var offset = 0
         // The Jobs tab already provides the authenticated, paged Relay metadata.
         // Read just enough pages to resolve locally saved reviews, including
@@ -76,11 +78,23 @@ struct MarkcutReviewInboxView: View {
             guard let page = try? await remote.relayJobs(offset: offset) else { break }
             for job in page.jobs where wanted.contains(job.id) && !job.title.isEmpty {
                 names[job.id] = job.title
+                matchedJobs[job.id] = job
             }
             if wanted.isSubset(of: Set(names.keys)) || !page.hasMore || page.nextOffset <= offset { break }
             offset = page.nextOffset
         }
         jobTitles.merge(names) { _, newer in newer }
+        var resolvedTasks: [String: String] = [:]
+        for job in matchedJobs.values {
+            guard let tasks = try? await remote.relayJobTasks(job) else { continue }
+            for (id, title) in tasks { resolvedTasks["\(job.id)/\(id)"] = title }
+        }
+        taskTitles.merge(resolvedTasks) { _, newer in newer }
+    }
+
+    private func reviewSubtitle(for group: MarkcutReviewGroup) -> String {
+        let item = group.sessions.first?.value ?? [:]
+        return MarkcutReviewGrouping.rowSubtitle(item, taskTitles: taskTitles)
     }
 
     private func selectedItem(in group: MarkcutReviewGroup) -> [String: Any]? {
@@ -106,30 +120,15 @@ struct MarkcutReviewInboxView: View {
                     }
                 }
                 ForEach(groups) { group in
-                    HStack(spacing: 0) {
-                        Button { open(group) } label: { ReviewGroupRow(group: group) }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("markcutReviewGroup")
-                            .appCopilotAction(
-                                id: "neox.review.group.\(group.id)",
-                                label: "Open \(group.title)",
-                                isVisible: isPilotActive && selectedGroup == nil
-                            ) { open(group) }
-                        Menu {
-                            Button("Delete review", systemImage: "trash", role: .destructive) {
-                                removeGroup(group)
-                            }
-                            .disabled(queuedFeedback(in: group))
-                            .accessibilityIdentifier("markcutReviewRemoveMenuItem")
-                        } label: {
-                            Image(systemName: "ellipsis")
-                                .font(.title3.weight(.semibold))
-                                .frame(width: 44, height: 44)
-                        }
+                    Button { open(group) } label: { ReviewGroupRow(group: group, subtitle: reviewSubtitle(for: group)) }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Review options")
-                        .accessibilityIdentifier("markcutReviewOptions")
-                    }
+                        .accessibilityIdentifier("markcutReviewGroup")
+                        .appCopilotAction(
+                            id: "neox.review.group.\(group.id)",
+                            label: "Open \(group.title)",
+                            isVisible: isPilotActive && selectedGroup == nil
+                        ) { open(group) }
+                    .listRowInsets(EdgeInsets())
                     .swipeActions {
                         Button("Remove", systemImage: "trash", role: .destructive) {
                             removeGroup(group)
@@ -139,7 +138,7 @@ struct MarkcutReviewInboxView: View {
                     }
                 }
             }
-            .listStyle(.insetGrouped)
+            .listStyle(.plain)
             .refreshable {
                 await reviewPush.syncPending()
                 await refreshJobTitles()
@@ -188,6 +187,15 @@ struct MarkcutReviewInboxView: View {
                     await retryQueuedFeedback()
                     do { try await Task.sleep(for: .seconds(15)) } catch { return }
                     await reviewPush.syncPending()
+                    let hasNewTask = inbox.groupedSessions.contains { item in
+                        guard let relay = (item["relayCorrelations"] as? [[String: Any]])?.first,
+                              let jobID = relay["jobId"] as? String,
+                              let taskID = relay["taskId"] as? String else { return false }
+                        return taskTitles["\(jobID)/\(taskID)"] == nil
+                    }
+                    if hasNewTask || !Set(inbox.requests.compactMap(\.jobID)).isSubset(of: Set(jobTitles.keys)) {
+                        await refreshJobTitles()
+                    }
                     openRequestedPreviewIfAvailable()
                 }
             }
@@ -743,39 +751,29 @@ struct MarkcutReviewInboxView: View {
 
 private struct ReviewGroupRow: View {
     let group: MarkcutReviewGroup
+    let subtitle: String
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: group.jobID == nil ? "film.stack" : "rectangle.stack.fill")
-                .font(.title3).foregroundStyle(Color.accentColor)
-                .frame(width: 42, height: 42)
-                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            VStack(alignment: .leading, spacing: 5) {
-                Text(group.title).font(.headline).lineLimit(1)
-                HStack(spacing: 7) {
-                    Text(MarkcutReviewGrouping.statusText(group.sessions[0].value))
-                    if let created = group.sessions[0].value["createdAt"] as? String,
-                       let date = ISO8601DateFormatter().date(from: created) {
-                        Text("·")
-                        Text(date.formatted(date: .abbreviated, time: .shortened))
-                    }
-                }
-                .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 4)
-            let status = group.sessions.first?.value ?? [:]
-            let decision = (status["decision"] as? [String: Any])?["decision"] as? String
+        let status = group.sessions.first?.value ?? [:]
+        let decision = (status["decision"] as? [String: Any])?["decision"] as? String
+        HStack(spacing: 10) {
             Image(systemName: decision == "approved" ? "checkmark.circle.fill" :
                     decision == "changes_requested" ? "arrow.uturn.backward.circle.fill" :
                     status["status"] as? String == "superseded" ? "clock.arrow.circlepath" :
                     group.pendingCount > 0 ? "circle.dotted" : "eye")
-                .font(.title3)
+                .font(.body)
                 .foregroundStyle(decision == "approved" ? Color.green :
                     decision == "changes_requested" ? Color.orange :
                     group.pendingCount > 0 ? Color.accentColor : Color.secondary)
+                .frame(width: 24)
                 .accessibilityIdentifier("markcutReviewStatusIcon")
-            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(group.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                Text(subtitle).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 5)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 9)
         .contentShape(Rectangle())
     }
 }

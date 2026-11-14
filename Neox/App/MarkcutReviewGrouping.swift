@@ -90,6 +90,16 @@ enum MarkcutReviewGrouping {
         return group.sessions.count > 1 ? revision.title : group.title
     }
 
+    static func rowSubtitle(_ item: [String: Any], taskTitles: [String: String] = [:]) -> String {
+        if let row = (item["relayCorrelations"] as? [[String: Any]])?.first,
+           let jobID = row["jobId"] as? String,
+           let taskID = row["taskId"] as? String {
+            let name = taskTitles["\(jobID)/\(taskID)"] ?? "Task"
+            return "\(taskID):\(name)"
+        }
+        return statusText(item)
+    }
+
     static func statusText(_ item: [String: Any]) -> String {
         if let decision = item["decision"] as? [String: Any], let value = decision["decision"] as? String {
             return value == "approved" ? "Approved" : "Changes requested"

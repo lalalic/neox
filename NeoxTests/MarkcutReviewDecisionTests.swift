@@ -312,6 +312,23 @@ final class MarkcutReviewDecisionTests: XCTestCase {
         XCTAssertEqual(groups.first(where: { $0.jobID == "job-one" })?.title, "Job #job-one")
     }
 
+    func testReviewRowsShowTaskIdAndActualTaskTitle() throws {
+        let request = try MarkcutReviewRequest(id: UUID().uuidString,
+            contentHash: String(repeating: "a", count: 64), revisionID: "rev",
+            title: "626:Growth 第一条爆款复刻 · 六阶段审核",
+            groupID: "job/626/task/1683", jobID: "626", delivery: "text")
+        let value = request.groupingValue
+        let relays = try XCTUnwrap(value["relayCorrelations"] as? [[String: Any]])
+        XCTAssertEqual(relays.first?["taskId"] as? String, "1683")
+        XCTAssertEqual(MarkcutReviewGrouping.rowSubtitle(value,
+            taskTitles: ["626/1683": "growth-researcher"]), "1683:growth-researcher")
+        XCTAssertEqual(MarkcutReviewGrouping.rowSubtitle(value), "1683:Task")
+        let standalone = try MarkcutReviewRequest(id: UUID().uuidString,
+            contentHash: String(repeating: "b", count: 64), revisionID: "rev",
+            title: "Standalone preview", delivery: "text")
+        XCTAssertEqual(MarkcutReviewGrouping.rowSubtitle(standalone.groupingValue), "Preview only")
+    }
+
     func testInboxUsesPhoneLocalCalendarDateNotUTCDay() {
         let toronto = TimeZone(identifier: "America/Toronto")!
         XCTAssertEqual(MarkcutReviewGrouping.localDate("2026-11-14T01:05:31.628Z", timeZone: toronto), "2026-11-13")

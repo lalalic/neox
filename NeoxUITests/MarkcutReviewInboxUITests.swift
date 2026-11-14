@@ -34,8 +34,9 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Approved · sent"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["markcutReviewApprove"].exists)
         app.buttons["markcutReviewPreviewClose"].tap()
-        app.buttons["markcutReviewOptions"].firstMatch.tap()
-        app.buttons["markcutReviewRemoveMenuItem"].tap()
+        XCTAssertFalse(app.buttons["markcutReviewOptions"].exists)
+        app.buttons["markcutReviewGroup"].firstMatch.swipeLeft()
+        app.buttons["markcutReviewRemoveGroup"].tap()
         XCTAssertEqual(app.buttons.matching(identifier: "markcutReviewGroup").count, 0)
     }
 
@@ -69,16 +70,17 @@ final class MarkcutReviewInboxUITests: XCTestCase {
     }
 
     @MainActor
-    func testLocalReviewGroupCanBeRemovedWithOptionsMenu() {
+    func testReviewListHasNoEllipsisOptionsAndKeepsSwipeDelete() {
         let app = XCUIApplication()
         app.launchArguments.append("-markcut-review-ui-fixture")
         app.launch()
         app.buttons["neoTopTabReviews"].tap()
         XCTAssertFalse(app.buttons["markcutReviewRefresh"].exists)
-        let options = app.buttons["markcutReviewOptions"].firstMatch
-        XCTAssertTrue(options.waitForExistence(timeout: 5))
-        options.tap()
-        let remove = app.buttons["markcutReviewRemoveMenuItem"]
+        XCTAssertFalse(app.buttons["markcutReviewOptions"].exists)
+        let row = app.buttons["markcutReviewGroup"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.swipeLeft()
+        let remove = app.buttons["markcutReviewRemoveGroup"]
         XCTAssertTrue(remove.waitForExistence(timeout: 5))
         remove.tap()
         XCTAssertEqual(app.buttons.matching(identifier: "markcutReviewGroup").count, 1,
@@ -175,8 +177,10 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         let reviews = app.buttons.matching(identifier: "markcutReviewGroup")
         XCTAssertEqual(reviews.count, 2)
         XCTAssertFalse(app.segmentedControls.firstMatch.exists)
-        XCTAssertTrue(reviews.element(boundBy: 0).label.localizedCaseInsensitiveContains("v2"))
-        XCTAssertTrue(reviews.element(boundBy: 1).label.localizedCaseInsensitiveContains("v1"))
+        XCTAssertTrue(reviews.element(boundBy: 0).label.contains("review-fixture-job"))
+        XCTAssertTrue(reviews.element(boundBy: 1).label.contains("review-fixture-job"))
+        XCTAssertTrue(app.images.matching(identifier: "markcutReviewStatusIcon").count >= 2,
+                      "The left status icon distinguishes each review revision")
         reviews.element(boundBy: 1).tap()
         XCTAssertTrue(app.staticTexts["Historical revision · review disabled"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["markcutReviewApprove"].exists)
