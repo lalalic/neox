@@ -1,6 +1,18 @@
 import XCTest
 
 final class ChatMessageRichUITests: XCTestCase {
+    func testChatKeyboardHasNoDoneAccessoryButton() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-neo-chat-rich-fixture"]
+        app.launch()
+        app.buttons["Chat"].firstMatch.tap()
+        let composer = app.textFields["neoChatComposer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 8))
+        composer.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Done"].exists, "Chat keyboard must not have a Done accessory button")
+    }
+
     func testChatBubbleRendersRichMessageWithoutSpeakerAndWithSmartTime() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-neo-chat-rich-fixture"]

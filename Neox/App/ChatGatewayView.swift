@@ -295,12 +295,6 @@ struct ChatGatewayView: View {
         } message: {
             Text("This hides old messages in Neo Mobile. It does not delete Neo Master history or cancel queued messages.")
         }
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Done") { composerFocused = false }
-            }
-        }
         .onChange(of: dictation.transcript) { _, text in
             guard !text.isEmpty else { return }
             let separator = dictationPrefix.isEmpty ||
