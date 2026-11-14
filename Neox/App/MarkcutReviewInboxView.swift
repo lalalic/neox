@@ -28,6 +28,7 @@ struct MarkcutReviewInboxView: View {
     @State private var fixtureSessions: [[String: Any]]?
     @State private var selectedGroup: MarkcutReviewGroup?
     @State private var selectedSessionID: String?
+    @State private var handledRequestedPreviewID: String?
     @State private var html: String?
     @State private var previewOrigin: URL?
     @State private var previewError: String?
@@ -544,10 +545,16 @@ struct MarkcutReviewInboxView: View {
     }
 
     private func openRequestedPreviewIfAvailable() {
-        guard let id = reviewPush.tappedRequestID ?? requestedPreviewID, selectedSessionID != id,
+        let tappedID = reviewPush.tappedRequestID
+        guard let id = tappedID ?? requestedPreviewID,
+              // Notification taps are one-shot. A standalone caller's stable
+              // requestedPreviewID must also not replay after the sheet closes.
+              tappedID != nil || handledRequestedPreviewID != id,
               let group = groups.first(where: { group in
                   group.sessions.contains { $0.reviewSessionID == id }
               }) else { return }
+        handledRequestedPreviewID = id
+        reviewPush.consumeTappedRequest(id)
         open(group, preferredSessionID: id)
     }
 

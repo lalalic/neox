@@ -54,6 +54,33 @@ final class MarkcutReviewInboxUITests: XCTestCase {
     }
 
     @MainActor
+    func testNotificationPreviewDoesNotReopenAfterDismissAndRefresh() {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-markcut-review-ui-multi-fixture",
+            "-markcut-notification-route-fixture"
+        ]
+        app.launch()
+        let close = app.buttons["markcutReviewPreviewClose"]
+        XCTAssertTrue(close.waitForExistence(timeout: 12))
+        close.tap()
+        XCTAssertFalse(close.waitForExistence(timeout: 2))
+        // A submitted review also updates the inbox and reruns the same
+        // preview-routing path. A stale notification must not reopen it.
+        let list = app.collectionViews.firstMatch
+        XCTAssertTrue(list.waitForExistence(timeout: 5))
+        list.swipeDown()
+        XCTAssertFalse(close.waitForExistence(timeout: 3),
+                       "Dismissed notification previews must not reopen after sync")
+        // Manual opening of the saved preview remains available.
+        let preview = app.buttons.matching(identifier: "markcutReviewGroup")
+            .containing(NSPredicate(format: "label CONTAINS[c] %@", "Standalone")).firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        preview.tap()
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testPreviewOnlyAndPendingReviewAreDistinctInMultiItemList() {
         let app = XCUIApplication()
         app.launchArguments.append("-markcut-review-ui-multi-fixture")

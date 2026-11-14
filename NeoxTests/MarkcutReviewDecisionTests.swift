@@ -3,6 +3,21 @@ import XCTest
 
 final class MarkcutReviewDecisionTests: XCTestCase {
     @MainActor
+    func testNotificationTapIsConsumedOnceAndCanBeTappedAgain() {
+        let coordinator = ReviewPushCoordinator.shared
+        let first = UUID().uuidString
+        let another = UUID().uuidString
+        coordinator.notificationTapped(first)
+        coordinator.consumeTappedRequest(another)
+        XCTAssertEqual(coordinator.tappedRequestID, first)
+        coordinator.consumeTappedRequest(first)
+        XCTAssertNil(coordinator.tappedRequestID)
+        coordinator.notificationTapped(first)
+        XCTAssertEqual(coordinator.tappedRequestID, first)
+        coordinator.consumeTappedRequest(first)
+    }
+
+    @MainActor
     func testReviewRequestPersistenceReplayAndRemovalArePhoneOwned() throws {
         let suite = "MarkcutReviewInboxTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

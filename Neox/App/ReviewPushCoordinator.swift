@@ -14,6 +14,12 @@ final class ReviewPushCoordinator: ObservableObject {
 
     func notificationTapped(_ id: String) { tappedRequestID = id }
 
+    /// A notification opens its preview once. Inbox refreshes and decision
+    /// acknowledgements must not replay the same tap.
+    func consumeTappedRequest(_ id: String) {
+        if tappedRequestID == id { tappedRequestID = nil }
+    }
+
     static func apnsEnvironment(from provisioning: Data?) -> String {
         guard let provisioning else { return "production" } // App Store / TestFlight
         // CMS profile contains the embedded XML entitlement plist. Only its
