@@ -110,7 +110,46 @@ final class MarkcutReviewDecisionTests: XCTestCase {
         XCTAssertEqual(comments[1]["text"] as? String, "")
         let normal = try MarkcutReviewRequest(id: UUID().uuidString,
             contentHash: String(repeating: "e", count: 64), revisionID: "r1", title: "Normal")
-        XCTAssertTrue((feedback.reviewResult(request: normal)["comments"] as? [[String: Any]])?.isEmpty == true)
+        // An approved decision preserves caller-provided comments for ordinary reviews, too.
+        XCTAssertEqual((feedback.reviewResult(request: normal)["comments"] as? [[String: Any]])?.count, 2)
+    }
+
+    @MainActor
+    func testSceneAndOverallCommentsSurviveApprovalAndChangesRequests() throws {
+        var draft = MarkcutReviewCommentDraft()
+        let first = MarkcutPlaybackPosition(sceneID: "opening", timeSeconds: 2.4,
+                                            sceneName: "Opening", sceneStart: 0)
+        let second = MarkcutPlaybackPosition(sceneID: "map", timeSeconds: 12.5,
+                                             sceneName: "Map", sceneStart: 10)
+        draft.overall = "  Improve the story arc  "
+        draft.setSceneText("First shot is too dark", at: first)
+        draft.setSceneText("Map transition needs easing", at: second)
+        XCTAssertEqual(draft.sceneCount, 2)
+        XCTAssertEqual(draft.text(for: first), "First shot is too dark")
+        XCTAssertEqual(draft.text(for: second), "Map transition needs easing")
+        XCTAssertEqual(draft.comments.map(\.scope), ["overall", "scene", "scene"])
+        XCTAssertEqual(draft.comments.map(\.sceneId), [nil, "opening", "map"])
+        XCTAssertEqual(draft.comments[1].sceneName, "Opening")
+        XCTAssertEqual(draft.comments[2].sceneName, "Map")
+        XCTAssertEqual(draft.comments[2].timeSeconds, 10)
+        let request = try MarkcutReviewRequest(id: UUID().uuidString,
+            contentHash: String(repeating: "a", count: 64), revisionID: "review",
+            title: "Feedback", delivery: "text")
+        for choice: MarkcutReviewChoice in [.approved, .changesRequested] {
+            let feedback = MarkcutReviewFeedback(requestId: request.id, decision: choice,
+                feedback: draft.overall.trimmingCharacters(in: .whitespacesAndNewlines),
+                idempotencyKey: UUID().uuidString, comments: draft.comments)
+            let result = feedback.reviewResult(request: request)
+            let comments = try XCTUnwrap(result["comments"] as? [[String: Any]])
+            XCTAssertEqual(comments.count, 3)
+            XCTAssertEqual(comments[0]["scope"] as? String, "overall")
+            XCTAssertEqual(comments[0]["text"] as? String, "Improve the story arc")
+            XCTAssertEqual(comments[1]["sceneId"] as? String, "opening")
+            XCTAssertEqual(comments[2]["sceneName"] as? String, "Map")
+        }
+        draft.setSceneText(" ", at: first)
+        XCTAssertEqual(draft.sceneCount, 1)
+        XCTAssertEqual(draft.comments.count, 2)
     }
 
     @MainActor

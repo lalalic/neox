@@ -63,6 +63,49 @@ struct MarkcutReviewComment: Codable, Equatable {
     var sceneName: String? = nil
 }
 
+/// Local draft comments keyed by the compiled scene identity. No server draft storage.
+struct MarkcutReviewCommentDraft: Equatable {
+    var overall = ""
+    private(set) var scenes: [String: MarkcutReviewComment] = [:]
+
+    var sceneCount: Int { scenes.count }
+    var hasComments: Bool { !comments.isEmpty }
+
+    func text(for position: MarkcutPlaybackPosition?) -> String {
+        guard let id = position?.sceneID else { return "" }
+        return scenes[id]?.text ?? ""
+    }
+
+    mutating func setSceneText(_ text: String, at position: MarkcutPlaybackPosition?) {
+        guard let position, let id = position.sceneID, !id.isEmpty else { return }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            scenes.removeValue(forKey: id)
+            return
+        }
+        var comment = MarkcutReviewComment(sceneId: id, timeSeconds: position.sceneStart,
+                                            text: text, scope: "scene")
+        comment.sceneName = position.sceneName
+        scenes[id] = comment
+    }
+
+    var comments: [MarkcutReviewComment] {
+        var result: [MarkcutReviewComment] = []
+        let overallText = overall.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !overallText.isEmpty {
+            result.append(MarkcutReviewComment(sceneId: nil, timeSeconds: 0,
+                                                text: overallText, scope: "overall"))
+        }
+        for comment in scenes.values.sorted(by: { ($0.timeSeconds, $0.sceneId ?? "") < ($1.timeSeconds, $1.sceneId ?? "") }) {
+            var trimmed = MarkcutReviewComment(sceneId: comment.sceneId, timeSeconds: comment.timeSeconds,
+                                                text: comment.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                                                scope: "scene")
+            trimmed.sceneName = comment.sceneName
+            result.append(trimmed)
+        }
+        return result
+    }
+}
+
 struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
     let id: String
     let contentHash: String
@@ -233,8 +276,9 @@ struct MarkcutReviewFeedback: Codable, Equatable, Identifiable {
     }
 
     func reviewResult(request: MarkcutReviewRequest) -> [String: Any] {
-        let resolvedComments: [MarkcutReviewComment] = request.mode == "questions" ? (comments ?? []) : decision == .approved ? [] :
-            (comments ?? [MarkcutReviewComment(sceneId: nil, timeSeconds: 0, text: feedback, scope: "overall")])
+        let resolvedComments: [MarkcutReviewComment] = comments ?? (
+            request.mode == "questions" || feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? [] :
+            [MarkcutReviewComment(sceneId: nil, timeSeconds: 0, text: feedback, scope: "overall")])
         var result: [String: Any] = ["requestId": request.id,
                 "previewId": request.previewID ?? request.revisionID,
                 "decision": decision.rawValue,

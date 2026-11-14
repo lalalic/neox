@@ -5,6 +5,15 @@ import UIKit
 struct MarkcutPlaybackPosition: Equatable {
     let sceneID: String?
     let timeSeconds: Double
+    let sceneName: String?
+    let sceneStart: Double
+
+    init(sceneID: String?, timeSeconds: Double, sceneName: String? = nil, sceneStart: Double = 0) {
+        self.sceneID = sceneID
+        self.timeSeconds = timeSeconds
+        self.sceneName = sceneName
+        self.sceneStart = sceneStart
+    }
 }
 
 struct MarkcutWebPreview: UIViewRepresentable {
@@ -59,7 +68,9 @@ struct MarkcutWebPreview: UIViewRepresentable {
                 let sceneID = value["sceneId"] as? String
                 DispatchQueue.main.async {
                     self.playbackPosition.wrappedValue = MarkcutPlaybackPosition(
-                        sceneID: sceneID, timeSeconds: seconds)
+                        sceneID: sceneID, timeSeconds: seconds,
+                        sceneName: value["sceneName"] as? String,
+                        sceneStart: max(0, (value["sceneStart"] as? Double) ?? 0))
                 }
             } else if message.name == "markcutPreviewError" {
                 DispatchQueue.main.async { self.failure.wrappedValue = String(describing: message.body) }

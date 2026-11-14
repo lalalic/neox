@@ -34,7 +34,8 @@ struct MarkcutReviewInboxView: View {
     @State private var loadingStage = "Loading preview…"
     @State private var previewRetry = 0
     @State private var landscapeExpanded = false
-    @State private var feedback = ""
+    @State private var commentDraft = MarkcutReviewCommentDraft()
+    @State private var commentMode = "overall"
     @State private var questionScenes: [MarkcutQuestion] = []
     @State private var questionAnswers: [String: String] = [:]
     @State private var playbackPosition: MarkcutPlaybackPosition?
@@ -328,7 +329,8 @@ struct MarkcutReviewInboxView: View {
                                 selectedSessionID = revision.reviewSessionID
                                 html = nil
                                 previewError = nil
-                                feedback = ""
+                                commentDraft = MarkcutReviewCommentDraft()
+                                commentMode = "overall"
                                 questionScenes = []
                                 questionAnswers = [:]
                                 Task { await loadPreview(revision.value) }
@@ -469,23 +471,57 @@ struct MarkcutReviewInboxView: View {
                     .font(.caption).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            TextField("Add feedback for changes…", text: $feedback, axis: .vertical)
-                .lineLimit(3...8)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityIdentifier("markcutReviewFeedback")
+            Picker("Comment target", selection: $commentMode) {
+                Text("Overall").tag("overall")
+                Text("Scene").tag("scene")
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("markcutReviewCommentMode")
+            if commentMode == "scene" {
+                HStack(spacing: 6) {
+                    Text(playbackPosition?.sceneName ?? "Choose a scene in the video")
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text("\(commentDraft.sceneCount) scene comments")
+                }
+                .font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier("markcutReviewSceneContext")
+                TextField("Comment on this scene…", text: Binding(
+                    get: { commentDraft.text(for: playbackPosition) },
+                    set: { commentDraft.setSceneText($0, at: playbackPosition) }), axis: .vertical)
+                    .lineLimit(2...4)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(playbackPosition?.sceneID == nil)
+                    .accessibilityIdentifier("markcutReviewSceneComment")
+            } else {
+                TextField("Overall comment…", text: $commentDraft.overall, axis: .vertical)
+                    .lineLimit(3...6)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("markcutReviewFeedback")
+            }
             HStack(spacing: 10) {
-                Button { Task { await submit("changes_requested", item: item) } } label: {
+                Button {
+                    if commentDraft.hasComments {
+                        Task { await submit("changes_requested", item: item) }
+                    } else {
+                        message = "Add an Overall or Scene comment before requesting changes."
+                    }
+                } label: {
                     Label("Request changes", systemImage: "arrow.uturn.backward")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
-                .disabled(syncing || cannotDeliver(item) || feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .buttonStyle(.borderedProminent)
+                .tint(Color(red: 0.64, green: 0.13, blue: 0.17))
+                .foregroundStyle(.white)
+                .disabled(syncing || cannotDeliver(item))
                 .accessibilityIdentifier("markcutReviewRequestChanges")
                 Button { Task { await submit("approved", item: item) } } label: {
                     Label("Approve", systemImage: "checkmark")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(Color(red: 0.08, green: 0.43, blue: 0.25))
+                .foregroundStyle(.white)
                 .disabled(syncing || cannotDeliver(item))
                 .accessibilityIdentifier("markcutReviewApprove")
             }
@@ -501,7 +537,8 @@ struct MarkcutReviewInboxView: View {
         html = nil
         previewOrigin = nil
         previewError = nil
-        feedback = ""
+        commentDraft = MarkcutReviewCommentDraft()
+        commentMode = "overall"
         questionScenes = []
         questionAnswers = [:]
     }
@@ -522,8 +559,13 @@ struct MarkcutReviewInboxView: View {
         selectedSessionID = first?.reviewSessionID
         html = nil
         previewError = nil
-        feedback = ""
+        commentDraft = MarkcutReviewCommentDraft()
+        commentMode = "overall"
         #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-markcut-review-comment-fixture") {
+            playbackPosition = MarkcutPlaybackPosition(sceneID: "scene-opening", timeSeconds: 1.5,
+                                                       sceneName: "Opening", sceneStart: 0)
+        }
         if ProcessInfo.processInfo.arguments.contains("-markcut-review-async-preview-fixture") {
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(350))
@@ -664,7 +706,7 @@ struct MarkcutReviewInboxView: View {
             setInterval(function(){
               const p=window.__markcutPlaybackContext;
               if(!p)return;
-              const value={sceneId:p.sceneId||null,timeSeconds:Number(p.timeSeconds)||0};
+              const value={sceneId:p.sceneId||null,sceneName:p.sceneName||null,sceneStart:Number(p.sceneStart)||0,timeSeconds:Number(p.timeSeconds)||0};
               const key=JSON.stringify(value);
               if(key===lastPosition)return;
               lastPosition=key;
@@ -695,20 +737,21 @@ struct MarkcutReviewInboxView: View {
             return
         }
         let choice: MarkcutReviewChoice = decision == "approved" ? .approved : .changesRequested
-        let note = feedback.trimmingCharacters(in: .whitespacesAndNewlines)
         let comments: [MarkcutReviewComment] = request.mode == "questions" ?
             questionScenes.map { question in
                 var comment = MarkcutReviewComment(sceneId: question.id, timeSeconds: 0,
                     text: questionAnswers[question.name] ?? "", scope: "scene")
                 comment.sceneName = question.name
                 return comment
-            } :
-            choice == .changesRequested ?
-            [MarkcutReviewComment(sceneId: playbackPosition?.sceneID,
-                                  timeSeconds: playbackPosition?.timeSeconds ?? 0,
-                                  text: note, scope: playbackPosition?.sceneID == nil ? "overall" : "spot")] : []
+            } : commentDraft.comments
+        if choice == .changesRequested && comments.isEmpty {
+            message = "Add an Overall or Scene comment before requesting changes."
+            return
+        }
+        let overallText = request.mode == "questions" ? "" :
+            commentDraft.overall.trimmingCharacters(in: .whitespacesAndNewlines)
         let pending = MarkcutReviewFeedback(requestId: request.id, decision: choice,
-            feedback: choice == .changesRequested ? note : "",
+            feedback: overallText,
             idempotencyKey: UUID().uuidString, comments: comments)
         inbox.queue(pending)
         await retryQueuedFeedback()

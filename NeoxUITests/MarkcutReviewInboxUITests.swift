@@ -146,6 +146,43 @@ final class MarkcutReviewInboxUITests: XCTestCase {
     }
 
     @MainActor
+    func testReviewCommentModesAndBothProminentActionButtons() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-markcut-review-ui-fixture", "-markcut-review-comment-fixture"]
+        app.launch()
+        app.buttons["neoTopTabReviews"].tap()
+        app.buttons["markcutReviewGroup"].firstMatch.tap()
+        let changes = app.buttons["markcutReviewRequestChanges"]
+        let approve = app.buttons["markcutReviewApprove"]
+        XCTAssertTrue(changes.waitForExistence(timeout: 5))
+        XCTAssertTrue(approve.isEnabled)
+        XCTAssertTrue(changes.isEnabled, "Request changes should not be dimmed when draft is empty")
+        changes.tap()
+        XCTAssertTrue(app.staticTexts["Add an Overall or Scene comment before requesting changes."].waitForExistence(timeout: 5))
+        let overallField = app.textViews["markcutReviewFeedback"].exists ?
+            app.textViews["markcutReviewFeedback"] : app.textFields["markcutReviewFeedback"]
+        XCTAssertTrue(overallField.exists)
+        overallField.tap()
+        overallField.typeText("Full story feedback")
+        let tabs = app.segmentedControls["markcutReviewCommentMode"]
+        XCTAssertTrue(tabs.exists)
+        tabs.buttons["Scene"].tap()
+        XCTAssertTrue(app.staticTexts["Opening"].waitForExistence(timeout: 5))
+        let sceneField = app.textViews["markcutReviewSceneComment"].exists ?
+            app.textViews["markcutReviewSceneComment"] : app.textFields["markcutReviewSceneComment"]
+        XCTAssertTrue(sceneField.exists)
+        XCTAssertTrue(sceneField.isEnabled)
+        sceneField.tap()
+        sceneField.typeText("Fix scene lighting")
+        tabs.buttons["Overall"].tap()
+        XCTAssertTrue((overallField.value as? String ?? "").contains("Full story feedback"))
+        tabs.buttons["Scene"].tap()
+        XCTAssertTrue((sceneField.value as? String ?? "").contains("Fix scene lighting"))
+        XCTAssertTrue(changes.isEnabled)
+        XCTAssertTrue(approve.isEnabled)
+    }
+
+    @MainActor
     func testFeedbackStartsAtThreeLinesAndAcceptsLineBreaks() {
         let app = XCUIApplication()
         app.launchArguments.append("-markcut-review-ui-fixture")
