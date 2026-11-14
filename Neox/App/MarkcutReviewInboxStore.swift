@@ -68,6 +68,7 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
     let contentHash: String
     let revisionID: String
     let title: String
+    let subtitle: String?
     let mode: String?
     let customTitle: Bool?
     let groupID: String?
@@ -82,7 +83,7 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
     let createdAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, contentHash, mediaHash, title, mode, customTitle, groupTitle, delivery, eventTemplate, createdAt
+        case id, contentHash, mediaHash, title, subtitle, mode, customTitle, groupTitle, delivery, eventTemplate, createdAt
         case previewID = "previewId"
         case revisionID = "revisionId"
         case groupID = "groupId"
@@ -91,7 +92,7 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
     }
 
     init(id: String, contentHash: String, revisionID: String, title: String,
-         mode: String? = nil, customTitle: Bool? = nil, groupID: String? = nil, groupTitle: String? = nil, jobID: String? = nil,
+         subtitle: String? = nil, mode: String? = nil, customTitle: Bool? = nil, groupID: String? = nil, groupTitle: String? = nil, jobID: String? = nil,
          delivery: String? = nil, eventTemplate: MarkcutReviewEventTemplate? = nil,
          previewID: String? = nil, ownerCallbackTool: String? = nil, ownerThreadID: String? = nil,
          playerURL: String? = nil, createdAt: String? = nil) throws {
@@ -118,6 +119,7 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
         // Event mode has no business revision: use transport request UUID for UI identity.
         self.revisionID = delivery == "event" ? id : revisionID
         self.title = title
+        self.subtitle = subtitle
         self.mode = mode
         self.customTitle = customTitle
         self.groupID = groupID
@@ -143,6 +145,7 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
             contentHash: fields.decode(String.self, forKey: isEvent ? .mediaHash : .contentHash),
             revisionID: isEvent ? (try fields.decode(String.self, forKey: .id)) : fields.decode(String.self, forKey: .revisionID),
             title: fields.decode(String.self, forKey: .title),
+            subtitle: fields.decodeIfPresent(String.self, forKey: .subtitle),
             mode: fields.decodeIfPresent(String.self, forKey: .mode),
             customTitle: fields.decodeIfPresent(Bool.self, forKey: .customTitle),
             groupID: fields.decodeIfPresent(String.self, forKey: .groupID),
@@ -162,6 +165,7 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(title, forKey: .title)
+        try c.encodeIfPresent(subtitle, forKey: .subtitle)
         try c.encodeIfPresent(mode, forKey: .mode)
         try c.encodeIfPresent(customTitle, forKey: .customTitle)
         if delivery == "event" {
@@ -188,6 +192,7 @@ struct MarkcutReviewRequest: Codable, Identifiable, Equatable {
     var groupingValue: [String: Any] {
         var value: [String: Any] = ["id": id, "title": title, "status": "ready",
                                     "reviewActionable": canDeliver, "delivery": effectiveDelivery]
+        if let subtitle { value["subtitle"] = subtitle }
         if delivery == "event" { value["mediaHash"] = contentHash }
         else { value["revisionId"] = revisionID; value["contentHash"] = contentHash }
         if let mode { value["mode"] = mode }

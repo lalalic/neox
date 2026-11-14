@@ -44,27 +44,19 @@ struct MarkcutReviewInboxView: View {
     @State private var taskTitles: [String: String] = [:]
     private var sessions: [[String: Any]] { fixtureSessions ?? inbox.groupedSessions }
 
-    // One chronological list, no modes: each revision is its own review row.
+    // One row per Relay Job/Task. Executions/revisions remain exclusively in
+    // the phone's existing local inbox and are selectable in the detail sheet.
     private var groups: [MarkcutReviewGroup] {
-        MarkcutReviewGrouping.groups(from: sessions).flatMap { group in
-            group.sessions.map { revision in
-                MarkcutReviewGroup(id: group.id + ":" + revision.id,
-                    title: MarkcutReviewGrouping.rowTitle(group: group, revision: revision, jobTitles: jobTitles),
-                    jobID: group.jobID, sessions: [revision],
-                    pendingCount: revision.value["status"] as? String == "ready" &&
-                        (revision.value["reviewActionable"] as? Bool ?? true) ? 1 : 0)
-            }
-        }.sorted {
-            let left = $0.sessions[0].value
-            let right = $1.sessions[0].value
-            let lt = (left["createdAt"] as? String) ?? ""
-            let rt = (right["createdAt"] as? String) ?? ""
-            if lt == rt { return $0.id > $1.id }
-            return lt > rt
+        MarkcutReviewGrouping.groups(from: sessions).map { group in
+            MarkcutReviewGroup(id: group.id,
+                title: MarkcutReviewGrouping.rowTitle(group: group, revision: group.sessions[0], jobTitles: jobTitles),
+                jobID: group.jobID, sessions: group.sessions, pendingCount: group.pendingCount)
         }
     }
     private func refreshJobTitles() async {
-        let wanted = Set(inbox.requests.compactMap(\.jobID))
+        // New requests arrive fully labeled by review.preview. Only old phone-
+        // owned history without labels needs the compatibility lookup.
+        let wanted = Set(inbox.requests.filter { $0.subtitle == nil }.compactMap(\.jobID))
         guard !wanted.isEmpty, remote.hasConfiguredAddress, remote.hasCredential else { return }
         if !remote.connected { await remote.connect() }
         guard remote.connected else { return }
@@ -188,12 +180,13 @@ struct MarkcutReviewInboxView: View {
                     do { try await Task.sleep(for: .seconds(15)) } catch { return }
                     await reviewPush.syncPending()
                     let hasNewTask = inbox.groupedSessions.contains { item in
-                        guard let relay = (item["relayCorrelations"] as? [[String: Any]])?.first,
+                        guard item["subtitle"] == nil,
+                              let relay = (item["relayCorrelations"] as? [[String: Any]])?.first,
                               let jobID = relay["jobId"] as? String,
                               let taskID = relay["taskId"] as? String else { return false }
                         return taskTitles["\(jobID)/\(taskID)"] == nil
                     }
-                    if hasNewTask || !Set(inbox.requests.compactMap(\.jobID)).isSubset(of: Set(jobTitles.keys)) {
+                    if hasNewTask || !Set(inbox.requests.filter { $0.subtitle == nil }.compactMap(\.jobID)).isSubset(of: Set(jobTitles.keys)) {
                         await refreshJobTitles()
                     }
                     openRequestedPreviewIfAvailable()

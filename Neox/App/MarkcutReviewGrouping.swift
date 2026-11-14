@@ -44,7 +44,13 @@ enum MarkcutReviewGrouping {
             let relayRows = session["relayCorrelations"] as? [[String: Any]] ?? []
             let jobIDs = Array(Set(relayRows.compactMap { $0["jobId"] as? String })).sorted()
             if !jobIDs.isEmpty {
-                for jobID in jobIDs { buckets["job:\(jobID)", default: []].append(session) }
+                // A Review row represents one Relay Task, not one Execution.
+                // Preserve every revision inside its locally-owned history.
+                for jobID in jobIDs {
+                    let taskID = relayRows.first(where: { ($0["jobId"] as? String) == jobID })?["taskId"] as? String
+                    let key = taskID.map { "job:\(jobID):task:\($0)" } ?? "job:\(jobID)"
+                    buckets[key, default: []].append(session)
+                }
                 continue
             }
             let identity = sourceIdentity(session)
@@ -53,7 +59,7 @@ enum MarkcutReviewGrouping {
         }
         return buckets.map { key, values in
             let ordered = values.sorted { timestamp($0) > timestamp($1) }
-            let jobID = key.hasPrefix("job:") ? String(key.dropFirst("job:".count)) : nil
+            let jobID = key.hasPrefix("job:") ? String(key.dropFirst("job:".count)).components(separatedBy: ":task:").first : nil
             let identity = sourceIdentity(ordered[0])
             let title: String
             if let jobID { title = "Job #\(jobDisplay(jobID))" }
@@ -91,6 +97,8 @@ enum MarkcutReviewGrouping {
     }
 
     static func rowSubtitle(_ item: [String: Any], taskTitles: [String: String] = [:]) -> String {
+        if let subtitle = item["subtitle"] as? String, !subtitle.isEmpty { return subtitle }
+        // Legacy requests created before the Review wrapper supplied subtitles.
         if let row = (item["relayCorrelations"] as? [[String: Any]])?.first,
            let jobID = row["jobId"] as? String,
            let taskID = row["taskId"] as? String {

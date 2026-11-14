@@ -60,7 +60,7 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         app.launch()
         app.buttons["neoTopTabReviews"].tap()
         let rows = app.buttons.matching(identifier: "markcutReviewGroup")
-        XCTAssertEqual(rows.count, 3)
+        XCTAssertEqual(rows.count, 2, "One Relay Task row with its local history, plus standalone preview")
         let preview = rows.containing(NSPredicate(format: "label CONTAINS[c] %@", "Standalone")).firstMatch
         XCTAssertTrue(preview.exists)
         preview.tap()
@@ -83,9 +83,9 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         let remove = app.buttons["markcutReviewRemoveGroup"]
         XCTAssertTrue(remove.waitForExistence(timeout: 5))
         remove.tap()
-        XCTAssertEqual(app.buttons.matching(identifier: "markcutReviewGroup").count, 1,
-                       "Deleting one review must preserve the other revision")
-        XCTAssertFalse(app.staticTexts["No previews yet"].exists)
+        XCTAssertEqual(app.buttons.matching(identifier: "markcutReviewGroup").count, 0,
+                       "Deleting the Task row also deletes its phone-local revision history")
+        XCTAssertFalse(app.buttons["markcutReviewGroup"].exists)
     }
 
     @MainActor
@@ -100,9 +100,9 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         let remove = app.buttons["markcutReviewRemoveGroup"]
         XCTAssertTrue(remove.waitForExistence(timeout: 3))
         remove.tap()
-        XCTAssertEqual(app.buttons.matching(identifier: "markcutReviewGroup").count, 1,
-                       "Deleting one review must preserve the other revision")
-        XCTAssertFalse(app.staticTexts["No previews yet"].exists)
+        XCTAssertEqual(app.buttons.matching(identifier: "markcutReviewGroup").count, 0,
+                       "Deleting the Task row also deletes its phone-local revision history")
+        XCTAssertFalse(app.buttons["markcutReviewGroup"].exists)
     }
 
     @MainActor
@@ -175,13 +175,16 @@ final class MarkcutReviewInboxUITests: XCTestCase {
 
         app.buttons["neoTopTabReviews"].tap()
         let reviews = app.buttons.matching(identifier: "markcutReviewGroup")
-        XCTAssertEqual(reviews.count, 2)
+        XCTAssertEqual(reviews.count, 1, "One Job/Task appears once regardless of execution count")
         XCTAssertFalse(app.segmentedControls.firstMatch.exists)
-        XCTAssertTrue(reviews.element(boundBy: 0).label.contains("review-fixture-job"))
-        XCTAssertTrue(reviews.element(boundBy: 1).label.contains("review-fixture-job"))
-        XCTAssertTrue(app.images.matching(identifier: "markcutReviewStatusIcon").count >= 2,
-                      "The left status icon distinguishes each review revision")
-        reviews.element(boundBy: 1).tap()
+        XCTAssertTrue(app.images.matching(identifier: "markcutReviewStatusIcon").count >= 1)
+        reviews.firstMatch.tap()
+        let revisions = app.buttons["markcutReviewVersionMenu"]
+        XCTAssertTrue(revisions.waitForExistence(timeout: 5))
+        revisions.tap()
+        let historical = app.buttons["markcutReviewRevision-fixture-old"]
+        XCTAssertTrue(historical.waitForExistence(timeout: 5))
+        historical.tap()
         XCTAssertTrue(app.staticTexts["Historical revision · review disabled"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["markcutReviewApprove"].exists)
     }

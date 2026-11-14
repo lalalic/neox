@@ -329,6 +329,49 @@ final class MarkcutReviewDecisionTests: XCTestCase {
         XCTAssertEqual(MarkcutReviewGrouping.rowSubtitle(standalone.groupingValue), "Preview only")
     }
 
+    @MainActor
+    func testWrapperProvidedReviewLabelsPersistOnlyInPhoneLocalHistory() throws {
+        let suite = "MarkcutWrapperLabels.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = MarkcutReviewInboxStore(defaults: defaults)
+        let request = try MarkcutReviewRequest(id: UUID().uuidString,
+            contentHash: String(repeating: "a", count: 64), revisionID: "review",
+            title: "626:Growth 第一条爆款复刻 · 六阶段审核",
+            subtitle: "1683:growth-researcher", groupID: "job/626/task/1683",
+            jobID: "626", delivery: "text")
+        XCTAssertTrue(store.accept(request, notify: false))
+        let restored = MarkcutReviewInboxStore(defaults: defaults)
+        XCTAssertEqual(restored.requests.count, 1)
+        XCTAssertEqual(restored.requests[0].subtitle, "1683:growth-researcher")
+        XCTAssertEqual(MarkcutReviewGrouping.rowSubtitle(restored.groupedSessions[0]),
+                       "1683:growth-researcher")
+        XCTAssertEqual(MarkcutReviewGrouping.groups(from: restored.groupedSessions).count, 1)
+    }
+
+    func testLocalReviewHistoryGroupsExecutionsByJobAndTaskWithoutDroppingRevisions() {
+        let sessions: [[String: Any]] = [
+            ["id": "old-626", "status": "superseded", "createdAt": "2026-11-13T14:00:00Z",
+             "relayCorrelations": [["jobId": "626", "taskId": "1683"]]],
+            ["id": "new-626", "status": "ready", "createdAt": "2026-11-13T15:00:00Z",
+             "relayCorrelations": [["jobId": "626", "taskId": "1683"]]],
+            ["id": "old-627", "status": "superseded", "createdAt": "2026-11-13T14:10:00Z",
+             "relayCorrelations": [["jobId": "627", "taskId": "1685"]]],
+            ["id": "new-627", "status": "ready", "createdAt": "2026-11-13T15:10:00Z",
+             "relayCorrelations": [["jobId": "627", "taskId": "1685"]]],
+            ["id": "another-task", "status": "ready", "createdAt": "2026-11-13T16:10:00Z",
+             "relayCorrelations": [["jobId": "627", "taskId": "1686"]]],
+        ]
+        let groups = MarkcutReviewGrouping.groups(from: sessions)
+        XCTAssertEqual(groups.count, 3)
+        XCTAssertEqual(groups.first(where: { $0.id == "job:626:task:1683" })?.sessions.map(\.reviewSessionID),
+                       ["new-626", "old-626"])
+        XCTAssertEqual(groups.first(where: { $0.id == "job:627:task:1685" })?.sessions.map(\.reviewSessionID),
+                       ["new-627", "old-627"])
+        XCTAssertEqual(groups.first(where: { $0.id == "job:627:task:1686" })?.sessions.count, 1)
+        XCTAssertEqual(groups.reduce(0) { $0 + $1.sessions.count }, sessions.count)
+    }
+
     func testInboxUsesPhoneLocalCalendarDateNotUTCDay() {
         let toronto = TimeZone(identifier: "America/Toronto")!
         XCTAssertEqual(MarkcutReviewGrouping.localDate("2026-11-14T01:05:31.628Z", timeZone: toronto), "2026-11-13")
