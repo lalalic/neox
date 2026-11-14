@@ -13,7 +13,7 @@ final class ChatMessageRichUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Done"].exists, "Chat keyboard must not have a Done accessory button")
     }
 
-    func testComposerDockStaysAtBottomAndAboveKeyboard() throws {
+    func testComposerStaysAtBottomAndAboveKeyboard() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-neo-chat-rich-fixture"]
         app.launch()
@@ -23,7 +23,7 @@ final class ChatMessageRichUITests: XCTestCase {
         XCTAssertTrue(composer.waitForExistence(timeout: 8))
         XCTAssertTrue(send.exists)
         XCTAssertGreaterThan(send.frame.maxY, app.frame.maxY * 0.75,
-                             "Chat composer should be docked near the screen bottom")
+                             "Chat composer should remain near the screen bottom")
         composer.tap()
         let keyboard = app.keyboards.firstMatch
         XCTAssertTrue(keyboard.waitForExistence(timeout: 5))

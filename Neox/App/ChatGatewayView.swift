@@ -440,30 +440,16 @@ struct ChatGatewayView: View {
             }
         }
         .padding(.horizontal, 13)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
-        .frame(maxWidth: .infinity)
-        // Dock flush to the screen edges. Extend only the background through
-        // the bottom safe area so controls remain clear of the home indicator.
-        .background {
-            composerDockShape
-                .fill(Color(.secondarySystemBackground))
-                .ignoresSafeArea(.container, edges: .bottom)
-        }
+        .padding(.vertical, 10)
+        .background(Color(.secondarySystemBackground),
+                    in: RoundedRectangle(cornerRadius: 25, style: .continuous))
         .overlay {
-            composerDockShape
+            RoundedRectangle(cornerRadius: 25, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.045), lineWidth: 1)
-                .ignoresSafeArea(.container, edges: .bottom)
-                .allowsHitTesting(false)
         }
-    }
-
-    // The larger lower radii follow the iPhone's rounded bottom corners.
-    // Unlike an inset floating pill, this dock reaches the physical edges.
-    private var composerDockShape: UnevenRoundedRectangle {
-        UnevenRoundedRectangle(topLeadingRadius: 25, bottomLeadingRadius: 50,
-                               bottomTrailingRadius: 50, topTrailingRadius: 25,
-                               style: .continuous)
+        .padding(.horizontal, 10)
+        .padding(.top, 5)
+        .padding(.bottom, 7)
     }
 
     @ViewBuilder
