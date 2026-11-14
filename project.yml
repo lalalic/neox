@@ -20,7 +20,13 @@ targets:
     type: application
     platform: iOS
     sources:
-      - Neox
+      - path: Neox
+        excludes:
+          - Resources/Mermaid/*
+      - path: Neox/Resources/Mermaid/mermaid.min.js
+        buildPhase: resources
+      - path: Neox/Resources/Mermaid/LICENSE
+        buildPhase: resources
     dependencies:
       - package: AppCopilotKit
         product: AppCopilotKit

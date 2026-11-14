@@ -39,10 +39,44 @@ struct ChatGatewayItem: Identifiable, Equatable {
         }
     }
 
-    var dateLabel: String {
-        guard let value = ISO8601DateFormatter().date(from: at) else { return at }
-        return value.formatted(date: .abbreviated, time: .shortened)
+    var dateLabel: String { smartDateLabel() }
+
+    func smartDateLabel(relativeTo now: Date = Date(), calendar: Calendar = .current,
+                        locale: Locale = .current) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.timeZone = calendar.timeZone
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = parser.date(from: at) ?? {
+            parser.formatOptions = [.withInternetDateTime]
+            return parser.date(from: at)
+        }() else { return at }
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        let time = formatter.string(from: date)
+        if calendar.isDate(date, inSameDayAs: now) { return time }
+        if calendar.isDateInYesterday(date) && calendar.isDate(now, inSameDayAs: Date()) {
+            return "Yesterday · " + time
+        }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
+           calendar.isDate(date, inSameDayAs: yesterday) {
+            return "Yesterday · " + time
+        }
+        if let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date),
+                                              to: calendar.startOfDay(for: now)).day,
+           (2...6).contains(days) {
+            formatter.dateFormat = "EEEE"
+            return formatter.string(from: date) + " · " + time
+        }
+        if calendar.isDate(date, equalTo: now, toGranularity: .year) {
+            formatter.setLocalizedDateFormatFromTemplate("MMM d")
+        } else {
+            formatter.setLocalizedDateFormatFromTemplate("MMM d yyyy")
+        }
+        return formatter.string(from: date) + " · " + time
     }
+
 }
 
 enum ChatGatewayError: Error {
@@ -68,6 +102,27 @@ final class ChatGatewayStore: ObservableObject {
         self.preferences = preferences
         clearedAt = preferences.object(forKey: Self.historyClearKey) as? Date
         queued = outbox.messages
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-neo-chat-rich-fixture") {
+            let hash = String(repeating: "a", count: 64)
+            let sample = """
+            **Summary**: Agent reports using `chat_report`.
+
+            ```mermaid
+            flowchart LR
+            Mobile[Neo Mobile] --> Gateway[Chat Gateway]
+            Gateway --> Agent
+            Agent -->|chat_report| Mobile
+            ```
+
+            [Markcut video preview](markcut://preview/\(hash))
+            """
+            items = [try! ChatGatewayItem(wire: [
+                "id":"report:chat-markup-fixture", "kind":"report", "text":sample,
+                "level":"info", "at":ISO8601DateFormatter().string(from: Date()),
+            ])]
+        }
+        #endif
     }
 
     /// Hide old timeline entries on this phone only. Never mutate the Mac's
@@ -200,6 +255,7 @@ struct ChatGatewayView: View {
     @State private var importingFile = false
     @State private var dictationPrefix = ""
     @State private var showClearHistoryConfirmation = false
+    @State private var selectedMarkcut: ChatMarkcutReference?
     @FocusState private var composerFocused: Bool
 
     var body: some View {
@@ -226,6 +282,9 @@ struct ChatGatewayView: View {
             }
 
             composer
+        }
+        .sheet(item: $selectedMarkcut) { reference in
+            ChatMarkcutPreviewSheet(master: master, hash: reference.hash)
         }
         .confirmationDialog("Clear chat messages on this phone?", isPresented: $showClearHistoryConfirmation,
                             titleVisibility: .visible) {
@@ -276,6 +335,9 @@ struct ChatGatewayView: View {
             composerFocused = false
         }
         .task {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-neo-chat-rich-fixture") { return }
+            #endif
             // Automatic recovery while the Chat tab is visible.
             while !Task.isCancelled {
                 await store.refresh(from: master)
@@ -401,12 +463,9 @@ struct ChatGatewayView: View {
         HStack {
             if item.kind == "owner" { Spacer(minLength: 55) }
             VStack(alignment: .leading, spacing: 6) {
-                Text(item.title)
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
-                Text(item.text)
-                    .textSelection(.enabled)
-                    .font(.body)
+                ChatMessageRichContent(text: item.text) { hash in
+                    selectedMarkcut = ChatMarkcutReference(hash: hash)
+                }
                 Text(item.dateLabel)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
