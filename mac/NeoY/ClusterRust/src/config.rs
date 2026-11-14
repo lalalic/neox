@@ -59,6 +59,24 @@ impl Config {
         } else {
             PathBuf::from(root)
         };
+        let node_name = get("NODE_NAME", "node");
+        if node_name.is_empty()
+            || node_name.len() > 64
+            || !node_name
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+        {
+            return Err(
+                "invalid NODE_NAME: use 1-64 ASCII letters, digits, dash or underscore".into(),
+            );
+        }
+        let mode = get("NODE_MODE", "session");
+        if mode != "persistent" && mode != "session" {
+            return Err("invalid NODE_MODE".into());
+        }
+        if !root.is_absolute() {
+            return Err("NODE_ROOT must be absolute".into());
+        }
         let ssh_key = get("NODE_SSH_KEY", "");
         let ssh_bin = get("SSH_BIN", "/usr/bin/ssh");
         let hub_target = get("HUB_SSH_TARGET", "");
@@ -68,8 +86,8 @@ impl Config {
             return Err("HUB_SSH_TARGET must be a single SSH user@host target".into());
         }
         Ok(Self {
-            node_name: get("NODE_NAME", "node"),
-            mode: get("NODE_MODE", "session"),
+            node_name,
+            mode,
             hub_target,
             hub_port: port("HUB_SSH_PORT", "22")?,
             hub_mcp_port: port("HUB_MCP_PORT", "0")?,

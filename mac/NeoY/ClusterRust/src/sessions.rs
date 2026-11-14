@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
     path::PathBuf,
     process::Stdio,
+    sync::atomic::{AtomicU64, Ordering},
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -44,6 +45,25 @@ struct Session {
 #[derive(Clone, Default)]
 pub struct Sessions {
     active: Arc<Mutex<HashMap<String, Arc<Session>>>>,
+    executing: Arc<Mutex<HashMap<u64, Arc<Session>>>>,
+    sequence: Arc<AtomicU64>,
+}
+
+// An interrupted HTTP request must not leave its command running unattended.
+// Reap/collect remains owned by the spawned background task.
+struct ExecGuard<'a> {
+    sessions: &'a Sessions,
+    id: u64,
+    session: Arc<Session>,
+    finished: bool,
+}
+impl Drop for ExecGuard<'_> {
+    fn drop(&mut self) {
+        self.sessions.executing.lock().unwrap().remove(&self.id);
+        if !self.finished && !self.session.data.lock().unwrap().done {
+            send_group(self.session.pid, libc::SIGKILL);
+        }
+    }
 }
 
 async fn drain<R: AsyncRead + Unpin>(mut stream: R, session: Arc<Session>, stderr: bool) {
@@ -147,34 +167,38 @@ async fn await_completion(s: Arc<Session>, mut child: tokio::process::Child) {
 impl Sessions {
     pub async fn exec(&self, cmd: &str, cwd: &str, timeout_ms: u64) -> Result<Value, String> {
         let (s, child) = new_session(cmd, resolve_cwd(cwd))?;
-        let handle = tokio::spawn(await_completion(s.clone(), child));
+        let id = self.sequence.fetch_add(1, Ordering::Relaxed);
+        self.executing.lock().unwrap().insert(id, s.clone());
+        let mut guard = ExecGuard {
+            sessions: self,
+            id,
+            session: s.clone(),
+            finished: false,
+        };
+        let mut handle = tokio::spawn(await_completion(s.clone(), child));
         let mut timed_out = false;
         if time::timeout(
             Duration::from_millis(timeout_ms.clamp(1000, 900_000)),
-            handle,
+            &mut handle,
         )
         .await
         .is_err()
         {
             timed_out = true;
             send_group(s.pid, libc::SIGTERM);
-            time::sleep(Duration::from_millis(650)).await;
-            let still_alive = {
-                let d = s.data.lock().unwrap();
-                !d.done
-            };
-            if still_alive {
-                send_group(s.pid, libc::SIGKILL)
-            }
-            time::timeout(Duration::from_secs(3), s.notify.notified())
+            if time::timeout(Duration::from_millis(650), &mut handle)
                 .await
-                .ok();
+                .is_err()
+            {
+                send_group(s.pid, libc::SIGKILL);
+                let _ = time::timeout(Duration::from_secs(3), &mut handle).await;
+            }
         }
         let d = s.data.lock().unwrap();
-        Ok(
-            json!({"exitCode":d.exit_code,"signal":d.signal.map(signal_name),"timedOut":timed_out,
-            "stdout":String::from_utf8_lossy(&d.stdout),"stderr":String::from_utf8_lossy(&d.stderr)}),
-        )
+        let result = json!({"exitCode":d.exit_code,"signal":d.signal.map(signal_name),"timedOut":timed_out,
+                "stdout":String::from_utf8_lossy(&d.stdout),"stderr":String::from_utf8_lossy(&d.stderr)});
+        guard.finished = d.done;
+        Ok(result)
     }
     pub fn start(&self, cmd: &str, cwd: &str) -> Result<Value, String> {
         let mut active = self.active.lock().unwrap();
@@ -209,8 +233,12 @@ impl Sessions {
             .get(id)
             .cloned()
             .ok_or_else(|| format!("unknown shell session: {id}"))?;
-        if !s.data.lock().unwrap().done && wait_ms > 0 {
+        if wait_ms > 0 {
+            // Register the waiter *before* the completion check; Notify does
+            // not retain notify_waiters signals for future pollers.
             let notified = s.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
             if !s.data.lock().unwrap().done {
                 let _ = time::timeout(Duration::from_millis(wait_ms.min(30_000)), notified).await;
             }
@@ -225,10 +253,15 @@ impl Sessions {
         self.active.lock().unwrap().remove(id);
         Ok(response)
     }
-    pub fn stop_all(&self) {
-        for s in self.active.lock().unwrap().values() {
-            if !s.data.lock().unwrap().done {
-                send_group(s.pid, libc::SIGTERM);
+    pub fn signal_all(&self, signal: i32) {
+        for session in self.active.lock().unwrap().values() {
+            if !session.data.lock().unwrap().done {
+                send_group(session.pid, signal);
+            }
+        }
+        for session in self.executing.lock().unwrap().values() {
+            if !session.data.lock().unwrap().done {
+                send_group(session.pid, signal);
             }
         }
     }
@@ -269,6 +302,52 @@ mod tests {
             .unwrap();
         assert_eq!(r["running"], false);
         assert_eq!(r["stdout"], "session-complete");
+    }
+    #[actix_web::test]
+    async fn request_cancellation_kills_shell_group() {
+        let sessions = Sessions::default();
+        let task = tokio::spawn({
+            let sessions = sessions.clone();
+            async move { sessions.exec("sleep 30", "~", 30_000).await }
+        });
+        for _ in 0..80 {
+            if !sessions.executing.lock().unwrap().is_empty() {
+                break;
+            }
+            time::sleep(Duration::from_millis(20)).await;
+        }
+        let pid = sessions
+            .executing
+            .lock()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap()
+            .pid;
+        task.abort();
+        let _ = task.await;
+        for _ in 0..40 {
+            if unsafe { libc::kill(-(pid as i32), 0) } != 0 {
+                break;
+            }
+            time::sleep(Duration::from_millis(25)).await;
+        }
+        assert_ne!(
+            unsafe { libc::kill(-(pid as i32), 0) },
+            0,
+            "cancelled request left process group alive"
+        );
+    }
+    #[actix_web::test]
+    async fn many_fast_polls_do_not_miss_exit() {
+        let sessions = Sessions::default();
+        for _ in 0..50 {
+            let r = sessions.start("printf done", "~").unwrap();
+            let id = r["session_id"].as_str().unwrap();
+            let polled = sessions.poll(id, 2000).await.unwrap();
+            assert_eq!(polled["running"], false);
+            assert_eq!(polled["stdout"], "done");
+        }
     }
     #[actix_web::test]
     async fn timeout_reports_true() {

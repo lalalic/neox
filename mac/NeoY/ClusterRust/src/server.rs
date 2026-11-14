@@ -2,7 +2,7 @@ use crate::{
     config::Config,
     sessions::{resolve_cwd, Sessions},
 };
-use actix_web::{web, App, HttpResponse, HttpServer};
+use actix_web::{http::header, web, App, HttpRequest, HttpResponse, HttpServer};
 use serde_json::{json, Value};
 use std::{fs, io, path::PathBuf, process::Command, sync::Arc};
 const MAX_OUTPUT: usize = 4 * 1024 * 1024;
@@ -111,13 +111,18 @@ fn fs_write(v: &Value) -> Result<Value, String> {
     }
     if v.get("append").and_then(Value::as_bool).unwrap_or(false) {
         use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
         let mut f = fs::OpenOptions::new()
             .create(true)
             .append(true)
+            .mode(0o600)
             .open(&p)
             .map_err(|e| e.to_string())?;
         f.write_all(content.as_bytes()).map_err(|e| e.to_string())?;
     } else {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let prior_permissions = fs::metadata(&p).ok().map(|m| m.permissions());
         let temp = p.with_extension(format!(
             "neo-temp-{}-{}",
             std::process::id(),
@@ -126,8 +131,25 @@ fn fs_write(v: &Value) -> Result<Value, String> {
                 .unwrap_or_default()
                 .as_nanos()
         ));
-        fs::write(&temp, content.as_bytes()).map_err(|e| e.to_string())?;
-        fs::rename(&temp, &p).map_err(|e| e.to_string())?;
+        // create_new prevents following a pre-existing symlink, and 0600
+        // avoids briefly publishing a fresh file before the atomic rename.
+        let write_result = (|| -> Result<(), std::io::Error> {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&temp)?;
+            file.write_all(content.as_bytes())?;
+            if let Some(permissions) = prior_permissions {
+                fs::set_permissions(&temp, permissions)?;
+            }
+            file.sync_all()?;
+            fs::rename(&temp, &p)
+        })();
+        if write_result.is_err() {
+            let _ = fs::remove_file(&temp);
+        }
+        write_result.map_err(|e| e.to_string())?;
     }
     Ok(
         json!({"path":p,"bytesWritten":content.len(),"append":v.get("append").and_then(Value::as_bool).unwrap_or(false)}),
@@ -136,10 +158,14 @@ fn fs_write(v: &Value) -> Result<Value, String> {
 fn fs_list(v: &Value) -> Result<Value, String> {
     let p = path(field(v, "path", "~"));
     let limit = number(v, "limit", 500).clamp(1, 2000) as usize;
-    let entries: Vec<_> = fs::read_dir(&p)
-        .map_err(|e| e.to_string())?
-        .filter_map(Result::ok)
-        .collect();
+    let mut entries = Vec::with_capacity(limit + 1);
+    for entry in fs::read_dir(&p).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        entries.push(entry);
+        if entries.len() > limit {
+            break;
+        }
+    }
     let out = entries
         .iter()
         .take(limit)
@@ -174,7 +200,7 @@ fn processes(v: &Value) -> Result<Value, String> {
         .map(str::to_owned)
         .collect::<Vec<_>>();
     Ok(
-        json!({"processes":rows.iter().take(limit).collect::<Vec<_>>(),"truncated":rows.len()>=limit}),
+        json!({"processes":rows.iter().take(limit).collect::<Vec<_>>(),"truncated":rows.len()>limit}),
     )
 }
 async fn call(state: &State, name: &str, args: &Value) -> Result<Value, String> {
@@ -198,14 +224,44 @@ async fn call(state: &State, name: &str, args: &Value) -> Result<Value, String> 
                 .poll(require(args, "session_id")?, number(args, "wait_ms", 0))
                 .await
         }
-        "fs_read" => fs_read(args),
-        "fs_write" => fs_write(args),
-        "fs_list" => fs_list(args),
-        "process_list" => processes(args),
+        "fs_read" | "fs_write" | "fs_list" | "process_list" => {
+            // iCloud/network filesystems and `ps` can block for seconds. Never
+            // hold one of the two HTTP worker threads hostage to synchronous IO.
+            let name = name.to_owned();
+            let args = args.clone();
+            tokio::task::spawn_blocking(move || match name.as_str() {
+                "fs_read" => fs_read(&args),
+                "fs_write" => fs_write(&args),
+                "fs_list" => fs_list(&args),
+                "process_list" => processes(&args),
+                _ => unreachable!(),
+            })
+            .await
+            .map_err(|e| format!("filesystem worker failed: {e}"))?
+        }
         _ => Err(format!("unknown tool: {name}")),
     }
 }
-async fn mcp(body: web::Bytes, state: web::Data<Arc<State>>) -> HttpResponse {
+async fn mcp(req: HttpRequest, body: web::Bytes, state: web::Data<Arc<State>>) -> HttpResponse {
+    // A public website must not be able to use a cross-site form/no-CORS POST
+    // to execute commands on the user's loopback MCP server. The trusted Swift
+    // gateway sends JSON without Origin; regular JSON cross-origin requests
+    // require a preflight that this listener intentionally does not allow.
+    if req.headers().contains_key(header::ORIGIN) {
+        return HttpResponse::Forbidden().finish();
+    }
+    let content_type = req
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+    if !content_type.eq_ignore_ascii_case("application/json")
+        && !content_type
+            .to_ascii_lowercase()
+            .starts_with("application/json;")
+    {
+        return HttpResponse::UnsupportedMediaType().finish();
+    }
     if body.len() > MAX_OUTPUT {
         return HttpResponse::PayloadTooLarge().finish();
     }
@@ -291,6 +347,114 @@ pub async fn is_healthy(port: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[actix_web::test]
+    async fn blocks_cross_site_and_non_json_requests() {
+        let fixture = tempfile::tempdir().unwrap();
+        let cfg = std::env::var("HOME").unwrap();
+        let _ = cfg;
+        // Test the handler directly without binding a public port.
+        let config = crate::config::Config::load().unwrap();
+        let state = Arc::new(State {
+            config,
+            sessions: Sessions::default(),
+        });
+        let app = actix_web::test::init_service(
+            App::new()
+                .app_data(web::Data::new(state))
+                .route("/mcp", web::post().to(mcp)),
+        )
+        .await;
+        let payload=serde_json::to_string(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+            "params":{"name":"shell_exec","arguments":{"command":"touch /tmp/neo-cross-site-should-not-exist"}}})).unwrap();
+        for (header_name, header_value, status) in [
+            (
+                "Content-Type",
+                "text/plain",
+                actix_web::http::StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            ),
+            (
+                "Origin",
+                "https://malicious.example",
+                actix_web::http::StatusCode::FORBIDDEN,
+            ),
+        ] {
+            let req = actix_web::test::TestRequest::post()
+                .uri("/mcp")
+                .insert_header((header::CONTENT_TYPE, "application/json"))
+                .insert_header((header_name, header_value))
+                .set_payload(payload.clone())
+                .to_request();
+            let response = actix_web::test::call_service(&app, req).await;
+            assert_eq!(response.status(), status);
+        }
+        drop(fixture);
+    }
+    #[test]
+    fn file_write_is_atomic_and_preserves_private_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("private.env");
+        std::fs::write(&p, b"old").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let result = fs_write(&json!({"path":p,"content":"new"})).unwrap();
+        assert_eq!(result["bytesWritten"], 3);
+        assert_eq!(std::fs::read(&p).unwrap(), b"new");
+        assert_eq!(
+            std::fs::metadata(&p).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let new = tmp.path().join("fresh.txt");
+        fs_write(&json!({"path":new,"content":"fresh"})).unwrap();
+        assert_eq!(
+            std::fs::metadata(new).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let appended = tmp.path().join("appended.txt");
+        fs_write(&json!({"path":appended,"content":"appended","append":true})).unwrap();
+        assert_eq!(
+            std::fs::metadata(appended).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+    #[actix_web::test]
+    async fn filesystem_truncation_boundaries() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("one.txt"), b"hello").unwrap();
+        let v = json!({"path":tmp.path(),"limit":1});
+        assert_eq!(fs_list(&v).unwrap()["truncated"], false);
+        std::fs::write(tmp.path().join("two.txt"), b"world").unwrap();
+        assert_eq!(fs_list(&v).unwrap()["truncated"], true);
+    }
+    #[actix_web::test]
+    async fn slow_file_read_does_not_block_event_loop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fifo = tmp.path().join("blocked-fifo");
+        let rc = std::process::Command::new("/usr/bin/mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap();
+        assert!(rc.success());
+        let cfg = crate::config::Config::load().unwrap();
+        let state = State {
+            config: cfg,
+            sessions: Sessions::default(),
+        };
+        let read_args = json!({"path":fifo});
+        let read = call(&state, "fs_read", &read_args);
+        tokio::pin!(read);
+        // The fs_read is deliberately blocked by a FIFO without a writer.
+        // Tokio's timer and unrelated HTTP requests must remain schedulable.
+        let timeout = tokio::time::timeout(std::time::Duration::from_millis(100), &mut read).await;
+        assert!(timeout.is_err(), "test FIFO unexpectedly completed");
+        let fifo_copy = fifo.clone();
+        let writer = tokio::task::spawn_blocking(move || std::fs::write(fifo_copy, b"hello"));
+        let result = tokio::time::timeout(std::time::Duration::from_secs(3), read)
+            .await
+            .unwrap()
+            .unwrap();
+        writer.await.unwrap().unwrap();
+        assert_eq!(result["content"], "hello");
+    }
     #[test]
     fn exact_seven_tools() {
         assert_eq!(tools("test").as_array().unwrap().len(), 7);

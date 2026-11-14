@@ -54,6 +54,48 @@ fn is_our_server(pid: i32, cfg: &Config) -> bool {
         Err(_) => false,
     }
 }
+fn is_our_tunnel(pid: i32, cfg: &Config) -> bool {
+    if !pid_alive(pid) {
+        return false;
+    }
+    let output = Command::new("/bin/ps")
+        .args(["-p", &pid.to_string(), "-o", "command="])
+        .output();
+    let Ok(output) = output else { return false };
+    let command = String::from_utf8_lossy(&output.stdout);
+    // Never signal a PID based on a stale file alone. Require the complete
+    // expected reverse-forward endpoint, SSH executable, and hub target.
+    command.contains(&cfg.ssh_bin.to_string_lossy().to_string())
+        && command.contains(&format!(
+            "127.0.0.1:{}:127.0.0.1:{}",
+            cfg.hub_mcp_port, cfg.local_mcp_port
+        ))
+        && command.contains(&cfg.hub_target)
+}
+
+async fn clean_orphan_tunnel(cfg: &Config) {
+    let file = pid_file(cfg, "tunnel");
+    if let Some(pid) = pid_read(&file) {
+        if is_our_tunnel(pid, cfg) {
+            unsafe {
+                libc::kill(pid, libc::SIGTERM);
+            }
+            for _ in 0..15 {
+                if !is_our_tunnel(pid, cfg) {
+                    break;
+                }
+                time::sleep(Duration::from_millis(100)).await;
+            }
+            if is_our_tunnel(pid, cfg) {
+                unsafe {
+                    libc::kill(pid, libc::SIGKILL);
+                }
+            }
+        }
+    }
+    let _ = fs::remove_file(file);
+}
+
 fn is_alive_run(cfg: &Config) -> bool {
     pid_read(&cfg.pid_file()).is_some_and(|p| is_our_server(p, cfg))
 }
@@ -204,7 +246,7 @@ async fn start(cfg: &Config) -> Result<(), String> {
         if is_alive_run(cfg)
             && server::is_healthy(cfg.local_mcp_port).await
             && (cfg.hub_target.is_empty()
-                || pid_read(&pid_file(cfg, "tunnel")).is_some_and(pid_alive))
+                || pid_read(&pid_file(cfg, "tunnel")).is_some_and(|pid| is_our_tunnel(pid, cfg)))
         {
             return Ok(());
         }
@@ -224,7 +266,7 @@ fn status(cfg: &Config) -> Result<(), String> {
         };
         let alive = pid.is_some_and(|p| {
             if role == "tunnel" {
-                pid_alive(p)
+                is_our_tunnel(p, cfg)
             } else {
                 is_our_server(p, cfg)
             }
@@ -293,6 +335,7 @@ async fn run(cfg: Config) -> Result<(), String> {
     if is_alive_run(&cfg) {
         return Err("neo-node is already running".into());
     }
+    clean_orphan_tunnel(&cfg).await;
     let sessions = Sessions::default();
     let state = Arc::new(State {
         config: cfg.clone(),
@@ -313,8 +356,15 @@ async fn run(cfg: Config) -> Result<(), String> {
         tokio::select! {_ = term.recv()=>{}, _=tokio::signal::ctrl_c()=>{}, _=async{let _=&server_task.await;}=>{}}
     }
     let _ = sender.send(true);
-    sessions.stop_all();
-    handle.stop(true).await;
+    sessions.signal_all(libc::SIGTERM);
+    time::sleep(Duration::from_millis(650)).await;
+    sessions.signal_all(libc::SIGKILL);
+    if time::timeout(Duration::from_secs(3), handle.stop(true))
+        .await
+        .is_err()
+    {
+        handle.stop(false).await;
+    }
     let _ = time::timeout(Duration::from_secs(3), tunnel).await;
     if pid_read(&cfg.pid_file()) == Some(std::process::id() as i32) {
         let _ = fs::remove_file(cfg.pid_file());

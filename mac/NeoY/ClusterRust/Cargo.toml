@@ -1,6 +1,6 @@
 [package]
 name = "neo-cluster-rust"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 description = "Native macOS remote node MCP runtime and SSH supervisor for NeoY cluster"

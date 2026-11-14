@@ -14,3 +14,14 @@ cargo clippy --locked --manifest-path mac/NeoY/ClusterRust/Cargo.toml --all-targ
 ```
 
 `mac/NeoY/install-local.sh` and `.github/workflows/neo-macos-release.yml` build/sign/package the universal `neo-cluster-rust` binary under `Neo.app/Contents/Resources`. Do not install an unsigned runtime over an authorized signed one. The `cluster add` command is the supported migration and rollback entry point. Do not remove old remote runtimes until a verified successful Rust tunnel and MCP handshake.
+
+## Crash recovery and MCP request safety
+
+Unclean supervisor death may leave an outbound SSH child alive. On startup,
+ClusterRust inspects the previous tunnel PID and verifies its exact SSH command,
+reverse-forward ports, and hub destination before terminating that orphan.
+Unrelated or recycled PIDs are never signaled. Short and long-running shell
+commands are grouped and terminated on cancellation/shutdown; child output is
+bounded. Local MCP commands accept only JSON requests without a browser Origin
+header, preventing cross-origin form/no-CORS requests from issuing shell tools.
+Potentially slow file operations run outside the HTTP event loop.
