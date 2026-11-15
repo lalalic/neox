@@ -18,6 +18,14 @@ public enum MediaTools {
         try? FileManager.default.createDirectory(at: exportsDir, withIntermediateDirectories: true)
         return [
             ToolDefinition(
+                name: "media.albums",
+                description: "List named iPhone photo albums and the number of photos in each. Never returns photo bytes.",
+                parameters: schema([:]),
+                handler: { _ in
+                    try await albums()
+                }
+            ),
+            ToolDefinition(
                 name: "media.search",
                 description: """
                 Search the iPhone photo/video library. Returns JSON with asset metadata: \
@@ -122,6 +130,26 @@ public enum MediaTools {
     /// PHImageManager delivers upright images, so .up is always correct there.
     static func orientation(from asset: PHAsset) -> CGImagePropertyOrientation {
         .up
+    }
+
+    // MARK: - media.albums
+
+    private static func albums() async throws -> String {
+        let status = await requestAccess()
+        guard status == .authorized || status == .limited else {
+            return "Error: photo library access denied"
+        }
+        let collections = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: nil)
+        let filter = PHFetchOptions()
+        filter.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
+        var result: [[String: Any]] = []
+        collections.enumerateObjects { album, _, _ in
+            guard let name = album.localizedTitle, !name.isEmpty else { return }
+            let count = PHAsset.fetchAssets(in: album, options: filter).count
+            result.append(["title": name, "count": count])
+        }
+        result.sort { ($0["title"] as? String ?? "") < ($1["title"] as? String ?? "") }
+        return jsonString(["albums": result])
     }
 
     // MARK: - media.search
