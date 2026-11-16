@@ -14,9 +14,10 @@ named tunnel `neoy` remains the identity and the app keeps the generated
 | `agents.qili2.com` | `127.0.0.1:8787` (Relay Dashboard) |
 
 `gpu.qili2.com` is retired: it must not be in Neo.app ingress or DNS.
-The extra routes are configured via `additionalTunnelRoutes` in Neo.app's
-private `deployment.json`; every route is a validated DNS name + loopback port.
-The named-tunnel credentials are unchanged; never copy them into the repository.
+The ingress routes are configured directly in the existing user-owned
+`cloudflared.yml`; Neo.app bootstraps the file once but never overwrites an
+existing file on restart. The named-tunnel credentials are unchanged; never
+copy them into the repository.
 
 ## Architecture decision
 
@@ -28,10 +29,14 @@ former independent Cloudflare connectors must be disabled in their PM2 or
 launchd owners, without stopping the local services.
 
 Neo.app's tunnel identity is cached locally so app reconnection does not rely
-on Cloudflare's management API. Changing the tunnel name/primary hostname
-still requires authoritative Cloudflare DNS registration. DNS migration of
-secondary hostnames is an explicit operator step, not an untracked app startup
-side effect. Failed route changes must retain the old connector until verified.
+on Cloudflare's management API. The YAML is the single ingress source of truth.
+For later edits, validate the YAML and restart only Neo.app's managed `cloudflared`
+child (TERM the PID from `cloudflared.pid`); Neo.app automatically starts a fresh
+child without rebuilding or relaunching the app. Changing the tunnel name or
+public hostname still requires authoritative Cloudflare DNS registration. DNS
+migration of secondary hostnames is an explicit operator step, not an untracked
+app startup side effect. Failed route changes must retain the old connector
+until verified.
 
 Canonical architecture rules: [design-principles.md](design-principles.md).
 

@@ -213,10 +213,17 @@ final class NeoYTunnelRuntime {
         }
 
         let credentials = credentialsPath(tunnel.id)
-        let config = try Self.namedTunnelConfiguration(
-            tunnelID: tunnel.id, credentials: credentials, settings: settings)
-        try config.write(to: configURL, atomically: true, encoding: .utf8)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
+        if FileManager.default.fileExists(atPath: configURL.path) {
+            // The YAML is the owner-maintained ingress source of truth. Never
+            // regenerate it on an app restart or unrelated settings change.
+            let existing = try String(contentsOf: configURL, encoding: .utf8)
+            try Self.validateManagedConfiguration(existing, tunnelID: tunnel.id)
+        } else {
+            let config = try Self.namedTunnelConfiguration(
+                tunnelID: tunnel.id, credentials: credentials, settings: settings)
+            try config.write(to: configURL, atomically: true, encoding: .utf8)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
+        }
         let cache = CachedNamedTunnel(id: tunnel.id, name: name, routedHostname: hostname)
         try JSONEncoder().encode(cache).write(to: cacheURL, options: .atomic)
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: cacheURL.path)
@@ -234,14 +241,20 @@ final class NeoYTunnelRuntime {
             "  - hostname: \(validSettings.publicHostname)",
             "    service: http://127.0.0.1:\(validSettings.mcpPort)",
         ]
-        for route in validSettings.additionalTunnelRoutes ?? [] {
-            lines += [
-                "  - hostname: \(route.hostname)",
-                "    service: http://127.0.0.1:\(route.port)",
-            ]
-        }
         lines.append("  - service: http_status:404")
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    nonisolated static func validateManagedConfiguration(_ config: String, tunnelID: String) throws {
+        let ids = config.split(separator: "\n").compactMap { line -> String? in
+            let cleaned = line.trimmingCharacters(in: .whitespaces)
+            guard cleaned.hasPrefix("tunnel:") else { return nil }
+            return cleaned.dropFirst("tunnel:".count).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard ids == [tunnelID] else {
+            throw NeoYRuntimeControlError.federation(
+                "Existing cloudflared.yml is for a different tunnel; refusing to overwrite")
+        }
     }
 
     private func listTunnels(executable: URL) async throws -> [ListedTunnel] {

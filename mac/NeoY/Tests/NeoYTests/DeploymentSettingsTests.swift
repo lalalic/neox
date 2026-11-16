@@ -2,48 +2,28 @@ import XCTest
 @testable import NeoY
 
 final class DeploymentSettingsTests: XCTestCase {
-    func testNamedTunnelSupportsMultipleHostnamesAndPreservesLegacySettings() throws {
+    func testNamedTunnelBootstrapsOnlyPrimaryHostAndVerifiesExistingConfig() throws {
         var settings = NeoYDeploymentSettings()
         settings.tunnelMode = .named
         settings.publicHostname = "neoy.qili2.com"
-        settings.additionalTunnelRoutes = [
-            NeoYTunnelIngressRoute(hostname: "neo-origin.qili2.com", port: 8769),
-            NeoYTunnelIngressRoute(hostname: "compute.qili2.com", port: 8798),
-            NeoYTunnelIngressRoute(hostname: "agents.qili2.com", port: 8787),
-        ]
-        let decoded = try JSONDecoder().decode(NeoYDeploymentSettings.self,
-                                                from: JSONEncoder().encode(settings))
-        XCTAssertEqual(decoded, settings)
-        let config = try NeoYTunnelRuntime.namedTunnelConfiguration(
+        let initial = try NeoYTunnelRuntime.namedTunnelConfiguration(
             tunnelID: "test-tunnel", credentials: "/tmp/test.json", settings: settings)
-        for hostname in ["neoy.qili2.com", "neo-origin.qili2.com",
-                         "compute.qili2.com", "agents.qili2.com"] {
-            XCTAssertTrue(config.contains("hostname: \(hostname)"))
-        }
-        XCTAssertFalse(config.contains("gpu.qili2.com"))
-        XCTAssertEqual(config.components(separatedBy: "service: http_status:404").count, 2)
-        XCTAssertTrue(config.hasSuffix("  - service: http_status:404\n"))
+        XCTAssertTrue(initial.contains("hostname: neoy.qili2.com"))
+        XCTAssertFalse(initial.contains("gpu.qili2.com"))
+        XCTAssertTrue(initial.hasSuffix("  - service: http_status:404\n"))
 
-        let legacy = try JSONDecoder().decode(NeoYDeploymentSettings.self,
-            from: Data(#"{"mcpPort":6767,"tunnelMode":"named","tunnelName":"neoy","publicHostname":"neoy.qili2.com"}"#.utf8))
-        XCTAssertNil(legacy.additionalTunnelRoutes)
+        let ownerEditedYAML = initial.replacingOccurrences(
+            of: "  - service: http_status:404",
+            with: "  - hostname: neo-origin.qili2.com\n    service: http://127.0.0.1:8769\n"
+                + "  - hostname: compute.qili2.com\n    service: http://127.0.0.1:8798\n"
+                + "  - hostname: agents.qili2.com\n    service: http://127.0.0.1:8787\n"
+                + "  - service: http_status:404")
+        XCTAssertNoThrow(try NeoYTunnelRuntime.validateManagedConfiguration(
+            ownerEditedYAML, tunnelID: "test-tunnel"))
+        XCTAssertThrowsError(try NeoYTunnelRuntime.validateManagedConfiguration(
+            ownerEditedYAML, tunnelID: "another-tunnel"))
     }
 
-    func testAdditionalTunnelRoutesRejectInvalidAndDuplicateHostnames() throws {
-        var settings = NeoYDeploymentSettings()
-        settings.tunnelMode = .named
-        settings.publicHostname = "neoy.qili2.com"
-        for hostname in ["neoy.qili2.com", "a/b.qili2.com", "UPPER.qili2.com",
-                         "a..qili2.com", "http://evil.com", "localhost"] {
-            settings.additionalTunnelRoutes = [.init(hostname: hostname, port: 8798)]
-            XCTAssertThrowsError(try settings.validated(), "Invalid hostname: \(hostname)")
-        }
-        settings.additionalTunnelRoutes = [.init(hostname: "compute.qili2.com", port: 0)]
-        XCTAssertThrowsError(try settings.validated())
-        settings.additionalTunnelRoutes = [.init(hostname: "compute.qili2.com", port: 8798),
-                                            .init(hostname: "compute.qili2.com", port: 8798)]
-        XCTAssertThrowsError(try settings.validated())
-    }
     func testRemoteProviderCommandEditsOnlyProviderExposure() throws {
         XCTAssertEqual(try NeoYSetupParser.parse("deployment provider enable chat-gateway"),
                        .deploymentProvider(name: "chat-gateway", enabled: true))
