@@ -9,9 +9,16 @@ final class NeoYTunnelRuntime {
         let name: String
     }
 
+    private struct CachedNamedTunnel: Codable {
+        let id: String
+        let name: String
+        let routedHostname: String
+    }
+
     private let logURL = NeoYPaths.logsDirectory.appendingPathComponent("tunnel.log")
     private let configURL = NeoYPaths.supportDirectory.appendingPathComponent("cloudflared.yml")
     private let pidURL = NeoYPaths.supportDirectory.appendingPathComponent("cloudflared.pid")
+    private let cacheURL = NeoYPaths.supportDirectory.appendingPathComponent("named-tunnel.json")
     private var process: Process?
     private var logHandle: FileHandle?
     private var generation = UUID()
@@ -20,6 +27,9 @@ final class NeoYTunnelRuntime {
     private var restartTask: Task<Void, Never>?
 
     func reconcile(settings: NeoYDeploymentSettings, enabled: Bool) async {
+        // Reconciliation can be triggered repeatedly by unrelated provider changes.
+        // Do not spawn another connector when the active configuration is unchanged.
+        if settings == desiredSettings, enabled == desiredEnabled, process?.isRunning == true { return }
         desiredSettings = settings
         desiredEnabled = enabled
         restartTask?.cancel()
@@ -174,29 +184,64 @@ final class NeoYTunnelRuntime {
             throw NeoYRuntimeControlError.federation("named tunnel requires a public hostname")
         }
         let name = settings.tunnelName.isEmpty ? Self.defaultTunnelName(hostname: hostname) : settings.tunnelName
-        var tunnels = try await listTunnels(executable: executable)
-        if !tunnels.contains(where: { $0.name == name }) {
-            _ = try await runChecked(executable, ["tunnel", "create", name])
-            tunnels = try await listTunnels(executable: executable)
+        let saved = (try? Data(contentsOf: cacheURL)).flatMap {
+            try? JSONDecoder().decode(CachedNamedTunnel.self, from: $0)
         }
-        guard let tunnel = tunnels.first(where: { $0.name == name }) else {
-            throw NeoYRuntimeControlError.federation("Cloudflare tunnel '\(name)' was not created")
+        let credentialsPath: (String) -> String = { id in
+            FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".cloudflared/\(id).json").path
         }
-        _ = try await runChecked(executable, ["tunnel", "route", "dns", name, hostname])
+        let tunnel: ListedTunnel
+        if let saved, saved.name == name,
+           UUID(uuidString: saved.id) != nil,
+           FileManager.default.fileExists(atPath: credentialsPath(saved.id)) {
+            // A running named tunnel should not depend on Cloudflare's management API.
+            tunnel = ListedTunnel(id: saved.id, name: saved.name)
+        } else {
+            var tunnels = try await listTunnels(executable: executable)
+            if !tunnels.contains(where: { $0.name == name }) {
+                _ = try await runChecked(executable, ["tunnel", "create", name])
+                tunnels = try await listTunnels(executable: executable)
+            }
+            guard let existing = tunnels.first(where: { $0.name == name }) else {
+                throw NeoYRuntimeControlError.federation("Cloudflare tunnel '\(name)' was not created")
+            }
+            tunnel = existing
+        }
+        if saved?.id != tunnel.id || saved?.routedHostname != hostname {
+            _ = try await runChecked(executable, ["tunnel", "route", "dns", name, hostname])
+        }
 
-        let credentials = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".cloudflared/\(tunnel.id).json").path
-        let config = """
-        tunnel: \(tunnel.id)
-        credentials-file: \(credentials)
-        ingress:
-          - hostname: \(hostname)
-            service: http://127.0.0.1:\(settings.mcpPort)
-          - service: http_status:404
-        """
+        let credentials = credentialsPath(tunnel.id)
+        let config = try Self.namedTunnelConfiguration(
+            tunnelID: tunnel.id, credentials: credentials, settings: settings)
         try config.write(to: configURL, atomically: true, encoding: .utf8)
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
+        let cache = CachedNamedTunnel(id: tunnel.id, name: name, routedHostname: hostname)
+        try JSONEncoder().encode(cache).write(to: cacheURL, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: cacheURL.path)
         return ["tunnel", "--config", configURL.path, "run", tunnel.id]
+    }
+
+    nonisolated static func namedTunnelConfiguration(
+        tunnelID: String, credentials: String, settings: NeoYDeploymentSettings
+    ) throws -> String {
+        let validSettings = try settings.validated()
+        var lines = [
+            "tunnel: \(tunnelID)",
+            "credentials-file: \(credentials)",
+            "ingress:",
+            "  - hostname: \(validSettings.publicHostname)",
+            "    service: http://127.0.0.1:\(validSettings.mcpPort)",
+        ]
+        for route in validSettings.additionalTunnelRoutes ?? [] {
+            lines += [
+                "  - hostname: \(route.hostname)",
+                "    service: http://127.0.0.1:\(route.port)",
+            ]
+        }
+        lines.append("  - service: http_status:404")
+        return lines.joined(separator: "\n") + "\n"
     }
 
     private func listTunnels(executable: URL) async throws -> [ListedTunnel] {

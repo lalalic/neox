@@ -5,12 +5,19 @@ enum NeoYTunnelMode: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// A public hostname mapped to a loopback HTTP port in Neo.app's named tunnel.
+struct NeoYTunnelIngressRoute: Codable, Equatable {
+    var hostname: String
+    var port: UInt16
+}
+
 struct NeoYDeploymentSettings: Codable, Equatable {
     static let defaultPort: UInt16 = 6767
     var mcpPort: UInt16 = Self.defaultPort
     var tunnelMode: NeoYTunnelMode = .off
     var tunnelName: String = ""
     var publicHostname: String = ""
+    var additionalTunnelRoutes: [NeoYTunnelIngressRoute]? = nil
     var preferredTunnelMode: NeoYTunnelMode? = nil
     var remoteTools: Set<String>? = nil
     var remoteFeatures: Set<String>? = nil // legacy; migrated to remoteTools on load
@@ -93,6 +100,20 @@ struct NeoYDeploymentSettings: Codable, Equatable {
                     throw NSError(domain: "NeoY", code: 3,
                                   userInfo: [NSLocalizedDescriptionKey: "Public hostname must look like neoy.example.com"])
                 }
+            }
+        }
+        // These routes are only allowed to target loopback (port-only configuration).
+        // Reject invalid/duplicate hostnames before producing a public ingress rule.
+        var hostnames = Set([publicHostname.lowercased()])
+        for route in additionalTunnelRoutes ?? [] {
+            let labels = route.hostname.split(separator: ".", omittingEmptySubsequences: false)
+            guard route.port > 0, route.hostname.count <= 253, labels.count >= 2,
+                  labels.allSatisfy({
+                      String($0).range(of: #"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"#,
+                                          options: .regularExpression) != nil
+                  }), hostnames.insert(route.hostname.lowercased()).inserted else {
+                throw NSError(domain: "NeoY", code: 6,
+                              userInfo: [NSLocalizedDescriptionKey: "Invalid or duplicate tunnel hostname/port"])
             }
         }
         return self
