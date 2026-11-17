@@ -28,10 +28,12 @@ final class NeoNavigationUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Cancel"].exists,
                        "The current gateway summary has no cancellation capability")
         runningRow.tap()
-        XCTAssertTrue(app.staticTexts["Activity not available yet"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(
-            format: "label CONTAINS %@", "currently provides Job summaries only"
-        )).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["Verified the model orientation using the front photo."]
+            .waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Task progress updated"].exists)
+        XCTAssertFalse(app.staticTexts["Status"].exists)
+        XCTAssertFalse(app.staticTexts["Running"].exists,
+                       "The detail must not repeat the top Job status")
 
         app.buttons["neoTopTabReviews"].tap()
         XCTAssertFalse(app.staticTexts["Review Inbox"].exists)
@@ -76,7 +78,7 @@ final class NeoNavigationUITests: XCTestCase {
     }
 
     @MainActor
-    func testWaitingShortcutStatusIsVisibleInJobsAndDetail() {
+    func testWaitingShortcutStatusIsOnlyInJobsList() {
         let app = XCUIApplication()
         app.launchArguments.append("-neo-jobs-ui-fixture")
         app.launch()
@@ -88,7 +90,9 @@ final class NeoNavigationUITests: XCTestCase {
         XCTAssertTrue(waitingRow.waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["Waiting"].exists)
         waitingRow.tap()
-        XCTAssertTrue(app.staticTexts["Waiting"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.staticTexts["Waiting"].exists,
+                       "The detail no longer duplicates the Jobs list status")
+        XCTAssertFalse(app.staticTexts["Status"].exists)
         XCTAssertFalse(app.staticTexts["Status unavailable"].exists)
     }
 

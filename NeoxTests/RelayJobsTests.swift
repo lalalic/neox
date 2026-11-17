@@ -182,6 +182,29 @@ final class RelayJobsTests: XCTestCase {
         ])?.title, "Job blocked")
     }
 
+    func testActivityUsesRedactedGatewayContentInsteadOfEventType() throws {
+        let job = try XCTUnwrap(RelayJob(wire: [
+            "id": "658", "repository": "toyalive-3d", "status": "RUNNING"
+        ]))
+        let content = try XCTUnwrap(RelayJobActivityEvent(wire: [
+            "id": "evt_658", "type": "task.progress",
+            "timestamp": "2026-11-17T11:12:00Z", "taskId": "1943",
+            "content": "Verified orientation with front photo.\u{0007}",
+            "message": "private prompt and token", "data": ["secret": "/private/path"]
+        ]))
+        let store = RelayJobsStore()
+        XCTAssertEqual(store.activityDescription(for: content, job: job), "Verified orientation with front photo.")
+        XCTAssertEqual(content.taskLabel, "Task 1943")
+        XCTAssertEqual(content.symbol, "arrow.trianglehead.2.clockwise.rotate.90")
+        XCTAssertFalse(String(describing: content).contains("private prompt"))
+        let old = try XCTUnwrap(RelayJobActivityEvent(wire: [
+            "id": "older", "type": "task.started", "timestamp": "2026-11-17T11:01:00Z",
+            "taskId": "1943", "message": "private prompt"
+        ]))
+        XCTAssertEqual(store.activityDescription(for: old, job: job), "Task started",
+                       "Old gateways remain safe and usable")
+    }
+
     func testActivitySymbolsComeOnlyFromAllowlistedEventTypes() throws {
         let mappings = [
             "job.created": "plus.circle", "job.planned": "doc.text",

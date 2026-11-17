@@ -128,13 +128,15 @@ enum RelayJobLifecycle: Equatable {
     var isTerminal: Bool { [.merged, .completed, .succeeded, .failed, .cancelled].contains(self) }
 }
 
-/// Sanitized lifecycle-only activity representation. Free-form messages and
-/// exception text are never read.
+/// Display-safe activity: only the authenticated Gateway's redacted content
+/// field is accepted, never unfiltered source event messages or payloads.
 struct RelayJobActivityEvent: Identifiable, Equatable {
     let id: String
     let type: String
     let title: String
+    let content: String?
     let date: Date
+    let taskID: String?
     let taskLabel: String?
 
     init?(wire: [String: Any], fallbackID: String? = nil) {
@@ -148,7 +150,13 @@ struct RelayJobActivityEvent: Identifiable, Equatable {
         self.id = id
         self.type = type
         self.title = title
+        // Only the authenticated Gateway's redacted "content" is accepted.
+        // Arbitrary raw event "message"/"data" must never reach this view.
+        self.content = (wire["content"] as? String)
+            .map { String($0.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }.prefix(320)) }
+            .flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         self.date = date
+        self.taskID = taskID
         self.taskLabel = taskID.map { "Task \($0)" }
     }
 
@@ -307,6 +315,7 @@ final class RelayJobsStore: ObservableObject {
     @Published private(set) var total = 0
     @Published private(set) var hasLoaded = false
     @Published private(set) var activities: [String: [RelayJobActivityEvent]] = [:]
+    @Published private(set) var taskTitles: [String: [String: String]] = [:]
     private var refreshing = false
     private var nextOffset = 0
     private let cancelOperation: CancelOperation?
@@ -405,8 +414,13 @@ final class RelayJobsStore: ObservableObject {
     func refreshActivity(for job: RelayJob, from master: RemoteMCPClient) async {
         if !master.connected { await master.connect() }
         guard master.connected else { return }
+        async let events = master.relayJobActivity(job)
+        if taskTitles[key(job)] == nil {
+            // An existing safe Gateway endpoint exposes Task titles without prompts.
+            taskTitles[key(job)] = try? await master.relayJobTasks(job)
+        }
         do {
-            let rows = try await master.relayJobActivity(job)
+            let rows = try await events
             activities[key(job)] = rows.sorted { $0.date > $1.date }
         } catch {
             // Preserve the last authoritative history if the Master is unavailable.
@@ -418,6 +432,14 @@ final class RelayJobsStore: ObservableObject {
     }
 
     func activity(for job: RelayJob) -> [RelayJobActivityEvent]? { activities[key(job)] }
+
+    func taskTitle(for event: RelayJobActivityEvent, job: RelayJob) -> String? {
+        event.taskID.flatMap { taskTitles[key(job)]?[$0] }
+    }
+
+    func activityDescription(for event: RelayJobActivityEvent, job: RelayJob) -> String {
+        event.content ?? taskTitle(for: event, job: job) ?? event.title
+    }
 
     var ordered: [RelayJob] {
         jobs.sorted {
@@ -440,6 +462,16 @@ final class RelayJobsStore: ObservableObject {
                             "status": "WAITING", "updatedAt": "2026-11-08T16:35:00Z",
                             "repository": "local/vlog"])!,
         ]
+        let running = jobs[0]
+        let fixture: [String: Any] = [
+            "id": "fixture-progress", "type": "task.progress",
+            "timestamp": "2026-11-17T11:12:00Z", "taskId": "1943",
+            "content": "Verified the model orientation using the front photo."
+        ]
+        if let event = RelayJobActivityEvent(wire: fixture) {
+            setActivity([event], for: running)
+            taskTitles[key(running)] = ["1943": "Designer orientation"]
+        }
     }
     #endif
 }
@@ -616,9 +648,7 @@ private struct RelayJobDetailView: View {
         // authoritative status is reflected when the Job list refreshes.
         let current = store.currentJob(matching: job)
         return List {
-            Section("Status") {
-                Label(current.statusName, systemImage: current.lifecycle.symbol)
-                    .foregroundStyle(current.lifecycle.tint)
+            Section {
                 LabeledContent("Job", value: "#\(current.id)")
                 if !current.repository.isEmpty { LabeledContent("Repository", value: current.repository) }
                 LabeledContent(
@@ -643,9 +673,17 @@ private struct RelayJobDetailView: View {
                                     .frame(width: 18)
                                     .accessibilityHidden(true)
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(event.title)
+                                    Text(store.activityDescription(for: event, job: job))
+                                        .fixedSize(horizontal: false, vertical: true)
                                     HStack {
-                                        if let taskLabel = event.taskLabel { Text(taskLabel) }
+                                        if let taskLabel = event.taskLabel {
+                                            if let taskTitle = store.taskTitle(for: event, job: job),
+                                               event.content != nil {
+                                                Text("\(taskLabel) · \(taskTitle)").lineLimit(1)
+                                            } else {
+                                                Text(taskLabel)
+                                            }
+                                        }
                                         Spacer()
                                         Text(RelayTimestamp.activityDisplay(event.date))
                                     }
