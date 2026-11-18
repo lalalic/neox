@@ -215,13 +215,15 @@ struct ChatMarkcutPreviewSheet: View {
     @State private var origin: URL?
     @State private var error: String?
     @State private var playbackPosition: MarkcutPlaybackPosition?
+    @State private var editorDecisionViewActive = false
 
     var body: some View {
         NavigationStack {
             Group {
                 if let html {
                     MarkcutWebPreview(html: html, baseURL: origin, failure: $error,
-                                      playbackPosition: $playbackPosition, retry: 0)
+                                      playbackPosition: $playbackPosition,
+                                      editorDecisionViewActive: $editorDecisionViewActive, retry: 0)
                 } else if let error {
                     ContentUnavailableView("Preview unavailable", systemImage: "exclamationmark.triangle",
                                            description: Text(error))
@@ -243,7 +245,11 @@ struct ChatMarkcutPreviewSheet: View {
             let media = try await master.markcutPreviewMedia(contentHash: hash)
             guard let compiled = media["compiled"], let player = media["playerUrl"] as? String,
                   let playerURL = URL(string: player) else { throw ChatGatewayError.invalidItem }
-            let json = try JSONSerialization.data(withJSONObject: compiled, options: [.fragmentsAllowed])
+            var previewRevision: [String: Any] = ["compiled": compiled]
+            if let editorDecisions = media["editorDecisions"] {
+                previewRevision["editorDecisions"] = editorDecisions
+            }
+            let json = try JSONSerialization.data(withJSONObject: previewRevision, options: [.fragmentsAllowed])
             let encoded = json.base64EncodedString()
             let tree = compiled as? [String: Any] ?? [:]
             let root = tree["root"] as? [String: Any] ?? tree
@@ -265,8 +271,11 @@ struct ChatMarkcutPreviewSheet: View {
             #remotion-canvas{width:min(100%,calc(75vh * \(ratio)))!important;max-height:75vh!important;aspect-ratio:\(width)/\(height);border-radius:12px;overflow:hidden}
             #scene-thumbnails{display:flex;max-width:100%;overflow-x:auto;gap:8px;padding:5px}
             </style><div id="remotion-root"></div>
-            <script>window.__markcutRevision={compiled:JSON.parse(new TextDecoder().decode(
-            Uint8Array.from(atob('\(encoded)'),c=>c.charCodeAt(0))))};</script>
+            <script>window.__markcutRevision=JSON.parse(new TextDecoder().decode(
+            Uint8Array.from(atob('\(encoded)'),c=>c.charCodeAt(0))));
+            window.addEventListener('markcut:edl-view',function(event){
+              window.webkit.messageHandlers.markcutEditorView.postMessage({active:!!event.detail.active});
+            });</script>
             <script src="\(safePlayer)"></script>
             """
         } catch {

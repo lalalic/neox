@@ -40,6 +40,7 @@ struct MarkcutReviewInboxView: View {
     @State private var questionScenes: [MarkcutQuestion] = []
     @State private var questionAnswers: [String: String] = [:]
     @State private var playbackPosition: MarkcutPlaybackPosition?
+    @State private var editorDecisionViewActive = false
     @State private var message: String?
     @State private var syncing = false
     @State private var jobTitles: [String: String] = [:]
@@ -278,7 +279,12 @@ struct MarkcutReviewInboxView: View {
                 if let item = selectedItem(in: group), item["status"] as? String == "ready",
                    !(item["decision"] is [String: Any]) {
                     Divider()
-                    if (item["reviewActionable"] as? Bool) ?? true {
+                    if editorDecisionViewActive {
+                        Label("Editor Decisions · Switch to Video to review", systemImage: "doc.text.magnifyingglass")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .padding(12)
+                            .accessibilityIdentifier("markcutEditorDecisionsReadOnly")
+                    } else if (item["reviewActionable"] as? Bool) ?? true {
                         decisionControls(for: item)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
@@ -327,6 +333,7 @@ struct MarkcutReviewInboxView: View {
                             Button {
                                 guard revision.reviewSessionID != selectedSessionID else { return }
                                 playbackPosition = nil
+                                editorDecisionViewActive = false
                                 selectedSessionID = revision.reviewSessionID
                                 html = nil
                                 previewError = nil
@@ -386,7 +393,7 @@ struct MarkcutReviewInboxView: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 MarkcutReviewSurface(html: $html, origin: $previewOrigin, playbackPosition: $playbackPosition,
-                    error: $previewError, loadingStage: $loadingStage, retry: $previewRetry) {
+                    editorDecisionViewActive: $editorDecisionViewActive, error: $previewError, loadingStage: $loadingStage, retry: $previewRetry) {
                     if let group = selectedGroup, let item = selectedItem(in: group) {
                         Task { await loadPreview(item) }
                     }
@@ -444,7 +451,7 @@ struct MarkcutReviewInboxView: View {
         // The sheet closure can outlive the parent View's captured @State values.
         // Let a dedicated Binding-backed child observe the asynchronous preview.
         MarkcutReviewSurface(html: $html, origin: $previewOrigin, playbackPosition: $playbackPosition,
-            error: $previewError, loadingStage: $loadingStage, retry: $previewRetry) {
+            editorDecisionViewActive: $editorDecisionViewActive, error: $previewError, loadingStage: $loadingStage, retry: $previewRetry) {
             Task { await loadPreview(item) }
         }
         }
@@ -533,6 +540,7 @@ struct MarkcutReviewInboxView: View {
 
     private func clearSelection() {
         playbackPosition = nil
+        editorDecisionViewActive = false
         selectedSessionID = nil
         landscapeExpanded = false
         html = nil
@@ -560,6 +568,7 @@ struct MarkcutReviewInboxView: View {
 
     private func open(_ group: MarkcutReviewGroup, preferredSessionID: String? = nil) {
         playbackPosition = nil
+        editorDecisionViewActive = false
         selectedGroup = group
         let first = group.sessions.first(where: { $0.reviewSessionID == preferredSessionID })
             ?? group.sessions.first
@@ -629,7 +638,11 @@ struct MarkcutReviewInboxView: View {
             }
             let width = (root["width"] as? NSNumber)?.doubleValue ?? 1080
             let height = (root["height"] as? NSNumber)?.doubleValue ?? 1920
-            let data = try JSONSerialization.data(withJSONObject: compiled, options: [.fragmentsAllowed])
+            var previewRevision: [String: Any] = ["compiled": compiled]
+            if let editorDecisions = media["editorDecisions"] {
+                previewRevision["editorDecisions"] = editorDecisions
+            }
+            let data = try JSONSerialization.data(withJSONObject: previewRevision, options: [.fragmentsAllowed])
             let encoded = data.base64EncodedString()
             previewOrigin = URL(string: player).flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }.flatMap {
                 var root = $0; root.path = "/"; root.query = nil; root.fragment = nil; return root.url
@@ -652,7 +665,10 @@ struct MarkcutReviewInboxView: View {
             </style>
             <div id="remotion-root"></div>
             <script>
-            window.__markcutRevision={compiled:JSON.parse(new TextDecoder().decode(Uint8Array.from(atob('\(encoded)'),c=>c.charCodeAt(0))))};
+            window.__markcutRevision=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob('\(encoded)'),c=>c.charCodeAt(0))));
+            window.addEventListener('markcut:edl-view',function(event){
+              window.webkit.messageHandlers.markcutEditorView.postMessage({active:!!event.detail.active});
+            });
             // The WebView is smaller than the phone screen and changes with the
             // feedback keyboard. Measure its real viewport rather than UIScreen.
             // Reserve a full scene-list row before fitting the video frame.
@@ -736,7 +752,7 @@ struct MarkcutReviewInboxView: View {
     }
 
     private func submit(_ decision: String, item: [String: Any]) async {
-        guard !syncing else { return }
+        guard !syncing, !editorDecisionViewActive else { return }
         guard let requestID = item["id"] as? String,
               let request = inbox.request(id: requestID) else { return }
         guard request.canDeliver && inbox.isCurrent(request) else {
@@ -827,6 +843,7 @@ private struct MarkcutReviewSurface: View {
     @Binding var html: String?
     @Binding var origin: URL?
     @Binding var playbackPosition: MarkcutPlaybackPosition?
+    @Binding var editorDecisionViewActive: Bool
     @Binding var error: String?
     @Binding var loadingStage: String
     @Binding var retry: Int
@@ -835,7 +852,8 @@ private struct MarkcutReviewSurface: View {
     var body: some View {
         Group {
             if let html {
-                MarkcutWebPreview(html: html, baseURL: origin, failure: $error, playbackPosition: $playbackPosition, retry: retry)
+                MarkcutWebPreview(html: html, baseURL: origin, failure: $error, playbackPosition: $playbackPosition,
+                    editorDecisionViewActive: $editorDecisionViewActive, retry: retry)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)

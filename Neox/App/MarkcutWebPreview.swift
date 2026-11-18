@@ -21,6 +21,7 @@ struct MarkcutWebPreview: UIViewRepresentable {
     let baseURL: URL?
     @Binding var failure: String?
     @Binding var playbackPosition: MarkcutPlaybackPosition?
+    @Binding var editorDecisionViewActive: Bool
     let retry: Int
 
     func makeUIView(context: Context) -> WKWebView {
@@ -29,6 +30,7 @@ struct MarkcutWebPreview: UIViewRepresentable {
         configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.userContentController.add(context.coordinator, name: "markcutPreviewError")
         configuration.userContentController.add(context.coordinator, name: "markcutPlaybackPosition")
+        configuration.userContentController.add(context.coordinator, name: "markcutEditorView")
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
         view.scrollView.isScrollEnabled = false
@@ -49,16 +51,22 @@ struct MarkcutWebPreview: UIViewRepresentable {
         view.loadHTMLString(html, baseURL: baseURL)
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(failure: $failure, playbackPosition: $playbackPosition) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(failure: $failure, playbackPosition: $playbackPosition,
+                    editorDecisionViewActive: $editorDecisionViewActive)
+    }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var lastHTML: String?
         var lastRetry = -1
         var failure: Binding<String?>
         var playbackPosition: Binding<MarkcutPlaybackPosition?>
-        init(failure: Binding<String?>, playbackPosition: Binding<MarkcutPlaybackPosition?>) {
+        var editorDecisionViewActive: Binding<Bool>
+        init(failure: Binding<String?>, playbackPosition: Binding<MarkcutPlaybackPosition?>,
+             editorDecisionViewActive: Binding<Bool>) {
             self.failure = failure
             self.playbackPosition = playbackPosition
+            self.editorDecisionViewActive = editorDecisionViewActive
         }
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             if message.name == "markcutPlaybackPosition",
@@ -72,6 +80,10 @@ struct MarkcutWebPreview: UIViewRepresentable {
                         sceneName: value["sceneName"] as? String,
                         sceneStart: max(0, (value["sceneStart"] as? Double) ?? 0))
                 }
+            } else if message.name == "markcutEditorView",
+                      let value = message.body as? [String: Any],
+                      let active = value["active"] as? Bool {
+                DispatchQueue.main.async { self.editorDecisionViewActive.wrappedValue = active }
             } else if message.name == "markcutPreviewError" {
                 DispatchQueue.main.async { self.failure.wrappedValue = String(describing: message.body) }
             }
