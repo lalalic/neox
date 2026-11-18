@@ -279,17 +279,12 @@ struct MarkcutReviewInboxView: View {
                 if let item = selectedItem(in: group), item["status"] as? String == "ready",
                    !(item["decision"] is [String: Any]) {
                     Divider()
-                    if editorDecisionViewActive {
-                        Label("Editor Decisions · Switch to Video to review", systemImage: "doc.text.magnifyingglass")
-                            .font(.caption).foregroundStyle(.secondary)
-                            .padding(12)
-                            .accessibilityIdentifier("markcutEditorDecisionsReadOnly")
-                    } else if (item["reviewActionable"] as? Bool) ?? true {
+                    if !editorDecisionViewActive && ((item["reviewActionable"] as? Bool) ?? true) {
                         decisionControls(for: item)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
                             .background(.bar)
-                    } else {
+                    } else if !editorDecisionViewActive {
                         Label("Preview only · no approval requested", systemImage: "eye")
                             .font(.caption).foregroundStyle(.secondary)
                             .padding(12)
@@ -654,6 +649,9 @@ struct MarkcutReviewInboxView: View {
             if let editorDecisions = media["editorDecisions"] {
                 previewRevision["editorDecisions"] = editorDecisions
             }
+            if let variants = media["variants"] {
+                previewRevision["variants"] = variants
+            }
             let data = try JSONSerialization.data(withJSONObject: previewRevision, options: [.fragmentsAllowed])
             let encoded = data.base64EncodedString()
             previewOrigin = URL(string: player).flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }.flatMap {
@@ -667,7 +665,9 @@ struct MarkcutReviewInboxView: View {
             <style>
             html,body,#remotion-root{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent;color:white}
             #remotion-preview{position:absolute;inset:0;width:100%;height:100%;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:8px;overflow:hidden;background:transparent}
-            #remotion-canvas{flex:0 0 auto;width:100%!important;max-width:100%!important;max-height:none!important;aspect-ratio:\(Int(width))/\(Int(height));margin:0!important;background:#111;border-radius:12px;overflow:hidden}
+            #markcut-video-selector-slot{position:absolute;right:8px;top:5px;z-index:30}
+            #markcut-video-selector{background:#282b32!important;color:white!important;border:1px solid #525765!important}
+            #remotion-canvas{flex:0 0 auto;width:100%!important;max-width:100%!important;max-height:none!important;aspect-ratio:var(--markcut-player-ratio)!important;margin:0!important;background:#111;border-radius:12px;overflow:hidden}
             #scene-thumbnails{box-sizing:border-box;flex:0 0 42px;height:42px;width:100%;min-width:0;display:flex;flex-wrap:nowrap;gap:8px;align-items:center;justify-content:flex-start;overflow-x:auto;overflow-y:hidden;white-space:nowrap;padding:4px 8px;scrollbar-width:none;-webkit-overflow-scrolling:touch;touch-action:pan-x;overscroll-behavior-x:contain}
             #scene-thumbnails::-webkit-scrollbar{display:none}
             #scene-thumbnails .scene-pill{box-sizing:border-box;flex:0 0 auto;white-space:nowrap;font-size:12px;line-height:22px;border-radius:8px;background:#282b32;color:#ddd;padding:3px 11px;cursor:pointer}
@@ -675,6 +675,7 @@ struct MarkcutReviewInboxView: View {
             .comment-marker{display:none!important}
             .markcut-scene-nav{position:fixed;z-index:15;display:none;width:28px;height:42px;border:none;border-radius:8px;background:#191b20;color:#fff;font-size:23px;cursor:pointer;opacity:0.95;padding:0}
             </style>
+            <div id="markcut-video-selector-slot"></div>
             <div id="remotion-root"></div>
             <script>
             window.__markcutRevision=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob('\(encoded)'),c=>c.charCodeAt(0))));

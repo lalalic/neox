@@ -13,8 +13,9 @@ final class MarkcutReviewInboxUITests: XCTestCase {
         let editor = app.webViews.buttons["Editor Decisions"]
         XCTAssertTrue(editor.waitForExistence(timeout: 10))
         editor.tap()
-        XCTAssertTrue(app.staticTexts["Editor Decisions · Switch to Video to review"].waitForExistence(timeout: 5))
-        XCTAssertFalse(approve.exists)
+        let hidden = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: approve)
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed)
         app.webViews.buttons["Video"].tap()
         XCTAssertTrue(approve.waitForExistence(timeout: 5))
     }

@@ -249,6 +249,9 @@ struct ChatMarkcutPreviewSheet: View {
             if let editorDecisions = media["editorDecisions"] {
                 previewRevision["editorDecisions"] = editorDecisions
             }
+            if let variants = media["variants"] {
+                previewRevision["variants"] = variants
+            }
             let json = try JSONSerialization.data(withJSONObject: previewRevision, options: [.fragmentsAllowed])
             let encoded = json.base64EncodedString()
             let tree = compiled as? [String: Any] ?? [:]
@@ -268,9 +271,11 @@ struct ChatMarkcutPreviewSheet: View {
             <!doctype html><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
             <style>html,body,#remotion-root{margin:0;width:100%;height:100%;background:#111;color:white;overflow:hidden}
             #remotion-preview{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
-            #remotion-canvas{width:min(100%,calc(75vh * \(ratio)))!important;max-height:75vh!important;aspect-ratio:\(width)/\(height);border-radius:12px;overflow:hidden}
+            #remotion-canvas{width:min(100%,calc(75vh * \(ratio)))!important;max-height:75vh!important;aspect-ratio:var(--markcut-player-ratio)!important;border-radius:12px;overflow:hidden}
             #scene-thumbnails{display:flex;max-width:100%;overflow-x:auto;gap:8px;padding:5px}
-            </style><div id="remotion-root"></div>
+            #markcut-video-selector-slot{position:absolute;top:6px;right:8px;z-index:30}
+            #markcut-video-selector{background:#282b32!important;color:white!important;border:1px solid #525765!important}
+            </style><div id="markcut-video-selector-slot"></div><div id="remotion-root"></div>
             <script>window.__markcutRevision=JSON.parse(new TextDecoder().decode(
             Uint8Array.from(atob('\(encoded)'),c=>c.charCodeAt(0))));
             window.addEventListener('markcut:edl-view',function(event){
