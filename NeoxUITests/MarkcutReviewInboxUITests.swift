@@ -2,6 +2,24 @@ import XCTest
 
 final class MarkcutReviewInboxUITests: XCTestCase {
     @MainActor
+    func testEditorDecisionsWebViewHidesFilmReviewUntilVideoSelected() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-markcut-review-ui-fixture", "-markcut-review-editor-decisions-fixture"]
+        app.launch()
+        app.buttons["neoTopTabReviews"].tap()
+        app.buttons["markcutReviewGroup"].firstMatch.tap()
+        let approve = app.buttons["markcutReviewApprove"]
+        XCTAssertTrue(approve.waitForExistence(timeout: 5))
+        let editor = app.webViews.buttons["Editor Decisions"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 10))
+        editor.tap()
+        XCTAssertTrue(app.staticTexts["Editor Decisions · Switch to Video to review"].waitForExistence(timeout: 5))
+        XCTAssertFalse(approve.exists)
+        app.webViews.buttons["Video"].tap()
+        XCTAssertTrue(approve.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testReviewInboxCanOpenWithExistingOrEmptyLocalInbox() {
         let app = XCUIApplication()
         app.launch()

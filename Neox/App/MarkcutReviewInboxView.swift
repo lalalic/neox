@@ -582,6 +582,18 @@ struct MarkcutReviewInboxView: View {
             playbackPosition = MarkcutPlaybackPosition(sceneID: "scene-opening", timeSeconds: 1.5,
                                                        sceneName: "Opening", sceneStart: 0)
         }
+        if ProcessInfo.processInfo.arguments.contains("-markcut-review-editor-decisions-fixture") {
+            // Device UI test for the WebKit ↔ SwiftUI read-only editorial view.
+            // The compiled Markcut video/EDL path is covered by provider tests.
+            html = """
+            <!doctype html><html><body style="background:#151515;color:white">
+            <button id="editor" onclick="window.webkit.messageHandlers.markcutEditorView.postMessage({active:true})">Editor Decisions</button>
+            <button id="video" onclick="window.webkit.messageHandlers.markcutEditorView.postMessage({active:false})">Video</button>
+            </body></html>
+            """
+            previewRetry += 1
+            return
+        }
         if ProcessInfo.processInfo.arguments.contains("-markcut-review-async-preview-fixture") {
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(350))
