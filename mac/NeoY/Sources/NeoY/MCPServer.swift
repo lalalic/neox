@@ -500,6 +500,7 @@ public final class MCPServer {
         let method = String(parts[0])
         let requestTarget = String(parts[1])
         let path = String(requestTarget.split(separator: "?", maxSplits: 1).first ?? "")
+        let restRoute = Self.restRoute(path)
 
         var rangeHeader: String?
         var headers: [String: String] = [:]
@@ -532,14 +533,17 @@ public final class MCPServer {
                 let padded = value.padding(toLength: ((value.count + 3) / 4) * 4, withPad: "=", startingAt: 0)
                 return Data(base64Encoded: padded).flatMap { String(data: $0, encoding: .utf8) }
             }
-        let presentedToken = bearerToken ?? queryToken ?? wsToken
+        let presentedToken = restRoute?.token ?? bearerToken ?? queryToken ?? wsToken
         let isCloudflareProxy = headers["cf-connecting-ip"] != nil || headers["cf-ray"] != nil
         let isDirectLoopback = Self.isLoopback(connection.endpoint) && !isCloudflareProxy
         let isPrivileged = isDirectLoopback ||
             (_snapshotPrivilegedAccessToken != nil && presentedToken == _snapshotPrivilegedAccessToken) ||
             (_snapshotOAuthService?.isAuthorizedBearer(presentedToken) == true)
 
-        if let onRequest { onRequest("\(method) \(path)") }
+        // Never expose credentials embedded in REST URLs to request logs.
+        if let onRequest {
+            onRequest("\(method) \(path.hasPrefix("/mcp/rest/") ? "/mcp/rest/<redacted>" : path)")
+        }
 
         // Extract body
         var body: Data?
@@ -650,6 +654,41 @@ public final class MCPServer {
         }
 
         switch (method, path) {
+        case ("GET", _) where path.hasPrefix("/mcp/rest/"):
+            guard let restRoute else {
+                sendJSON(connection: connection, status: 404, json: ["error": "Invalid REST tool path"])
+                return
+            }
+            let query = URLComponents(string: "http://localhost\(requestTarget)")?.queryItems ?? []
+            let rawArgs = query.first(where: { $0.name == "args" })?.value
+            let arguments: [String: Any]
+            if let rawArgs {
+                guard let data = rawArgs.data(using: .utf8),
+                      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    sendJSON(connection: connection, status: 400, json: ["error": "args must be a JSON object"])
+                    return
+                }
+                arguments = object
+            } else {
+                arguments = [:]
+            }
+            let rpc: [String: Any]
+            if let tool = restRoute.tool {
+                rpc = ["jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                       "params": ["name": tool, "arguments": arguments]]
+            } else {
+                rpc = ["jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": [:]]
+            }
+            handleMCPPostNonisolated(
+                body: try? JSONSerialization.data(withJSONObject: rpc),
+                connection: connection, isLocal: isDirectLoopback, authorized: isPrivileged,
+                masterAuthorized: _snapshotPrivilegedAccessToken != nil
+                    && restRoute.token == _snapshotPrivilegedAccessToken,
+                principal: presentedToken.map {
+                    SHA256.hash(data: Data($0.utf8)).map { String(format: "%02x", $0) }.joined()
+                }
+            )
+
         case ("POST", "/mcp"):
             handleMCPPostNonisolated(
                 body: body,
@@ -743,6 +782,20 @@ public final class MCPServer {
                 sendHTTP(connection: connection, status: 404, body: "Not found".data(using: .utf8))
             }
         }
+    }
+
+    /// Extract URL-only REST credentials and optional tool name.
+    nonisolated static func restRoute(_ path: String) -> (token: String, tool: String?)? {
+        guard path.hasPrefix("/mcp/rest/") else { return nil }
+        let components = path.dropFirst("/mcp/rest/".count)
+            .split(separator: "/", omittingEmptySubsequences: false)
+        guard (1...2).contains(components.count),
+              let token = String(components[0]).removingPercentEncoding,
+              !token.isEmpty else { return nil }
+        if components.count == 1 { return (token, nil) }
+        guard let tool = String(components[1]).removingPercentEncoding,
+              !tool.isEmpty else { return nil }
+        return (token, tool)
     }
 
     /// The private delivery acquisition tool is not a generic OAuth agent tool.
