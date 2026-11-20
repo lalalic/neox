@@ -242,7 +242,8 @@ actor NeoYNodeService {
             hub = .init(target: "\(NSUserName())@\(clientIP)", port: 22, identityFile: nil)
         }
 
-        let hubMCPPort = try allocateHubPort()
+        let hubMCPPort = reverseBootstrap ? try allocateHubPort() : 0
+        let directToken = reverseBootstrap ? nil : UUID().uuidString.replacingOccurrences(of: "-", with: "") + UUID().uuidString.replacingOccurrences(of: "-", with: "")
         let localMCPPort = 8789
         let remoteRoot = "\(remoteHome)/.local/share/neo-node"
         let remoteConfig = "\(remoteHome)/.config/neo-node"
@@ -259,7 +260,6 @@ actor NeoYNodeService {
         let currentRuntime = remoteRoot + "/neo-cluster-rust"
         let stagedRuntime = remoteRoot + "/neo-cluster-rust.next"
         let previousRuntime = remoteRoot + "/neo-cluster-rust.previous"
-        let oldNodeRuntime = remoteRoot + "/neo-node.mjs"
         let oldConfig = remoteConfig + "/node.env"
         let runtime = try nodeRuntimeResource("neo-cluster-rust")
         let localVersion = try NeoYSSHBootstrap.run(runtime.path, ["--version"])
@@ -280,51 +280,23 @@ actor NeoYNodeService {
         }
 
         var identityFile = hub.identityFile
-        if !reverseBootstrap {
-            let keyPath = "\(remoteConfig)/id_ed25519"
-            let key = try NeoYSSHBootstrap.ssh(
-                ssh,
-                command: "test -f \(shellQuote(keyPath)) || ssh-keygen -q -t ed25519 -N '' -f \(shellQuote(keyPath)); cat \(shellQuote(keyPath + ".pub"))"
-            )
-            guard key.exitCode == 0 else {
-                throw NeoYCoreError.operationFailed("failed to create neo-node SSH identity: \(key.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
-            }
-            try authorizeNodePublicKey(key.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
-            identityFile = keyPath
-        }
-
         let mode = reverseBootstrap ? "session" : "persistent"
         let env = [
             "NODE_NAME=\(name)",
             "NODE_MODE=\(mode)",
             "HUB_SSH_TARGET=\(hub.target)",
             "HUB_SSH_PORT=\(hub.port)",
-            "HUB_MCP_PORT=\(hubMCPPort)",
+            "NODE_REVERSE_PORT=\(reverseBootstrap ? String(hubMCPPort) : "")",
+            "NODE_ACCESS_TOKEN=\(directToken ?? "")",
             "LOCAL_MCP_PORT=\(localMCPPort)",
             "NODE_ROOT=\(remoteRoot)",
             "NODE_SSH_KEY=\(identityFile ?? "")"
         ].joined(separator: "\n") + "\n"
         let encoded = Data(env.utf8).base64EncodedString()
-        let lookupOldNodeBinary = """
-        node_bin="$(command -v node 2>/dev/null || true)"
-        if test -z "$node_bin" && test -f \(shellQuote(oldConfig)); then
-            node_bin="$(sed -n 's/^NODE_BIN=//p' \(shellQuote(oldConfig)) | head -1)"
-        fi
-        """
-        let oldNodeStop = """
-        if test -f \(shellQuote(oldNodeRuntime)); then
-            \(lookupOldNodeBinary)
-            if test -n "$node_bin" && test -x "$node_bin"; then
-                "$node_bin" \(shellQuote(oldNodeRuntime)) stop >/dev/null 2>&1 || true
-                "$node_bin" \(shellQuote(oldNodeRuntime)) uninstall-persistence >/dev/null 2>&1 || true
-            fi
-        fi
-        """
         let installCommand = [
             "set -e",
             "\(shellQuote(stagedRuntime)) --version >/dev/null",
             "\(shellQuote(currentRuntime)) stop >/dev/null 2>&1 || true",
-            oldNodeStop,
             "if test -f \(shellQuote(oldConfig)); then cp \(shellQuote(oldConfig)) \(shellQuote(oldConfig + ".previous")); fi",
             "if test -f \(shellQuote(currentRuntime)); then mv -f \(shellQuote(currentRuntime)) \(shellQuote(previousRuntime)); fi",
             "mv -f \(shellQuote(stagedRuntime)) \(shellQuote(currentRuntime))",
@@ -347,11 +319,6 @@ actor NeoYNodeService {
         if test -f \(shellQuote(previousRuntime)); then
             mv -f \(shellQuote(previousRuntime)) \(shellQuote(currentRuntime))
             \(shellQuote(currentRuntime)) install >/dev/null 2>&1 && \(shellQuote(currentRuntime)) start >/dev/null 2>&1
-        elif test -f \(shellQuote(oldNodeRuntime)); then
-            \(lookupOldNodeBinary)
-            if test -n "$node_bin" && test -x "$node_bin"; then
-                "$node_bin" \(shellQuote(oldNodeRuntime)) install >/dev/null 2>&1 && "$node_bin" \(shellQuote(oldNodeRuntime)) start >/dev/null 2>&1
-            fi
         fi
         """
         guard installed.exitCode == 0 else {
@@ -359,11 +326,11 @@ actor NeoYNodeService {
             throw NeoYCoreError.operationFailed("failed to install/start Rust neo-node: \(installed.stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
         }
 
-        let mcpURL = "http://127.0.0.1:\(hubMCPPort)/mcp"
+        let mcpURL = reverseBootstrap ? "http://127.0.0.1:\(hubMCPPort)/mcp" : "http://\(ssh.host):\(localMCPPort)/mcp"
         var lastError = "neo-node MCP did not become reachable"
         for _ in 0..<20 {
             do {
-                return try await pair(["pair", name, mcpURL])
+                return try await pair(["pair", name, mcpURL] + (directToken.map { [$0] } ?? []))
             } catch {
                 lastError = error.localizedDescription
                 try? await Task.sleep(for: .milliseconds(250))
@@ -609,6 +576,10 @@ actor NeoYNodeService {
         request.httpMethod = "POST"
         request.timeoutInterval = 15
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+           let token = components.queryItems?.first(where: { $0.name == "token" })?.value {
+            request.setValue(token, forHTTPHeaderField: "x-neo-node-token")
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "jsonrpc": "2.0",
             "id": "neoy-node",

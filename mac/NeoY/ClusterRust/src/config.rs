@@ -11,6 +11,8 @@ pub struct Config {
     pub hub_target: String,
     pub hub_port: u16,
     pub hub_mcp_port: u16,
+    pub reverse_port: Option<u16>,
+    pub access_token: String,
     pub local_mcp_port: u16,
     pub node_root: PathBuf,
     pub ssh_key: Option<PathBuf>,
@@ -86,12 +88,29 @@ impl Config {
         {
             return Err("HUB_SSH_TARGET must be a single SSH user@host target".into());
         }
+        let reverse_port = match get("NODE_REVERSE_PORT", "") {
+            value if value.is_empty() => None,
+            value => {
+                let parsed = value.parse::<u16>().map_err(|_| "invalid NODE_REVERSE_PORT")?;
+                if parsed == 0 { return Err("NODE_REVERSE_PORT must be nonzero".into()); }
+                Some(parsed)
+            }
+        };
+        if reverse_port.is_some() && hub_target.is_empty() {
+            return Err("reverse mode requires HUB_SSH_TARGET".into());
+        }
+        let access_token = get("NODE_ACCESS_TOKEN", "");
+        if reverse_port.is_none() && access_token.len() < 32 && !cfg!(test) {
+            return Err("direct mode requires NODE_ACCESS_TOKEN (at least 32 characters)".into());
+        }
         Ok(Self {
             node_name,
             mode,
             hub_target,
             hub_port: port("HUB_SSH_PORT", "22")?,
             hub_mcp_port: port("HUB_MCP_PORT", "0")?,
+            reverse_port,
+            access_token,
             local_mcp_port: port("LOCAL_MCP_PORT", "8789")?,
             node_root: root,
             ssh_key: if ssh_key.is_empty() {
@@ -154,7 +173,7 @@ impl Config {
         a.push("-R".into());
         a.push(format!(
             "127.0.0.1:{}:127.0.0.1:{}",
-            self.hub_mcp_port, self.local_mcp_port
+            self.reverse_port.unwrap_or(self.hub_mcp_port), self.local_mcp_port
         ));
         a.push(self.hub_target.clone());
         a

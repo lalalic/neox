@@ -243,6 +243,12 @@ async fn call(state: &State, name: &str, args: &Value) -> Result<Value, String> 
     }
 }
 async fn mcp(req: HttpRequest, body: web::Bytes, state: web::Data<Arc<State>>) -> HttpResponse {
+    if state.config.reverse_port.is_none() && !cfg!(test) {
+        let supplied = req.headers().get("x-neo-node-token").and_then(|v| v.to_str().ok()).unwrap_or("");
+        if !constant_time_equal(supplied.as_bytes(), state.config.access_token.as_bytes()) {
+            return HttpResponse::Unauthorized().finish();
+        }
+    }
     // A public website must not be able to use a cross-site form/no-CORS POST
     // to execute commands on the user's loopback MCP server. The trusted Swift
     // gateway sends JSON without Origin; regular JSON cross-origin requests
@@ -306,8 +312,17 @@ async fn health(state: web::Data<Arc<State>>) -> HttpResponse {
         .content_type("text/plain")
         .body(format!("ok {}\n", state.config.node_name))
 }
+fn constant_time_equal(a: &[u8], b: &[u8]) -> bool {
+    let mut diff = a.len() ^ b.len();
+    for i in 0..a.len().max(b.len()) {
+        diff |= (a.get(i).copied().unwrap_or(0) ^ b.get(i).copied().unwrap_or(0)) as usize;
+    }
+    diff == 0
+}
+
 pub async fn launch(state: Arc<State>) -> io::Result<actix_web::dev::Server> {
     let port = state.config.local_mcp_port;
+    let state_for_bind = state.config.reverse_port.is_some();
     let server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(state.clone()))
@@ -316,7 +331,7 @@ pub async fn launch(state: Arc<State>) -> io::Result<actix_web::dev::Server> {
             .route("/mcp", web::post().to(mcp))
     })
     .workers(2)
-    .bind(("127.0.0.1", port))?
+    .bind((if state_for_bind { "127.0.0.1" } else { "0.0.0.0" }, port))?
     .run();
     Ok(server)
 }

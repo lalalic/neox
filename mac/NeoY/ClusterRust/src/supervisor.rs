@@ -68,13 +68,13 @@ fn is_our_tunnel(pid: i32, cfg: &Config) -> bool {
     command.contains(&cfg.ssh_bin.to_string_lossy().to_string())
         && command.contains(&format!(
             "127.0.0.1:{}:127.0.0.1:{}",
-            cfg.hub_mcp_port, cfg.local_mcp_port
+            cfg.reverse_port.unwrap_or(cfg.hub_mcp_port), cfg.local_mcp_port
         ))
         && command.contains(&cfg.hub_target)
 }
 
 fn tunnel_ready(cfg: &Config) -> bool {
-    if cfg.hub_target.is_empty() {
+    if cfg.reverse_port.is_none() {
         return true;
     }
     let pid = pid_read(&pid_file(cfg, "tunnel"));
@@ -312,7 +312,7 @@ fn status(cfg: &Config) -> Result<(), String> {
     Ok(())
 }
 async fn monitor_tunnel(cfg: Config, mut stop: watch::Receiver<bool>) {
-    if cfg.hub_target.is_empty() {
+    if cfg.reverse_port.is_none() {
         return;
     }
     let mut backoff = Duration::from_secs(1);
