@@ -25,6 +25,9 @@ final class NeoYTunnelRuntime {
     private var desiredSettings = NeoYDeploymentSettings()
     private var desiredEnabled = false
     private var restartTask: Task<Void, Never>?
+    private var configWatchTask: Task<Void, Never>?
+    private var activeConfigDigest: Data?
+    private var rejectedConfigDigest: Data?
 
     func reconcile(settings: NeoYDeploymentSettings, enabled: Bool) async {
         // Reconciliation can be triggered repeatedly by unrelated provider changes.
@@ -34,6 +37,7 @@ final class NeoYTunnelRuntime {
         desiredEnabled = enabled
         restartTask?.cancel()
         restartTask = nil
+        stopConfigWatcher()
         stopProcess(removePublicURL: true)
 
         guard enabled, settings.tunnelMode != .off else { return }
@@ -53,7 +57,12 @@ final class NeoYTunnelRuntime {
                 arguments = try await prepareNamedTunnel(executable: executable, settings: settings)
                 try writePublicURL("https://\(settings.publicHostname)")
             }
+            let initialConfigDigest = settings.tunnelMode == .named
+                ? (try? Data(contentsOf: configURL)).map(Self.digest) : nil
             try start(executable: executable, arguments: arguments)
+            if settings.tunnelMode == .named {
+                startConfigWatcher(executable: executable, initialDigest: initialConfigDigest)
+            }
             if settings.tunnelMode == .quick {
                 let currentGeneration = generation
                 Task { @MainActor [weak self] in
@@ -70,7 +79,71 @@ final class NeoYTunnelRuntime {
         desiredEnabled = false
         restartTask?.cancel()
         restartTask = nil
+        stopConfigWatcher()
         stopProcess(removePublicURL: true)
+    }
+
+    private nonisolated static func digest(_ data: Data) -> Data {
+        Data(SHA256.hash(data: data))
+    }
+
+    private func stopConfigWatcher() {
+        configWatchTask?.cancel()
+        configWatchTask = nil
+        activeConfigDigest = nil
+        rejectedConfigDigest = nil
+    }
+
+    /// Poll the actual content, not just file metadata. This detects in-place edits
+    /// and atomic replacement, without ever treating a partial/invalid write as live.
+    private func startConfigWatcher(executable: URL, initialDigest: Data?) {
+        stopConfigWatcher()
+        activeConfigDigest = initialDigest
+        configWatchTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(1)) }
+                catch { return }
+                guard !Task.isCancelled, let self else { return }
+                await self.reloadIfConfigChanged(executable: executable)
+            }
+        }
+    }
+
+    private func reloadIfConfigChanged(executable: URL) async {
+        guard desiredEnabled, desiredSettings.tunnelMode == .named,
+              process?.isRunning == true,
+              let bytes = try? Data(contentsOf: configURL) else { return }
+        let candidate = Self.digest(bytes)
+        guard candidate != activeConfigDigest, candidate != rejectedConfigDigest else { return }
+        do {
+            guard let cached = try? Data(contentsOf: cacheURL),
+                  let tunnel = try? JSONDecoder().decode(CachedNamedTunnel.self, from: cached) else {
+                throw NeoYRuntimeControlError.federation("Missing named tunnel identity")
+            }
+            try Self.validateManagedConfiguration(String(decoding: bytes, as: UTF8.self),
+                                                  tunnelID: tunnel.id)
+            _ = try await runChecked(executable, ["tunnel", "--config", configURL.path,
+                                                   "ingress", "validate"])
+            // If the owner saved another revision during validation, validate that
+            // revision on the next check instead of restarting with unverified data.
+            guard !Task.isCancelled, desiredEnabled,
+                  let current = try? Data(contentsOf: configURL),
+                  Self.digest(current) == candidate else { return }
+            activeConfigDigest = candidate
+            rejectedConfigDigest = nil
+            NSLog("Neo tunnel configuration validated; reloading connector")
+            if let running = process, running.isRunning {
+                running.terminate()  // Existing exit handler owns the restart.
+                let pid = running.processIdentifier
+                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2) {
+                    if kill(pid, 0) == 0 { kill(pid, SIGKILL) }
+                }
+            }
+        } catch {
+            rejectedConfigDigest = candidate
+            NSLog("Neo tunnel configuration rejected, keeping active connector: %@",
+                  error.localizedDescription)
+        }
     }
 
     private func start(executable: URL, arguments: [String]) throws {

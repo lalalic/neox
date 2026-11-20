@@ -16,6 +16,11 @@ The Jobs tab consumes the selected Master's authenticated Chat Gateway rather th
 
 Bonjour discovery only shows whether a Master is **nearby**. It is not evidence that an authenticated Neo HTTPS gateway is offline. Keep the user-selected Master visible while away from its LAN and probe its saved HTTPS MCP endpoint using the existing Keychain token. Only a successful authenticated response establishes Remote **Online**. A failed probe is a connection/credential issue, not proof the Mac is powered off. Never copy or redirect an existing token to a Bonjour-advertised URL without prior credential binding. Verify with iOS Simulator UI/state tests and a real authenticated phone connection before claiming the installed phone is fixed.
 
+For Cloudflare public hostname add/change/remove on Neo Master, follow the
+[Neo.app shared-tunnel runbook](mac/NeoY/docs/shared-cloudflare-tunnel.md).
+Neo.app owns the only connector; edit its live YAML rather than launching a
+new tunnel or rebuilding the app. A new hostname also requires Cloudflare DNS.
+
 ## NeoY v2 architecture rules
 
 For any work under `mac/NeoY`, the canonical architecture contract is
