@@ -38,7 +38,7 @@ final class ChatMessageRichUITests: XCTestCase {
         app.buttons["Chat"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Markcut video preview"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 8))
-        XCTAssertTrue(app.webViews.firstMatch.staticTexts["Chat Gateway"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.webViews.firstMatch.staticTexts["Neo Gateway"].waitForExistence(timeout: 8))
         XCTAssertFalse(app.staticTexts["Orchestrator"].exists)
         XCTAssertFalse(app.staticTexts["You"].exists)
         app.buttons["Markcut video preview"].firstMatch.tap()

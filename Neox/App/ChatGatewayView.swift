@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
@@ -94,19 +95,24 @@ final class ChatGatewayStore: ObservableObject {
     private let preferences: UserDefaults
     private static let historyClearKey = "neo.chat.history.hidden-before.v1"
     private let outbox: ChatGatewayOutbox
+    private let history: ChatGatewayHistory
     private var refreshing = false
     private var flushing = false
+    private var unifiedAvailable = false
 
-    init(outbox: ChatGatewayOutbox = ChatGatewayOutbox(), preferences: UserDefaults = .standard) {
+    init(outbox: ChatGatewayOutbox = ChatGatewayOutbox(), preferences: UserDefaults = .standard,
+         history: ChatGatewayHistory? = nil) {
         self.outbox = outbox
+        self.history = history ?? ChatGatewayHistory()
         self.preferences = preferences
+        items = self.history.items
         clearedAt = preferences.object(forKey: Self.historyClearKey) as? Date
         queued = outbox.messages
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-neo-chat-rich-fixture") {
             let hash = String(repeating: "a", count: 64)
             let sample = """
-            **Summary**: Agent reports using `chat_report`.
+            **Summary**: Orchestrator replies using `reply.text` and `reply.completed`.
 
             ```mermaid
             flowchart LR
@@ -161,7 +167,8 @@ final class ChatGatewayStore: ObservableObject {
     }
 
     func refresh(from master: RemoteMCPClient) async {
-        guard !refreshing else { return }
+        // A successful unified probe freezes the legacy sender for this view.
+        guard !unifiedAvailable, !refreshing else { return }
         refreshing = true
         defer { refreshing = false }
 
@@ -173,7 +180,9 @@ final class ChatGatewayStore: ObservableObject {
         guard master.connected else { return }
 
         do {
-            items = try await master.chatGatewayFeed()
+            let legacy = try await master.chatGatewayFeed()
+            try history.importLegacyOnce(legacy)
+            items = history.items
         } catch {
             // Preserve the last confirmed timeline; retry automatically.
         }
@@ -186,6 +195,188 @@ final class ChatGatewayStore: ObservableObject {
         }
     }
 
+    /// Old MCP is deliberately retired before REST cutover. Preserve locally
+    /// saved history/outbox even when one-time server history import is not
+    /// available; never mark import completed unless it really succeeded.
+    func importLegacyIfAvailable(_ readLegacy: () async throws -> [ChatGatewayItem]) async {
+        guard !history.hasImportedLegacy else { return }
+        do {
+            try history.importLegacyOnce(await readLegacy())
+            items = history.items
+        } catch {
+            // The old provider may already be unregistered. A failed import
+            // must not block REST/SSE or discard phone-owned local messages.
+        }
+    }
+
+    /// One SSE listener per visible Chat tab. REST/SSE is authoritative once
+    /// authenticated. If unavailable, keep the local outbox for later retry.
+    func runUnifiedSession(using master: RemoteMCPClient) async -> Bool {
+        guard master.hasConfiguredAddress && master.hasCredential else { return false }
+        if !master.connected { await master.connect() }
+        guard master.connected else { return unifiedAvailable }
+        do {
+            // The retired MCP must never become a mandatory prerequisite for
+            // the new REST/SSE transport. Keep import pending for later recovery.
+            await importLegacyIfAvailable { try await master.chatGatewayFeed() }
+            let rest = try master.unifiedGatewayREST()
+            let receipt = try await rest.json("GET", path: "/orchestrator-chat/pending")
+            guard let pending = receipt["pending"] as? [[String: Any]] else {
+                throw GatewayRESTError.invalidResponse
+            }
+            unifiedAvailable = true
+            try await reconcileUnifiedPending(pending, rest: rest)
+            try await flushUnified(using: rest)
+            let key = unifiedCursorKey(for: master.endpoint)
+            let cursor = max(0, preferences.integer(forKey: key))
+            do {
+                try await rest.events(after: cursor) { [weak self] payload in
+                guard let self else { return }
+                let value = try JSONSerialization.jsonObject(with: payload)
+                guard let event = value as? [String: Any],
+                      let id = event["id"] as? Int, id > 0,
+                      let requestID = event["requestId"] as? String,
+                      let status = event["status"] as? String else {
+                    throw GatewayRESTError.invalidResponse
+                }
+                let previous = self.preferences.integer(forKey: key)
+                guard id > previous else { return } // Replay is idempotent.
+                guard id == previous + 1 else { throw GatewayRESTError.invalidResponse }
+                let reply: [String: Any]? = {
+                    guard let text = event["text"] as? String else { return nil }
+                    return ["text": text, "level": event["level"] as? String ?? "info",
+                            "jobId": event["jobId"] as? String ?? ""]
+                }()
+                try self.history.update(requestID: requestID, status: status, message: reply)
+                self.items = self.history.items
+                if ["completed", "failed"].contains(status) {
+                    guard let deliveryID = event["deliveryId"] as? String else {
+                        throw GatewayRESTError.invalidResponse
+                    }
+                    _ = try await rest.json("POST", path: "/orchestrator-chat/ack", body: ["deliveryId": deliveryID])
+                }
+                // Advance only after the relevant text and ACK are durable.
+                self.preferences.set(id, forKey: key)
+                }
+            } catch GatewayRESTError.http(409) {
+                // Cursor expired. Re-fetch and DURABLY reconcile the latest
+                // unacknowledged terminal replies before advancing the cursor.
+                // The earlier pending snapshot may have become stale.
+                let fresh = try await rest.json("GET", path: "/orchestrator-chat/pending")
+                guard let pending = fresh["pending"] as? [[String: Any]],
+                      let baseline = fresh["cursor"] as? Int, baseline >= cursor else {
+                    throw GatewayRESTError.invalidResponse
+                }
+                try await reconcileUnifiedPending(pending, rest: rest)
+                preferences.set(baseline, forKey: key)
+            }
+            return true
+        } catch {
+            // After a successful REST probe never route the same outbox to
+            // legacy: that could submit a request into a different thread.
+            return unifiedAvailable
+        }
+    }
+
+    private func unifiedCursorKey(for endpoint: String) -> String {
+        let bytes = SHA256.hash(data: Data(endpoint.utf8))
+        return "neo.orchestrator.cursor." + bytes.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func reconcileUnifiedPending(_ pending: [[String: Any]], rest: UnifiedGatewayREST) async throws {
+        for item in pending {
+            guard let id = item["requestId"] as? String,
+                  let status = item["status"] as? String else {
+                throw GatewayRESTError.invalidResponse
+            }
+            try history.update(requestID: id, status: status,
+                               message: item["message"] as? [String: Any])
+            if ["completed", "failed"].contains(status) {
+                guard let deliveryID = item["deliveryId"] as? String else {
+                    throw GatewayRESTError.invalidResponse
+                }
+                _ = try await rest.json("POST", path: "/orchestrator-chat/ack", body: ["deliveryId": deliveryID])
+            }
+        }
+        items = history.items
+    }
+
+    private func flushUnified(using rest: UnifiedGatewayREST) async throws {
+        guard !flushing else { return }
+        flushing = true
+        defer { flushing = false }
+        for message in outbox.messages {
+            let attachments = message.attachments ?? []
+            guard attachments.count <= 4 else { throw GatewayRESTError.invalidResponse }
+            let refs = attachments.map { ["id": $0.id, "name": $0.name] }
+            let messageBody: [String: Any] = [
+                "requestId": message.id,
+                "text": message.text.isEmpty ? "See attached files." : message.text,
+                "attachments": refs
+            ]
+            if !attachments.isEmpty {
+                // A lost 202 may leave this message in the local outbox even
+                // though Models already accepted (and perhaps ACKed) it.
+                // Revalidate the exact request body before touching its files:
+                // the server refuses new uploads after acceptance.
+                let known = try await rest.json("GET", path: "/orchestrator-chat/pending",
+                    query: [URLQueryItem(name: "requestId", value: message.id)])
+                guard let accepted = known["accepted"] as? Bool else {
+                    throw GatewayRESTError.invalidResponse
+                }
+                if accepted {
+                    let replay = try await rest.json("POST", path: "/orchestrator-chat/messages",
+                                                     body: messageBody, expectedStatus: 202)
+                    guard replay["requestId"] as? String == message.id else {
+                        throw GatewayRESTError.invalidResponse
+                    }
+                    try history.markSubmitted(message.id)
+                    try outbox.acknowledge(message.id)
+                    items = history.items
+                    queued = outbox.messages
+                    continue
+                }
+            }
+            // Upload SHA-256 checked chunks before accepting a new message.
+            // Every chunk is repeatable under the same request/attachment ID.
+            for attachment in attachments {
+                let bytes = try Data(contentsOf: URL(fileURLWithPath: attachment.path))
+                guard !bytes.isEmpty, bytes.count == attachment.size, bytes.count <= 12 * 1024 * 1024,
+                      SHA256.hash(data: bytes).map({ String(format: "%02x", $0) }).joined() == attachment.sha256 else {
+                    throw GatewayRESTError.invalidResponse
+                }
+                let chunkSize = 128 * 1024
+                let count = (bytes.count + chunkSize - 1) / chunkSize
+                guard count > 0 && count <= 96 else { throw GatewayRESTError.invalidResponse }
+                for index in 0..<count {
+                    let from = index * chunkSize
+                    let chunk = bytes.subdata(in: from..<min(bytes.count, from + chunkSize))
+                    let reply = try await rest.json("POST", path: "/orchestrator-chat/attachments",
+                        body: ["requestId": message.id, "attachmentId": attachment.id,
+                               "name": attachment.name, "chunkIndex": index, "chunkCount": count,
+                               "contentBase64": chunk.base64EncodedString(),
+                               "sha256": attachment.sha256, "size": attachment.size])
+                    // Already-complete files may return complete=true for
+                    // *every* replayed chunk after an uncertain network result.
+                    guard reply["attachmentId"] as? String == attachment.id,
+                          let complete = reply["complete"] as? Bool,
+                          (index < count - 1 || complete) else {
+                        throw GatewayRESTError.invalidResponse
+                    }
+                }
+            }
+            let receipt = try await rest.json("POST", path: "/orchestrator-chat/messages",
+                                              body: messageBody, expectedStatus: 202)
+            guard receipt["requestId"] as? String == message.id else {
+                throw GatewayRESTError.invalidResponse
+            }
+            try history.markSubmitted(message.id)
+            try outbox.acknowledge(message.id)
+            items = history.items
+            queued = outbox.messages
+        }
+    }
+
     func send(using master: RemoteMCPClient) -> Bool {
         let message = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (!message.isEmpty || !draftAttachments.isEmpty), message.count <= 2000 else { return false }
@@ -194,6 +385,10 @@ final class ChatGatewayStore: ObservableObject {
         // or temporarily unavailable head never requires a Retry tap.
         do {
             try outbox.enqueue(message, attachments: draftAttachments)
+            // Local transcript and delivery queue have independent durable owners.
+            // If history persistence fails, the queued request is still recoverable.
+            if let pending = outbox.messages.last { try? history.owner(pending) }
+            items = history.items
             queued = outbox.messages
             draft = ""
             draftAttachments = []
@@ -203,7 +398,15 @@ final class ChatGatewayStore: ObservableObject {
         }
         // Start delivery immediately, but do not keep the composer focused
         // while a gateway request is in flight.
-        Task { await refresh(from: master) }
+        Task {
+            if unifiedAvailable {
+                if let rest = try? master.unifiedGatewayREST() {
+                    try? await flushUnified(using: rest)
+                }
+            } else {
+                await refresh(from: master)
+            }
+        }
         return true
     }
 
@@ -233,7 +436,9 @@ final class ChatGatewayStore: ObservableObject {
             do {
                 try await master.sendChatGatewayMessage(
                     message.text, requestID: message.id, attachments: message.attachments ?? [])
+                try history.markSubmitted(message.id)
                 try outbox.acknowledge(message.id)
+                items = history.items
                 queued = outbox.messages
             } catch {
                 // Preserve durable pending work and stable request ID; next
@@ -242,7 +447,10 @@ final class ChatGatewayStore: ObservableObject {
             }
         }
         if !queued.isEmpty { return }
-        if let latest = try? await master.chatGatewayFeed() { items = latest }
+        if let latest = try? await master.chatGatewayFeed() {
+            try? history.importLegacyOnce(latest)
+            items = history.items
+        }
     }
 }
 
@@ -332,10 +540,12 @@ struct ChatGatewayView: View {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-neo-chat-rich-fixture") { return }
             #endif
-            // Automatic recovery while the Chat tab is visible.
+            // Prefer durable REST/SSE when verified, otherwise retain the
+            // existing working legacy feed until full cutover.
             while !Task.isCancelled {
-                await store.refresh(from: master)
-                do { try await Task.sleep(for: .seconds(8)) }
+                let unified = await store.runUnifiedSession(using: master)
+                if !unified { await store.refresh(from: master) }
+                do { try await Task.sleep(for: .seconds(unified ? 2 : 8)) }
                 catch { return }
             }
         }
