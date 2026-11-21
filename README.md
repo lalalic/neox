@@ -22,6 +22,31 @@ the session.
 
 Neo Mobile provides four compact **top navigation** buttons (Chat, Jobs, Review, Connector), keeping the chat composer against the bottom safe area without a bottom tab bar. Connector uses the phone server's actual state to color its top icon/label: green when running, orange while idle/starting, and red on failure. The redundant Connector page title/status banner has been removed; Neo Master connectivity remains visible inside the page. The Connector includes the existing iPhone media MCP server so a desktop agent can search, analyze, and pull photos/videos over Wi-Fi.
 
+## Neo Mobile Orchestrator Chat
+
+Chat uses the **already paired** Neo Master's HTTPS origin and Keychain bearer;
+no extra Master login or independent Chat Gateway provider is required. The
+current transport is Models-backed `/orchestrator-chat/*` REST/SSE rather than
+`chat_report` MCP calls: `POST /messages` returns durable acceptance (202),
+`GET /events` delivers the complete reply, `GET /pending` reconciles dropped
+SSE or a resumed app, and `POST /ack` follows local persistence. The phone
+owns both displayed history and a protected, idempotent outbox; reusing the
+same `com.neox.app` bundle identity during an in-place upgrade preserves its
+saved Master credential and local data. A separate staging bundle cannot
+assume access to the production App's Keychain.
+
+Ordinary completed chat replies appear in bubbles without APNs; attention,
+failures, and owner actions may notify. The local history trash clears only
+this phone's visible records. Models does **not** retain a second permanent
+chat transcript; pending operational messages are retained until ACK and
+then their text and attachments are scrubbed. For the precise envelope,
+handoff, and endpoint semantics, see the
+[Orchestrator Chat contract](https://github.com/lalalic/neo/blob/main/docs/chat-gateway-orchestrator.md).
+
+A real iPhone/NeoUse acceptance test must verify the text entered the composer
+and that both the owner's bubble and complete assistant reply survive a
+relaunch. A successful automation tap alone is not proof of message delivery.
+
 ## Neo Mobile Review Inbox
 
 The Review Inbox keeps submissions on the phone after Approve or Request Changes.
@@ -41,19 +66,20 @@ The review metadata is stored on the phone across app relaunches. Video
 replay still requires the Neo Master to retain the referenced Markcut compiled
 preview and media; this feature does not copy full videos into phone storage.
 
-In Chat, the trash icon immediately to the right of the `+` opens a confirmation
-to clear the visible message history *on this phone only*. The Neo Master feed
-remains intact, and pending outbox messages/attachments are still delivered.
+In Chat, the trash icon immediately to the right of the `+` opens a
+confirmation to clear the visible message history *on this phone only*. Models
+keeps no second permanent Chat feed; pending outbox messages/attachments are
+still delivered, and ACKed operational content is scrubbed.
 The local clear cutoff persists across app restarts, and future messages appear
 normally.
 
 ## Relay Jobs on Neo Mobile
 
-The Jobs tab reads the selected Master's authenticated Chat Gateway. Active Jobs are listed first, followed by recent terminal Jobs. Each row shows the title (or Job ID fallback), the Gateway-projected runtime status (including `WAITING`, `IDLE`, `REVIEWING`, and `MERGE_PENDING`), and **creation time** (from Relay `createdAt`, not the last update). The detail view reads the latest Job snapshot while open and shows the repository and a sanitized activity timeline; no raw prompts, private paths, arbitrary event messages or exception text are displayed.
+The Jobs tab first reads the selected Master's authenticated `/relay/api/mobile/*` REST routes, with legacy Chat Gateway MCP fallback only when those routes are absent. Active Jobs are listed first, followed by recent terminal Jobs. Each row shows the title (or Job ID fallback), the Gateway-projected runtime status (including `WAITING`, `IDLE`, `REVIEWING`, and `MERGE_PENDING`), and **creation time** (from Relay `createdAt`, not the last update). The detail view reads the latest Job snapshot while open and shows the repository and a sanitized activity timeline; no raw prompts, private paths, arbitrary event messages or exception text are displayed.
 
 Jobs are fetched in pages of **20**, not as a full inventory: pull down to reset to the newest 20, or swipe up to the bottom to append 20 more. The list does not automatically reset while scrolling. Open a Job to refresh its activity. Eligible Jobs expose a swipe **Cancel** action only when the authenticated gateway advertises `cancellable`; cancellation asks for confirmation and the phone requires the Master's authoritative `CANCELLED` readback. The request uses the exact repository and Job ID, not a PR number. Older gateways that omit the capability cannot offer cancellation. Connectivity failures preserve the last good snapshot rather than treating it as an empty authoritative state.
 
-The gateway owns the source of truth and authorization: [Chat Gateway Skill](https://github.com/lalalic/neo/blob/main/skills/chat-gateway/SKILL.md) and [Mobile Job controls](https://github.com/lalalic/neo/blob/main/skills/chat-gateway/docs/neo-mobile-job-controls.md). The phone does not mutate Relay's SQLite store or infer completion from a submission receipt.
+The Relay/mobile gateway owns the source of truth and authorization: [Chat Gateway Skill](https://github.com/lalalic/neo/blob/main/skills/chat-gateway/SKILL.md) and [Mobile Job controls](https://github.com/lalalic/neo/blob/main/skills/chat-gateway/docs/neo-mobile-job-controls.md). The phone does not mutate Relay's SQLite store or infer completion from a submission receipt.
 
 ## NeoY v2 design principles
 
