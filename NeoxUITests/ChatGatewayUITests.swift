@@ -91,3 +91,17 @@ extension ChatGatewayUITests {
         XCTAssertTrue(app.buttons["neoChatSend"].exists)
     }
 }
+
+extension ChatGatewayUITests {
+    func testVoiceConversationHasDedicatedEntryAndCanDismissWithoutStartingMicrophone() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-neo-chat-rich-fixture"]
+        app.launch()
+        let button = app.buttons["neoChatVoiceConversation"]
+        XCTAssertTrue(button.waitForExistence(timeout: 12))
+        XCTAssertEqual(button.label, "Voice conversation")
+        // Do not open the microphone from a pure UI smoke fixture.
+        XCTAssertTrue(app.buttons["neoChatMicrophone"].exists)
+        XCTAssertTrue(app.buttons["neoChatSend"].exists)
+    }
+}

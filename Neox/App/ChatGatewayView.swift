@@ -88,6 +88,7 @@ enum ChatGatewayError: Error {
 final class ChatGatewayStore: ObservableObject {
     @Published private(set) var items: [ChatGatewayItem] = []
     @Published private(set) var queued: [QueuedChatMessage] = []
+    @Published private(set) var lastFailedRequestID: String?
     @Published var draft = ""
     @Published var draftAttachments: [ChatLocalAttachment] = []
     @Published private(set) var clearedAt: Date?
@@ -269,6 +270,7 @@ final class ChatGatewayStore: ObservableObject {
                 }()
                 try self.history.update(requestID: requestID, status: status, message: reply)
                 self.items = self.history.items
+                if status == "failed" { self.lastFailedRequestID = requestID }
                 if ["completed", "failed"].contains(status) {
                     guard let deliveryID = event["deliveryId"] as? String else {
                         throw GatewayRESTError.invalidResponse
@@ -311,6 +313,7 @@ final class ChatGatewayStore: ObservableObject {
             }
             try history.update(requestID: id, status: status,
                                message: item["message"] as? [String: Any])
+            if status == "failed" { lastFailedRequestID = id }
             if ["completed", "failed"].contains(status) {
                 guard let deliveryID = item["deliveryId"] as? String else {
                     throw GatewayRESTError.invalidResponse
@@ -430,6 +433,29 @@ final class ChatGatewayStore: ObservableObject {
         return true
     }
 
+    /// Voice uses the SAME durable outbox, request ID, Chat REST/SSE and
+    /// timeline as typed messages. It must never overwrite a typed draft.
+    func sendVoiceText(_ spoken: String, using master: RemoteMCPClient) -> String? {
+        let text = spoken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, text.count <= 2000 else { return nil }
+        do {
+            let message = try outbox.enqueue(text)
+            try? history.owner(message)
+            items = history.items
+            queued = outbox.messages
+            Task {
+                if unifiedAvailable {
+                    if let rest = try? master.unifiedGatewayREST() {
+                        try? await flushUnified(using: rest)
+                    }
+                } else {
+                    await refresh(from: master)
+                }
+            }
+            return message.id
+        } catch { return nil }
+    }
+
     func attach(data: Data, name: String) {
         guard draftAttachments.count < 4,
               let stored = try? outbox.stage(data, name: name) else { return }
@@ -479,6 +505,8 @@ struct ChatGatewayView: View {
     let isActive: Bool
     @StateObject private var store = ChatGatewayStore()
     @StateObject private var dictation = ChatComposerDictation()
+    @StateObject private var voice = ChatVoiceConversation()
+    @State private var showingVoice = false
     @State private var pickedPhoto: PhotosPickerItem?
     @State private var importingFile = false
     @State private var dictationPrefix = ""
@@ -511,6 +539,11 @@ struct ChatGatewayView: View {
 
             composer
         }
+        .sheet(isPresented: $showingVoice) {
+            ChatVoiceSheet(voice: voice)
+                .onAppear { Task { await voice.start() } }
+                .onDisappear { voice.stop() }
+        }
         .sheet(item: $selectedMarkcut) { reference in
             ChatMarkcutPreviewSheet(master: master, hash: reference.hash)
         }
@@ -523,6 +556,22 @@ struct ChatGatewayView: View {
         } message: {
             Text("This hides old messages in Neo Mobile. It does not delete Neo Master history or cancel queued messages.")
         }
+        .onChange(of: voice.committedTurn) { _, turn in
+            guard let turn else { return }
+            if let requestID = store.sendVoiceText(turn.text, using: master) {
+                voice.expectReply(requestID: requestID)
+            } else {
+                voice.stop()
+            }
+        }
+        .onChange(of: store.lastFailedRequestID) { _, requestID in
+            if let requestID { voice.receiveFailure(requestID: requestID) }
+        }
+        .onChange(of: store.items) { _, records in
+            for item in records where item.kind == "report" {
+                voice.receive(item)
+            }
+        }
         .onChange(of: dictation.transcript) { _, text in
             guard !text.isEmpty else { return }
             let separator = dictationPrefix.isEmpty ||
@@ -532,6 +581,8 @@ struct ChatGatewayView: View {
         .onChange(of: isActive) { _, active in
             if !active {
                 dictation.stop()
+                voice.stop()
+                showingVoice = false
                 composerFocused = false
             }
         }
@@ -554,6 +605,7 @@ struct ChatGatewayView: View {
         }
         .onDisappear {
             dictation.stop()
+            voice.stop()
             composerFocused = false
         }
         .task {
@@ -632,6 +684,18 @@ struct ChatGatewayView: View {
                 .accessibilityIdentifier("neoChatClearHistory")
 
                 Spacer(minLength: 0)
+
+                Button {
+                    dictation.stop()
+                    composerFocused = false
+                    showingVoice = true
+                } label: {
+                    Image(systemName: "waveform.circle")
+                        .font(.system(size: 22))
+                        .frame(width: 35, height: 35)
+                }
+                .accessibilityLabel("Voice conversation")
+                .accessibilityIdentifier("neoChatVoiceConversation")
 
                 Button {
                     if !dictation.isRecording && !dictation.isStarting {

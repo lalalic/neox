@@ -39,11 +39,11 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Neox serves an MCP server on your local network so your desktop agent can reach it.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Neo uses the microphone for Chat dictation and Capture Tour recording.</string>
+	<string>Neo uses the microphone for Chat dictation, hands-free voice conversations, and Capture Tour recording.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Neox lets your desktop agent browse and export your photo library.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Neo transcribes speech for Chat dictation and video understanding.</string>
+	<string>Neo transcribes speech for Chat dictation, hands-free voice conversations, and video understanding.</string>
 	<key>NSUbiquitousContainers</key>
 	<dict>
 		<key>iCloud.com.neox.app</key>

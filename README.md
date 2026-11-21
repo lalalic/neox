@@ -323,3 +323,25 @@ On Neo Master, use `scripts/testflight.py doctor` to verify the existing App Sto
   meant to be used plugged in ("charging dock"). Keep the screen on for
   reliable serving.
 - Only the status screen is human-facing; every feature is agent-first.
+
+### Voice conversation in Chat (device integration)
+
+The Chat composer has a dedicated **Voice conversation** button in addition to
+its existing, manual dictation button. The new foreground-only voice sheet uses
+`Packages/DuplexVoiceKit`: LiveKit local microphone/voice processing, Apple
+speech recognition and synthesized PCM playback through LiveKit local
+`SoundPlayer`. Voice turns use the same durable Chat outbox, REST/SSE request
+IDs and on-device assistant history as typed messages. The voice client only
+speaks the matched terminal assistant reply; it ignores unrelated replies and
+non-terminal placeholders. The microphone is stopped when the sheet closes or
+Chat is no longer active. The phone never directly connects to Events Bus or
+LiveKit Server.
+
+STT/TTS can be replaced through the shared `SpeechRecognitionProvider` and
+`SpeechSynthesisProvider` protocols. This version uses the default Apple
+providers; they need microphone/speech permission and a configured Chat
+master. The energy VAD is a local utterance segmentation heuristic. Real iPhone
+speakerphone echo rejection, barge-in timing, Bluetooth and continuous
+conversational recognition require physical-device validation before claiming
+production-quality full duplex; in particular LiveKit SoundPlayer's local audio
+route does not prove its playback is used as the AEC reference.

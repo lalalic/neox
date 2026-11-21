@@ -19,6 +19,7 @@ public struct AppleSpeechRecognitionProvider: SpeechRecognitionProvider {
                 }
                 let request = SFSpeechAudioBufferRecognitionRequest()
                 request.shouldReportPartialResults = true
+                request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
                 let recognition = recognizer.recognitionTask(with: request) { result, error in
                     if let result {
                         continuation.yield(result.isFinal
