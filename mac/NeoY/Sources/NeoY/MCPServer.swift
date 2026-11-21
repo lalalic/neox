@@ -601,9 +601,15 @@ public final class MCPServer {
                 extraHeaders:["Location":"/dashboard/","Cache-Control":"no-store"])
             return
         }
+        if UnifiedGatewayRoute.needsDashboardLogin(method:method,path:path,
+                                                   browserAuthorized:gatewayBrowser,
+                                                   bearerAuthorized:gatewayBearer) {
+            sendHTTP(connection:connection,status:302,body:nil,
+                extraHeaders:["Location":"/dashboard/login","Cache-Control":"no-store"])
+            return
+        }
         if path == "/dashboard/login" {
-            if method == "GET" {
-                let html="""
+            let html="""
                 <!doctype html><html lang="en"><head><meta charset="utf-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1">
                 <title>Neo Dashboard sign in</title></head><body>
@@ -612,6 +618,7 @@ public final class MCPServer {
                 autocomplete="current-password" required></label>
                 <button type="submit">Sign in</button></form></main></body></html>
                 """
+            if method == "GET" {
                 sendHTTP(connection:connection,status:200,body:Data(html.utf8),contentType:"text/html; charset=utf-8",
                     extraHeaders:["Cache-Control":"no-store","X-Frame-Options":"DENY"])
                 return
@@ -624,8 +631,13 @@ public final class MCPServer {
                   (_snapshotPrivilegedAccessToken != nil && password == _snapshotPrivilegedAccessToken ||
                    _snapshotOAuthService?.isAuthorizedBearer(password) == true)
             else {
-                sendHTTP(connection:connection,status:401,body:nil,
-                    extraHeaders:["Cache-Control":"no-store"])
+                // Keep the login form visible on an invalid access code.
+                // Never echo credentials or distinguish authentication sources.
+                let retry=html.replacingOccurrences(of:"</form>",with:
+                    "</form><p role=\"alert\">Access code not accepted. Try again.</p>")
+                sendHTTP(connection:connection,status:401,body:Data(retry.utf8),
+                    contentType:"text/html; charset=utf-8",
+                    extraHeaders:["Cache-Control":"no-store","X-Frame-Options":"DENY"])
                 return
             }
             let loggedIn=gatewayBrowserSessions.login()

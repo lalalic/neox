@@ -12,6 +12,24 @@ final class UnifiedGatewayRouteTests: XCTestCase {
         XCTAssertNil(UnifiedGatewayRoute.match(method: "PUT", path: "/relay/api/jobs", browserAuthorized: true, bearerAuthorized: true))
     }
 
+    func testUnauthenticatedDashboardNavigationRedirectsOnlyHtmlEntryPages() {
+        for path in ["/dashboard/", "/dashboard/index.html"] {
+            XCTAssertTrue(UnifiedGatewayRoute.needsDashboardLogin(method: "GET", path: path,
+                browserAuthorized: false, bearerAuthorized: false))
+            XCTAssertFalse(UnifiedGatewayRoute.needsDashboardLogin(method: "GET", path: path,
+                browserAuthorized: true, bearerAuthorized: false))
+            XCTAssertFalse(UnifiedGatewayRoute.needsDashboardLogin(method: "GET", path: path,
+                browserAuthorized: false, bearerAuthorized: true))
+        }
+        for path in ["/dashboard/dashboard.js", "/dashboard/manifest.webmanifest", "/dashboard/../secret",
+                     "/relay/api/jobs", "/dashboard/csrf", "/dashboard/login"] {
+            XCTAssertFalse(UnifiedGatewayRoute.needsDashboardLogin(method: "GET", path: path,
+                browserAuthorized: false, bearerAuthorized: false), path)
+        }
+        XCTAssertFalse(UnifiedGatewayRoute.needsDashboardLogin(method: "POST", path: "/dashboard/",
+            browserAuthorized: false, bearerAuthorized: false))
+    }
+
     func testRouteAllowlistAndPrivateLoopbackPorts() {
         let model = UnifiedGatewayRoute.match(method: "POST", path: "/orchestrator-chat/messages", browserAuthorized: false, bearerAuthorized: true)
         XCTAssertEqual(model?.port, 8769)

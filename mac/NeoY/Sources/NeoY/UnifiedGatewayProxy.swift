@@ -37,6 +37,14 @@ enum UnifiedGatewayRoute {
         "ack": "POST", "attachments": "POST", "health": "GET"
     ]
 
+    /// An unauthenticated HTML navigation must show the sign-in page instead
+    /// of returning a blank 401 body. Never redirect API, assets or Bearer callers.
+    static func needsDashboardLogin(method: String, path: String,
+                                    browserAuthorized: Bool, bearerAuthorized: Bool) -> Bool {
+        method == "GET" && !browserAuthorized && !bearerAuthorized &&
+            (path == "/dashboard/" || path == "/dashboard/index.html")
+    }
+
     static func match(method: String, path: String, browserAuthorized: Bool, bearerAuthorized: Bool) -> Target? {
         guard !path.contains("%"), !path.contains(".."), !path.contains("//"),
               method == method.uppercased() else { return nil }
