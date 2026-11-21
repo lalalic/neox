@@ -47,6 +47,26 @@ A real iPhone/NeoUse acceptance test must verify the text entered the composer
 and that both the owner's bubble and complete assistant reply survive a
 relaunch. A successful automation tap alone is not proof of message delivery.
 
+## Shared DuplexVoiceKit package (under development)
+
+The reusable voice SDK lives at [`Packages/DuplexVoiceKit/`](Packages/DuplexVoiceKit/)
+with its own `Package.swift`, `LICENSE`, public protocol surface and tests.
+`project.yml` registers it as a **local** Swift package and links the
+`DuplexVoiceKit`, `DuplexVoiceApple` and `DuplexVoiceLiveKit` products to NeoxApp.
+The package is product-neutral; it is not a Neo chat transport or server.
+Other local iOS projects can reference this package by path. It is not yet a
+standalone remotely installable GitHub Swift package because its manifest is
+nested inside this repository.
+
+The current package implements generic STT/TTS protocols, Apple speech adapters,
+LiveKit 2.19 local capture and TTS sentence merging/FIFO playback coordination.
+The **LiveKit audio output**, real VAD/barge-in and iPhone full-duplex E2E are
+still outstanding. Adding a package dependency does **not** enable a Voice UI
+or replace the existing Chat composer dictation implementation.
+
+Run `swift test --package-path Packages/DuplexVoiceKit` for its package tests.
+`xcodegen generate` refreshes the local-package reference for the iOS target.
+
 ## Neo Mobile Review Inbox
 
 The Review Inbox keeps submissions on the phone after Approve or Request Changes.

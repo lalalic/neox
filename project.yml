@@ -8,6 +8,8 @@ options:
   defaultConfig: Debug
 
 packages:
+  DuplexVoiceKit:
+    path: Packages/DuplexVoiceKit
   AppCopilotKit:
     url: https://github.com/lalalic/app-copilot-kit.git
     from: 0.2.3
@@ -30,6 +32,12 @@ targets:
     dependencies:
       - package: AppCopilotKit
         product: AppCopilotKit
+      - package: DuplexVoiceKit
+        product: DuplexVoiceKit
+      - package: DuplexVoiceKit
+        product: DuplexVoiceApple
+      - package: DuplexVoiceKit
+        product: DuplexVoiceLiveKit
       - package: RoyalVNCKit
         product: RoyalVNCKit
         embed: true
