@@ -1,8 +1,100 @@
 import XCTest
+import Network
 @testable import NeoxApp
 
 @MainActor
 final class RelayJobsTests: XCTestCase {
+    // Real iPhone URLSession -> NWListener -> Relay REST JSON. The old MCP
+    // provider intentionally has no tools/list endpoint in this server.
+    // This catches the dependency that previously left Jobs empty at cutover.
+    func testDeviceRESTJobsLoadWithoutLegacyMCPConnection() async throws {
+        let ready = XCTestExpectation(description: "Device localhost Relay fixture ready")
+        let listener = try NWListener(using: .tcp, on: .any)
+        listener.stateUpdateHandler = { state in
+            if case .ready = state { ready.fulfill() }
+        }
+        listener.newConnectionHandler = { connection in
+            connection.start(queue: .global(qos: .userInitiated))
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 16_384) { data, _, _, _ in
+                let request = String(decoding: data ?? Data(), as: UTF8.self)
+                let authorized = request.lowercased().contains("authorization: bearer fixture-only-test-token")
+                let routeOK = request.hasPrefix("GET /relay/api/mobile/jobs?")
+                let offset = request.contains("offset=20") ? 20 : 0
+                let indices = offset == 0 ? Array(1...20) : Array(21...22)
+                let rows: [[String: Any]] = indices.map { i in
+                    ["id": "job_\(i)", "repository": i == 20 ? "neo/toyalive-3d" : "vlog",
+                     "status": "COMPLETED", "title": "Test Job \(i)",
+                     "createdAt": "2026-11-20T09:00:00Z", "updatedAt": "2026-11-20T10:00:00Z"]
+                }
+                let responseObject: [String: Any] = ["jobs": rows, "total": 22,
+                    "nextOffset": offset == 0 ? 20 : NSNull(), "hasMore": offset == 0]
+                let responseData = (try? JSONSerialization.data(withJSONObject: responseObject)) ?? Data()
+                let valid = authorized && routeOK
+                let payload = valid ? responseData : Data(#"{"error":"invalid_fixture_request"}"#.utf8)
+                let status = valid ? "200 OK" : "401 Unauthorized"
+                let header = "HTTP/1.1 \(status)\r\nContent-Type: application/json\r\nContent-Length: \(payload.count)\r\nConnection: close\r\n\r\n"
+                var packet = Data(header.utf8)
+                packet.append(payload)
+                connection.send(content: packet, completion: .contentProcessed { _ in connection.cancel() })
+            }
+        }
+        listener.start(queue: .global(qos: .userInitiated))
+        defer { listener.cancel() }
+        await fulfillment(of: [ready], timeout: 10)
+        let port = try XCTUnwrap(listener.port?.rawValue)
+        let master = RemoteMCPClient(testEndpoint: "http://127.0.0.1:\(port)/mcp",
+                                     testBearer: "fixture-only-test-token")
+        XCTAssertFalse(master.connected, "Legacy MCP must be disconnected in this fixture")
+        let store = RelayJobsStore()
+        await store.refresh(from: master)
+        XCTAssertNil(store.loadError, "Jobs must use bearer-authenticated REST independently")
+        XCTAssertEqual(store.jobs.count, 20)
+        XCTAssertEqual(store.total, 22)
+        XCTAssertTrue(store.hasMore)
+        XCTAssertTrue(store.jobs.contains(where: { $0.repository == "neo/toyalive-3d" }))
+        await store.loadMore(from: master)
+        XCTAssertEqual(store.jobs.count, 22)
+        XCTAssertFalse(store.hasMore)
+        XCTAssertFalse(master.connected, "No MCP dependency should be introduced")
+    }
+
+    /// One-shot physical iPhone -> TLS -> Neo Master -> live Relay integration.
+    /// Test-only random bearer; NOT the real Neo Core credential or a deployed route.
+    func testPhysicalDeviceFetchesLiveRelayJobsOverAuthenticatedHTTPS() async throws {
+        let documents = try XCTUnwrap(FileManager.default.urls(for: .documentDirectory,
+                                                                in: .userDomainMask).first)
+        let fixtureURL = documents.appendingPathComponent("neo-relay-e2e-20261120.json")
+        guard FileManager.default.fileExists(atPath: fixtureURL.path) else {
+            throw XCTSkip("Only run when an isolated signed test tunnel is set up")
+        }
+        defer { try? FileManager.default.removeItem(at: fixtureURL) }
+        let data = try Data(contentsOf: fixtureURL)
+        guard let config = try JSONSerialization.jsonObject(with: data) as? [String: String],
+              let origin = config["origin"], let credential = config["token"],
+              origin.hasPrefix("https://"), origin.hasSuffix(".trycloudflare.com"),
+              credential.count >= 48 else {
+            XCTFail("Invalid one-time HTTPS fixture configuration")
+            return
+        }
+        let master = RemoteMCPClient(testEndpoint: origin + "/mcp",testBearer:credential)
+        XCTAssertFalse(master.connected)
+        let store = RelayJobsStore()
+        await store.refresh(from: master)
+        XCTAssertNil(store.loadError, "True device-to-Mac HTTPS Jobs must not require MCP")
+        XCTAssertEqual(store.jobs.count, 20)
+        XCTAssertGreaterThan(store.total, 400, "Real Relay has hundreds of Jobs")
+        XCTAssertTrue(store.hasMore)
+        for _ in 0..<30 {
+            if !store.hasMore { break }
+            await store.loadMore(from: master)
+        }
+        XCTAssertEqual(store.jobs.count, store.total,
+                       "All actual Relay pages must be reachable on physical iPhone")
+        XCTAssertTrue(store.jobs.contains(where: { $0.repository == "neo/toyalive-3d" }),
+                      "Keep scoped repositories from the real Relay inventory")
+        XCTAssertFalse(master.connected, "Never depend on the retired MCP discovery")
+    }
+
     func testPagesLoadTwentyAtATimeAndPullRefreshResetsToFirstPage() async throws {
         let master = RemoteMCPClient()
         let rows = (1...47).compactMap { id in
@@ -58,7 +150,28 @@ final class RelayJobsTests: XCTestCase {
         failRefresh = true
         await store.refresh(from: master)
         XCTAssertEqual(store.jobs.count, 2, "Failed refresh retains last successful snapshot")
+        XCTAssertNotNil(store.loadError, "A failed fetch must remain visible to the owner")
         XCTAssertEqual(store.currentJob(matching: first).status, "COMPLETED")
+    }
+
+    func testFailedInitialFetchNeverPretendsRelayHasNoJobs() async throws {
+        let master = RemoteMCPClient()
+        var fail = true
+        let job = try XCTUnwrap(RelayJob(wire: [
+            "id": "678", "repository": "vlog", "status": "RUNNING"
+        ]))
+        let store = RelayJobsStore(pageOperation: { _, _ in
+            if fail { throw CancellationError() }
+            return RelayJobsPage(jobs: [job], total: 1, nextOffset: 1, hasMore: false)
+        })
+        await store.refresh(from: master)
+        XCTAssertTrue(store.jobs.isEmpty)
+        XCTAssertNotNil(store.loadError)
+        XCTAssertTrue(store.hasLoaded)
+        fail = false
+        await store.refresh(from: master)
+        XCTAssertNil(store.loadError, "A successful retry must clear the error")
+        XCTAssertEqual(store.jobs.map(\.id), ["678"])
     }
 
     func testJobsAreMetadataOnlyAndSanitized() throws {

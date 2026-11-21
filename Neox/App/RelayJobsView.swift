@@ -314,6 +314,7 @@ final class RelayJobsStore: ObservableObject {
     @Published private(set) var hasMore = false
     @Published private(set) var total = 0
     @Published private(set) var hasLoaded = false
+    @Published private(set) var loadError: String?
     @Published private(set) var activities: [String: [RelayJobActivityEvent]] = [:]
     @Published private(set) var taskTitles: [String: [String: String]] = [:]
     private var refreshing = false
@@ -333,8 +334,9 @@ final class RelayJobsStore: ObservableObject {
         guard master.hasConfiguredAddress && master.hasCredential else {
             throw RelayJobsFetchError.notConnected
         }
-        if !master.connected { await master.connect() }
-        guard master.connected else { throw RelayJobsFetchError.notConnected }
+        // Unified Jobs REST is independently Bearer-authenticated. Do not
+        // block its request on the legacy MCP tool-list connection: after
+        // cutover that MCP provider is deliberately retired.
         return try await master.relayJobs(offset: offset)
     }
 
@@ -345,7 +347,13 @@ final class RelayJobsStore: ObservableObject {
         defer { refreshing = false; isLoading = false; hasLoaded = true }
         do {
             applyPage(try await fetchPage(from: master, offset: 0), reset: true)
+            loadError = nil
         } catch {
+            // A failed first page is not proof of an empty Relay inventory.
+            // An isolated test bundle has its own credentials and preferences.
+            loadError = !master.hasConfiguredAddress || !master.hasCredential
+                ? "Connect to Neo Master in Connector to load Jobs."
+                : "Cannot load Jobs from Neo Master. Check the connection and retry."
             // Retain the visible page during temporary network failures.
         }
     }
@@ -412,8 +420,8 @@ final class RelayJobsStore: ObservableObject {
     func canCancel(_ job: RelayJob) -> Bool { job.canCancel && cancelOperation != nil }
 
     func refreshActivity(for job: RelayJob, from master: RemoteMCPClient) async {
-        if !master.connected { await master.connect() }
-        guard master.connected else { return }
+        guard master.hasCredential && master.hasConfiguredAddress else { return }
+        // REST activity remains available even if the old MCP connection is not.
         async let events = master.relayJobActivity(job)
         if taskTitles[key(job)] == nil {
             // An existing safe Gateway endpoint exposes Task titles without prompts.
@@ -546,12 +554,27 @@ struct RelayJobsView: View {
             .overlay {
                 if store.jobs.isEmpty && store.isLoading {
                     ProgressView("Loading Jobs")
+                } else if store.jobs.isEmpty, let error = store.loadError {
+                    VStack(spacing: 12) {
+                        Label("Jobs unavailable", systemImage: "wifi.exclamationmark")
+                            .font(.headline)
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                        Button("Retry Jobs") {
+                            Task { await store.refresh(from: master) }
+                        }
+                        .accessibilityIdentifier("neoRelayJobsRetry")
+                    }
+                    .padding()
                 } else if store.jobs.isEmpty {
                     ContentUnavailableView("No recent Jobs", systemImage: "tray",
                                            description: Text("Jobs from your selected Master will appear here."))
                 }
             }
-            .accessibilityIdentifier("neoRelayJobsList")
+            // Do not put an identifier on the whole List: on iOS 26 it
+            // overrides individual row and Retry button accessibility IDs.
             .refreshable { await store.refresh(from: master) }
             .listStyle(.plain)
             .navigationDestination(for: RelayJob.self) { job in
@@ -592,7 +615,9 @@ struct RelayJobsView: View {
                 Text(failureMessage ?? "Could not cancel this Job. Refresh and try again.")
             }
         }
-        .task {
+        .task(id: master.endpoint) {
+            // The user may pair/select Neo Master after Jobs was initially
+            // created by TabView. Always refresh on a selected Master change.
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-neo-jobs-ui-fixture") {
                 store.seedForUITest()
@@ -600,6 +625,12 @@ struct RelayJobsView: View {
             }
             #endif
             await store.refresh(from: master)
+        }
+        .onChange(of: master.connected) { _, isConnected in
+            // The same URL may be re-paired later with a valid credential.
+            // Jobs REST also works without this MCP connection, but a new
+            // successful pairing should restore the owner-visible list.
+            if isConnected { Task { await store.refresh(from: master) } }
         }
     }
 }

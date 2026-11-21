@@ -22,7 +22,9 @@ struct MarkcutReviewInboxView: View {
     }
 
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var remote = RemoteMCPClient()
+    // Share the selected Master with Chat/Jobs/Connector. A private copy
+    // becomes stale when a user pairs the app after opening Review.
+    @EnvironmentObject private var remote: RemoteMCPClient
     @ObservedObject private var inbox = MarkcutReviewInboxStore.shared
     @ObservedObject private var reviewPush = ReviewPushCoordinator.shared
     @State private var fixtureSessions: [[String: Any]]?
@@ -61,8 +63,8 @@ struct MarkcutReviewInboxView: View {
         // owned history without labels needs the compatibility lookup.
         let wanted = Set(inbox.requests.filter { $0.subtitle == nil }.compactMap(\.jobID))
         guard !wanted.isEmpty, remote.hasConfiguredAddress, remote.hasCredential else { return }
-        if !remote.connected { await remote.connect() }
-        guard remote.connected else { return }
+        // The new Relay REST job metadata route does not depend on the
+        // discontinued chat-gateway MCP provider or its tools/list state.
         var names: [String: String] = [:]
         var matchedJobs: [String: RelayJob] = [:]
         var offset = 0

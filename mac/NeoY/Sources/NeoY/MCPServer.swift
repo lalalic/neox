@@ -72,6 +72,7 @@ public final class MCPServer {
     /// Optional Bonjour service name; when set the listener advertises `_mcp._tcp`.
     public let bonjourName: String?
 
+    nonisolated private let gatewayBrowserSessions = UnifiedGatewayBrowserSessions()
     private var listener: NWListener?
     private var toolHandlers: [String: ToolHandler] = [:]
     private var federatedToolProviders: [String: String] = [:]
@@ -413,6 +414,7 @@ public final class MCPServer {
             case .ready:
                 self.receiveHTTPData(connection: connection, accumulated: Data())
             case .failed, .cancelled:
+                UnifiedGatewayInFlight.shared.cancel(for: connection)
                 connection.cancel()
             default:
                 break
@@ -445,46 +447,39 @@ public final class MCPServer {
                 data.append(content)
             }
 
-            // Check if we have a complete HTTP request
-            if let raw = String(data: data, encoding: .utf8),
-               let headerEnd = raw.range(of: "\r\n\r\n") {
-                let headers = String(raw[raw.startIndex..<headerEnd.lowerBound])
-                var expectedContentLength = 0
-                for line in headers.split(separator: "\r\n") {
-                    if line.lowercased().hasPrefix("content-length:") {
-                        let valStr = line.split(separator: ":").dropFirst().joined(separator: ":").trimmingCharacters(in: .whitespaces)
-                        expectedContentLength = Int(valStr) ?? 0
-                        break
-                    }
+            // Parse HTTP headers as bytes. Multipart attachment bodies are binary;
+            // decoding the entire request as UTF-8 corrupts or rejects them.
+            if data.count > 48 * 1024 * 1024 + 65_536 { connection.cancel(); return }
+            if let terminator=data.range(of: Data("\r\n\r\n".utf8)) {
+                let headerData=data.subdata(in:0..<terminator.lowerBound)
+                guard let header=String(data:headerData,encoding:.utf8),headerData.count<=65_536 else {
+                    connection.cancel();return
                 }
-
-                let headerEndOffset = raw.distance(from: raw.startIndex, to: headerEnd.upperBound)
-                let bodyLength = data.count - headerEndOffset
-
-                if expectedContentLength == 0 || bodyLength >= expectedContentLength {
-                    self.processHTTPRequest(raw: String(data: data, encoding: .utf8) ?? raw, connection: connection)
+                let headerLines=header.split(separator:"\r\n")
+                let lengths=headerLines.filter { $0.lowercased().hasPrefix("content-length:") }
+                let transferEncoding=headerLines.contains { $0.lowercased().hasPrefix("transfer-encoding:") }
+                guard lengths.count<=1 && !transferEncoding else {connection.cancel();return}
+                let value=lengths.first?.split(separator:":",maxSplits:1).last?.trimmingCharacters(in:.whitespaces)
+                let expected=Int(value ?? "0") ?? -1
+                guard expected>=0 && expected<=48*1024*1024 else {connection.cancel();return}
+                let bodyOffset=terminator.upperBound
+                if data.count-bodyOffset>=expected {
+                    let raw=header+"\r\n\r\n"
+                    self.processHTTPRequest(raw:raw, connection:connection,
+                        binaryBody:expected>0 ? data.subdata(in:bodyOffset..<(bodyOffset+expected)) : nil)
                     return
                 }
             }
-
             if isComplete || (content == nil && accumulated.isEmpty) {
-                if data.isEmpty {
-                    connection.cancel()
-                } else if let raw = String(data: data, encoding: .utf8) {
-                    self.processHTTPRequest(raw: raw, connection: connection)
-                } else {
-                    connection.cancel()
-                }
-                return
+                connection.cancel();return
             }
-
-            self.receiveHTTPData(connection: connection, accumulated: data)
+            self.receiveHTTPData(connection:connection, accumulated:data)
         }
     }
 
     // MARK: - HTTP Request Router (nonisolated — runs on httpQueue)
 
-    nonisolated private func processHTTPRequest(raw: String, connection: NWConnection) {
+    nonisolated private func processHTTPRequest(raw: String, connection: NWConnection, binaryBody: Data? = nil) {
         let lines = raw.split(separator: "\r\n", omittingEmptySubsequences: false)
         guard let requestLine = lines.first else {
             sendHTTP(connection: connection, status: 400, body: nil)
@@ -545,14 +540,8 @@ public final class MCPServer {
             onRequest("\(method) \(path.hasPrefix("/mcp/rest/") ? "/mcp/rest/<redacted>" : path)")
         }
 
-        // Extract body
-        var body: Data?
-        if let bodyStart = raw.range(of: "\r\n\r\n") {
-            let bodyStr = String(raw[bodyStart.upperBound...])
-            if !bodyStr.isEmpty {
-                body = bodyStr.data(using: .utf8)
-            }
-        }
+        // Keep original bytes for all request bodies, including attachments.
+        let body=binaryBody
 
         if let oauth = _snapshotOAuthService,
            let response = oauth.handle(method: method, path: path, requestTarget: requestTarget, headers: headers, body: body) {
@@ -597,6 +586,92 @@ public final class MCPServer {
                          extraHeaders: ["Cache-Control": "no-store"])
                 return
             }
+        }
+
+        // Authenticated reverse-proxy edge. The browser has a scoped, HttpOnly
+        // session; iPhone clients instead use their existing Bearer credential.
+        // Never reuse a query token or expose a raw /api or /mobile/notify route.
+        let gatewayBearer = bearerToken != nil && (
+            (_snapshotPrivilegedAccessToken != nil && bearerToken == _snapshotPrivilegedAccessToken) ||
+            (_snapshotOAuthService?.isAuthorizedBearer(bearerToken) == true))
+        let gatewayCSRF = gatewayBrowserSessions.csrf(cookieHeader:headers["cookie"])
+        let gatewayBrowser = gatewayCSRF != nil
+        if path == "/dashboard" && method == "GET" {
+            sendHTTP(connection:connection,status:302,body:nil,
+                extraHeaders:["Location":"/dashboard/","Cache-Control":"no-store"])
+            return
+        }
+        if path == "/dashboard/login" {
+            if method == "GET" {
+                let html="""
+                <!doctype html><html lang="en"><head><meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <title>Neo Dashboard sign in</title></head><body>
+                <main><h1>Neo Dashboard</h1><form action="/dashboard/login" method="post">
+                <label>Neo access code <input type="password" name="access_code"
+                autocomplete="current-password" required></label>
+                <button type="submit">Sign in</button></form></main></body></html>
+                """
+                sendHTTP(connection:connection,status:200,body:Data(html.utf8),contentType:"text/html; charset=utf-8",
+                    extraHeaders:["Cache-Control":"no-store","X-Frame-Options":"DENY"])
+                return
+            }
+            guard method == "POST",(body?.count ?? 0)<=4096,
+                  headers["content-type"]?.lowercased().hasPrefix("application/x-www-form-urlencoded")==true,
+                  let body, let form=String(data:body,encoding:.utf8),
+                  let password=URLComponents(string:"?"+form)?.queryItems?.first(where:{$0.name=="access_code"})?.value,
+                  !password.isEmpty,
+                  (_snapshotPrivilegedAccessToken != nil && password == _snapshotPrivilegedAccessToken ||
+                   _snapshotOAuthService?.isAuthorizedBearer(password) == true)
+            else {
+                sendHTTP(connection:connection,status:401,body:nil,
+                    extraHeaders:["Cache-Control":"no-store"])
+                return
+            }
+            let loggedIn=gatewayBrowserSessions.login()
+            sendHTTP(connection:connection,status:303,body:nil,
+                extraHeaders:["Location":"/dashboard/","Set-Cookie":loggedIn.cookie,
+                              "Cache-Control":"no-store"])
+            return
+        }
+        if path == "/dashboard/csrf" {
+            guard method=="GET", let csrf=gatewayCSRF else {
+                sendHTTP(connection:connection,status:401,body:nil,
+                    extraHeaders:["Cache-Control":"no-store"]);return
+            }
+            sendJSON(connection:connection,status:200,json:["csrf":csrf]);return
+        }
+        if path.hasPrefix("/dashboard/") || path.hasPrefix("/relay/") || path.hasPrefix("/orchestrator-chat/") {
+            guard let route=UnifiedGatewayRoute.match(method:method,path:path,
+                                                       browserAuthorized:gatewayBrowser,
+                                                       bearerAuthorized:gatewayBearer) else {
+                sendHTTP(connection:connection,status:gatewayBearer || gatewayBrowser ? 404 : 401,
+                         body:nil,extraHeaders:["Cache-Control":"no-store"])
+                return
+            }
+            if gatewayBrowser && !gatewayBearer && method != "GET" {
+                let host=headers["host"] ?? ""
+                let scheme=isCloudflareProxy || headers["x-forwarded-proto"]=="https" ? "https" : "http"
+                guard headers["origin"]=="\(scheme)://\(host)",
+                      let csrf=gatewayCSRF,headers["x-neo-csrf"]==csrf else {
+                    sendHTTP(connection:connection,status:403,body:nil,
+                             extraHeaders:["Cache-Control":"no-store"])
+                    return
+                }
+            }
+            // Forward only the original query string, not any client credentials.
+            let query=URLComponents(string:"http://127.0.0.1"+requestTarget)?.percentEncodedQuery
+            let immutableBody=body
+            let requestContentType=headers["content-type"]
+            let task=Task.detached(priority:.userInitiated) {
+                await UnifiedGatewayStream.forward(connection:connection,method:method,target:route,
+                                                   query:query,contentType:requestContentType,
+                                                   idempotencyKey:headers["idempotency-key"],
+                                                   body:immutableBody)
+                UnifiedGatewayInFlight.shared.clear(for:connection)
+            }
+            UnifiedGatewayInFlight.shared.install(task,for:connection)
+            return
         }
 
         // Mobile device registration is protected by the Master Access Code.
@@ -1224,6 +1299,7 @@ public final class MCPServer {
         case 202: statusText = "Accepted"
         case 204: statusText = "No Content"
         case 302: statusText = "Found"
+        case 303: statusText = "See Other"
         case 400: statusText = "Bad Request"
         case 401: statusText = "Unauthorized"
         case 404: statusText = "Not Found"

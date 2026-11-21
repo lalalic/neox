@@ -56,6 +56,16 @@ final class RemoteMCPClient: ObservableObject {
         bearer = Self.readSecret(account: Self.credentialAccount(for: endpoint)) ?? ""
     }
 
+    #if DEBUG
+    /// Test-only, isolated loopback REST fixture. Never reads or persists
+    /// production iPhone credentials, and is absent from release builds.
+    init(testEndpoint: String, testBearer: String) {
+        endpoint = testEndpoint
+        activeEndpoint = testEndpoint
+        bearer = testBearer
+    }
+    #endif
+
     var hasCredential: Bool { !bearer.isEmpty }
     var hasConfiguredAddress: Bool { !endpoint.isEmpty }
     var usingLAN: Bool { activeEndpoint?.hasPrefix("http://") == true }
@@ -312,9 +322,20 @@ final class RemoteMCPClient: ObservableObject {
     /// The Chat tab uses the existing saved authenticated HTTPS Master, never a
     /// second listener or credentials copied from a Bonjour discovery result.
     func relayJobs(offset: Int = 0, limit: Int = RelayJobsPage.pageSize) async throws -> RelayJobsPage {
-        let result = try await callAuthenticatedTool(chatGatewayProvider, [
-            "command": "chat_jobs", "args": ["limit": limit, "offset": offset]
-        ])
+        let result: [String: Any]
+        if let direct = try await relayREST("GET", path: "/relay/api/mobile/jobs", query: [
+            URLQueryItem(name: "offset", value: String(offset)),
+            URLQueryItem(name: "limit", value: String(limit))]) {
+            // REST uses null as its terminal page cursor. The view's typed
+            // cursor uses total for that same terminal state.
+            var normalized = direct
+            if direct["nextOffset"] is NSNull { normalized["nextOffset"] = direct["total"] }
+            result = normalized
+        } else {
+            result = try await callAuthenticatedTool(chatGatewayProvider, [
+                "command": "chat_jobs", "args": ["limit": limit, "offset": offset]
+            ])
+        }
         guard let rows = result["jobs"] as? [[String: Any]],
               let total = result["total"] as? Int, total >= 0,
               let nextOffset = result["nextOffset"] as? Int,
@@ -332,10 +353,15 @@ final class RemoteMCPClient: ObservableObject {
     /// Task titles are a distinct sanitized read-only Relay view. Never
     /// transfer prompts, private file paths, objectives or task artifacts.
     func relayJobTasks(_ job: RelayJob) async throws -> [String: String] {
-        let result = try await callAuthenticatedTool(chatGatewayProvider, [
-            "command": "chat_job_tasks",
-            "args": ["repository": job.repository, "jobId": job.id]
-        ])
+        let result: [String: Any]
+        if let direct = try await relayREST("GET", path: "/relay/api/mobile/job-tasks",
+            query: [URLQueryItem(name: "id", value: job.id), URLQueryItem(name: "repo", value: job.repository)]) {
+            result = direct
+        } else {
+            result = try await callAuthenticatedTool(chatGatewayProvider, [
+                "command": "chat_job_tasks", "args": ["repository": job.repository, "jobId": job.id]
+            ])
+        }
         guard result["jobId"] as? String == job.id,
               result["repository"] as? String == job.repository,
               let tasks = result["tasks"] as? [[String: Any]], tasks.count <= 500 else {
@@ -356,13 +382,21 @@ final class RemoteMCPClient: ObservableObject {
     /// Read only allowlisted activity from the authenticated Master. Source
     /// events have no client ID; attach a stable position-based UI identity.
     func relayJobActivity(_ job: RelayJob) async throws -> [RelayJobActivityEvent] {
-        let result = try await callAuthenticatedTool(chatGatewayProvider, [
-            "command": "chat_job_activity",
-            "args": ["repository": job.repository, "jobId": job.id]
-        ])
+        let result: [String: Any]
+        let direct: Bool
+        if let rest = try await relayREST("GET", path: "/relay/api/mobile/job-activity",
+            query: [URLQueryItem(name: "id", value: job.id), URLQueryItem(name: "repo", value: job.repository)]) {
+            result = rest
+            direct = true
+        } else {
+            result = try await callAuthenticatedTool(chatGatewayProvider, [
+                "command": "chat_job_activity", "args": ["repository": job.repository, "jobId": job.id]
+            ])
+            direct = false
+        }
         guard result["repository"] as? String == job.repository,
               result["jobId"] as? String == job.id,
-              result["source"] as? String == "events-bus-history",
+              (direct || result["source"] as? String == "events-bus-history"),
               let rows = result["events"] as? [[String: Any]] else {
             throw RemoteError.invalidResponse
         }
@@ -375,10 +409,15 @@ final class RemoteMCPClient: ObservableObject {
     /// this method returns a success; a request acknowledgement is insufficient.
     func cancelRelayJob(_ job: RelayJob) async throws -> RelayJob {
         guard job.canCancel else { throw RelayJobCancellationError.unsupported }
-        let result = try await callAuthenticatedTool(chatGatewayProvider, [
-            "command": "chat_job_cancel",
-            "args": ["repository": job.repository, "jobId": job.id]
-        ])
+        let result: [String: Any]
+        if let direct = try await relayREST("POST", path: "/relay/api/mobile/job-cancel",
+                                        body: ["id": job.id, "repository": job.repository]) {
+            result = direct
+        } else {
+            result = try await callAuthenticatedTool(chatGatewayProvider, [
+                "command": "chat_job_cancel", "args": ["repository": job.repository, "jobId": job.id]
+            ])
+        }
         guard result["status"] as? String == "cancelled",
               result["repository"] as? String == job.repository,
               result["id"] as? String == job.id else {
@@ -390,6 +429,25 @@ final class RemoteMCPClient: ObservableObject {
             throw RelayJobCancellationError.unconfirmed
         }
         return confirmed
+    }
+
+    /// A legacy gateway returns 404 and remains usable. Never fall back
+    /// after an authorization error, mutation failure or uncertain receipt.
+    private func relayREST(_ method: String, path: String, query: [URLQueryItem] = [],
+                           body: [String: Any]? = nil) async throws -> [String: Any]? {
+        do {
+            let rest = try unifiedGatewayREST()
+            return try await rest.json(method, path: path, query: query, body: body)
+        } catch GatewayRESTError.http(404) {
+            return nil
+        }
+    }
+
+    /// REST routes use the SAME selected Master credential as MCP.
+    /// No independently discovered host or redirect may receive this token.
+    func unifiedGatewayREST() throws -> UnifiedGatewayREST {
+        let scheme = (activeEndpoint ?? endpoint).hasPrefix("http://") ? "http" : "https"
+        return try UnifiedGatewayREST(origin: remoteURL(path: "/", scheme: scheme), token: bearer)
     }
 
     func chatGatewayFeed() async throws -> [ChatGatewayItem] {
