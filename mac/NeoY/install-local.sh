@@ -91,7 +91,10 @@ codesign --verify --deep --strict "$APP"
   print -u2 "NeoY install preflight failed: signed Rust Core identity mismatch."
   exit 1
 }
-[[ "$("$APP/Contents/Resources/neo-cluster-rust" --version)" == "$(grep -E '^version = ' "$HERE/ClusterRust/Cargo.toml" | head -1 | cut -d'"' -f2)" ]] || {
+# ClusterRust currently loads its direct-mode config *before* parsing
+# --version; supply an inert, fixed-length token only to that read-only probe.
+# This is NOT a service access token and is never persisted or used to start it.
+[[ "$(NODE_ACCESS_TOKEN=00000000000000000000000000000000 "$APP/Contents/Resources/neo-cluster-rust" --version)" == "$(grep -E '^version = ' "$HERE/ClusterRust/Cargo.toml" | head -1 | cut -d'"' -f2)" ]] || {
   print -u2 "NeoY install preflight failed: signed Rust Cluster identity mismatch."
   exit 1
 }
