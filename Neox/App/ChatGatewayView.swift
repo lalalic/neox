@@ -213,13 +213,13 @@ final class ChatGatewayStore: ObservableObject {
     /// authenticated. If unavailable, keep the local outbox for later retry.
     func runUnifiedSession(using master: RemoteMCPClient) async -> Bool {
         guard master.hasConfiguredAddress && master.hasCredential else { return false }
-        if !master.connected { await master.connect() }
-        guard master.connected else { return unifiedAvailable }
+        // The unified REST/SSE route is independent of MCP connectivity.
+        // An unavailable or removed legacy MCP provider must not strand Chat.
         do {
-            // The retired MCP must never become a mandatory prerequisite for
-            // the new REST/SSE transport. Keep import pending for later recovery.
-            await importLegacyIfAvailable { try await master.chatGatewayFeed() }
             let rest = try master.unifiedGatewayREST()
+            if master.connected {
+                await importLegacyIfAvailable { try await master.chatGatewayFeed() }
+            }
             let receipt = try await rest.json("GET", path: "/orchestrator-chat/pending")
             guard let pending = receipt["pending"] as? [[String: Any]] else {
                 throw GatewayRESTError.invalidResponse
@@ -229,6 +229,26 @@ final class ChatGatewayStore: ObservableObject {
             try await flushUnified(using: rest)
             let key = unifiedCursorKey(for: master.endpoint)
             let cursor = max(0, preferences.integer(forKey: key))
+            // Recover un-ACKed complete replies even if an already-open SSE
+            // stream stops delivering bytes through iOS/Cloudflare. This task
+            // runs only while the Chat tab is visible and cannot send twice:
+            // persisted replies are keyed by requestId, and ACK is idempotent.
+            let pendingRecovery = Task { [weak self] in
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .seconds(4)) }
+                    catch { return }
+                    guard let self else { return }
+                    do {
+                        let fresh = try await rest.json("GET", path: "/orchestrator-chat/pending")
+                        guard let waiting = fresh["pending"] as? [[String: Any]] else { continue }
+                        try await self.reconcileUnifiedPending(waiting, rest: rest)
+                    } catch {
+                        // Keep the SSE listener alive. Temporary network errors
+                        // are retried by the next four-second reconciliation.
+                    }
+                }
+            }
+            defer { pendingRecovery.cancel() }
             do {
                 try await rest.events(after: cursor) { [weak self] payload in
                 guard let self else { return }
