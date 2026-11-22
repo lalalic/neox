@@ -31,7 +31,7 @@ enum UnifiedGatewayRoute {
         "router-test": ["POST"], "execution-router-rules": ["PUT"],
         "troubleshooter-qa": ["PUT"]
     ]
-    private static let mobileReads: Set<String> = ["mobile/jobs", "mobile/job-tasks", "mobile/job-activity"]
+    private static let mobileReads: Set<String> = ["mobile/jobs", "mobile/job-tasks", "mobile/job-activity", "mobile/events"]
     private static let orchestratorMethods: [String: String] = [
         "messages": "POST", "events": "GET", "pending": "GET",
         "ack": "POST", "attachments": "POST", "health": "GET"
@@ -67,7 +67,8 @@ enum UnifiedGatewayRoute {
             }
             if bearerAuthorized && (method == "GET" && mobileReads.contains(name)
                 || method == "POST" && name == "mobile/job-cancel") {
-                return Target(port: 8787, path: "/api/" + name, requiresModelToken: false, streaming: false)
+                return Target(port: 8787, path: "/api/" + name, requiresModelToken: false,
+                              streaming: name == "mobile/events")
             }
             return nil
         }

@@ -317,6 +317,9 @@ final class RelayJobsStore: ObservableObject {
     @Published private(set) var loadError: String?
     @Published private(set) var activities: [String: [RelayJobActivityEvent]] = [:]
     @Published private(set) var taskTitles: [String: [String: String]] = [:]
+    @Published private(set) var liveRevision = 0
+    @Published private(set) var activityLoadingIDs = Set<String>()
+    @Published private(set) var activityErrors: [String: String] = [:]
     private var refreshing = false
     private var nextOffset = 0
     private let cancelOperation: CancelOperation?
@@ -420,19 +423,39 @@ final class RelayJobsStore: ObservableObject {
     func canCancel(_ job: RelayJob) -> Bool { job.canCancel && cancelOperation != nil }
 
     func refreshActivity(for job: RelayJob, from master: RemoteMCPClient) async {
-        guard master.hasCredential && master.hasConfiguredAddress else { return }
-        // REST activity remains available even if the old MCP connection is not.
-        async let events = master.relayJobActivity(job)
-        if taskTitles[key(job)] == nil {
-            // An existing safe Gateway endpoint exposes Task titles without prompts.
-            taskTitles[key(job)] = try? await master.relayJobTasks(job)
+        let identity = key(job)
+        guard !activityLoadingIDs.contains(identity) else { return }
+        activityLoadingIDs.insert(identity)
+        defer { activityLoadingIDs.remove(identity) }
+        guard master.hasCredential && master.hasConfiguredAddress else {
+            activityErrors[identity] = "Connect to Neo Master to load Activity."
+            return
         }
+        // Load actual event history FIRST. Task title lookup is optional:
+        // never block the entire Activity screen on a second network request.
         do {
-            let rows = try await events
-            activities[key(job)] = rows.sorted { $0.date > $1.date }
+            let rows = try await master.relayJobActivity(job)
+            activities[identity] = rows.sorted { $0.date > $1.date }
+            activityErrors.removeValue(forKey: identity)
         } catch {
-            // Preserve the last authoritative history if the Master is unavailable.
+            activityErrors[identity] = "Unable to load Activity from Neo Master. Retry."
+            // Keep the last successfully fetched timeline on transient errors.
         }
+        if taskTitles[identity] == nil {
+            taskTitles[identity] = try? await master.relayJobTasks(job)
+        }
+    }
+
+    func isActivityLoading(_ job: RelayJob) -> Bool {
+        activityLoadingIDs.contains(key(job))
+    }
+
+    func activityError(for job: RelayJob) -> String? {
+        activityErrors[key(job)]
+    }
+
+    func receiveLiveChange() {
+        liveRevision &+= 1
     }
 
     func setActivity(_ events: [RelayJobActivityEvent], for job: RelayJob) {
@@ -625,6 +648,25 @@ struct RelayJobsView: View {
             }
             #endif
             await store.refresh(from: master)
+            guard master.hasConfiguredAddress && master.hasCredential else { return }
+            // Subscribe to the authenticated, redacted Relay change stream.
+            // Never infer new state from SSE payloads; re-fetch durable REST.
+            while !Task.isCancelled {
+                do {
+                    let rest = try master.unifiedGatewayREST()
+                    try await rest.relayChanges {
+                        await store.refresh(from: master)
+                        store.receiveLiveChange()
+                    }
+                } catch {
+                    // Older Masters may not yet expose this route. Keep the
+                    // loaded Jobs usable and retry without switching identity.
+                }
+                if Task.isCancelled { return }
+                do { try await Task.sleep(for: .seconds(3)) }
+                catch { return }
+                await store.refresh(from: master)
+            }
         }
         .onChange(of: master.connected) { _, isConnected in
             // The same URL may be re-paired later with a valid credential.
@@ -726,12 +768,21 @@ private struct RelayJobDetailView: View {
                             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                         }
                     }
+                } else if store.isActivityLoading(job) {
+                    ProgressView("Loading activity")
+                        .listRowBackground(Color.clear)
                 } else {
-                    ContentUnavailableView(
-                        "Activity not available yet",
-                        systemImage: "clock.arrow.circlepath",
-                        description: Text("This Master currently provides Job summaries only. Activity will appear when the gateway supports it.")
-                    )
+                    VStack(spacing: 12) {
+                        ContentUnavailableView(
+                            "Activity unavailable",
+                            systemImage: "wifi.exclamationmark",
+                            description: Text(store.activityError(for: job) ?? "Activity has not loaded. Retry the request.")
+                        )
+                        Button("Retry Activity") {
+                            Task { await store.refreshActivity(for: job, from: master) }
+                        }
+                        .accessibilityIdentifier("neoRelayActivityRetry")
+                    }
                     .listRowBackground(Color.clear)
                 }
             }
@@ -744,11 +795,10 @@ private struct RelayJobDetailView: View {
             await store.refreshActivity(for: job, from: master)
         }
         .task(id: "\(job.repository)/\(job.id)") {
-            while !Task.isCancelled {
-                await store.refreshActivity(for: job, from: master)
-                do { try await Task.sleep(for: .seconds(8)) }
-                catch { return }
-            }
+            await store.refreshActivity(for: job, from: master)
+        }
+        .onChange(of: store.liveRevision) { _, _ in
+            Task { await store.refreshActivity(for: job, from: master) }
         }
     }
 }

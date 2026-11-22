@@ -49,6 +49,13 @@ final class UnifiedGatewayRouteTests: XCTestCase {
         let relay = UnifiedGatewayRoute.match(method: "POST", path: "/relay/api/mobile/job-cancel", browserAuthorized: false, bearerAuthorized: true)
         XCTAssertEqual(relay?.path, "/api/mobile/job-cancel")
         XCTAssertFalse(relay?.requiresModelToken == true)
+        let mobileEvents = UnifiedGatewayRoute.match(method: "GET", path: "/relay/api/mobile/events",
+            browserAuthorized: false, bearerAuthorized: true)
+        XCTAssertEqual(mobileEvents?.path, "/api/mobile/events")
+        XCTAssertEqual(mobileEvents?.port, 8787)
+        XCTAssertTrue(mobileEvents?.streaming == true)
+        XCTAssertNil(UnifiedGatewayRoute.match(method: "GET", path: "/relay/api/mobile/events",
+            browserAuthorized: true, bearerAuthorized: false))
     }
 
     func testTraversalAndUnknownRoutesFailClosed() {

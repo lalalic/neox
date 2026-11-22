@@ -73,6 +73,48 @@ final class UnifiedGatewayREST: NSObject, URLSessionTaskDelegate, @unchecked Sen
         return obj
     }
 
+    /// Bearer-authenticated Relay notifications contain no Job payload, prompts
+    /// or event text. The authoritative Jobs/Activity data is re-fetched by REST.
+    @MainActor func relayChanges(onChange: @escaping @MainActor () async -> Void) async throws {
+        var request = try makeRequest("GET", path: "/relay/api/mobile/events",
+                                      query: [], body: nil)
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 3600
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpShouldSetCookies = false
+        configuration.timeoutIntervalForResource = 3600
+        let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
+        let (bytes, response) = try await session.bytes(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+              http.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("text/event-stream") == true else {
+            throw GatewayRESTError.http((response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        var eventName = ""
+        var dataLines: [String] = []
+        for try await line in bytes.lines {
+            try Task.checkCancellation()
+            if line.isEmpty {
+                if eventName == "change" {
+                    guard dataLines.count == 1,
+                          let data = dataLines[0].data(using: .utf8), data.count <= 256,
+                          let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          json.count == 1, json["refresh"] as? Bool == true else {
+                        throw GatewayRESTError.invalidResponse
+                    }
+                    await onChange()
+                }
+                dataLines.removeAll(keepingCapacity: true)
+                eventName = ""
+            } else if line.hasPrefix("event:") {
+                eventName = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("data:") {
+                guard dataLines.count < 2 else { throw GatewayRESTError.invalidResponse }
+                dataLines.append(String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces))
+            }
+        }
+    }
+
     /// A caller must persist the received message BEFORE advancing its cursor.
     func events(after cursor: Int, onEvent: @escaping @MainActor (Data) async throws -> Void) async throws {
         guard cursor >= 0 else { throw GatewayRESTError.invalidResponse }

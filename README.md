@@ -99,6 +99,8 @@ The Jobs tab first reads the selected Master's authenticated `/relay/api/mobile/
 
 Jobs are fetched in pages of **20**, not as a full inventory: pull down to reset to the newest 20, or swipe up to the bottom to append 20 more. The list does not automatically reset while scrolling. Open a Job to refresh its activity. Eligible Jobs expose a swipe **Cancel** action only when the authenticated gateway advertises `cancellable`; cancellation asks for confirmation and the phone requires the Master's authoritative `CANCELLED` readback. The request uses the exact repository and Job ID, not a PR number. Older gateways that omit the capability cannot offer cancellation. Connectivity failures preserve the last good snapshot rather than treating it as an empty authoritative state.
 
+Jobs now subscribe to the selected Master's authenticated \`/relay/api/mobile/events\` SSE endpoint. The stream carries only a fixed \`{"refresh":true}\` wake-up and never includes raw Job, Task or private message content; the app re-reads Jobs and the open Activity timeline from the authenticated REST routes. Opening an Activity screen shows a loading state while fetching; failed fetches retain prior events and expose Retry rather than claiming that the Master lacks Activity. Older Masters without the SSE route remain readable with pull-to-refresh.
+
 The Relay/mobile gateway owns the source of truth and authorization: [Chat Gateway Skill](https://github.com/lalalic/neo/blob/main/skills/chat-gateway/SKILL.md) and [Mobile Job controls](https://github.com/lalalic/neo/blob/main/skills/chat-gateway/docs/neo-mobile-job-controls.md). The phone does not mutate Relay's SQLite store or infer completion from a submission receipt.
 
 ## NeoY v2 design principles
