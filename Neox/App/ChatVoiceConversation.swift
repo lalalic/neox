@@ -53,17 +53,9 @@ final class ChatVoiceConversation: ObservableObject {
         errorText = nil
         let token = UUID()
         generation = token
-        let speechAllowed = await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: status == .authorized)
-            }
-        }
+        let speechAllowed = await Self.requestSpeechPermission()
         guard generation == token else { return }
-        let microphoneAllowed = await withCheckedContinuation { continuation in
-            AVAudioApplication.requestRecordPermission { granted in
-                continuation.resume(returning: granted)
-            }
-        }
+        let microphoneAllowed = await Self.requestMicrophonePermission()
         guard generation == token else { return }
         guard speechAllowed && microphoneAllowed else {
             phase = .error
@@ -97,6 +89,25 @@ final class ChatVoiceConversation: ObservableObject {
         } catch {
             phase = .error
             errorText = "Cannot start LiveKit microphone: \(error.localizedDescription)"
+        }
+    }
+
+    // Apple's authorization callbacks run on arbitrary TCC/XPC queues. Do
+    // not create their closures inside a @MainActor method: Swift 6 would
+    // inherit MainActor isolation and trap on the authorization callback.
+    private nonisolated static func requestSpeechPermission() async -> Bool {
+        await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in
+                continuation.resume(returning: status == .authorized)
+            }
+        }
+    }
+
+    private nonisolated static func requestMicrophonePermission() async -> Bool {
+        await withCheckedContinuation { continuation in
+            AVAudioApplication.requestRecordPermission { granted in
+                continuation.resume(returning: granted)
+            }
         }
     }
 

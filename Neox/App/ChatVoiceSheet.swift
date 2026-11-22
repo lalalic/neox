@@ -9,7 +9,9 @@ struct ChatVoiceSheet: View {
     var body: some View {
         VStack(spacing: 22) {
             HStack {
-                Text("Voice conversation").font(.headline)
+                Text("Voice conversation")
+                    .font(.headline)
+                    .accessibilityIdentifier("neoChatVoiceSheet")
                 Spacer()
                 Button("Done") { dismiss() }
                     .accessibilityIdentifier("neoChatVoiceDone")
@@ -50,6 +52,5 @@ struct ChatVoiceSheet: View {
         }
         .padding(24)
         .presentationDetents([.large])
-        .accessibilityIdentifier("neoChatVoiceSheet")
     }
 }

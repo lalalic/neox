@@ -8,6 +8,26 @@ import Speech
 public struct AppleSpeechRecognitionProvider: SpeechRecognitionProvider {
     public init() {}
 
+    // Construct outside the main-actor Task. Speech.framework may invoke its
+    // result handler on a background queue; only the AsyncStream continuation
+    // crosses that boundary.
+    private static func recognitionHandler(
+        _ continuation: AsyncThrowingStream<TranscriptEvent, Error>.Continuation
+    ) -> @Sendable (SFSpeechRecognitionResult?, Error?) -> Void {
+        { result, error in
+            if let result {
+                continuation.yield(result.isFinal
+                    ? .final(result.bestTranscription.formattedString)
+                    : .partial(result.bestTranscription.formattedString))
+                if result.isFinal { continuation.yield(.speechEnded); continuation.finish() }
+            } else if let error {
+                continuation.finish(throwing: error)
+            }
+        }
+    }
+
+
+
     public func transcribe(audio: AsyncThrowingStream<AudioFrame, Error>, language: String)
         -> AsyncThrowingStream<TranscriptEvent, Error> {
         AsyncThrowingStream { continuation in
@@ -20,16 +40,8 @@ public struct AppleSpeechRecognitionProvider: SpeechRecognitionProvider {
                 let request = SFSpeechAudioBufferRecognitionRequest()
                 request.shouldReportPartialResults = true
                 request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
-                let recognition = recognizer.recognitionTask(with: request) { result, error in
-                    if let result {
-                        continuation.yield(result.isFinal
-                            ? .final(result.bestTranscription.formattedString)
-                            : .partial(result.bestTranscription.formattedString))
-                        if result.isFinal { continuation.yield(.speechEnded); continuation.finish() }
-                    } else if let error {
-                        continuation.finish(throwing: error)
-                    }
-                }
+                let recognition = recognizer.recognitionTask(
+                    with: request, resultHandler: Self.recognitionHandler(continuation))
                 // speechStarted must come from an actual VAD detection, not recognition startup.
                 do {
                     for try await frame in audio {

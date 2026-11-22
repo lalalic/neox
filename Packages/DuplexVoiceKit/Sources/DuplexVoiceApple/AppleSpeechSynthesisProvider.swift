@@ -57,7 +57,16 @@ private final class SynthesizerBox: @unchecked Sendable {
         synthesizer = value
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: language)
-        value.write(utterance) { buffer in
+        value.write(utterance, toBufferCallback: Self.audioHandler(continuation))
+    }
+
+    // AVSpeechSynthesizer can supply PCM buffers off the main actor. The
+    // callback factory is nonisolated so Swift 6 never assumes main-executor
+    // isolation while invoking it.
+    private nonisolated static func audioHandler(
+        _ continuation: AsyncThrowingStream<AudioFrame, Error>.Continuation
+    ) -> @Sendable (AVAudioBuffer) -> Void {
+        { buffer in
             guard let pcm = buffer as? AVAudioPCMBuffer else {
                 continuation.finish(throwing: AppleSpeechError.invalidAudioFrame)
                 return
