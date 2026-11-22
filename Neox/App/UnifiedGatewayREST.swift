@@ -3,7 +3,7 @@ import Foundation
 /// Internal authenticated REST/SSE transport for the unified Neo gateway.
 /// Model and Relay business state remain owned by their loopback services.
 enum GatewayRESTError: Error {
-    case invalidEndpoint, invalidResponse, http(Int)
+    case invalidEndpoint, invalidResponse, http(Int), malformedSSE(String)
 }
 
 final class UnifiedGatewayREST: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
@@ -92,25 +92,36 @@ final class UnifiedGatewayREST: NSObject, URLSessionTaskDelegate, @unchecked Sen
         }
         var eventName = ""
         var dataLines: [String] = []
-        for try await line in bytes.lines {
+        var wire = GatewaySSELineBuffer(maxLineBytes: 1024)
+        // Foundation AsyncBytes.lines skips blank SSE delimiter lines on real
+        // URLSession streams. Parse bytes directly so frame boundaries survive.
+        for try await byte in bytes {
             try Task.checkCancellation()
-            if line.isEmpty {
+            guard let line = try wire.append(byte) else { continue }
+            let cleanLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if cleanLine.isEmpty {
                 if eventName == "change" {
-                    guard dataLines.count == 1,
-                          let data = dataLines[0].data(using: .utf8), data.count <= 256,
-                          let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                          json.count == 1, json["refresh"] as? Bool == true else {
-                        throw GatewayRESTError.invalidResponse
+                    guard dataLines.count == 1 else {
+                        throw GatewayRESTError.malformedSSE("dataLineCount=\(dataLines.count)")
+                    }
+                    guard let data = dataLines[0].data(using: .utf8), data.count <= 256 else {
+                        throw GatewayRESTError.malformedSSE("payloadSizeOverLimit")
+                    }
+                    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                        throw GatewayRESTError.malformedSSE("notJSONDictionary")
+                    }
+                    guard json.count == 1, json["refresh"] as? Bool == true else {
+                        throw GatewayRESTError.malformedSSE("invalidRefreshMarker fields=\(json.count)")
                     }
                     await onChange()
                 }
                 dataLines.removeAll(keepingCapacity: true)
                 eventName = ""
-            } else if line.hasPrefix("event:") {
-                eventName = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
-            } else if line.hasPrefix("data:") {
-                guard dataLines.count < 2 else { throw GatewayRESTError.invalidResponse }
-                dataLines.append(String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces))
+            } else if cleanLine.hasPrefix("event:") {
+                eventName = String(cleanLine.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+            } else if cleanLine.hasPrefix("data:") {
+                guard dataLines.count < 2 else { throw GatewayRESTError.malformedSSE("excessDataLines") }
+                dataLines.append(String(cleanLine.dropFirst(5)).trimmingCharacters(in: .whitespaces))
             }
         }
     }
@@ -133,8 +144,10 @@ final class UnifiedGatewayREST: NSObject, URLSessionTaskDelegate, @unchecked Sen
             throw GatewayRESTError.http((response as? HTTPURLResponse)?.statusCode ?? 0)
         }
         var dataLines: [String] = []
-        for try await line in bytes.lines {
+        var wire = GatewaySSELineBuffer(maxLineBytes: 256 * 1024)
+        for try await byte in bytes {
             try Task.checkCancellation()
+            guard let line = try wire.append(byte) else { continue }
             if line.isEmpty {
                 if !dataLines.isEmpty {
                     guard let data = dataLines.joined(separator: "\n").data(using: .utf8),
@@ -149,5 +162,30 @@ final class UnifiedGatewayREST: NSObject, URLSessionTaskDelegate, @unchecked Sen
                 dataLines.append(String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces))
             }
         }
+    }
+}
+
+/// Byte-exact SSE line decoder. URLSession.AsyncBytes.lines can suppress empty
+/// lines, but SSE uses those lines to terminate complete events. Keep each
+/// separator (including CRLF) without exposing or buffering raw event bodies
+/// beyond the caller's explicit size limit.
+struct GatewaySSELineBuffer {
+    let maxLineBytes: Int
+    private var pending = Data()
+
+    init(maxLineBytes: Int) { self.maxLineBytes = maxLineBytes }
+
+    mutating func append(_ byte: UInt8) throws -> String? {
+        if byte == 10 { // LF; CRLF is normalized below
+            if pending.last == 13 { pending.removeLast() }
+            guard let line = String(data: pending, encoding: .utf8) else {
+                throw GatewayRESTError.invalidResponse
+            }
+            pending.removeAll(keepingCapacity: true)
+            return line // Empty string is a meaningful SSE frame delimiter.
+        }
+        guard pending.count < maxLineBytes else { throw GatewayRESTError.invalidResponse }
+        pending.append(byte)
+        return nil
     }
 }

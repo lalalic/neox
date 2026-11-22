@@ -4,6 +4,23 @@ import Network
 
 @MainActor
 final class RelayJobsTests: XCTestCase {
+    func testSSEByteDecoderPreservesCRLFAndBlankFrameBoundaries() throws {
+        let source = ": connected\r\n\r\nevent: change\r\ndata: {\"refresh\":true}\r\n\r\n" +
+                     "event: change\ndata: {\"refresh\":true}\n\n"
+        var decoder = GatewaySSELineBuffer(maxLineBytes: 1024)
+        let lines = try source.utf8.compactMap { try decoder.append($0) }
+        XCTAssertEqual(lines, [": connected", "", "event: change", "data: {\"refresh\":true}", "",
+                               "event: change", "data: {\"refresh\":true}", ""])
+    }
+
+    func testSSEByteDecoderRejectsUnboundedAndMalformedUTF8() throws {
+        var limited = GatewaySSELineBuffer(maxLineBytes: 4)
+        for byte in "1234".utf8 { XCTAssertNil(try limited.append(byte)) }
+        XCTAssertThrowsError(try limited.append(UInt8(ascii: "5")))
+        var invalid = GatewaySSELineBuffer(maxLineBytes: 8)
+        XCTAssertNil(try invalid.append(0xFF))
+        XCTAssertThrowsError(try invalid.append(0x0A))
+    }
     // Real iPhone URLSession -> NWListener -> Relay REST JSON. The old MCP
     // provider intentionally has no tools/list endpoint in this server.
     // This catches the dependency that previously left Jobs empty at cutover.
