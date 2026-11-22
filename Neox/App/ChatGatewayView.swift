@@ -506,7 +506,7 @@ struct ChatGatewayView: View {
     @StateObject private var store = ChatGatewayStore()
     @StateObject private var dictation = ChatComposerDictation()
     @StateObject private var voice = ChatVoiceConversation()
-    @State private var showingVoice = false
+    @State private var voiceDraftPreview = ChatVoiceDraftPreview()
     @State private var pickedPhoto: PhotosPickerItem?
     @State private var importingFile = false
     @State private var dictationPrefix = ""
@@ -539,11 +539,6 @@ struct ChatGatewayView: View {
 
             composer
         }
-        .sheet(isPresented: $showingVoice) {
-            ChatVoiceSheet(voice: voice)
-                .onAppear { Task { await voice.start() } }
-                .onDisappear { voice.stop() }
-        }
         .sheet(item: $selectedMarkcut) { reference in
             ChatMarkcutPreviewSheet(master: master, hash: reference.hash)
         }
@@ -556,13 +551,25 @@ struct ChatGatewayView: View {
         } message: {
             Text("This hides old messages in Neo Mobile. It does not delete Neo Master history or cancel queued messages.")
         }
+        .onChange(of: voice.transcript) { _, text in
+            guard voiceIsRunning,
+                  let preview = voiceDraftPreview.render(transcript: text,
+                                                         currentDraft: store.draft) else { return }
+            store.draft = preview
+        }
         .onChange(of: voice.committedTurn) { _, turn in
             guard let turn else { return }
+            // The interim STT suffix was shown in the composer; only the
+            // speech itself is sent. Restore any unsent typed draft.
+            store.draft = voiceDraftPreview.committed(currentDraft: store.draft)
             if let requestID = store.sendVoiceText(turn.text, using: master) {
                 voice.expectReply(requestID: requestID)
             } else {
-                voice.stop()
+                stopVoice()
             }
+        }
+        .onChange(of: voice.phase) { _, phase in
+            if phase == .error { voiceDraftPreview.cancel() }
         }
         .onChange(of: store.lastFailedRequestID) { _, requestID in
             if let requestID { voice.receiveFailure(requestID: requestID) }
@@ -581,8 +588,7 @@ struct ChatGatewayView: View {
         .onChange(of: isActive) { _, active in
             if !active {
                 dictation.stop()
-                voice.stop()
-                showingVoice = false
+                stopVoice()
                 composerFocused = false
             }
         }
@@ -605,7 +611,7 @@ struct ChatGatewayView: View {
         }
         .onDisappear {
             dictation.stop()
-            voice.stop()
+            stopVoice()
             composerFocused = false
         }
         .task {
@@ -623,9 +629,57 @@ struct ChatGatewayView: View {
         }
     }
 
+    private var voiceIsRunning: Bool {
+        switch voice.phase {
+        case .starting, .listening, .thinking, .speaking: true
+        case .idle, .stopped, .error: false
+        }
+    }
+
+    private var voiceIconName: String {
+        switch voice.phase {
+        case .starting: "waveform.circle"
+        case .listening: "waveform.circle.fill"
+        case .thinking: "ellipsis.circle.fill"
+        case .speaking: "speaker.wave.2.fill"
+        case .error: "exclamationmark.circle"
+        case .idle, .stopped: "waveform.circle"
+        }
+    }
+
+    private var voiceIconColor: Color {
+        switch voice.phase {
+        case .listening: .red
+        case .thinking: .orange
+        case .speaking: .blue
+        case .error: .red
+        case .starting: .orange
+        case .idle, .stopped: .primary
+        }
+    }
+
+    private func stopVoice() {
+        voice.stop()
+        // Keep the in-progress recognized text available for editing if the
+        // user stopped speaking before the automatic utterance commit.
+        voiceDraftPreview.cancel()
+    }
+
+    private func toggleVoice() {
+        if voiceIsRunning {
+            stopVoice()
+        } else {
+            dictation.stop() // LiveKit and one-shot dictation cannot own the mic together.
+            composerFocused = false
+            voiceDraftPreview.begin(draft: store.draft)
+            Task { await voice.start() }
+        }
+    }
+
     private var composer: some View {
         VStack(alignment: .leading, spacing: 7) {
-            TextField("Message", text: $store.draft, axis: .vertical)
+            TextField(voiceIsRunning ? (voice.phase == .thinking ? "Waiting for reply…" : "Listening…") : "Message",
+                      text: $store.draft, axis: .vertical)
                 .focused($composerFocused)
                 .lineLimit(1...5)
                 .font(.body)
@@ -653,7 +707,7 @@ struct ChatGatewayView: View {
                     }
                 }
             }
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 Menu {
                     PhotosPicker(selection: $pickedPhoto, matching: .images) {
                         Label("Photo", systemImage: "photo.on.rectangle")
@@ -665,9 +719,9 @@ struct ChatGatewayView: View {
                     }
                 } label: {
                     Image(systemName: "plus")
-                        .font(.system(size: 18, weight: .medium))
+                        .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(.primary)
-                        .frame(width: 34, height: 34)
+                        .frame(width: 30, height: 30)
                         .background(Color(.tertiarySystemBackground), in: Circle())
                 }
                 .accessibilityLabel("Add")
@@ -675,9 +729,9 @@ struct ChatGatewayView: View {
 
                 Button { showClearHistoryConfirmation = true } label: {
                     Image(systemName: "trash")
-                        .font(.system(size: 17, weight: .medium))
+                        .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(.secondary)
-                        .frame(width: 34, height: 34)
+                        .frame(width: 30, height: 30)
                         .contentShape(Circle())
                 }
                 .accessibilityLabel("Clear chat history")
@@ -685,19 +739,22 @@ struct ChatGatewayView: View {
 
                 Spacer(minLength: 0)
 
-                Button {
-                    dictation.stop()
-                    composerFocused = false
-                    showingVoice = true
-                } label: {
-                    Image(systemName: "waveform.circle")
-                        .font(.system(size: 22))
-                        .frame(width: 35, height: 35)
+                Button(action: toggleVoice) {
+                    Image(systemName: voiceIconName)
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(voiceIconColor)
+                        .frame(width: 30, height: 30)
+                        .background(voiceIsRunning ? voiceIconColor.opacity(0.12) : .clear,
+                                    in: Circle())
+                        .contentShape(Circle())
                 }
-                .accessibilityLabel("Voice conversation")
+                .accessibilityLabel(voiceIsRunning ? "Stop voice conversation" : "Voice conversation")
+                .accessibilityValue(voice.phase.rawValue.capitalized)
+                .accessibilityHint(voice.errorText ?? "Tap to start or stop live voice")
                 .accessibilityIdentifier("neoChatVoiceConversation")
 
                 Button {
+                    if voiceIsRunning { stopVoice() }
                     if !dictation.isRecording && !dictation.isStarting {
                         dictationPrefix = store.draft
                         composerFocused = false
@@ -705,9 +762,9 @@ struct ChatGatewayView: View {
                     dictation.toggle()
                 } label: {
                     Image(systemName: dictation.isRecording ? "stop.fill" : "mic")
-                        .font(.system(size: 19, weight: .medium))
+                        .font(.system(size: 17, weight: .medium))
                         .foregroundStyle(dictation.isRecording ? Color.red : Color.primary)
-                        .frame(width: 35, height: 35)
+                        .frame(width: 30, height: 30)
                         .contentShape(Circle())
                 }
                 .accessibilityLabel(dictation.isRecording ? "Stop dictation" : "Dictate")
@@ -715,14 +772,15 @@ struct ChatGatewayView: View {
 
                 Button {
                     dictation.stop()
+                    if voiceIsRunning { stopVoice() }
                     if store.send(using: master) {
                         composerFocused = false
                     }
                 } label: {
                     Image(systemName: "arrow.up")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Color(uiColor: .systemBackground))
-                        .frame(width: 34, height: 34)
+                        .frame(width: 30, height: 30)
                         .background(Color(uiColor: .label), in: Circle())
                 }
                 .disabled((store.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&

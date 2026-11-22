@@ -48,7 +48,7 @@ final class ChatVoiceConversation: ObservableObject {
     }
 
     func start() async {
-        guard !active else { return }
+        guard !active, phase != .starting else { return }
         phase = .starting
         errorText = nil
         let token = UUID()

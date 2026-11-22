@@ -331,14 +331,19 @@ On Neo Master, use `scripts/testflight.py doctor` to verify the existing App Sto
 ### Voice conversation in Chat (device integration)
 
 The Chat composer has a dedicated **Voice conversation** button in addition to
-its existing, manual dictation button. The new foreground-only voice sheet uses
+its existing, manual dictation button. The inline voice toggle uses
 `Packages/DuplexVoiceKit`: LiveKit local microphone/voice processing, Apple
 speech recognition and synthesized PCM playback through LiveKit local
-`SoundPlayer`. Voice turns use the same durable Chat outbox, REST/SSE request
+`SoundPlayer`. No modal voice sheet is shown: icon appearance and accessibility
+value communicate Starting, Listening, Thinking, Speaking, and Error. Interim
+speech recognition text appears directly in the Chat composer, and stopping
+before utterance commit retains that pending text for editing. Automatically
+committed voice turns preserve any previously typed draft.
+Voice turns use the same durable Chat outbox, REST/SSE request
 IDs and on-device assistant history as typed messages. The voice client only
 speaks the matched terminal assistant reply; it ignores unrelated replies and
-non-terminal placeholders. The microphone is stopped when the sheet closes or
-Chat is no longer active. The phone never directly connects to Events Bus or
+non-terminal placeholders. The microphone is stopped by tapping the icon again,
+switching away from Chat, or sending a manually edited message. The phone never directly connects to Events Bus or
 LiveKit Server.
 
 STT/TTS can be replaced through the shared `SpeechRecognitionProvider` and
