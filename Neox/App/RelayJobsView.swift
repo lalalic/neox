@@ -665,7 +665,8 @@ struct RelayJobsView: View {
                 if Task.isCancelled { return }
                 do { try await Task.sleep(for: .seconds(3)) }
                 catch { return }
-                await store.refresh(from: master)
+                // A reconnect is not an SSE event. Do not silently poll Jobs
+                // and misrepresent a polling result as a live stream update.
             }
         }
         .onChange(of: master.connected) { _, isConnected in
