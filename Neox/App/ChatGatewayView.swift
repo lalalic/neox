@@ -685,6 +685,15 @@ struct ChatGatewayView: View {
                 .font(.body)
                 .accessibilityIdentifier("neoChatComposer")
 
+            if let error = dictation.errorText ?? voice.errorText {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier(dictation.errorText == nil
+                                             ? "neoChatVoiceError"
+                                             : "neoChatMicrophoneError")
+            }
+
             if !store.draftAttachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -755,6 +764,7 @@ struct ChatGatewayView: View {
 
                 Button {
                     if voiceIsRunning { stopVoice() }
+                    if voice.phase == .error { voice.stop() }
                     if !dictation.isRecording && !dictation.isStarting {
                         dictationPrefix = store.draft
                         composerFocused = false
@@ -767,7 +777,11 @@ struct ChatGatewayView: View {
                         .frame(width: 30, height: 30)
                         .contentShape(Circle())
                 }
-                .accessibilityLabel(dictation.isRecording ? "Stop dictation" : "Dictate")
+                .accessibilityLabel(dictation.isRecording ? "Stop dictation" :
+                                    (dictation.isStarting ? "Starting dictation" : "Dictate"))
+                .accessibilityValue(dictation.errorText ?? (dictation.isStarting ? "Starting" :
+                                                             (dictation.isRecording ? "Recording" : "Ready")))
+                .accessibilityHint(dictation.errorText ?? "Tap to start or stop dictation")
                 .accessibilityIdentifier("neoChatMicrophone")
 
                 Button {

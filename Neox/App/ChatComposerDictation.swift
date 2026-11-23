@@ -10,6 +10,7 @@ final class ChatComposerDictation: ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var isStarting = false
     @Published private(set) var transcript = ""
+    @Published private(set) var errorText: String?
 
     private let engine = AVAudioEngine()
     private var request: SFSpeechAudioBufferRecognitionRequest?
@@ -18,38 +19,62 @@ final class ChatComposerDictation: ObservableObject {
     private var hasTap = false
     private var audioSessionActive = false
     private var session = UUID()
+    private var startupTask: Task<Void, Never>?
+    private let speechPermission: @Sendable () async -> Bool
+    private let microphonePermission: @Sendable () async -> Bool
+
+    init(speechPermission: @escaping @Sendable () async -> Bool = {
+        await ChatComposerDictation.requestSpeechPermission()
+    }, microphonePermission: @escaping @Sendable () async -> Bool = {
+        await ChatComposerDictation.requestMicrophonePermission()
+    }) {
+        self.speechPermission = speechPermission
+        self.microphonePermission = microphonePermission
+    }
 
     func toggle() {
         if isRecording || isStarting {
             stop()
         } else {
-            Task { await start() }
+            // Set the latch before creating the Task so two fast taps cannot
+            // enqueue two permission/audio startups on the main actor.
+            isStarting = true
+            startupTask?.cancel()
+            startupTask = Task { [weak self] in await self?.start() }
         }
     }
 
     private func start() async {
-        guard !isStarting && !isRecording else { return }
-        isStarting = true
+        guard !Task.isCancelled, isStarting && !isRecording else { return }
+        errorText = nil
         let token = UUID()
         session = token
-        defer { isStarting = false }
+        defer {
+            if session == token {
+                isStarting = false
+                startupTask = nil
+            }
+        }
 
-        let speechAuthorized = await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: status == .authorized)
-            }
+        let speechAuthorized = await speechPermission()
+        guard !Task.isCancelled, token == session else { return }
+        guard speechAuthorized else {
+            fail("Speech Recognition permission is required.")
+            return
         }
-        guard speechAuthorized, token == session else { return }
-        let microphoneAuthorized = await withCheckedContinuation { continuation in
-            AVAudioApplication.requestRecordPermission { granted in
-                continuation.resume(returning: granted)
-            }
+        let microphoneAuthorized = await microphonePermission()
+        guard !Task.isCancelled, token == session else { return }
+        guard microphoneAuthorized else {
+            fail("Microphone permission is required.")
+            return
         }
-        guard microphoneAuthorized, token == session else { return }
 
         let language = Locale.preferredLanguages.first ?? "en-US"
         guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: language)),
-              recognizer.isAvailable else { return }
+              recognizer.isAvailable else {
+            fail("Speech recognition is unavailable for the selected language.")
+            return
+        }
 
         self.recognizer = recognizer
         let audioRequest = SFSpeechAudioBufferRecognitionRequest()
@@ -65,7 +90,11 @@ final class ChatComposerDictation: ObservableObject {
             audioSessionActive = true
             let input = engine.inputNode
             let format = input.outputFormat(forBus: 0)
-            guard format.sampleRate > 0 else { stop(); return }
+            guard Self.inputFormatIsUsable(sampleRate: format.sampleRate,
+                                            channelCount: format.channelCount) else {
+                fail("The microphone audio format is unavailable.")
+                return
+            }
             input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
                 audioRequest.append(buffer)
             }
@@ -77,19 +106,54 @@ final class ChatComposerDictation: ObservableObject {
                         self.transcript = result.bestTranscription.formattedString
                         if result.isFinal { self.stop() }
                     }
-                    if error != nil { self.stop() }
+                    if let error {
+                        self.fail("Dictation unavailable: \(error.localizedDescription)")
+                    }
                 }
             }
             try engine.start()
-            guard token == session else { stop(); return }
+            guard token == session else {
+                stop()
+                return
+            }
             isRecording = true
         } catch {
-            stop()
+            fail("Dictation unavailable: \(error.localizedDescription)")
         }
+    }
+
+    // Permission callbacks may run on a TCC/XPC queue. Keep their
+    // continuations nonisolated so Swift 6 does not trap crossing actors.
+    private nonisolated static func requestSpeechPermission() async -> Bool {
+        await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in
+                continuation.resume(returning: status == .authorized)
+            }
+        }
+    }
+
+    private nonisolated static func requestMicrophonePermission() async -> Bool {
+        await withCheckedContinuation { continuation in
+            AVAudioApplication.requestRecordPermission { granted in
+                continuation.resume(returning: granted)
+            }
+        }
+    }
+
+    private func fail(_ message: String) {
+        stop()
+        errorText = message
+    }
+
+    static func inputFormatIsUsable(sampleRate: Double, channelCount: AVAudioChannelCount) -> Bool {
+        sampleRate.isFinite && sampleRate > 0 && channelCount > 0
     }
 
     func stop() {
         session = UUID() // Ignore callbacks from the previous recording.
+        startupTask?.cancel()
+        startupTask = nil
+        errorText = nil
         if engine.isRunning { engine.stop() }
         if hasTap {
             engine.inputNode.removeTap(onBus: 0)

@@ -113,6 +113,7 @@ final class ChatVoiceConversation: ObservableObject {
 
     func stop() {
         generation = UUID()
+        errorText = nil
         let wasActive = active
         active = false
         recognitionTask?.cancel()
