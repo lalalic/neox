@@ -335,6 +335,36 @@ final class RelayJobsTests: XCTestCase {
                        "Old gateways remain safe and usable")
     }
 
+    func testActivityNeverUsesAgentRoleAsPrimaryDescription() throws {
+        let job = try XCTUnwrap(RelayJob(wire: [
+            "id": "720", "repository": "neox", "status": "RUNNING"
+        ]))
+        let store = RelayJobsStore()
+        let role = try XCTUnwrap(RelayJobActivityEvent(wire: [
+            "id": "role", "type": "task.started",
+            "timestamp": "2026-11-22T21:38:00Z", "taskId": "2242",
+            "content": "implementation"
+        ]))
+        XCTAssertNil(role.content)
+        XCTAssertEqual(store.activityDescription(for: role, job: job), "Task started")
+
+        let detailed = try XCTUnwrap(RelayJobActivityEvent(wire: [
+            "id": "detail", "type": "task.progress",
+            "timestamp": "2026-11-22T21:46:00Z", "taskId": "2242",
+            "content": "Verified the full iOS build and completed two review rounds."
+        ]))
+        XCTAssertEqual(store.activityDescription(for: detailed, job: job),
+                       "Verified the full iOS build and completed two review rounds.")
+        XCTAssertEqual(detailed.taskLabel, "Task 2242")
+
+        let unblocked = try XCTUnwrap(RelayJobActivityEvent(wire: [
+            "id": "unblock", "type": "task.unblocked",
+            "timestamp": "2026-11-22T23:05:00Z", "taskId": "2243"
+        ]))
+        XCTAssertEqual(store.activityDescription(for: unblocked, job: job),
+                       "Task unblocked")
+    }
+
     func testActivitySymbolsComeOnlyFromAllowlistedEventTypes() throws {
         let mappings = [
             "job.created": "plus.circle", "job.planned": "doc.text",

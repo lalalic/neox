@@ -154,7 +154,14 @@ struct RelayJobActivityEvent: Identifiable, Equatable {
         // Arbitrary raw event "message"/"data" must never reach this view.
         self.content = (wire["content"] as? String)
             .map { String($0.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }.prefix(320)) }
-            .flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { value in
+                let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty,
+                      !["implementation", "troubleshooter", "coordinator",
+                        "reviewer", "planner", "developer", "worker", "architect"]
+                        .contains(text.lowercased()) else { return nil }
+                return text
+            }
         self.date = date
         self.taskID = taskID
         self.taskLabel = taskID.map { "Task \($0)" }
@@ -165,6 +172,7 @@ struct RelayJobActivityEvent: Identifiable, Equatable {
         "task.queued": "Task queued", "task.started": "Task started",
         "task.progress": "Task progress updated", "task.completed": "Task completed",
         "task.failed": "Task failed", "task.cancelled": "Task cancelled",
+        "task.blocked": "Task blocked", "task.unblocked": "Task unblocked",
         "job.cancelled": "Job cancelled", "job.completed": "Job completed",
         "job.failed": "Job failed", "job.blocked": "Job blocked",
         "review.approved": "Review approved",
@@ -189,7 +197,8 @@ struct RelayJobActivityEvent: Identifiable, Equatable {
         case "task.completed", "task.succeeded", "job.completed": "checkmark.circle"
         case "task.failed", "job.failed": "exclamationmark.triangle"
         case "task.cancelled", "job.cancelled": "xmark.circle"
-        case "job.blocked", "review.blocked": "hand.raised.circle"
+        case "job.blocked", "review.blocked", "task.blocked": "hand.raised.circle"
+        case "task.unblocked": "arrow.uturn.forward.circle"
         case "review.approved": "checkmark.seal"
         case "review.changes_required": "arrow.uturn.backward.circle"
         case "review.created", "review.requested", "review.started": "eye"
@@ -316,7 +325,6 @@ final class RelayJobsStore: ObservableObject {
     @Published private(set) var hasLoaded = false
     @Published private(set) var loadError: String?
     @Published private(set) var activities: [String: [RelayJobActivityEvent]] = [:]
-    @Published private(set) var taskTitles: [String: [String: String]] = [:]
     @Published private(set) var liveRevision = 0
     @Published private(set) var activityLoadingIDs = Set<String>()
     @Published private(set) var activityErrors: [String: String] = [:]
@@ -431,8 +439,8 @@ final class RelayJobsStore: ObservableObject {
             activityErrors[identity] = "Connect to Neo Master to load Activity."
             return
         }
-        // Load actual event history FIRST. Task title lookup is optional:
-        // never block the entire Activity screen on a second network request.
+        // Event summaries come from the authenticated, redacted Relay API.
+        // Avoid a secondary title lookup that repeats agent role names.
         do {
             let rows = try await master.relayJobActivity(job)
             activities[identity] = rows.sorted { $0.date > $1.date }
@@ -440,9 +448,6 @@ final class RelayJobsStore: ObservableObject {
         } catch {
             activityErrors[identity] = "Unable to load Activity from Neo Master. Retry."
             // Keep the last successfully fetched timeline on transient errors.
-        }
-        if taskTitles[identity] == nil {
-            taskTitles[identity] = try? await master.relayJobTasks(job)
         }
     }
 
@@ -464,12 +469,10 @@ final class RelayJobsStore: ObservableObject {
 
     func activity(for job: RelayJob) -> [RelayJobActivityEvent]? { activities[key(job)] }
 
-    func taskTitle(for event: RelayJobActivityEvent, job: RelayJob) -> String? {
-        event.taskID.flatMap { taskTitles[key(job)]?[$0] }
-    }
-
     func activityDescription(for event: RelayJobActivityEvent, job: RelayJob) -> String {
-        event.content ?? taskTitle(for: event, job: job) ?? event.title
+        // Task titles are often just agent roles (implementation, troubleshooter).
+        // Prefer an owner-redacted event summary, then the action label.
+        event.content ?? event.title
     }
 
     var ordered: [RelayJob] {
@@ -501,7 +504,6 @@ final class RelayJobsStore: ObservableObject {
         ]
         if let event = RelayJobActivityEvent(wire: fixture) {
             setActivity([event], for: running)
-            taskTitles[key(running)] = ["1943": "Designer orientation"]
         }
     }
     #endif
@@ -748,18 +750,22 @@ private struct RelayJobDetailView: View {
                                     .accessibilityHidden(true)
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(store.activityDescription(for: event, job: job))
+                                        .lineLimit(4)
                                         .fixedSize(horizontal: false, vertical: true)
-                                    HStack {
-                                        if let taskLabel = event.taskLabel {
-                                            if let taskTitle = store.taskTitle(for: event, job: job),
-                                               event.content != nil {
-                                                Text("\(taskLabel) · \(taskTitle)").lineLimit(1)
-                                            } else {
-                                                Text(taskLabel)
+                                    HStack(spacing: 6) {
+                                        if event.content != nil {
+                                            Text(event.title)
+                                                .lineLimit(1)
+                                            if event.taskLabel != nil {
+                                                Text("·")
                                             }
                                         }
-                                        Spacer()
+                                        if let taskLabel = event.taskLabel {
+                                            Text(taskLabel).lineLimit(1)
+                                        }
+                                        Spacer(minLength: 8)
                                         Text(RelayTimestamp.activityDisplay(event.date))
+                                            .lineLimit(1)
                                     }
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
