@@ -16,7 +16,6 @@ final class DeploymentSettingsTests: XCTestCase {
             of: "  - service: http_status:404",
             with: "  - hostname: neo-origin.qili2.com\n    service: http://127.0.0.1:8769\n"
                 + "  - hostname: compute.qili2.com\n    service: http://127.0.0.1:8798\n"
-                + "  - hostname: agents.qili2.com\n    service: http://127.0.0.1:8787\n"
                 + "  - service: http_status:404")
         XCTAssertNoThrow(try NeoYTunnelRuntime.validateManagedConfiguration(
             ownerEditedYAML, tunnelID: "test-tunnel"))

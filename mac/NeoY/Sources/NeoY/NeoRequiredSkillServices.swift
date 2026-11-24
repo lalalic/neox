@@ -12,7 +12,7 @@ enum NeoRequiredSkillServices {
     static let requiredOwners = [
         Owner(name: "events-bus", services: ["nats", "history"],
               setupScript: ["cli", "events-bus.mjs"]),
-        Owner(name: "agents-relay", services: ["daemon", "dashboard-tunnel"],
+        Owner(name: "agents-relay", services: ["daemon"],
               setupScript: ["bin", "services.mjs"]),
     ]
 

@@ -22,9 +22,9 @@ never commit credentials or the live private file into Git.
 | `neoy.qili2.com` | `127.0.0.1:6767` | Authenticated Neo MCP |
 | `models.qili2.com` | `127.0.0.1:8769` | Model gateway |
 | `compute.qili2.com` | `127.0.0.1:8798` | Compute gateway |
-| `agents.qili2.com` | `127.0.0.1:8787` | Relay Dashboard |
 
-`gpu.qili2.com` is retired; never recreate its ingress or DNS record.
+`gpu.qili2.com` and `agents.qili2.com` are retired; never recreate their ingress or DNS records.
+The Relay Dashboard is available at the authenticated `neoy.qili2.com/dashboard/` path.
 The existing application security/authentication policies remain responsible
 for each service. A tunnel route does *not* confer authentication.
 

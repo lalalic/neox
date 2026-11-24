@@ -137,6 +137,9 @@ final class NeoCLISetupTests: XCTestCase {
         XCTAssertEqual(Set(required.map(\.name)), ["events-bus", "agents-relay"])
         let events = required.first { $0.name == "events-bus" }!
         XCTAssertEqual(events.services, ["nats", "history"])
+        let relay = required.first { $0.name == "agents-relay" }!
+        XCTAssertEqual(relay.services, ["daemon"])
+        XCTAssertTrue(NeoRequiredSkillServices.missingServices(for: relay, states: ["agents-relay/daemon": "online"]).isEmpty)
         XCTAssertEqual(NeoRequiredSkillServices.missingServices(for: events, states: [
             "events-bus/nats": "online", "unrelated/daemon": "errored"
         ]), ["history"])
