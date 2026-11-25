@@ -2,6 +2,11 @@ import Foundation
 import XCTest
 @testable import NeoY
 
+private final class DashboardNoRedirect: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(_ session:URLSession,task:URLSessionTask,willPerformHTTPRedirection response:HTTPURLResponse,
+        newRequest request:URLRequest,completionHandler:@escaping(URLRequest?)->Void){completionHandler(nil)}
+}
+
 final class UnifiedGatewayRouteTests: XCTestCase {
     func testUnauthenticatedAndMethodEscalationFailClosed() {
         XCTAssertNil(UnifiedGatewayRoute.match(method: "GET", path: "/dashboard/", browserAuthorized: false, bearerAuthorized: false))
@@ -101,5 +106,53 @@ final class UnifiedGatewayRouteTests: XCTestCase {
         let rotated=UnifiedGatewayBrowserSessions()
         rotated.configure(file:file,operatorCredential:"changed-master")
         XCTAssertNil(rotated.csrf(cookieHeader:second.cookie,validate:service.browserPrincipalIsActive))
+    }
+
+    @MainActor
+    func testActualGatewayTicketExchangeAndCookieAuthorization() async throws {
+        let root=FileManager.default.temporaryDirectory.appendingPathComponent("neo-dashboard-http-"+UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer{try? FileManager.default.removeItem(at:root)}
+        let port:UInt16=59842
+        let origin="http://127.0.0.1:\(port)"
+        let server=MCPServer(name:"dashboard-auth-fixture",port:port)
+        let master="test-only-dashboard-master"
+        server.setPrivilegedAccessToken(master)
+        server.configureOAuth(clientID:"fixture",consentToken:master,stateURL:root.appendingPathComponent("oauth.json"))
+        try server.start();defer{server.stop()}
+        try await Task.sleep(for:.milliseconds(200))
+        let config=URLSessionConfiguration.ephemeral;config.httpShouldSetCookies=false
+        let session=URLSession(configuration:config,delegate:DashboardNoRedirect(),delegateQueue:nil)
+        defer{session.invalidateAndCancel()}
+        func call(_ method:String,_ path:String,headers:[String:String]=[:],body:Data?=nil) async throws -> (HTTPURLResponse,Data) {
+            var request=URLRequest(url:try XCTUnwrap(URL(string:origin+path)))
+            request.httpMethod=method;request.timeoutInterval=5;request.httpBody=body
+            for (key,value) in headers{request.setValue(value,forHTTPHeaderField:key)}
+            let (data,response)=try await session.data(for:request)
+            return (try XCTUnwrap(response as? HTTPURLResponse),data)
+        }
+        let anonymous=try await call("POST","/dashboard/ticket")
+        XCTAssertEqual(anonymous.0.statusCode,401)
+        let approved=try await call("POST","/dashboard/ticket",headers:["Authorization":"Bearer "+master])
+        XCTAssertEqual(approved.0.statusCode,200)
+        XCTAssertEqual(approved.0.value(forHTTPHeaderField:"Cache-Control"),"no-store")
+        let json=try XCTUnwrap(JSONSerialization.jsonObject(with:approved.1) as? [String:Any])
+        let ticket=try XCTUnwrap(json["ticket"] as? String)
+        let body=Data(("ticket="+ticket).utf8)
+        let wrong=try await call("POST","/dashboard/connect",headers:["Origin":"https://untrusted.example","Content-Type":"application/x-www-form-urlencoded"],body:body)
+        XCTAssertEqual(wrong.0.statusCode,401)
+        let form=["Origin":origin,"Content-Type":"application/x-www-form-urlencoded"]
+        let exchanged=try await call("POST","/dashboard/connect",headers:form,body:body)
+        XCTAssertEqual(exchanged.0.statusCode,303)
+        let cookie=String(try XCTUnwrap(exchanged.0.value(forHTTPHeaderField:"Set-Cookie")).split(separator:";")[0])
+        let replay=try await call("POST","/dashboard/connect",headers:form,body:body)
+        XCTAssertEqual(replay.0.statusCode,401)
+        let auth=try await call("GET","/dashboard/csrf",headers:["Cookie":cookie])
+        XCTAssertEqual(auth.0.statusCode,200)
+        let csrf=try XCTUnwrap((JSONSerialization.jsonObject(with:auth.1) as? [String:Any])?["csrf"] as? String)
+        let logout=try await call("POST","/dashboard/logout",headers:["Cookie":cookie,"X-Neo-CSRF":csrf,"Origin":origin])
+        XCTAssertEqual(logout.0.statusCode,204)
+        let revoked=try await call("GET","/dashboard/csrf",headers:["Cookie":cookie])
+        XCTAssertEqual(revoked.0.statusCode,401)
     }
 }
