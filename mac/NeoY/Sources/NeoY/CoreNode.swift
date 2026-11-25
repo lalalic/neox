@@ -12,6 +12,7 @@ struct NeoYNodeConfiguration: Codable, Equatable, Sendable {
     let kind: NeoYNodeKind
     let token: String?
     var isEnabled: Bool = true
+    var registrationID: String? = nil
 }
 
 actor NeoYNodeStore {
@@ -35,8 +36,16 @@ actor NeoYNodeStore {
     }
 
     func upsert(_ node: NeoYNodeConfiguration) throws {
+        let previous=nodes.first{$0.name==node.name}
+        var registered=node
+        // Re-pairing after removal (or a different endpoint/credential)
+        // creates a new identity and cannot revive an old OAuth device grant.
+        if let previous,previous.url==node.url,previous.kind==node.kind,
+            previous.token==node.token,previous.isEnabled==node.isEnabled{
+            registered.registrationID=previous.registrationID ?? UUID().uuidString
+        }else{registered.registrationID=UUID().uuidString}
         nodes.removeAll { $0.name == node.name }
-        nodes.append(node)
+        nodes.append(registered)
         try persist()
     }
 

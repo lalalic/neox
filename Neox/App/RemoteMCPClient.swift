@@ -32,6 +32,11 @@ final class RemoteMCPClient: ObservableObject {
     private let savedMacsKey = "remoteMCPHistoryV1"
     private let namedMastersKey = "neox.knownMastersV1"
     private var bearer = ""
+    private var oauthGrant: NeoMobileOAuthGrant?
+    private var oauthFlight: (id: UUID, endpoint: String, revision: UUID, task: Task<NeoMobileOAuthGrant, Error>)?
+    private var attemptedEnrollment: Set<String> = []
+    private var credentialGeneration = UUID()
+    private var credentialRevisions: [String:UUID] = [:]
     private var localEndpoint: String?
     private var activeEndpoint: String?
     private var remoteToolNames: [String] = []
@@ -53,7 +58,7 @@ final class RemoteMCPClient: ObservableObject {
         } else if let first = savedMacs.first {
             endpoint = first.url
         }
-        bearer = Self.readSecret(account: Self.credentialAccount(for: endpoint)) ?? ""
+        loadSavedCredential(for:endpoint)
     }
 
     #if DEBUG
@@ -98,14 +103,14 @@ final class RemoteMCPClient: ObservableObject {
         let target = advertised ?? known[name] ?? (firstBinding ? endpoint : "")
         guard !target.isEmpty else {
             endpoint = ""
-            bearer = ""
+            loadSavedCredential(for:"")
             connected = false
             return
         }
         if target != endpoint {
             endpoint = target
             activeEndpoint = nil
-            bearer = Self.readSecret(account: Self.credentialAccount(for: target)) ?? ""
+            loadSavedCredential(for:target)
             connected = false
         }
         known[name] = target
@@ -125,8 +130,9 @@ final class RemoteMCPClient: ObservableObject {
 
     func openVNCTunnel() async throws -> VNCLoopbackRelay {
         guard connected, !bearer.isEmpty else { throw RemoteError.missingCredential }
-        let isLAN = activeEndpoint?.hasPrefix("http://") == true
-        return try await VNCLoopbackRelay.start(url: remoteURL(path: "/vnc", scheme: isLAN ? "ws" : "wss"), token: bearer)
+        let token = try await currentBearer()
+        let isLAN = oauthGrant == nil && activeEndpoint?.hasPrefix("http://") == true
+        return try await VNCLoopbackRelay.start(url: remoteURL(path: "/vnc", scheme: isLAN ? "ws" : "wss"), token: token)
     }
 
     /// Feature routes share the configured Neo Remote host and HTTPS gateway.
@@ -134,7 +140,7 @@ final class RemoteMCPClient: ObservableObject {
     func remoteURL(path: String, scheme: String = "https") throws -> URL {
         guard path.hasPrefix("/"), !path.hasPrefix("//"),
               !path.contains("?"), !path.contains("#"),
-              let source = URL(string: activeEndpoint ?? endpoint),
+              let source = URL(string: oauthGrant == nil ? (activeEndpoint ?? endpoint) : endpoint),
               var components = URLComponents(url: source, resolvingAgainstBaseURL: false)
         else { throw RemoteError.invalidEndpoint }
         components.scheme = scheme
@@ -149,10 +155,14 @@ final class RemoteMCPClient: ObservableObject {
             throw RemoteError.invalidEndpoint
         }
         if !token.isEmpty {
+            credentialRevisions[normalized]=UUID()
             try Self.saveSecret(token, account: Self.credentialAccount(for: normalized))
-            bearer = token
+            if let old=Self.loadGrant(for:normalized) { Task { try? await NeoMobileOAuth.revoke(old) } }
+            Self.deleteSecret(account:Self.oauthAccount(for:normalized))
+            attemptedEnrollment.remove(normalized)
+            loadSavedCredential(for:normalized)
         } else if normalized != endpoint {
-            bearer = Self.readSecret(account: Self.credentialAccount(for: normalized)) ?? ""
+            loadSavedCredential(for:normalized)
         }
         guard !bearer.isEmpty else { throw RemoteError.missingCredential }
         endpoint = normalized
@@ -167,7 +177,7 @@ final class RemoteMCPClient: ObservableObject {
     func useSavedMac(_ mac: SavedMac) {
         endpoint = mac.url
         activeEndpoint = nil
-        bearer = Self.readSecret(account: Self.credentialAccount(for: mac.url)) ?? ""
+        loadSavedCredential(for:mac.url)
         connected = false
         error = nil
     }
@@ -184,8 +194,22 @@ final class RemoteMCPClient: ObservableObject {
         terminalTool = ""
     }
 
-    func forgetCredential() {
+    func forgetCredential() async {
+        let selected=endpoint,generation=credentialGeneration
+        busy=true
+        defer{busy=false}
+        if let flight=oauthFlight,flight.endpoint==selected{
+            _=try? await flight.task.value
+        }
+        guard endpoint==selected,credentialGeneration==generation else{return}
+        if let old=Self.loadGrant(for:selected){
+            do{try await NeoMobileOAuth.revoke(old)}
+            catch{self.error="Cannot revoke the saved device credential: "+error.localizedDescription;return}
+        }
+        guard endpoint==selected,credentialGeneration==generation else{return}
         MacScreenCredentials.delete(for: endpoint)
+        credentialRevisions[endpoint]=UUID()
+        Self.deleteSecret(account: Self.oauthAccount(for:endpoint))
         Self.deleteSecret(account: Self.credentialAccount(for: endpoint))
         savedMacs.removeAll { $0.url == endpoint }
         UserDefaults.standard.set(savedMacs.map(\.url), forKey: savedMacsKey)
@@ -193,7 +217,7 @@ final class RemoteMCPClient: ObservableObject {
         known.removeValue(forKey: selectedMasterName)
         UserDefaults.standard.set(known, forKey: namedMastersKey)
         endpoint = ""
-        bearer = Self.readSecret(account: Self.credentialAccount(for: endpoint)) ?? ""
+        loadSavedCredential(for:endpoint)
         UserDefaults.standard.set(endpoint, forKey: "remoteMCPURL")
         disconnect()
     }
@@ -203,6 +227,9 @@ final class RemoteMCPClient: ObservableObject {
         error = nil
         defer { busy = false }
         do {
+            // Existing paired Mobile devices can migrate the saved Master
+            // access code using the same OAuth PKCE flow, without prompting.
+            _ = try await currentBearer(enroll:true)
             let result = try await rpc(method: "tools/list", params: [:])
             let tools = result["tools"] as? [[String: Any]] ?? []
             let names = tools.compactMap { $0["name"] as? String }
@@ -446,8 +473,16 @@ final class RemoteMCPClient: ObservableObject {
     /// REST routes use the SAME selected Master credential as MCP.
     /// No independently discovered host or redirect may receive this token.
     func unifiedGatewayREST() throws -> UnifiedGatewayREST {
-        let scheme = (activeEndpoint ?? endpoint).hasPrefix("http://") ? "http" : "https"
-        return try UnifiedGatewayREST(origin: remoteURL(path: "/", scheme: scheme), token: bearer)
+        let selected = endpoint, generation=credentialGeneration
+        let scheme = oauthGrant == nil && (activeEndpoint ?? endpoint).hasPrefix("http://") ? "http" : "https"
+        let url=try remoteURL(path:"/",scheme:scheme)
+        return try UnifiedGatewayREST(origin:url,token:bearer,credentialProvider:{[weak self] in
+            guard let self,self.endpoint==selected,self.credentialGeneration==generation else{throw RemoteError.missingCredential}
+            let token=try await self.currentBearer()
+            guard self.endpoint==selected,self.credentialGeneration==generation,
+                self.oauthGrant==nil || url.scheme=="https" else{throw RemoteError.missingCredential}
+            return token
+        })
     }
 
     func chatGatewayFeed() async throws -> [ChatGatewayItem] {
@@ -641,11 +676,18 @@ final class RemoteMCPClient: ObservableObject {
         guard let url = components.url else { throw RemoteError.invalidEndpoint }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        let selected=endpoint,generation=credentialGeneration
+        let token=try await currentBearer()
+        guard endpoint==selected,credentialGeneration==generation else{throw RemoteError.missingCredential}
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 15
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let config=URLSessionConfiguration.ephemeral
+        config.httpShouldSetCookies=false
+        let session=URLSession(configuration:config,delegate:NeoMobileOAuthNoRedirect(),delegateQueue:nil)
+        defer{session.invalidateAndCancel()}
+        let (data,response)=try await session.data(for:request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw RemoteError.http((response as? HTTPURLResponse)?.statusCode ?? 0)
         }
@@ -692,6 +734,15 @@ final class RemoteMCPClient: ObservableObject {
     }
 
     private func rpc(method: String, params: [String: Any]) async throws -> [String: Any] {
+        if oauthGrant != nil {
+            // Renewable OAuth credentials are never sent to a Bonjour LAN
+            // hint or plaintext HTTP, even when legacy LAN mode is enabled.
+            let selected=endpoint
+            let response=try await requestRPC(method:method,params:params,address:selected)
+            guard endpoint==selected else{throw RemoteError.missingCredential}
+            activeEndpoint=selected
+            return response
+        }
         if let activeEndpoint {
             do {
                 return try await requestRPC(method: method, params: params, address: activeEndpoint)
@@ -723,14 +774,21 @@ final class RemoteMCPClient: ObservableObject {
         requestID += 1
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        let selected=endpoint
+        let token=try await currentBearer()
+        guard endpoint==selected,oauthGrant==nil || address==selected && url.scheme=="https" else{throw RemoteError.missingCredential}
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
         request.timeoutInterval = address == localEndpoint && activeEndpoint == nil ? 2 : 20
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "jsonrpc": "2.0", "id": requestID, "method": method, "params": params
         ])
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let config=URLSessionConfiguration.ephemeral
+        config.httpShouldSetCookies=false
+        let session=URLSession(configuration:config,delegate:NeoMobileOAuthNoRedirect(),delegateQueue:nil)
+        defer{session.invalidateAndCancel()}
+        let (data,response)=try await session.data(for:request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw RemoteError.http((response as? HTTPURLResponse)?.statusCode ?? 0)
         }
@@ -744,6 +802,80 @@ final class RemoteMCPClient: ObservableObject {
             throw RemoteError.invalidResponse
         }
         return result
+    }
+
+    private static func oauthAccount(for endpoint:String)->String {
+        credentialAccount(for:endpoint)+".oauth-v1"
+    }
+    private static func loadGrant(for endpoint:String)->NeoMobileOAuthGrant? {
+        guard let raw=readSecret(account:oauthAccount(for:endpoint)),
+            let grant=try? JSONDecoder().decode(NeoMobileOAuthGrant.self,from:Data(raw.utf8)),
+            (try? NeoMobileOAuth.origin(for:endpoint))==grant.origin else{return nil}
+        return grant
+    }
+    private func loadSavedCredential(for endpoint:String) {
+        credentialGeneration=UUID()
+        // A refresh request already sent must be allowed to finish writing
+        // its rotated credential. Its result is never used by a new selection.
+        oauthGrant=Self.loadGrant(for:endpoint)
+        bearer=oauthGrant?.accessToken ?? Self.readSecret(account:Self.credentialAccount(for:endpoint)) ?? ""
+    }
+    private func currentBearer(enroll:Bool=false) async throws -> String {
+        let selected=endpoint,generation=credentialGeneration
+        let revision=credentialRevisions[selected] ?? UUID()
+        credentialRevisions[selected]=revision
+        guard !bearer.isEmpty else{throw RemoteError.missingCredential}
+        if let grant=oauthGrant,!grant.needsRefresh{return grant.accessToken}
+        let old=oauthGrant
+        let shouldEnroll=old==nil && enroll && !attemptedEnrollment.contains(selected)
+            && (try? NeoMobileOAuth.origin(for:selected)) != nil
+        guard old != nil || shouldEnroll || oauthFlight?.endpoint==selected else{return bearer}
+        let id:UUID,task:Task<NeoMobileOAuthGrant,Error>
+        if let flight=oauthFlight,flight.endpoint==selected,flight.revision==revision {
+            id=flight.id;task=flight.task
+        }else{
+            if let flight=oauthFlight {
+                // Serialize rotations across Master selection changes too.
+                _=try? await flight.task.value
+                guard endpoint==selected,credentialGeneration==generation else{throw RemoteError.missingCredential}
+                if oauthFlight?.id==flight.id{oauthFlight=nil}
+                oauthGrant=Self.loadGrant(for:selected)
+                return try await currentBearer(enroll:enroll)
+            }
+            id=UUID()
+            let legacy=bearer
+            if shouldEnroll{attemptedEnrollment.insert(selected)}
+            task=Task {
+                let next:NeoMobileOAuthGrant
+                if let old {next=try await NeoMobileOAuth.refresh(old)}
+                else {next=try await NeoMobileOAuth.enroll(endpoint:selected,operatorCode:legacy,deviceID:Self.persistentDeviceID())}
+                guard self.credentialRevisions[selected]==revision else{
+                    try? await NeoMobileOAuth.revoke(next)
+                    throw RemoteError.missingCredential
+                }
+                do{
+                    let data=try JSONEncoder().encode(next)
+                    try Self.saveSecret(String(decoding:data,as:UTF8.self),account:Self.oauthAccount(for:selected))
+                    Self.deleteSecret(account:Self.credentialAccount(for:selected))
+                }catch{try? await NeoMobileOAuth.revoke(next);throw error}
+                return next
+            }
+            oauthFlight=(id,selected,revision,task)
+        }
+        defer{if oauthFlight?.id==id{oauthFlight=nil}}
+        do{
+            let next=try await task.value
+            guard endpoint==selected,credentialGeneration==generation else{throw RemoteError.missingCredential}
+            oauthGrant=next;bearer=next.accessToken;activeEndpoint=selected
+            return next.accessToken
+        }catch{
+            guard endpoint==selected,credentialGeneration==generation else{throw RemoteError.missingCredential}
+            // Older/manual short-lived credentials may not have operator
+            // consent; keep their previous behavior. A renewable grant never
+            // falls back to an old Master token after refresh failure.
+            if old==nil,shouldEnroll{return bearer}
+            throw error
+        }
     }
 
     private static func credentialAccount(for url: String) -> String {
@@ -773,7 +905,9 @@ final class RemoteMCPClient: ObservableObject {
     private static func saveSecret(_ secret: String, account: String) throws {
         let query = [kSecClass as String: kSecClassGenericPassword,
                      kSecAttrAccount as String: account] as CFDictionary
-        SecItemDelete(query)
+        let update=SecItemUpdate(query,[kSecValueData as String:Data(secret.utf8)] as CFDictionary)
+        if update==errSecSuccess{return}
+        guard update==errSecItemNotFound else{throw RemoteError.credentialSave}
         let attributes: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: account,

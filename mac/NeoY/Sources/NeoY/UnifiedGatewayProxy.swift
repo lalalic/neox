@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import Security
+import CryptoKit
 
 /// Neo Core is the sole authenticated HTTPS edge for these loopback services.
 /// This component only authorizes methods/paths and streams bytes. It does not
@@ -84,10 +85,19 @@ enum UnifiedGatewayRoute {
 /// Cookie authentication is never inferred from an MCP token in the URL.
 /// Secure, HttpOnly, SameSite=Strict browser sessions are separate from mobile Bearer auth.
 final class UnifiedGatewayBrowserSessions: @unchecked Sendable {
-    private struct Session { let csrf: String; let expires: Date }
+    typealias Principal = NeoYOAuthService.BrowserPrincipal
+    private struct Session: Codable { let csrf: String; let principal: Principal }
+    private struct Ticket { let principal: Principal; let expires: Date }
+    private struct Store: Codable { let epoch: String; let entries: [String: Session] }
     private let lock=NSLock()
     private var entries: [String: Session] = [:]
+    private var tickets: [String: Ticket] = [:]
+    private var stateURL: URL?
+    private var epoch = ""
 
+    private static func digest(_ value: String) -> String {
+        SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
     private static func secret() -> String {
         var bytes=[UInt8](repeating: 0, count: 32)
         guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
@@ -96,22 +106,92 @@ final class UnifiedGatewayBrowserSessions: @unchecked Sendable {
         return Data(bytes).base64EncodedString().replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
     }
-    func login() -> (cookie: String, csrf: String) {
+
+    // Persist only session digests and CSRF state. Operator rotation invalidates
+    // the entire browser store, just like the existing OAuth token epoch.
+    func configure(file: URL, operatorCredential: String) {
         lock.lock();defer {lock.unlock()}
-        entries=entries.filter { $0.value.expires > Date() }
-        let token=Self.secret(), csrf=Self.secret()
-        entries[token]=Session(csrf: csrf, expires: Date().addingTimeInterval(8*3600))
-        return ("neo_gateway_session=\(token); Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=28800",csrf)
+        let next = Self.digest(operatorCredential)
+        if stateURL == file && epoch == next { return }
+        stateURL=file;epoch=next;tickets.removeAll();entries.removeAll()
+        if let data=try? Data(contentsOf:file),
+           let store=try? JSONDecoder().decode(Store.self,from:data),store.epoch==epoch {
+            let now=Date().timeIntervalSince1970
+            entries=store.entries.filter { $0.value.principal.expiresAt > now }
+        }
     }
-    func csrf(cookieHeader: String?) -> String? {
-        guard let cookieHeader,
-              let token=cookieHeader.split(separator: ";").map({ $0.trimmingCharacters(in: .whitespaces) })
-                .first(where: { $0.hasPrefix("neo_gateway_session=") })?.split(separator: "=", maxSplits: 1).last
-        else { return nil }
-        lock.lock();defer {lock.unlock()}
-        let key=String(token)
-        guard let session=entries[key],session.expires>Date() else {entries.removeValue(forKey:key);return nil}
+    private func persistLocked() -> Bool {
+        guard let stateURL else { return true } // isolated unit tests
+        do {
+            try FileManager.default.createDirectory(at:stateURL.deletingLastPathComponent(),withIntermediateDirectories:true)
+            let data=try JSONEncoder().encode(Store(epoch:epoch,entries:entries))
+            // Stage a private file before atomic replacement; no cleartext
+            // cookie secrets are written, even during the atomic write.
+            let tmp=stateURL.deletingLastPathComponent().appendingPathComponent(".browser-sessions-"+UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at:tmp) }
+            guard FileManager.default.createFile(atPath:tmp.path,contents:data,attributes:[.posixPermissions:0o600]) else{return false}
+            if FileManager.default.fileExists(atPath:stateURL.path) {
+                _=try FileManager.default.replaceItemAt(stateURL,withItemAt:tmp,options:.usingNewMetadataOnly)
+            } else {try FileManager.default.moveItem(at:tmp,to:stateURL)}
+            return true
+        } catch {return false}
+    }
+    private func loginLocked(principal: Principal) -> (cookie: String, csrf: String)? {
+        let now=Date().timeIntervalSince1970
+        guard principal.expiresAt>now else{return nil}
+        entries=entries.filter { $0.value.principal.expiresAt>now }
+        let token=Self.secret(), csrf=Self.secret(),key=Self.digest(token)
+        entries[key]=Session(csrf:csrf,principal:principal)
+        guard persistLocked() else{entries.removeValue(forKey:key);return nil}
+        let age=max(1,Int(principal.expiresAt-now))
+        return ("neo_gateway_session=\(token); Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=\(age)",csrf)
+    }
+    func login(principal: Principal) -> (cookie: String, csrf: String)? {
+        lock.lock();defer {lock.unlock()};return loginLocked(principal:principal)
+    }
+    // Keep the old in-memory unit-test entry point; production always supplies
+    // a principal verified by NeoYOAuthService.
+    func login() -> (cookie: String, csrf: String) {
+        login(principal:Principal(clientID:nil,accessDigest:nil,
+            expiresAt:Date().timeIntervalSince1970+8*3600))!
+    }
+    func ticket(principal:Principal)->String?{
+        lock.lock();defer{lock.unlock()}
+        let now=Date()
+        guard principal.expiresAt>now.timeIntervalSince1970 else{return nil}
+        tickets=tickets.filter{$0.value.expires>now}
+        guard tickets.count<128 else{return nil}
+        let token=Self.secret();tickets[Self.digest(token)]=Ticket(principal:principal,expires:now.addingTimeInterval(60))
+        return token
+    }
+    func redeem(_ ticket:String,validate:(Principal)->Bool)->(cookie:String,csrf:String)?{
+        lock.lock();defer{lock.unlock()}
+        guard ticket.count<=128,let record=tickets.removeValue(forKey:Self.digest(ticket)),
+            record.expires>Date(),validate(record.principal) else{return nil}
+        return loginLocked(principal:record.principal)
+    }
+    private func cookieKey(_ header:String?)->String?{
+        guard let token=header?.split(separator:";").map({$0.trimmingCharacters(in:.whitespaces)})
+            .first(where:{$0.hasPrefix("neo_gateway_session=")})?.split(separator:"=",maxSplits:1).last,
+            token.count<=128 else{return nil}
+        return Self.digest(String(token))
+    }
+    func csrf(cookieHeader:String?,validate:(Principal)->Bool={_ in true})->String?{
+        guard let key=cookieKey(cookieHeader) else{return nil}
+        lock.lock();defer{lock.unlock()}
+        guard let session=entries[key],session.principal.expiresAt>Date().timeIntervalSince1970,
+            validate(session.principal) else{
+            if entries.removeValue(forKey:key) != nil {_=persistLocked()}
+            return nil
+        }
         return session.csrf
+    }
+    func logout(cookieHeader:String?)->Bool{
+        guard let key=cookieKey(cookieHeader) else{return true}
+        lock.lock();defer{lock.unlock()}
+        let old=entries.removeValue(forKey:key)
+        guard persistLocked() else{entries[key]=old;return false}
+        return true
     }
 }
 

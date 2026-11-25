@@ -73,4 +73,33 @@ final class UnifiedGatewayRouteTests: XCTestCase {
         XCTAssertNil(store.csrf(cookieHeader: "neo_gateway_session=wrong"))
         XCTAssertNil(store.csrf(cookieHeader: ""))
     }
+
+    func testPersistedCookieAndOneUseTicketSurviveOnlyAuthorizedGrant() throws {
+        let root=FileManager.default.temporaryDirectory.appendingPathComponent("dashboard-session-"+UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer{try? FileManager.default.removeItem(at:root)}
+        let file=root.appendingPathComponent("sessions.json")
+        let service=NeoYOAuthService(clientID:"fixture",consentToken:"test-only-master",stateURL:root.appendingPathComponent("oauth.json"))
+        let principal=try XCTUnwrap(service.browserPrincipal("test-only-master",remember:true))
+        XCTAssertGreaterThan(principal.expiresAt-Date().timeIntervalSince1970,29*86400)
+        let store=UnifiedGatewayBrowserSessions()
+        store.configure(file:file,operatorCredential:"test-only-master")
+        let ticket=try XCTUnwrap(store.ticket(principal:principal))
+        let session=try XCTUnwrap(store.redeem(ticket,validate:service.browserPrincipalIsActive))
+        XCTAssertNil(store.redeem(ticket,validate:service.browserPrincipalIsActive))
+        let cookie=String(session.cookie.split(separator:";")[0])
+        let token=String(cookie.split(separator:"=")[1])
+        XCTAssertFalse(String(decoding:try Data(contentsOf:file),as:UTF8.self).contains(token))
+        let attrs=try FileManager.default.attributesOfItem(atPath:file.path)
+        XCTAssertEqual((attrs[.posixPermissions] as? NSNumber)?.intValue,0o600)
+        let reopened=UnifiedGatewayBrowserSessions()
+        reopened.configure(file:file,operatorCredential:"test-only-master")
+        XCTAssertEqual(reopened.csrf(cookieHeader:cookie,validate:service.browserPrincipalIsActive),session.csrf)
+        let second=try XCTUnwrap(reopened.login(principal:principal))
+        XCTAssertTrue(reopened.logout(cookieHeader:cookie))
+        XCTAssertNil(reopened.csrf(cookieHeader:cookie,validate:service.browserPrincipalIsActive))
+        let rotated=UnifiedGatewayBrowserSessions()
+        rotated.configure(file:file,operatorCredential:"changed-master")
+        XCTAssertNil(rotated.csrf(cookieHeader:second.cookie,validate:service.browserPrincipalIsActive))
+    }
 }

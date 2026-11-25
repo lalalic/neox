@@ -10,7 +10,7 @@ enum NeoYMobileDeviceNotifications {
     private static let store = DeviceStore()
 
     nonisolated static func allowed(path: String, isLocal: Bool,
-                                    headers: [String: String], masterAccessCode: String?) -> Bool {
+                                    headers: [String: String], masterAccessCode: String?, registeredMobileBearer: Bool = false) -> Bool {
         guard actions.contains(where: { $0.1 == path }) else { return false }
         if path == notify {
             let host = headers["host"]?.lowercased().split(separator: ":").first.map(String.init)
@@ -19,6 +19,7 @@ enum NeoYMobileDeviceNotifications {
                 && headers["x-forwarded-for"] == nil && headers["x-forwarded-proto"] == nil
                 && headers["cf-ray"] == nil && headers["cf-connecting-ip"] == nil
         }
+        if path==registration && registeredMobileBearer{return true}
         guard let masterAccessCode, !masterAccessCode.isEmpty,
               let authorization = headers["authorization"], authorization.hasPrefix("Bearer ") else { return false }
         return String(authorization.dropFirst("Bearer ".count)) == masterAccessCode

@@ -9,13 +9,15 @@ enum GatewayRESTError: Error {
 final class UnifiedGatewayREST: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     private let origin: URL
     private let token: String
+    private let credentialProvider: (@MainActor () async throws -> String)?
 
-    init(origin: URL, token: String) throws {
+    init(origin: URL, token: String, credentialProvider: (@MainActor () async throws -> String)? = nil) throws {
         guard ["http", "https"].contains(origin.scheme ?? ""),
               origin.host != nil, origin.user == nil, origin.password == nil,
               !token.isEmpty else { throw GatewayRESTError.invalidEndpoint }
         self.origin = origin
         self.token = token
+        self.credentialProvider = credentialProvider
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask,
@@ -26,7 +28,7 @@ final class UnifiedGatewayREST: NSObject, URLSessionTaskDelegate, @unchecked Sen
         completionHandler(nil)
     }
 
-    private func makeRequest(_ method: String, path: String, query: [URLQueryItem], body: [String: Any]?) throws -> URLRequest {
+    @MainActor private func makeRequest(_ method: String, path: String, query: [URLQueryItem], body: [String: Any]?) async throws -> URLRequest {
         guard path.hasPrefix("/"), !path.hasPrefix("//"), !path.contains(".."), !path.contains("%"),
               !path.contains("?"), !path.contains("#"),
               path.hasPrefix("/orchestrator-chat/") || path.hasPrefix("/relay/api/") else {
@@ -38,7 +40,8 @@ final class UnifiedGatewayREST: NSObject, URLSessionTaskDelegate, @unchecked Sen
         guard let target = url.url else { throw GatewayRESTError.invalidEndpoint }
         var request = URLRequest(url: target)
         request.httpMethod = method
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let current = try await credentialProvider?() ?? token
+        request.setValue("Bearer \(current)", forHTTPHeaderField: "Authorization")
         request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
         if let body {
             guard JSONSerialization.isValidJSONObject(body) else { throw GatewayRESTError.invalidResponse }
@@ -56,7 +59,7 @@ final class UnifiedGatewayREST: NSObject, URLSessionTaskDelegate, @unchecked Sen
 
     @MainActor func json(_ method: String, path: String, query: [URLQueryItem] = [], body: [String: Any]? = nil,
               expectedStatus: Int = 200) async throws -> [String: Any] {
-        let request = try makeRequest(method, path: path, query: query, body: body)
+        let request = try await makeRequest(method, path: path, query: query, body: body)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpShouldSetCookies = false
         configuration.urlCache = nil
@@ -76,7 +79,7 @@ final class UnifiedGatewayREST: NSObject, URLSessionTaskDelegate, @unchecked Sen
     /// Bearer-authenticated Relay notifications contain no Job payload, prompts
     /// or event text. The authoritative Jobs/Activity data is re-fetched by REST.
     @MainActor func relayChanges(onChange: @escaping @MainActor () async -> Void) async throws {
-        var request = try makeRequest("GET", path: "/relay/api/mobile/events",
+        var request = try await makeRequest("GET", path: "/relay/api/mobile/events",
                                       query: [], body: nil)
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 3600
@@ -129,7 +132,7 @@ final class UnifiedGatewayREST: NSObject, URLSessionTaskDelegate, @unchecked Sen
     /// A caller must persist the received message BEFORE advancing its cursor.
     func events(after cursor: Int, onEvent: @escaping @MainActor (Data) async throws -> Void) async throws {
         guard cursor >= 0 else { throw GatewayRESTError.invalidResponse }
-        var request = try makeRequest("GET", path: "/orchestrator-chat/events",
+        var request = try await makeRequest("GET", path: "/orchestrator-chat/events",
                                       query: [URLQueryItem(name: "cursor", value: String(cursor))], body: nil)
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 3600

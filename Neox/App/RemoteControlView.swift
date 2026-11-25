@@ -209,7 +209,7 @@ struct RemoteControlView: View {
                 }
                 if remote.hasCredential {
                     Button("Forget this Mac", role: .destructive) {
-                        remote.forgetCredential()
+                        Task { await remote.forgetCredential() }
                     }
                 }
             }

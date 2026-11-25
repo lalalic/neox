@@ -224,6 +224,8 @@ public final class MCPServer {
                                gatewayStateURL: URL? = nil) {
         oauthService = NeoYOAuthService(clientID: clientID, consentToken: consentToken,
                                         stateURL: stateURL, gatewayStateURL: gatewayStateURL)
+        gatewayBrowserSessions.configure(file:stateURL.deletingLastPathComponent()
+            .appendingPathComponent("dashboard-sessions.json"),operatorCredential:consentToken)
         refreshSnapshots()
     }
 
@@ -594,7 +596,9 @@ public final class MCPServer {
         let gatewayBearer = bearerToken != nil && (
             (_snapshotPrivilegedAccessToken != nil && bearerToken == _snapshotPrivilegedAccessToken) ||
             (_snapshotOAuthService?.isAuthorizedBearer(bearerToken) == true))
-        let gatewayCSRF = gatewayBrowserSessions.csrf(cookieHeader:headers["cookie"])
+        let gatewayCSRF = gatewayBrowserSessions.csrf(cookieHeader:headers["cookie"]){ principal in
+            self._snapshotOAuthService?.browserPrincipalIsActive(principal) == true
+        }
         let gatewayBrowser = gatewayCSRF != nil
         if path == "/dashboard" && method == "GET" {
             sendHTTP(connection:connection,status:302,body:nil,
@@ -608,6 +612,57 @@ public final class MCPServer {
                 extraHeaders:["Location":"/dashboard/login","Cache-Control":"no-store"])
             return
         }
+        // A registered node or a local authenticated CLI can open the browser
+        // without copying the Master token. Only a 60-second, one-use ticket
+        // crosses into the browser, in the fragment (never HTTP query/logs).
+        if path == "/dashboard/ticket" {
+            guard method=="POST", gatewayBearer,
+                  let principal=_snapshotOAuthService?.browserPrincipal(bearerToken,remember:true),
+                  let ticket=gatewayBrowserSessions.ticket(principal:principal) else {
+                sendHTTP(connection:connection,status:401,body:nil,extraHeaders:["Cache-Control":"no-store"]);return
+            }
+            let data=try? JSONSerialization.data(withJSONObject:["ticket":ticket,"expires_in":60])
+            sendHTTP(connection:connection,status:200,body:data,extraHeaders:["Cache-Control":"no-store","Pragma":"no-cache"]);return
+        }
+        if path == "/dashboard/connect" {
+            let security=["Cache-Control":"no-store","Referrer-Policy":"no-referrer","X-Frame-Options":"DENY",
+                "Content-Security-Policy":"default-src 'none'; script-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"]
+            if method=="GET" {
+                let page="""
+                <!doctype html><meta charset="utf-8"><title>Connect Neo Dashboard</title>
+                <form action="/dashboard/connect" method="post" id="handoff"><input type="hidden" name="ticket" id="ticket"></form>
+                <p id="message">Connecting registered Neo device…</p>
+                <script>const t=location.hash.slice(1);history.replaceState(null,'',location.pathname);
+                if(/^[A-Za-z0-9_-]{32,128}$/.test(t)){document.getElementById('ticket').value=t;document.getElementById('handoff').submit();}
+                else{document.getElementById('message').textContent='Open Neo Dashboard again from your registered device.';}</script>
+                """
+                sendHTTP(connection:connection,status:200,body:Data(page.utf8),contentType:"text/html; charset=utf-8",extraHeaders:security);return
+            }
+            let scheme=isCloudflareProxy || headers["x-forwarded-proto"]=="https" ? "https" : "http"
+            let origin="\(scheme)://\(headers["host"] ?? "")"
+            guard method=="POST",headers["origin"]==origin,(body?.count ?? 0)<=1024,
+                headers["content-type"]?.lowercased().hasPrefix("application/x-www-form-urlencoded")==true,
+                let body,let form=String(data:body,encoding:.utf8),
+                let ticket=URLComponents(string:"?"+form)?.queryItems?.first(where:{$0.name=="ticket"})?.value,
+                let loggedIn=gatewayBrowserSessions.redeem(ticket,validate:{ principal in
+                    self._snapshotOAuthService?.browserPrincipalIsActive(principal)==true
+                }) else{
+                    sendHTTP(connection:connection,status:401,body:Data("Dashboard handoff expired or invalid. Open it again from Neo.".utf8),
+                        contentType:"text/plain; charset=utf-8",extraHeaders:security);return
+                }
+            sendHTTP(connection:connection,status:303,body:nil,
+                extraHeaders:security.merging(["Location":"/dashboard/","Set-Cookie":loggedIn.cookie]){_,new in new});return
+        }
+        if path == "/dashboard/logout" {
+            let scheme=isCloudflareProxy || headers["x-forwarded-proto"]=="https" ? "https" : "http"
+            guard method=="POST",let csrf=gatewayCSRF,headers["x-neo-csrf"]==csrf,
+                headers["origin"]=="\(scheme)://\(headers["host"] ?? "")",
+                gatewayBrowserSessions.logout(cookieHeader:headers["cookie"]) else{
+                    sendHTTP(connection:connection,status:401,body:nil,extraHeaders:["Cache-Control":"no-store"]);return
+                }
+            sendHTTP(connection:connection,status:204,body:nil,extraHeaders:["Cache-Control":"no-store",
+                "Set-Cookie":"neo_gateway_session=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0"]);return
+        }
         if path == "/dashboard/login" {
             let html="""
                 <!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -616,6 +671,7 @@ public final class MCPServer {
                 <main><h1>Neo Dashboard</h1><form action="/dashboard/login" method="post">
                 <label>Neo access code <input type="password" name="access_code"
                 autocomplete="current-password" required></label>
+                <label><input type="checkbox" name="remember" value="yes"> Remember this trusted browser for up to 30 days</label>
                 <button type="submit">Sign in</button></form></main></body></html>
                 """
             if method == "GET" {
@@ -628,8 +684,9 @@ public final class MCPServer {
                   let body, let form=String(data:body,encoding:.utf8),
                   let password=URLComponents(string:"?"+form)?.queryItems?.first(where:{$0.name=="access_code"})?.value,
                   !password.isEmpty,
-                  (_snapshotPrivilegedAccessToken != nil && password == _snapshotPrivilegedAccessToken ||
-                   _snapshotOAuthService?.isAuthorizedBearer(password) == true)
+                  let principal = _snapshotOAuthService?.browserPrincipal(password,remember:
+                    URLComponents(string:"?"+form)?.queryItems?.contains(where:{$0.name=="remember" && $0.value=="yes"})==true),
+                  let loggedIn = gatewayBrowserSessions.login(principal:principal)
             else {
                 // Keep the login form visible on an invalid access code.
                 // Never echo credentials or distinguish authentication sources.
@@ -640,7 +697,6 @@ public final class MCPServer {
                     extraHeaders:["Cache-Control":"no-store","X-Frame-Options":"DENY"])
                 return
             }
-            let loggedIn=gatewayBrowserSessions.login()
             sendHTTP(connection:connection,status:303,body:nil,
                 extraHeaders:["Location":"/dashboard/","Set-Cookie":loggedIn.cookie,
                               "Cache-Control":"no-store"])
@@ -694,8 +750,11 @@ public final class MCPServer {
                 return
             }
             let masterCode = _snapshotPrivilegedAccessToken
+            let deviceID: String? = path==NeoYMobileDeviceNotifications.registration &&
+                (body?.count ?? 0)<=524_288 ? body.flatMap{(try? JSONSerialization.jsonObject(with:$0) as? [String:Any])?["deviceId"] as? String}:nil
             guard NeoYMobileDeviceNotifications.allowed(path: path, isLocal: isDirectLoopback,
-                                                 headers: headers, masterAccessCode: masterCode) else {
+                                                 headers: headers, masterAccessCode: masterCode,
+                                                 registeredMobileBearer:_snapshotOAuthService?.isRegisteredMobileBearer(bearerToken,deviceID:deviceID)==true) else {
                 sendHTTP(connection: connection, status: 403, body: nil,
                          extraHeaders: ["Cache-Control": "no-store"])
                 return

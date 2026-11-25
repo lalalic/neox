@@ -46,6 +46,7 @@ final class NeoYOAuthService: @unchecked Sendable {
         let audience: String?
         let expiresAt: TimeInterval
         var renewUntil: TimeInterval? = nil
+        var grantID: String? = nil
     }
 
     private struct RegisteredClient: Codable {
@@ -53,6 +54,7 @@ final class NeoYOAuthService: @unchecked Sendable {
         let redirectUris: [String]?
         let clientName: String
         let createdAt: TimeInterval
+        var nodeBinding: String? = nil
     }
 
     private struct StoreFile: Codable {
@@ -111,6 +113,24 @@ final class NeoYOAuthService: @unchecked Sendable {
         if let gatewayStateURL { importGatewayStoreIfNeeded(from: gatewayStateURL) }
     }
 
+    private static let nodeClientPrefix="Neo registered node: "
+    private func nodeBinding(for clientName:String)->String?{
+        guard clientName.hasPrefix(Self.nodeClientPrefix) else{return nil}
+        let name=String(clientName.dropFirst(Self.nodeClientPrefix.count))
+        let registry=stateURL.deletingLastPathComponent().appendingPathComponent("trusted-nodes.json")
+        guard let data=try? Data(contentsOf:registry),
+            let nodes=try? JSONDecoder().decode([NeoYNodeConfiguration].self,from:data),
+            let node=nodes.first(where:{$0.name==name && $0.isEnabled}) else{return nil}
+        let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
+        guard let identity=try? encoder.encode(node) else{return nil}
+        return Self.sha256(identity.base64EncodedString())
+    }
+    private func clientAllowedLocked(_ id:String)->Bool{
+        guard let client=clients[id],client.clientName.hasPrefix(Self.nodeClientPrefix) else{return true}
+        guard let binding=client.nodeBinding else{return false}
+        return nodeBinding(for:client.clientName)==binding
+    }
+
     func isAuthorizedBearer(_ token: String?) -> Bool {
         guard let token, !token.isEmpty else { return false }
         if Self.constantTimeEqual(token, consentToken) { return true }
@@ -118,7 +138,73 @@ final class NeoYOAuthService: @unchecked Sendable {
         let now = Date().timeIntervalSince1970
         return lock.withLock {
             sweepLocked(now: now)
-            return access[digest]?.expiresAt ?? 0 > now
+            guard let record=access[digest],record.expiresAt>now else{return false}
+            return clientAllowedLocked(record.clientID)
+        }
+    }
+
+    struct BrowserPrincipal: Codable, Equatable, Sendable {
+        let clientID: String?
+        let accessDigest: String?
+        let expiresAt: TimeInterval
+        var grantID: String? = nil
+    }
+
+    func browserPrincipal(_ credential: String?, remember: Bool) -> BrowserPrincipal? {
+        guard let credential, !credential.isEmpty else { return nil }
+        let now = Date().timeIntervalSince1970
+        let maxLifetime = remember ? refreshTTL : interactiveSessionTTL
+        if Self.constantTimeEqual(credential, consentToken) {
+            return BrowserPrincipal(clientID: nil, accessDigest: nil, expiresAt: now + maxLifetime)
+        }
+        let digest = Self.sha256(credential)
+        return lock.withLock {
+            sweepLocked(now: now)
+            guard let record = access[digest], record.expiresAt > now,
+                clientAllowedLocked(record.clientID) else { return nil }
+            let renewableUntil = refresh.values.filter {
+                record.grantID != nil && $0.grantID == record.grantID &&
+                    $0.clientID == record.clientID && $0.audience == record.audience
+            }.map(\.expiresAt).max() ?? 0
+            if remember && renewableUntil > now {
+                return BrowserPrincipal(clientID: record.clientID, accessDigest: nil,
+                    expiresAt: min(now + maxLifetime, renewableUntil),grantID:record.grantID)
+            }
+            return BrowserPrincipal(clientID: record.clientID, accessDigest: digest,
+                expiresAt: min(now + maxLifetime, record.expiresAt))
+        }
+    }
+
+    func browserPrincipalIsActive(_ principal: BrowserPrincipal) -> Bool {
+        let now = Date().timeIntervalSince1970
+        guard principal.expiresAt > now else { return false }
+        guard let clientID = principal.clientID else { return true }
+        return lock.withLock {
+            sweepLocked(now: now)
+            guard clientAllowedLocked(clientID) else{return false}
+            if let digest = principal.accessDigest {
+                return access[digest]?.clientID == clientID
+            }
+            return principal.grantID != nil && refresh.values.contains {
+                $0.clientID==clientID && $0.grantID==principal.grantID && $0.expiresAt>now
+            }
+        }
+    }
+
+    // APNs registration is still operator-approved, but an enrolled Mobile
+    // grant need not retain the long-lived Master access code.
+    func isRegisteredMobileBearer(_ token:String?,deviceID:String?) -> Bool {
+        guard let token,!token.isEmpty else{return false}
+        let digest=Self.sha256(token),now=Date().timeIntervalSince1970
+        return lock.withLock{
+            sweepLocked(now:now)
+            guard let current=access[digest],current.expiresAt>now,
+                let name=clients[current.clientID]?.clientName,
+                name.hasPrefix("Neo Mobile registered device: "),
+                let deviceID,let supplied=UUID(uuidString:deviceID),
+                UUID(uuidString:String(name.dropFirst("Neo Mobile registered device: ".count)))==supplied else{return false}
+            return current.grantID != nil && refresh.values.contains{$0.clientID==current.clientID &&
+                $0.grantID==current.grantID && $0.audience==current.audience && $0.expiresAt>now}
         }
     }
 
@@ -328,16 +414,17 @@ final class NeoYOAuthService: @unchecked Sendable {
             guard let token = form["refresh_token"], !token.isEmpty else { return oauthError(status: 400, code: "invalid_request", description: "refresh_token is required") }
             let digest = Self.sha256(token)
             let now = Date().timeIntervalSince1970
-            guard let record = lock.withLock({ () -> StoredToken? in
+            // Consume and rotate under the same lock. A concurrent cookie
+            // validation must never see a transient missing refresh grant.
+            return lock.withLock {
                 sweepLocked(now: now)
-                return refresh.removeValue(forKey: digest)
-            }), record.expiresAt > now else {
-                return oauthError(status: 400, code: "invalid_grant", description: "unknown or expired refresh token")
+                guard let record = refresh[digest], record.clientID == requestedClientID,
+                    record.expiresAt > now,clientAllowedLocked(record.clientID) else {
+                    return oauthError(status:400,code:"invalid_grant",description:"unknown or expired refresh token")
+                }
+                refresh.removeValue(forKey:digest)
+                return issueTokensLocked(clientID:record.clientID,audience:record.audience,grantID:record.grantID)
             }
-            guard record.clientID == requestedClientID else {
-                return oauthError(status: 400, code: "invalid_grant", description: "client_id mismatch")
-            }
-            return issueTokens(clientID: record.clientID, audience: record.audience)
 
         default:
             return oauthError(status: 400, code: "unsupported_grant_type", description: "unsupported grant_type")
@@ -387,8 +474,21 @@ final class NeoYOAuthService: @unchecked Sendable {
         if let token = form["token"] {
             let digest = Self.sha256(token)
             lock.withLock {
-                access.removeValue(forKey: digest)
-                refresh.removeValue(forKey: digest)
+                if form["revoke_grant"]=="true",let record=refresh[digest],let grantID=record.grantID {
+                    access=access.filter{$0.value.grantID != grantID}
+                    refresh=refresh.filter{$0.value.grantID != grantID}
+                    if let client=clients[record.clientID],
+                        (client.clientName.hasPrefix("Neo registered node: ") ||
+                         client.clientName.hasPrefix("Neo Mobile registered device: ") ||
+                         client.clientName.hasPrefix("Neo registered device: ")),
+                        !access.values.contains(where:{$0.clientID==record.clientID}),
+                        !refresh.values.contains(where:{$0.clientID==record.clientID}) {
+                        clients.removeValue(forKey:record.clientID)
+                    }
+                }else{
+                    access.removeValue(forKey:digest)
+                    refresh.removeValue(forKey:digest)
+                }
                 saveStoreLocked()
             }
         }
@@ -419,13 +519,17 @@ final class NeoYOAuthService: @unchecked Sendable {
 
         let redirects = Array(Set(redirectUris)).sorted()
         let name = String((object["client_name"] as? String ?? "ChatGPT").prefix(200))
-        let fingerprint = redirects.joined(separator: "\u{0}") + "\u{1}" + name
+        let binding=nodeBinding(for:name)
+        if name.hasPrefix(Self.nodeClientPrefix),binding==nil{
+            return oauthError(status:400,code:"invalid_client_metadata",description:"registered Neo node is not enabled")
+        }
+        let fingerprint = redirects.joined(separator: "\u{0}") + "\u{1}" + name + (binding.map{"\u{1}"+$0} ?? "")
         let id = "neo-dcr-" + Self.sha256(fingerprint).prefix(32)
         let record = lock.withLock { () -> RegisteredClient? in
             if let existing = clients[id] { return existing }
             guard clients.count < 32 else { return nil }
             let created = RegisteredClient(id: id, redirectUris: redirects, clientName: name,
-                                           createdAt: Date().timeIntervalSince1970)
+                                           createdAt: Date().timeIntervalSince1970,nodeBinding:binding)
             clients[id] = created
             saveStoreLocked()
             return created
@@ -450,7 +554,7 @@ final class NeoYOAuthService: @unchecked Sendable {
         if id == clientID {
             return RegisteredClient(id: id, redirectUris: nil, clientName: "Configured OAuth client", createdAt: 0)
         }
-        return lock.withLock { clients[id] }
+        return lock.withLock { clientAllowedLocked(id) ? clients[id] : nil }
     }
 
     private func redirectAllowed(_ value: String, for client: RegisteredClient) -> Bool {
@@ -459,20 +563,26 @@ final class NeoYOAuthService: @unchecked Sendable {
     }
 
     private func issueTokens(clientID: String, audience: String?) -> NeoYOAuthHTTPResponse {
+        lock.withLock {
+            guard clientAllowedLocked(clientID) else{return oauthError(status:400,code:"invalid_grant",description:"registered node no longer trusted")}
+            return issueTokensLocked(clientID:clientID,audience:audience)
+        }
+    }
+
+    private func issueTokensLocked(clientID: String, audience: String?, grantID:String?=nil) -> NeoYOAuthHTTPResponse {
+        let family=grantID ?? UUID().uuidString
         let now = Date().timeIntervalSince1970
         let accessToken = Self.randomToken(bytes: 32)
         let refreshToken = Self.randomToken(bytes: 32)
-        let interactive = knownClient(clientID)?.clientName == "Z.ai interactive"
+        let interactive = clients[clientID]?.clientName == "Z.ai interactive"
         let renewUntil = interactive ? now + interactiveSessionTTL : nil
         let accessRecord = StoredToken(digest: Self.sha256(accessToken), clientID: clientID,
-                                       audience: audience, expiresAt: now + accessTTL, renewUntil: renewUntil)
-        let refreshRecord = StoredToken(digest: Self.sha256(refreshToken), clientID: clientID, audience: audience, expiresAt: now + refreshTTL)
-        lock.withLock {
-            sweepLocked(now: now)
-            access[accessRecord.digest] = accessRecord
-            if !interactive { refresh[refreshRecord.digest] = refreshRecord }
-            saveStoreLocked()
-        }
+                                       audience: audience, expiresAt: now + accessTTL, renewUntil: renewUntil,grantID:family)
+        let refreshRecord = StoredToken(digest: Self.sha256(refreshToken), clientID: clientID, audience: audience, expiresAt: now + refreshTTL,grantID:family)
+        sweepLocked(now: now)
+        access[accessRecord.digest] = accessRecord
+        if !interactive { refresh[refreshRecord.digest] = refreshRecord }
+        saveStoreLocked()
         var response: [String: Any] = [
             "access_token": accessToken,
             "token_type": "Bearer",

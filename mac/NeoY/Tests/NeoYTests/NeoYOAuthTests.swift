@@ -452,4 +452,91 @@ final class NeoYOAuthTests: XCTestCase {
             headers: headers.merging(["authorization": "Bearer \(nextToken)"]) { _, value in value }, body: nil)
         XCTAssertEqual(deadlineAttempt?.status, 401)
     }
+
+    func testRegisteredNodeGrantRotationAndRevocationAreBoundToExactPairing() async throws {
+        let directory=FileManager.default.temporaryDirectory.appendingPathComponent("neo-node-oauth-"+UUID().uuidString)
+        try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
+        defer{try? FileManager.default.removeItem(at:directory)}
+        let nodes=NeoYNodeStore(file:directory.appendingPathComponent("trusted-nodes.json"))
+        let node=NeoYNodeConfiguration(name:"fixture-work",url:"http://127.0.0.1:28789/mcp",kind:.neoNode,token:nil)
+        try await nodes.upsert(node)
+        let secret="test-only-master"
+        let service=NeoYOAuthService(clientID:"configured",consentToken:secret,stateURL:directory.appendingPathComponent("oauth.json"))
+        let headers=["host":"neoy.example","x-forwarded-proto":"https"]
+        func request(_ path:String,_ fields:[String:String])->NeoYOAuthHTTPResponse?{
+            var form=URLComponents();form.queryItems=fields.map{URLQueryItem(name:$0.key,value:$0.value)}
+            return service.handle(method:"POST",path:path,requestTarget:path,headers:headers,
+                body:Data((form.percentEncodedQuery ?? "").utf8))
+        }
+        func object(_ response:NeoYOAuthHTTPResponse?) throws -> [String:Any]{
+            XCTAssertEqual(response?.status,200)
+            return try XCTUnwrap(JSONSerialization.jsonObject(with:try XCTUnwrap(response?.body)) as? [String:Any])
+        }
+        func register(_ name:String)throws->String{
+            let result=service.handle(method:"POST",path:"/register",requestTarget:"/register",headers:headers,
+                body:try JSONSerialization.data(withJSONObject:["client_name":name,
+                  "redirect_uris":["http://127.0.0.1:8765/neo/oauth/callback"],"token_endpoint_auth_method":"none"]))
+            XCTAssertEqual(result?.status,201)
+            let body=try XCTUnwrap(JSONSerialization.jsonObject(with:try XCTUnwrap(result?.body)) as? [String:Any])
+            return try XCTUnwrap(body["client_id"] as? String)
+        }
+        func enroll(_ client:String)throws->[String:Any]{
+            let verifier=String(repeating:"a",count:43)
+            let challenge=Data(SHA256.hash(data:Data(verifier.utf8))).base64EncodedString()
+                .replacingOccurrences(of:"+",with:"-").replacingOccurrences(of:"/",with:"_").replacingOccurrences(of:"=",with:"")
+            let callback="http://127.0.0.1:8765/neo/oauth/callback"
+            var query=URLComponents();query.path="/authorize"
+            query.queryItems=["response_type":"code","client_id":client,"redirect_uri":callback,
+                "code_challenge":challenge,"code_challenge_method":"S256","resource":"https://neoy.example/mcp",
+                "state":"fixture"].map{URLQueryItem(name:$0.key,value:$0.value)}
+            let page=service.handle(method:"GET",path:"/authorize",requestTarget:try XCTUnwrap(query.string),headers:headers,body:nil)
+            XCTAssertEqual(page?.status,200)
+            let html=String(decoding:try XCTUnwrap(page?.body),as:UTF8.self)
+            let match=try XCTUnwrap(html.range(of:"name=\"rid\" value=\""))
+            let end=try XCTUnwrap(html[match.upperBound...].firstIndex(of:"\""))
+            let rid=String(html[match.upperBound..<end])
+            let approval=request("/authorize",["rid":rid,"token":secret])
+            XCTAssertEqual(approval?.status,302)
+            let location=try XCTUnwrap(approval?.headers["Location"])
+            let code=try XCTUnwrap(URLComponents(string:location)?.queryItems?.first(where:{$0.name=="code"})?.value)
+            return try object(request("/token",["grant_type":"authorization_code","client_id":client,
+               "redirect_uri":callback,"code":code,"code_verifier":verifier]))
+        }
+        let client=try register("Neo registered node: fixture-work")
+        let initial=try enroll(client)
+        let access=try XCTUnwrap(initial["access_token"] as? String)
+        let refresh=try XCTUnwrap(initial["refresh_token"] as? String)
+        let principal=try XCTUnwrap(service.browserPrincipal(access,remember:true))
+        XCTAssertTrue(service.browserPrincipalIsActive(principal))
+        let wrong=try register("different-client")
+        XCTAssertEqual(request("/token",["grant_type":"refresh_token","client_id":wrong,"refresh_token":refresh])?.status,400)
+        let rotated=try object(request("/token",["grant_type":"refresh_token","client_id":client,"refresh_token":refresh]))
+        let nextAccess=try XCTUnwrap(rotated["access_token"] as? String)
+        let nextRefresh=try XCTUnwrap(rotated["refresh_token"] as? String)
+        XCTAssertNotEqual(refresh,nextRefresh)
+        XCTAssertTrue(service.browserPrincipalIsActive(principal))
+        XCTAssertEqual(request("/token",["grant_type":"refresh_token","client_id":client,"refresh_token":refresh])?.status,400)
+        // A second grant with the same DCR client must remain independent.
+        let other=try enroll(client)
+        let otherAccess=try XCTUnwrap(other["access_token"] as? String)
+        XCTAssertEqual(request("/revoke",["token":nextRefresh,"revoke_grant":"true"])?.status,200)
+        XCTAssertFalse(service.isAuthorizedBearer(access))
+        XCTAssertFalse(service.isAuthorizedBearer(nextAccess))
+        XCTAssertFalse(service.browserPrincipalIsActive(principal))
+        XCTAssertTrue(service.isAuthorizedBearer(otherAccess))
+        try await nodes.remove("fixture-work")
+        XCTAssertFalse(service.isAuthorizedBearer(otherAccess))
+        try await nodes.upsert(node)
+        XCTAssertFalse(service.isAuthorizedBearer(otherAccess),"Re-pair must not revive a removed device grant")
+        XCTAssertNotEqual(try register("Neo registered node: fixture-work"),client)
+        let deviceID=UUID().uuidString
+        let mobileClient=try register("Neo Mobile registered device: "+deviceID)
+        let mobile=try enroll(mobileClient)
+        XCTAssertTrue(service.isRegisteredMobileBearer(mobile["access_token"] as? String,deviceID:deviceID))
+        XCTAssertFalse(service.isRegisteredMobileBearer(mobile["access_token"] as? String,deviceID:UUID().uuidString))
+        XCTAssertTrue(NeoYMobileDeviceNotifications.allowed(path:NeoYMobileDeviceNotifications.registration,isLocal:false,headers:[:],
+            masterAccessCode:secret,registeredMobileBearer:true))
+        XCTAssertFalse(NeoYMobileDeviceNotifications.allowed(path:NeoYMobileDeviceNotifications.notify,isLocal:false,headers:[:],
+            masterAccessCode:secret,registeredMobileBearer:true))
+    }
 }
