@@ -40,7 +40,7 @@ Neo.app should prepare the CLI and required shared Agents/Skills during
 first-run setup and repair a missing managed CLI on startup. Harness assets
 are resolved from the installed package path, not `NEO_ROOT`, the app repo or
 a Neo source checkout. Source development symlinks must not be silently
-replaced by a managed install. Independent projects live under their selected
+replaced by a managed install. After the Harness CLI is ready, the app invokes `neo setup code-tools` on startup and explicit Setup. The Harness owns versions, user-local installation and the global agent rule. Missing optional tooling is logged without blocking required Skills or app startup. Independent projects live under their selected
 root, each with its own `.git`; the app lists them via the Harness CLI rather
 than a second hardcoded project enumeration.
 

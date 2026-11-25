@@ -107,10 +107,12 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             catch { NSLog("Neo optional Skills startup recovery failed: %@", error.localizedDescription) }
             // Required Skills and their service daemons are Neo-owned infrastructure.
             // Keep them healthy while the app remains open, without user-facing toggles.
+            var codeToolsNeedSetup = true
             while !Task.isCancelled {
                 if NeoCLISetup.cliPath() == nil {
                     do { NSLog("Neo Harness recovery: %@", try NeoCLISetup.installIfMissing()) }
                     catch { NSLog("Neo Harness recovery failed: %@", error.localizedDescription) }
+                    codeToolsNeedSetup = true
                 }
                 do { _ = try NeoCLISetup.setupMissingGlobalSkills() }
                 catch { NSLog("Neo required Skills recovery failed: %@", error.localizedDescription) }
@@ -120,6 +122,10 @@ final class NeoYAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 do { try NeoProjectLifecycleServices.reconcile() }
                 catch { NSLog("Neo Project lifecycle configuration unavailable: %@", error.localizedDescription) }
                 NeoCLISetup.autoUpdateIfDue()
+                if codeToolsNeedSetup {
+                    NSLog("%@", NeoCLISetup.setupCodeTools())
+                    codeToolsNeedSetup = false
+                }
                 do { try await Task.sleep(for: .seconds(5 * 60)) }
                 catch { break }
             }

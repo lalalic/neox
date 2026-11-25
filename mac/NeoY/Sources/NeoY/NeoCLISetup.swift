@@ -697,11 +697,29 @@ enum NeoCLISetup {
         try ensureToolSkills(Set(requiredGlobalSkills))
     }
 
+    /// Harness owns tool packages, versions and global rules. Optional tooling
+    /// must never prevent the app or required Skills from starting.
+    static func setupCodeTools(cli: URL? = cliPath()) -> String {
+        guard let cli else { return "Harness code tools unavailable: neo CLI missing" }
+        do {
+            let result = try runCLI(executable: cli, arguments: ["setup", "code-tools"])
+            guard result.status == 0,
+                  let data = result.stdout.data(using: .utf8),
+                  let receipt = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  receipt["ok"] as? Bool == true else {
+                return "Harness code tools unavailable: " + String((result.stderr.isEmpty ? result.stdout : result.stderr).prefix(400))
+            }
+            return "Harness code tools ready"
+        } catch {
+            return "Harness code tools unavailable: " + error.localizedDescription
+        }
+    }
+
     static func setup() -> String {
         do {
             let cli = try installIfMissing()
             let skills = try setupMissingGlobalSkills()
-            return cli + "; " + skills
+            return cli + "; " + skills + "; " + setupCodeTools()
         } catch {
             return "Neo CLI / Global Skills setup failed: \(error.localizedDescription)"
         }

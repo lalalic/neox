@@ -2,6 +2,22 @@ import XCTest
 @testable import NeoY
 
 final class NeoCLISetupTests: XCTestCase {
+    func testHarnessCodeToolsReceiptAndFailure() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cli = directory.appendingPathComponent("neo")
+        func write(_ script: String) throws {
+            try script.write(to: cli, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
+        }
+        try write("#!/bin/sh\n[ \"$1 $2\" = \"setup code-tools\" ] || exit 9\nprintf '%s\\n' '{\"ok\":true}'\n")
+        XCTAssertEqual(NeoCLISetup.setupCodeTools(cli: cli), "Harness code tools ready")
+        try write("#!/bin/sh\nprintf '%s\\n' '{\"ok\":false}'\nexit 1\n")
+        XCTAssertTrue(NeoCLISetup.setupCodeTools(cli: cli).contains("unavailable"))
+        XCTAssertTrue(NeoCLISetup.setupCodeTools(cli: nil).contains("missing"))
+    }
+
     func testXChatHTTPBootstrapUsesNeoCLIWithoutNewMCPTool() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("xchat-bootstrap-\(UUID().uuidString)", isDirectory: true)
