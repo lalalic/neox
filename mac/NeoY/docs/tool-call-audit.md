@@ -1,0 +1,11 @@
+# NeoY MCP tool-call audit
+
+The canonical MCP tool-call lifecycle log is `~/Library/Logs/NeoY/tool-calls.jsonl`. Use it to investigate calls, correlating `call_id`, `tool`, `time`, `phase` (`started`/`terminal`), `status`, `duration_ms`, and `error.code`. For handler failures, inspect `error.type`, `error.domain`, and `error.number` to identify the failing subsystem without logging raw exception messages or secrets. A `status=failed` terminal entry indicates an MCP-level failure; `status=succeeded` does **not** prove an executed shell command returned exit code zero. When necessary correlate with the shell job metadata and stdout/stderr files under `~/Library/Application Support/NeoY/core/jobs/` using the job ID. Never infer that a `running` shell response indicates failure or non-execution; its process continues after the synchronous wait; inspect the job before retrying mutations.
+
+NeoY Core's separate `~/Library/Logs/NeoY/Core/audit.jsonl` audit writer is retired; do not consult or recreate it. Prefer reporting aggregate counts and redacted diagnostics rather than exposing prompts, credentials, or complete shell arguments. Historical entries may have been cleared.
+
+NeoY `shell.exec` `timeout_ms` controls synchronous waiting only. If a command is still executing when that wait expires, the tool returns `status=running` with a durable `jobId`; **never rerun a side-effecting command** merely because its wait elapsed. Query `shell.job_status` (`shell_job_status`) for the same ID. Explicit `shell.job_kill` (`shell_job_kill`) is required to terminate it. `timeout_ms=0` returns immediately.
+
+Raw MCP auditing: `tool-calls.jsonl` records the complete JSON input at start and returned JSON output at completion, plus error messages, duration and exit code when present. No redaction is applied. This file can contain tokens, personal data and command output; restrict access (directory `0700`, file `0600`) and never paste its raw contents into public reports.
+
+Patch tool validation: Published JSON Schema `required` fields are not a substitute for checking arguments at the MCP ingress. For `apply_file_patch`, validate `patch` and `cwd` before dispatch and map nonzero `git apply` exits to MCP `isError:true`; audit status must reflect actual tool failure, not merely successful RPC transport.
