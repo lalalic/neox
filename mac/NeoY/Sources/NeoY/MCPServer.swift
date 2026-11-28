@@ -727,6 +727,30 @@ public final class MCPServer {
                     return
                 }
             }
+            if path == "/relay/api/events" && !gatewayBrowser {
+                guard method == "GET",
+                      UnifiedGatewayMobileHistory.isMasterOwnerBearer(bearerToken,
+                        masterToken: _snapshotPrivilegedAccessToken) else {
+                    sendHTTP(connection: connection, status: 403, body: nil,
+                             extraHeaders: ["Cache-Control": "no-store"])
+                    return
+                }
+                guard let scope = UnifiedGatewayMobileHistory.query(
+                    URLComponents(string: "http://localhost\(requestTarget)")?.queryItems ?? []
+                ) else {
+                    sendHTTP(connection: connection, status: 400, body: nil,
+                             extraHeaders: ["Cache-Control": "no-store"])
+                    return
+                }
+                let task = Task.detached(priority: .userInitiated) {
+                    let result = await Self.fetchMobileJobHistory(job: scope.job, repository: scope.repository)
+                    self.sendHTTP(connection: connection, status: result.status, body: result.body,
+                                  extraHeaders: ["Cache-Control": "no-store"])
+                    UnifiedGatewayInFlight.shared.clear(for: connection)
+                }
+                UnifiedGatewayInFlight.shared.install(task, for: connection)
+                return
+            }
             // Forward only the original query string, not any client credentials.
             let query=URLComponents(string:"http://127.0.0.1"+requestTarget)?.percentEncodedQuery
             let immutableBody=body
@@ -1361,6 +1385,35 @@ public final class MCPServer {
         sendHTTP(connection: connection, status: status, body: jsonData, contentType: "application/json")
     }
 
+    nonisolated private static func fetchMobileJobHistory(job: String, repository: String) async -> (status: Int, body: Data?) {
+        func get(_ path: String, query: [URLQueryItem]) async -> (Int, Data?) {
+            var components = URLComponents(string: "http://127.0.0.1:8787\(path)")!
+            components.queryItems = query
+            guard let url = components.url else { return (502, nil) }
+            var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
+            request.httpMethod = "GET"
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                return ((response as? HTTPURLResponse)?.statusCode ?? 502, data)
+            } catch { return (502, nil) }
+        }
+        let preflight = await get("/api/job", query: [URLQueryItem(name: "id", value: job)])
+        guard preflight.0 == 200 else { return (preflight.0 == 404 ? 409 : 502, nil) }
+        guard let preflightData = preflight.1,
+              let found = try? JSONSerialization.jsonObject(with: preflightData) as? [String: Any] else { return (502, nil) }
+        guard UnifiedGatewayMobileHistory.matchesJob(found, job: job, repository: repository) else { return (409, nil) }
+        let response = await get("/api/events", query: [URLQueryItem(name: "job", value: job), URLQueryItem(name: "limit", value: "60")])
+        guard response.0 == 200, let data = response.1,
+              let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              let projected = UnifiedGatewayMobileHistory.project(rows, job: job),
+              let output = try? JSONSerialization.data(withJSONObject: projected, options: [.sortedKeys]) else {
+            return (502, nil)
+        }
+        return (200, output)
+    }
+
     nonisolated private func sendHTTP(connection: NWConnection, status: Int, body: Data?,
                           contentType: String = "application/json",
                           extraHeaders: [String: String] = [:]) {
@@ -1374,9 +1427,11 @@ public final class MCPServer {
         case 400: statusText = "Bad Request"
         case 401: statusText = "Unauthorized"
         case 404: statusText = "Not Found"
+        case 409: statusText = "Conflict"
         case 403: statusText = "Forbidden"
         case 405: statusText = "Method Not Allowed"
         case 500: statusText = "Internal Server Error"
+        case 502: statusText = "Bad Gateway"
         case 503: statusText = "Service Unavailable"
         default: statusText = "Unknown"
         }

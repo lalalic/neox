@@ -145,6 +145,28 @@ final class RelayJobsTests: XCTestCase {
         XCTAssertEqual(offsets, [0, 20, 40, 0])
     }
 
+    func testCancelledOnlyPageStillAdvancesAndCancelledRowsStayHidden() async throws {
+        let master = RemoteMCPClient()
+        let cancelled = try XCTUnwrap(RelayJob(wire: ["id": "1", "repository": "vlog", "status": "CANCELLED"]))
+        let visible = try XCTUnwrap(RelayJob(wire: ["id": "2", "repository": "vlog", "status": "RUNNING"]))
+        let cancelledLater = try XCTUnwrap(RelayJob(wire: ["id": "2", "repository": "vlog", "status": "CANCELLED"]))
+        let other = try XCTUnwrap(RelayJob(wire: ["id": "3", "repository": "vlog", "status": "COMPLETED"]))
+        var offsets: [Int] = []
+        let store = RelayJobsStore(pageOperation: { offset, _ in
+            offsets.append(offset)
+            if offset == 0 { return RelayJobsPage(jobs: [cancelled], total: 2, nextOffset: 1, hasMore: true) }
+            return RelayJobsPage(jobs: [cancelledLater, other], total: 3, nextOffset: 3, hasMore: false)
+        })
+        await store.refresh(from: master)
+        XCTAssertTrue(store.jobs.isEmpty)
+        XCTAssertTrue(store.hasMore)
+        await store.loadMore(from: master)
+        XCTAssertEqual(offsets, [0, 1])
+        XCTAssertEqual(store.jobs.map(\.id), ["3"], "A cancelled duplicate in a later page removes the prior visible row")
+        store.applySnapshot([cancelled, visible, cancelledLater, other])
+        XCTAssertEqual(store.jobs.map(\.id), ["2", "3"])
+    }
+
     func testPagesDeduplicateOverlappingJobsAndPreserveRowsOnFailure() async throws {
         let master = RemoteMCPClient()
         let first = try XCTUnwrap(RelayJob(wire: ["id": "619", "repository": "vlog", "status": "RUNNING"]))
@@ -304,12 +326,84 @@ final class RelayJobsTests: XCTestCase {
         XCTAssertNotNil(RelayJobActivityEvent(wire: [
             "id": "evt_3", "type": "task.completed", "timestamp": "2026-11-08T16:40:00.368Z"
         ]))
-        XCTAssertNil(RelayJobActivityEvent(wire: [
+        XCTAssertEqual(RelayJobActivityEvent(wire: [
             "id": "evt_4", "type": "unknown.event", "timestamp": "2026-11-08T16:40:00Z"
-        ]))
+        ])?.title, "unknown.event")
         XCTAssertEqual(RelayJobActivityEvent(wire: [
             "id": "evt_5", "type": "job.blocked", "timestamp": "2026-11-08T16:40:00Z"
         ])?.title, "Job blocked")
+    }
+
+    func testCanonicalHistoryKeepsIdentityStableOrderDetailsAndLatestSixty() throws {
+        let base = "2026-11-27T22:29:41Z"
+        var rows: [[String: Any]] = [
+            ["event_id": "same-time-first", "job_id": "763", "task_id": "2443",
+             "type": "new.lifecycle.event", "timestamp": base, "data": ["summary": "ordinary detail"]],
+            ["event_id": "same-time-first", "job_id": "763", "type": "duplicate",
+             "timestamp": base],
+            ["event_id": "same-time-second", "job_id": "763", "type": "task.failed",
+             "timestamp": base, "message": "Failed during verification", "data": ["phase": "verify"]],
+            ["event_id": "malformed", "job_id": "763", "type": "bad", "timestamp": "invalid"]
+        ]
+        rows += (0..<61).map { index in
+            ["event_id": "window-\(index)", "job_id": "763", "type": "task.progress",
+             "timestamp": "2026-11-27T22:\(String(format: "%02d", index % 60)):41Z"]
+        }
+        let history = try XCTUnwrap(RelayJobActivityEvent.canonicalHistory(rows, jobID: "763"))
+        XCTAssertEqual(history.count, 60)
+        XCTAssertEqual(history.first?.id, "window-59")
+        XCTAssertEqual(history.first(where: { $0.id == "same-time-first" })?.taskLabel, "Task 2443")
+        XCTAssertEqual(history.first(where: { $0.id == "same-time-first" })?.title, "new.lifecycle.event")
+        XCTAssertEqual(history.first(where: { $0.id == "same-time-first" })?.content, "Event received")
+        XCTAssertTrue(history.first(where: { $0.id == "same-time-second" })?.details?.contains("verify") == true)
+        XCTAssertLessThan(try XCTUnwrap(history.firstIndex(where: { $0.id == "same-time-first" })),
+                          try XCTUnwrap(history.firstIndex(where: { $0.id == "same-time-second" })),
+                          "Equal timestamps retain history input order")
+        let fallback = try XCTUnwrap(RelayJobActivityEvent(wire: [
+            "event_id": "fallback", "job_id": "763", "type": "new.event",
+            "timestamp": base, "data": ["phase": "running", "evidence": "logs clean", "next": "deploy"]
+        ]))
+        XCTAssertEqual(fallback.content, "running · Evidence: logs clean · Next: deploy")
+        let emptyMessageFallback = try XCTUnwrap(RelayJobActivityEvent(wire: [
+            "event_id": "empty-message", "job_id": "763", "type": "new.event",
+            "timestamp": base, "message": "  ", "data": ["phase": "running"]
+        ]))
+        XCTAssertEqual(emptyMessageFallback.content, "running")
+        XCTAssertNil(RelayJobActivityEvent.canonicalHistory([
+            ["event_id": "foreign", "job_id": "764", "type": "task.started", "timestamp": base]
+        ], jobID: "763"))
+        XCTAssertEqual(RelayJobActivityEvent.canonicalHistory([], jobID: "763")?.count, 0)
+    }
+
+    func testActivityRefreshReplaysWakeDuringFetchAndRetainsSnapshotOnFailure() async throws {
+        let job = try XCTUnwrap(RelayJob(wire: ["id": "763", "repository": "vlog", "status": "RUNNING"]))
+        let started = expectation(description: "first canonical history fetch started")
+        var calls = 0
+        let store = RelayJobsStore(activityOperation: { _ in
+            calls += 1
+            if calls == 1 {
+                started.fulfill()
+                try await Task.sleep(for: .milliseconds(80))
+            }
+            if calls == 3 { throw NSError(domain: "activity-fixture", code: 1) }
+            let event = try XCTUnwrap(RelayJobActivityEvent(wire: [
+                "event_id": "event-\(calls)", "job_id": "763", "type": "task.progress",
+                "timestamp": "2026-11-27T22:29:4\(calls)Z", "message": "Fetch \(calls)"
+            ]))
+            return ([event], false)
+        })
+        let master = RemoteMCPClient()
+        let firstFetch = Task { await store.refreshActivity(for: job, from: master) }
+        await fulfillment(of: [started], timeout: 2)
+        store.receiveLiveChange()
+        await store.refreshActivity(for: job, from: master)
+        await firstFetch.value
+        XCTAssertEqual(calls, 2, "A wake received during an in-flight fetch triggers a follow-up")
+        XCTAssertEqual(store.activity(for: job)?.first?.id, "event-2")
+
+        await store.refreshActivity(for: job, from: master)
+        XCTAssertEqual(store.activity(for: job)?.first?.id, "event-2", "A transient failure keeps the last good history")
+        XCTAssertNotNil(store.activityError(for: job))
     }
 
     func testActivityUsesRedactedGatewayContentInsteadOfEventType() throws {
@@ -465,7 +559,7 @@ final class RelayJobsTests: XCTestCase {
         let cancelled = try XCTUnwrap(RelayJob(wire: ["id": "44", "status": "CANCELLED"]))
         let store = RelayJobsStore(cancelOperation: { _ in cancelled })
         try await store.cancel(running)
-        XCTAssertEqual(store.ordered.map(\.status), ["CANCELLED"])
+        XCTAssertTrue(store.ordered.isEmpty, "Confirmed cancelled jobs are removed from the visible list")
 
         let wrongJob = try XCTUnwrap(RelayJob(wire: ["id": "other", "status": "CANCELLED"]))
         let unconfirmed = RelayJobsStore(cancelOperation: { _ in wrongJob })
