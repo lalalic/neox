@@ -46,6 +46,8 @@ final class NeoNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["1943: Verify model orientation"].exists)
         XCTAssertFalse(app.staticTexts["Task progress updated"].exists)
         XCTAssertFalse(app.staticTexts["Loading activity"].exists)
+        XCTAssertFalse(app.buttons["Event details"].exists)
+        XCTAssertFalse(app.staticTexts["Event details"].exists)
         XCTAssertFalse(app.staticTexts["Status"].exists)
         XCTAssertFalse(app.staticTexts["Running"].exists,
                        "The detail must not repeat the top Job status")

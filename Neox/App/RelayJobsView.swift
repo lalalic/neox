@@ -885,15 +885,6 @@ private struct RelayJobDetailView: View {
                                     }
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                    if let details = event.details {
-                                        DisclosureGroup("Event details") {
-                                            Text(details)
-                                                .font(.caption.monospaced())
-                                                .textSelection(.enabled)
-                                                .fixedSize(horizontal: false, vertical: true)
-                                        }
-                                        .font(.caption)
-                                    }
                                 }
                             }
                             .accessibilityElement(children: .combine)
