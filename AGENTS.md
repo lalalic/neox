@@ -145,13 +145,12 @@ Neox/
   Info.plist                 display name, Bonjour service, permission strings
   Neox.entitlements          intentionally empty dict — real entitlements come
                              from the provisioning profile at signing
-NeoxTests/                   XCTests hosted in the app; run on the device via
-                             `scripts/remote-deploy.sh --test`
+NeoxTests/                   XCTests hosted in the app; use the NeoxApp scheme
 skills/
   neox-phone-mcp/             agent-facing skill: concise workflow in
                              SKILL.md, with protocol/troubleshooting
                              references, executable bridge script, and evals.
-scripts/remote-deploy.sh     sync + build on mac111 + install on iPhone
+scripts/testflight.py        shared apple-delivery wrapper: direct install or authorized TestFlight release
 ```
 
 Hard rules:
@@ -173,8 +172,7 @@ Hard rules:
 
 The app embeds its own automation: after deploy, drive and verify the UI from
 the Mac over MCP — `agent.pilot` with `snapshot`/`tap`/`type`/`screenshot` and
-`agent.demo` for visual overlays. `scripts/remote-deploy.sh --snapshot` and
-`--mcp CMD [ARGS]` are shortcuts for this loop.
+`agent.demo` for visual overlays. Use the discovered `iphone-helm` Skill for physical-device automation.
 
 ## Regenerating / building locally
 
@@ -225,62 +223,18 @@ xcodebuild -project Neox.xcodeproj -scheme NeoxApp -sdk iphonesimulator \
   `store.totalCount` *after* the run — incrementing per-asset double-counts
   on `redo`.
 
-## Remote build & deploy (iPhone 17 via mac111)
+## Physical iPhone development and verification
 
-The phone is USB-connected to `mac111` (LAN alias `mac111-lan`, user `chengli`,
-keychain password `o7a@bj`). Build there, install over the CoreDevice tunnel:
-
-```bash
-./scripts/remote-deploy.sh            # or run the steps below
-```
-
-Manual sequence (what the script does):
+For development and QA on the physical iPhone, **use the shared `apple-delivery` Skill**. Discover it with `neo skill list --project "$PWD"` and read its current manual before installing. Run from this repository:
 
 ```bash
-# 1. sync sources (NOT build dirs) and regenerate the project remotely
-rsync -az --delete --exclude '.git' --exclude 'build' --exclude 'build-sim' \
-  --exclude 'Neox.xcodeproj' --exclude 'build-device' ./ mac111-lan:~/Workspace/free2/neox/
-ssh mac111-lan 'export PATH=/opt/homebrew/bin:$PATH; cd ~/Workspace/free2/neox \
-  && rm -rf Neox.xcodeproj && xcodegen generate'
-
-# 2. keychain unlock MUST precede codesign; build for generic destination
-ssh mac111-lan 'security unlock-keychain -p "o7a@bj" ~/Library/Keychains/login.keychain-db
-  && xcodebuild -project Neox.xcodeproj -scheme NeoxApp -configuration Debug \
-     -destination "generic/platform=iOS" -derivedDataPath build-device/DerivedData \
-     PROVISIONING_PROFILE_SPECIFIER="PhoneBridge-Dev" CODE_SIGN_STYLE=Manual \
-     CODE_SIGN_IDENTITY="1BFCAE9159CD1B7D0C35B777E072621031F38748" build'
-
-# 3. headless xcodebuild fails signing the Xcode-16 debug dylib → sign by hand,
-#    keychain unlock in the SAME ssh session:
-APP=~/Workspace/free2/neox/build-device/DerivedData/Build/Products/Debug-iphoneos/Neox.app
-#   sign $APP/Neox.debug.dylib, embed
-#   ~/Library/MobileDevice/Provisioning Profiles/QL7J5K8T3V.mobileprovision,
-#   then sign the bundle with the profile's entitlements (+ get-task-allow)
-
-# 4. install + launch
-xcrun devicectl device install app --device FC6AEF41-F3A8-5176-8FEB-841232FF2237 "$APP"
-xcrun devicectl device process launch --device FC6AEF41-F3A8-5176-8FEB-841232FF2237 com.neox.app
+scripts/testflight.py install --dry-run
+scripts/testflight.py install --launch
 ```
 
-Deployment gotchas (all hit in practice):
+The direct-install command checks the paired device and development signing, builds for generic iOS, installs using CoreDevice, and verifies the installed bundle ID and version/build. It does not bump build numbers, upload to App Store Connect, or require TestFlight. Use `--device COREDEVICE_ID` if more than one eligible iPhone is connected. Use `--app /absolute/path/to/App.app` only for an already signed matching build. Follow the Skill for Keychain errors, bounded retry, and explicit provisioning updates; never hard-code passwords or bypass signing. TestFlight `release` is a separate, explicitly authorized distribution operation, not a workaround for local installation.
 
-- `xcodebuild -destination 'id=<coredevice-uuid>'` times out mounting the
-  developer disk image when the phone's iOS is newer than the cached DDI —
-  always build `generic/platform=iOS`; `devicectl install` doesn't need the DDI.
-- `devicectl` **hangs forever** when the tunnel is down. Wrap in timeouts;
-  recover with `sudo pkill -9 CoreDeviceService` on mac111, unlock the phone,
-  and re-trust if prompted.
-- An iOS app cannot host a reliable inbound LAN listener while backgrounded.
-  Rebind on the initial `.active` phase and every foreground return; make the
-  desktop producer retry briefly after a handoff rather than claiming
-  background-server persistence.
-- `security unlock-keychain` must run in the **same SSH session** as any
-  `codesign`, or signing fails with `errSecInternalComponent`.
-- ASC API JWTs need `iat` from real epoch (`time.time()`, not naive
-  `datetime.utcnow()`) and `exp − iat ≤ 20 min`. Device registration uses the
-  **legacy UDID** (`00008150-…`), not the CoreDevice id.
-- Provisioning profile `PhoneBridge-Dev` (id `QL7J5K8T3V`) covers bundle
-  `com.neox.app` + cert `1BFCAE91…` + this iPhone.
+After installation, use the `iphone-helm` Skill to verify the real iPhone UI and live backend. Install the matching NeoY gateway when the change affects it. A build, install, launch, or simulator pass does not satisfy physical-device acceptance; report any blocked real-device check separately.
 
 ## Project learnings
 
