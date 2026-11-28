@@ -52,6 +52,7 @@ struct RelayJob: Identifiable, Equatable, Hashable {
     }
     var canPause: Bool { gatewayAllowsPause && lifecycle.isActive && lifecycle != .paused }
     var canRecover: Bool { gatewayAllowsRecovery && lifecycle == .paused }
+    var canOpenJEL: Bool { lifecycle == .completed && !repository.isEmpty }
 }
 
 enum RelayJobLifecycle: Equatable {
@@ -659,6 +660,8 @@ struct RelayJobsView: View {
     @State private var confirmationJob: RelayJob?
     @State private var failureMessage: String?
     @State private var failureTitle = "Job not cancelled"
+    @State private var openingJEL = false
+    @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(master: RemoteMCPClient) {
@@ -697,6 +700,32 @@ struct RelayJobsView: View {
                     .accessibilityIdentifier("neoRelayJobRow-\(job.id)")
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        if job.canOpenJEL {
+                            Button {
+                                guard !openingJEL else { return }
+                                openingJEL = true
+                                Task {
+                                    defer { openingJEL = false }
+                                    do {
+                                        let url = try await master.relayJELBrowserURL(job)
+                                        openURL(url) { accepted in
+                                            if !accepted {
+                                                failureTitle = "JEL unavailable"
+                                                failureMessage = "Could not open the Dashboard browser."
+                                            }
+                                        }
+                                    } catch {
+                                        failureTitle = "JEL unavailable"
+                                        failureMessage = "Could not open this Job’s authenticated Dashboard JEL. Check the Master connection and try again."
+                                    }
+                                }
+                            } label: {
+                                Label("JEL", systemImage: "point.3.connected.trianglepath.dotted")
+                            }
+                            .tint(.blue)
+                            .disabled(openingJEL)
+                            .accessibilityIdentifier("neoRelayJobJEL-\(job.id)")
+                        }
                         if store.canCancel(job) {
                             Button(role: .destructive) { confirmationJob = job } label: {
                                 Label("Cancel", systemImage: "xmark.circle")

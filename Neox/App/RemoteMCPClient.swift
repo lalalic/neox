@@ -438,6 +438,42 @@ final class RemoteMCPClient: ObservableObject {
         return confirmed
     }
 
+    /// Hand off only a short-lived one-use ticket, never the Mobile bearer.
+    /// The exact repository and Job ID travel in the fragment and are checked
+    /// again by the Dashboard before rendering the canonical JEL.
+    func relayJELBrowserURL(_ job: RelayJob) async throws -> URL {
+        guard job.canOpenJEL else { throw RemoteError.invalidResponse }
+        let selected = endpoint, generation = credentialGeneration
+        // Use the saved HTTPS Master, not the temporary LAN transport hint.
+        guard var components = URLComponents(string: selected), components.scheme == "https",
+              components.host != nil, components.user == nil, components.password == nil else {
+            throw RemoteError.invalidEndpoint
+        }
+        components.path = "/dashboard/connect"; components.query = nil; components.fragment = nil
+        guard let origin = components.url else { throw RemoteError.invalidEndpoint }
+        let receipt = try await unifiedGatewayREST(requireHTTPS: true).json("POST", path: "/dashboard/ticket")
+        guard endpoint == selected, credentialGeneration == generation,
+              let ticket = receipt["ticket"] as? String else { throw RemoteError.invalidResponse }
+        return try Self.relayJELHandoffURL(origin: origin, job: job, ticket: ticket)
+    }
+
+    static func relayJELHandoffURL(origin: URL, job: RelayJob, ticket: String) throws -> URL {
+        let id = job.id, repo = job.repository
+        guard job.canOpenJEL, origin.scheme == "https", origin.host != nil,
+              origin.user == nil, origin.password == nil, origin.path == "/dashboard/connect",
+              origin.query == nil,
+              ticket.range(of: #"^[A-Za-z0-9_-]{32,128}$"#, options: .regularExpression) != nil,
+              id.range(of: #"^[A-Za-z0-9_.-]{1,100}$"#, options: .regularExpression) != nil,
+              repo.utf8.count <= 200,
+              repo.range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}(/[A-Za-z0-9][A-Za-z0-9._-]{0,99}){0,3}$"#, options: .regularExpression) != nil,
+              var components = URLComponents(url: origin, resolvingAgainstBaseURL: false) else {
+            throw RemoteError.invalidResponse
+        }
+        components.fragment = "ticket=\(ticket)&repo=\(repo)&id=\(id)"
+        guard let url = components.url else { throw RemoteError.invalidResponse }
+        return url
+    }
+
     /// Pause/recover use only the narrow authenticated endpoint and durable readback.
     func performRelayJobPauseAction(_ action: RelayJobPauseAction, job: RelayJob) async throws -> RelayJob {
         guard action.allowed(job) else { throw RelayJobCancellationError.unsupported }
@@ -465,10 +501,19 @@ final class RemoteMCPClient: ObservableObject {
 
     /// REST routes use the SAME selected Master credential as MCP.
     /// No independently discovered host or redirect may receive this token.
-    func unifiedGatewayREST() throws -> UnifiedGatewayREST {
+    func unifiedGatewayREST(requireHTTPS: Bool = false) throws -> UnifiedGatewayREST {
         let selected = endpoint, generation=credentialGeneration
-        let scheme = oauthGrant == nil && (activeEndpoint ?? endpoint).hasPrefix("http://") ? "http" : "https"
-        let url=try remoteURL(path:"/",scheme:scheme)
+        let url: URL
+        if requireHTTPS {
+            guard var parts = URLComponents(string:selected), parts.scheme == "https",
+                  parts.host != nil, parts.user == nil, parts.password == nil else { throw RemoteError.invalidEndpoint }
+            parts.path = "/"; parts.query = nil; parts.fragment = nil
+            guard let secureOrigin = parts.url else { throw RemoteError.invalidEndpoint }
+            url = secureOrigin
+        } else {
+            let scheme = oauthGrant == nil && (activeEndpoint ?? endpoint).hasPrefix("http://") ? "http" : "https"
+            url = try remoteURL(path:"/",scheme:scheme)
+        }
         return try UnifiedGatewayREST(origin:url,token:bearer,credentialProvider:{[weak self] in
             guard let self,self.endpoint==selected,self.credentialGeneration==generation else{throw RemoteError.missingCredential}
             let token=try await self.currentBearer()

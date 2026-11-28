@@ -17,6 +17,16 @@ final class UnifiedGatewayRouteTests: XCTestCase {
         XCTAssertNil(UnifiedGatewayRoute.match(method: "PUT", path: "/relay/api/jobs", browserAuthorized: true, bearerAuthorized: true))
     }
 
+    func testJELHandoffDestinationIsScopedAndNeverAnOpenRedirect() {
+        XCTAssertEqual(UnifiedGatewayRoute.dashboardHandoffDestination(repo:nil,id:nil),"/dashboard/")
+        XCTAssertEqual(UnifiedGatewayRoute.dashboardHandoffDestination(repo:"owner/neox",id:"767"),"/dashboard/#/jel/owner%2Fneox%7C767")
+        for repo in ["//evil.example","https://evil.example","owner/../other","repo\r\nLocation: evil"] {
+            XCTAssertNil(UnifiedGatewayRoute.dashboardHandoffDestination(repo:repo,id:"767"))
+        }
+        XCTAssertNil(UnifiedGatewayRoute.dashboardHandoffDestination(repo:"neox",id:nil))
+        XCTAssertNil(UnifiedGatewayRoute.dashboardHandoffDestination(repo:"neox",id:"767|other"))
+    }
+
     func testMobilePauseRecoverAreNarrowBearerOnlyRoutes() {
         for suffix in ["job-pause", "job-resume"] {
             let path = "/relay/api/mobile/" + suffix
@@ -206,6 +216,12 @@ final class UnifiedGatewayRouteTests: XCTestCase {
         let exchanged=try await call("POST","/dashboard/connect",headers:form,body:body)
         XCTAssertEqual(exchanged.0.statusCode,303)
         let cookie=String(try XCTUnwrap(exchanged.0.value(forHTTPHeaderField:"Set-Cookie")).split(separator:";")[0])
+        let scopedTicket=try await call("POST","/dashboard/ticket",headers:["Authorization":"Bearer "+master])
+        let scopedJSON=try XCTUnwrap(JSONSerialization.jsonObject(with:scopedTicket.1) as? [String:Any])
+        let scoped=try XCTUnwrap(scopedJSON["ticket"] as? String)
+        let scopedExchange=try await call("POST","/dashboard/connect",headers:form,body:Data(("ticket="+scoped+"&repo=owner%2Fneox&id=767").utf8))
+        XCTAssertEqual(scopedExchange.0.statusCode,303)
+        XCTAssertEqual(scopedExchange.0.value(forHTTPHeaderField:"Location"),"/dashboard/#/jel/owner%2Fneox%7C767")
         let replay=try await call("POST","/dashboard/connect",headers:form,body:body)
         XCTAssertEqual(replay.0.statusCode,401)
         let auth=try await call("GET","/dashboard/csrf",headers:["Cookie":cookie])

@@ -600,6 +600,20 @@ final class RelayJobsTests: XCTestCase {
         ]))
     }
 
+    func testCompletedJELHandoffKeepsTicketAndScopeInFragment() throws {
+        let job = try XCTUnwrap(RelayJob(wire: ["id":"767", "repository":"owner/neox", "status":"COMPLETED"]))
+        let running = try XCTUnwrap(RelayJob(wire: ["id":"767", "repository":"owner/neox", "status":"RUNNING"]))
+        let origin = try XCTUnwrap(URL(string:"https://master.example/dashboard/connect"))
+        let ticket = String(repeating:"a",count:43)
+        XCTAssertTrue(job.canOpenJEL); XCTAssertFalse(running.canOpenJEL)
+        let url = try RemoteMCPClient.relayJELHandoffURL(origin:origin,job:job,ticket:ticket)
+        XCTAssertEqual(url.host,"master.example"); XCTAssertEqual(url.path,"/dashboard/connect"); XCTAssertNil(url.query)
+        XCTAssertEqual(URLComponents(url:url,resolvingAgainstBaseURL:false)?.fragment,"ticket=\(ticket)&repo=owner/neox&id=767")
+        XCTAssertThrowsError(try RemoteMCPClient.relayJELHandoffURL(origin:origin,job:running,ticket:ticket))
+        XCTAssertThrowsError(try RemoteMCPClient.relayJELHandoffURL(origin:origin,job:job,ticket:"bad&ticket"))
+        XCTAssertThrowsError(try RemoteMCPClient.relayJELHandoffURL(origin:URL(string:"http://master.example/dashboard/connect")!,job:job,ticket:ticket))
+    }
+
     func testPauseRecoverCapabilitiesAndScopedReceipt() async throws {
         let running = try XCTUnwrap(RelayJob(wire: ["id":"44", "repository":"vlog", "status":"RUNNING", "pausable":true, "recoverable":false]))
         let paused = try XCTUnwrap(RelayJob(wire: ["id":"44", "repository":"vlog", "status":"PAUSED", "pausable":false, "recoverable":true]))

@@ -632,8 +632,12 @@ public final class MCPServer {
                 <!doctype html><meta charset="utf-8"><title>Connect Neo Dashboard</title>
                 <form action="/dashboard/connect" method="post" id="handoff"><input type="hidden" name="ticket" id="ticket"></form>
                 <p id="message">Connecting registered Neo device…</p>
-                <script>const t=location.hash.slice(1);history.replaceState(null,'',location.pathname);
-                if(/^[A-Za-z0-9_-]{32,128}$/.test(t)){document.getElementById('ticket').value=t;document.getElementById('handoff').submit();}
+                <script>const raw=location.hash.slice(1);history.replaceState(null,'',location.pathname);
+                const p=new URLSearchParams(raw);const t=raw.includes('=')?p.get('ticket'):raw;
+                if(/^[A-Za-z0-9_-]{32,128}$/.test(t||'')){
+                  const form=document.getElementById('handoff');document.getElementById('ticket').value=t;
+                  for(const name of ['repo','id'])if(p.has(name)){const input=document.createElement('input');input.type='hidden';input.name=name;input.value=p.get(name);form.append(input);}
+                  form.submit();}
                 else{document.getElementById('message').textContent='Open Neo Dashboard again from your registered device.';}</script>
                 """
                 sendHTTP(connection:connection,status:200,body:Data(page.utf8),contentType:"text/html; charset=utf-8",extraHeaders:security);return
@@ -643,7 +647,9 @@ public final class MCPServer {
             guard method=="POST",headers["origin"]==origin,(body?.count ?? 0)<=1024,
                 headers["content-type"]?.lowercased().hasPrefix("application/x-www-form-urlencoded")==true,
                 let body,let form=String(data:body,encoding:.utf8),
-                let ticket=URLComponents(string:"?"+form)?.queryItems?.first(where:{$0.name=="ticket"})?.value,
+                let items=URLComponents(string:"?"+form)?.queryItems,
+                let ticket=items.first(where:{$0.name=="ticket"})?.value,
+                let destination=UnifiedGatewayRoute.dashboardHandoffDestination(repo:items.first(where:{$0.name=="repo"})?.value,id:items.first(where:{$0.name=="id"})?.value),
                 let loggedIn=gatewayBrowserSessions.redeem(ticket,validate:{ principal in
                     self._snapshotOAuthService?.browserPrincipalIsActive(principal)==true
                 }) else{
@@ -651,7 +657,7 @@ public final class MCPServer {
                         contentType:"text/plain; charset=utf-8",extraHeaders:security);return
                 }
             sendHTTP(connection:connection,status:303,body:nil,
-                extraHeaders:security.merging(["Location":"/dashboard/","Set-Cookie":loggedIn.cookie]){_,new in new});return
+                extraHeaders:security.merging(["Location":destination,"Set-Cookie":loggedIn.cookie]){_,new in new});return
         }
         if path == "/dashboard/logout" {
             let scheme=isCloudflareProxy || headers["x-forwarded-proto"]=="https" ? "https" : "http"

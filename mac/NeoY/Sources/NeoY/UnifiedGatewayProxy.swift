@@ -14,6 +14,17 @@ enum UnifiedGatewayRoute {
         let streaming: Bool
     }
 
+    /// A browser ticket may target only a validated Job JEL on this Dashboard.
+    /// Never accept arbitrary return URLs or paths from the client.
+    static func dashboardHandoffDestination(repo: String?, id: String?) -> String? {
+        if repo == nil && id == nil { return "/dashboard/" }
+        guard let repo, let id, repo.utf8.count <= 200,
+              repo.range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}(/[A-Za-z0-9][A-Za-z0-9._-]{0,99}){0,3}$"#, options: .regularExpression) != nil,
+              id.range(of: #"^[A-Za-z0-9_.-]{1,100}$"#, options: .regularExpression) != nil,
+              let scope = (repo + "|" + id).addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")) else { return nil }
+        return "/dashboard/#/jel/" + scope
+    }
+
     static let dashboardAssets: Set<String> = [
         "", "index.html", "dashboard.css", "dashboard.js", "dashboard-config.js",
         "pwa.js", "service-worker.js", "manifest.webmanifest",
