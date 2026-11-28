@@ -223,7 +223,7 @@ xcodebuild -project Neox.xcodeproj -scheme NeoxApp -sdk iphonesimulator \
   `store.totalCount` *after* the run — incrementing per-asset double-counts
   on `redo`.
 
-Completed Job rows have a JEL swipe action opening the exact Job’s canonical Dashboard lifecycle viewer through an HTTPS one-use browser ticket (no Mobile bearer in the browser). Job list swipe actions include Cancel, Pause and Recover only when the authenticated gateway advertises the corresponding capability. Recover resumes a durably paused Job; use the scoped mobile pause/resume endpoints, reject mismatched receipts and never infer authorization from a display status.
+Completed Job rows have a JEL swipe action opening the exact Job’s canonical lifecycle chart in an in-app sheet, using the selected Master’s authenticated `/relay/api/mobile/job-jel` endpoint. Render in an isolated local WebView with bundled Mermaid, no browser login, external navigation, network access, native bridges or credentials in the renderer. Job list swipe actions include Cancel, Pause and Recover only when the authenticated gateway advertises the corresponding capability. Recover resumes a durably paused Job; use the scoped mobile pause/resume endpoints, reject mismatched receipts and never infer authorization from a display status.
 
 ## Physical iPhone development and verification
 

@@ -27,6 +27,14 @@ final class UnifiedGatewayRouteTests: XCTestCase {
         }
     }
 
+    func testInAppJELIsNarrowBearerReadOnly() {
+        let path="/relay/api/mobile/job-jel"
+        XCTAssertEqual(UnifiedGatewayRoute.match(method:"GET",path:path,browserAuthorized:false,bearerAuthorized:true)?.path,"/api/mobile/job-jel")
+        XCTAssertNil(UnifiedGatewayRoute.match(method:"GET",path:path,browserAuthorized:true,bearerAuthorized:false))
+        XCTAssertNil(UnifiedGatewayRoute.match(method:"GET",path:path,browserAuthorized:false,bearerAuthorized:false))
+        XCTAssertNil(UnifiedGatewayRoute.match(method:"POST",path:path,browserAuthorized:false,bearerAuthorized:true))
+    }
+
     func testJELHandoffDestinationIsScopedAndNeverAnOpenRedirect() {
         XCTAssertEqual(UnifiedGatewayRoute.dashboardHandoffDestination(repo:nil,id:nil),"/dashboard/")
         XCTAssertEqual(UnifiedGatewayRoute.dashboardHandoffDestination(repo:"owner/neox",id:"767"),"/dashboard/#/jel/owner%2Fneox%7C767")

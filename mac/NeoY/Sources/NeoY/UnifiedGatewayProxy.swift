@@ -45,7 +45,7 @@ enum UnifiedGatewayRoute {
         "troubleshooter-qa": ["PUT"]
     ]
     private static let mobileWrites: Set<String> = ["mobile/job-cancel", "mobile/job-pause", "mobile/job-resume"]
-    private static let mobileReads: Set<String> = ["events", "mobile/jobs", "mobile/job-tasks", "mobile/job-activity", "mobile/events"]
+    private static let mobileReads: Set<String> = ["events", "mobile/jobs", "mobile/job-jel", "mobile/job-tasks", "mobile/job-activity", "mobile/events"]
     private static let orchestratorMethods: [String: String] = [
         "messages": "POST", "events": "GET", "pending": "GET",
         "ack": "POST", "attachments": "POST", "health": "GET"

@@ -31,8 +31,7 @@ final class UnifiedGatewayREST: NSObject, URLSessionTaskDelegate, @unchecked Sen
     @MainActor private func makeRequest(_ method: String, path: String, query: [URLQueryItem], body: [String: Any]?) async throws -> URLRequest {
         guard path.hasPrefix("/"), !path.hasPrefix("//"), !path.contains(".."), !path.contains("%"),
               !path.contains("?"), !path.contains("#"),
-              path.hasPrefix("/orchestrator-chat/") || path.hasPrefix("/relay/api/")
-                || (method == "POST" && path == "/dashboard/ticket" && origin.scheme == "https") else {
+              path.hasPrefix("/orchestrator-chat/") || path.hasPrefix("/relay/api/") else {
             throw GatewayRESTError.invalidEndpoint
         }
         var url = URLComponents(url: origin, resolvingAgainstBaseURL: false)!

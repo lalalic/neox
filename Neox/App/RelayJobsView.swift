@@ -660,8 +660,7 @@ struct RelayJobsView: View {
     @State private var confirmationJob: RelayJob?
     @State private var failureMessage: String?
     @State private var failureTitle = "Job not cancelled"
-    @State private var openingJEL = false
-    @Environment(\.openURL) private var openURL
+    @State private var jelJob: RelayJob?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(master: RemoteMCPClient) {
@@ -701,29 +700,10 @@ struct RelayJobsView: View {
                     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         if job.canOpenJEL {
-                            Button {
-                                guard !openingJEL else { return }
-                                openingJEL = true
-                                Task {
-                                    defer { openingJEL = false }
-                                    do {
-                                        let url = try await master.relayJELBrowserURL(job)
-                                        openURL(url) { accepted in
-                                            if !accepted {
-                                                failureTitle = "JEL unavailable"
-                                                failureMessage = "Could not open the Dashboard browser."
-                                            }
-                                        }
-                                    } catch {
-                                        failureTitle = "JEL unavailable"
-                                        failureMessage = "Could not open this Job’s authenticated Dashboard JEL. Check the Master connection and try again."
-                                    }
-                                }
-                            } label: {
+                            Button { jelJob = job } label: {
                                 Label("JEL", systemImage: "point.3.connected.trianglepath.dotted")
                             }
                             .tint(.blue)
-                            .disabled(openingJEL)
                             .accessibilityIdentifier("neoRelayJobJEL-\(job.id)")
                         }
                         if store.canCancel(job) {
@@ -799,6 +779,9 @@ struct RelayJobsView: View {
             .navigationDestination(for: RelayJob.self) { job in
                 RelayJobDetailView(job: job, store: store, master: master)
                     .id("\(job.repository)#\(job.id)")
+            }
+            .sheet(item: $jelJob) { job in
+                RelayJELSheet(master: master, job: job)
             }
             .confirmationDialog(
                 "Cancel \(confirmationJob?.displayTitle ?? "Job")?",

@@ -1,6 +1,7 @@
 import SwiftUI
 import XCTest
 import Network
+import WebKit
 @testable import NeoxApp
 
 @MainActor
@@ -600,18 +601,41 @@ final class RelayJobsTests: XCTestCase {
         ]))
     }
 
-    func testCompletedJELHandoffKeepsTicketAndScopeInFragment() throws {
+    func testCompletedJELPayloadRequiresExactScopeAndCompletedState() throws {
         let job = try XCTUnwrap(RelayJob(wire: ["id":"767", "repository":"owner/neox", "status":"COMPLETED"]))
         let running = try XCTUnwrap(RelayJob(wire: ["id":"767", "repository":"owner/neox", "status":"RUNNING"]))
-        let origin = try XCTUnwrap(URL(string:"https://master.example/dashboard/connect"))
-        let ticket = String(repeating:"a",count:43)
+        let facts: [String:Any] = ["id":"767","repository":"owner/neox","state":"COMPLETED","tasks":[],"plans":[]]
+        let wire: [String:Any] = ["schema":"relay.jel.v1","job":facts,"generator":"function jobJelDiagram(job) { return 'flowchart LR'; }"]
         XCTAssertTrue(job.canOpenJEL); XCTAssertFalse(running.canOpenJEL)
-        let url = try RemoteMCPClient.relayJELHandoffURL(origin:origin,job:job,ticket:ticket)
-        XCTAssertEqual(url.host,"master.example"); XCTAssertEqual(url.path,"/dashboard/connect"); XCTAssertNil(url.query)
-        XCTAssertEqual(URLComponents(url:url,resolvingAgainstBaseURL:false)?.fragment,"ticket=\(ticket)&repo=owner/neox&id=767")
-        XCTAssertThrowsError(try RemoteMCPClient.relayJELHandoffURL(origin:origin,job:running,ticket:ticket))
-        XCTAssertThrowsError(try RemoteMCPClient.relayJELHandoffURL(origin:origin,job:job,ticket:"bad&ticket"))
-        XCTAssertThrowsError(try RemoteMCPClient.relayJELHandoffURL(origin:URL(string:"http://master.example/dashboard/connect")!,job:job,ticket:ticket))
+        let payload = try RelayJELPayload(wire:wire,job:job)
+        XCTAssertEqual((try JSONSerialization.jsonObject(with:payload.facts) as? [String:Any])?["id"] as? String,"767")
+        XCTAssertThrowsError(try RelayJELPayload(wire:wire,job:running))
+        var mismatch=wire; var wrong=facts; wrong["repository"]="other/neox"; mismatch["job"]=wrong
+        XCTAssertThrowsError(try RelayJELPayload(wire:mismatch,job:job))
+        mismatch=wire; mismatch["generator"]="unexpected"; XCTAssertThrowsError(try RelayJELPayload(wire:mismatch,job:job))
+    }
+
+    func testInAppJELActuallyRendersWithBundledMermaidAndNoBrowserLogin() async throws {
+        let job = try XCTUnwrap(RelayJob(wire:["id":"767","repository":"neox","status":"COMPLETED"]))
+        let receipt: [String:Any] = ["schema":"relay.jel.v1", "job":["id":"767","repository":"neox","state":"COMPLETED","tasks":[],"plans":[]],
+            "generator":"function jobJelDiagram(job) { return 'flowchart LR; A[Create] --> B[Final Review] --> C[Job]'; }"]
+        let payload = try RelayJELPayload(wire:receipt,job:job)
+        let view = WKWebView(frame:CGRect(x:0,y:0,width:402,height:750),configuration:RelayJELWebView.configuration())
+        let delegate = RelayJELWebView.Coordinator(); view.navigationDelegate=delegate
+        view.loadHTMLString(RelayJELWebView.html(payload:payload,dark:false),baseURL:nil)
+        var rendered=false
+        for _ in 0..<50 {
+            try await Task.sleep(for:.milliseconds(200))
+            if (try? await view.evaluateJavaScript("document.body?.dataset.jelRendered === 'true'")) as? Bool == true {rendered=true;break}
+        }
+        XCTAssertTrue(rendered,"Local WebKit must render an actual SVG")
+        guard rendered else {return}
+        let count=try await view.evaluateJavaScript("document.querySelectorAll('#chart svg g.node').length") as? Int
+        XCTAssertEqual(count,3)
+        let before=try await view.evaluateJavaScript("document.querySelector('#chart svg').getBoundingClientRect().width") as? Double
+        _ = try await view.evaluateJavaScript("document.getElementById('plus').click()")
+        let after=try await view.evaluateJavaScript("document.querySelector('#chart svg').getBoundingClientRect().width") as? Double
+        XCTAssertGreaterThan(after ?? 0,before ?? .infinity)
     }
 
     func testPauseRecoverCapabilitiesAndScopedReceipt() async throws {
