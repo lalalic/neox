@@ -225,6 +225,8 @@ xcodebuild -project Neox.xcodeproj -scheme NeoxApp -sdk iphonesimulator \
 
 ## Physical iPhone development and verification
 
+**Delivery policy:** When an authorized physical iPhone is available, directly install the intended revision with `apple-delivery` and verify the requested behavior on the device. If no authorized physical iPhone is available, deliver the intended revision via `scripts/testflight.py release --bump` to the configured existing internal TestFlight group, following the Skill's release and compliance gates. This policy authorizes internal TestFlight distribution for requested iOS delivery when no device is available; never publish externally. Verify internal build availability, and mark physical-device acceptance `NOT_RUN` until the device can be tested. A failed local build, signing, install or automation check on an available iPhone is a blocker to diagnose, not a reason to switch to TestFlight.
+
 For development and QA on the physical iPhone, **use the shared `apple-delivery` Skill**. Discover it with `neo skill list --project "$PWD"` and read its current manual before installing. Run from this repository:
 
 ```bash
@@ -232,7 +234,7 @@ scripts/testflight.py install --dry-run
 scripts/testflight.py install --launch
 ```
 
-The direct-install command checks the paired device and development signing, builds for generic iOS, installs using CoreDevice, and verifies the installed bundle ID and version/build. It does not bump build numbers, upload to App Store Connect, or require TestFlight. Use `--device COREDEVICE_ID` if more than one eligible iPhone is connected. Use `--app /absolute/path/to/App.app` only for an already signed matching build. Follow the Skill for Keychain errors, bounded retry, and explicit provisioning updates; never hard-code passwords or bypass signing. TestFlight `release` is a separate, explicitly authorized distribution operation, not a workaround for local installation.
+The direct-install command checks the paired device and development signing, builds for generic iOS, installs using CoreDevice, and verifies the installed bundle ID and version/build. It does not bump build numbers, upload to App Store Connect, or require TestFlight. Use `--device COREDEVICE_ID` if more than one eligible iPhone is connected. Use `--app /absolute/path/to/App.app` only for an already signed matching build. Follow the Skill for Keychain errors, bounded retry, and explicit provisioning updates; never hard-code passwords or bypass signing. TestFlight `release` remains a separate internal distribution operation under the delivery policy above, not a workaround for local installation.
 
 After installation, use the `iphone-helm` Skill to verify the real iPhone UI and live backend. Install the matching NeoY gateway when the change affects it. A build, install, launch, or simulator pass does not satisfy physical-device acceptance; report any blocked real-device check separately.
 
