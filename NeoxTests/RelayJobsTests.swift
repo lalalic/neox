@@ -222,12 +222,18 @@ final class RelayJobsTests: XCTestCase {
         ]))
         XCTAssertEqual(job.id, "902")
         XCTAssertEqual(job.displayTitle, "Vlog export")
+        XCTAssertEqual(job.displayIdentity, "lalalic/neo/902")
         XCTAssertEqual(job.statusName, "Running")
         XCTAssertEqual(job.createdAt, "2026-11-07T09:15:00Z")
         XCTAssertTrue(job.isActive)
         XCTAssertFalse(job.canCancel, "The current gateway does not publish cancellation capability")
         XCTAssertFalse(String(describing: job).contains("private request"))
         XCTAssertFalse(String(describing: job).contains("secret"))
+    }
+
+    func testJobListIdentityWithoutRepositoryUsesIDOnly() throws {
+        let job = try XCTUnwrap(RelayJob(wire: ["id": "902", "status": "RUNNING"]))
+        XCTAssertEqual(job.displayIdentity, "902")
     }
 
     func testLifecyclePresentationAndOnlyRunningAnimates() {

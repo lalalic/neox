@@ -39,6 +39,7 @@ struct RelayJob: Identifiable, Equatable, Hashable {
         lifecycle.isActive
     }
     var displayTitle: String { title.isEmpty ? "Job \(id)" : title }
+    var displayIdentity: String { repository.isEmpty ? id : "\(repository)/\(id)" }
 
     /// Requires explicit gateway capability and a nonterminal Relay state.
     /// Older gateways omit this property, which safely hides the action.
@@ -576,7 +577,7 @@ final class RelayJobsStore: ObservableObject {
         jobs = [
             RelayJob(wire: ["id": "fixture-8", "title": "Running vlog edit",
                             "status": "RUNNING", "updatedAt": "2026-11-08T16:40:00Z",
-                            "repository": "lalalic/neo"])!,
+                            "createdAt": "2026-11-08T09:00:00Z", "repository": "lalalic/neo"])!,
             RelayJob(wire: ["id": "fixture-7", "title": "Finished validation",
                             "status": "COMPLETED", "updatedAt": "2026-11-08T16:30:00Z",
                             "repository": "lalalic/neo"])!,
@@ -786,15 +787,17 @@ private struct RelayJobRow: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text(job.displayTitle)
                     .font(.body.weight(.medium))
-                    .lineLimit(2)
-                Text("Created \(RelayTimestamp.creationDisplay(job.createdAt) ?? "Date unavailable")")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 HStack(spacing: 8) {
-                    Text("#\(job.id)")
+                    Text(job.displayIdentity)
+                        .truncationMode(.middle)
                     Text(job.statusName)
-                    if !job.repository.isEmpty { Text(job.repository).lineLimit(1) }
+                        .layoutPriority(1)
+                    Text(RelayTimestamp.creationDisplay(job.createdAt) ?? "Date unavailable")
+                        .layoutPriority(1)
                 }
+                .lineLimit(1)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
@@ -803,6 +806,7 @@ private struct RelayJobRow: View {
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(job.displayTitle), \(job.statusName)")
+        .accessibilityValue("\(job.displayIdentity), \(RelayTimestamp.creationDisplay(job.createdAt) ?? "Date unavailable")")
     }
 }
 
@@ -811,6 +815,7 @@ private struct RelayJobDetailView: View {
     @ObservedObject var store: RelayJobsStore
     @ObservedObject var master: RemoteMCPClient
     @State private var metadataExpanded = false
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         // NavigationLink captures a snapshot; @ObservedObject ensures the latest
@@ -818,6 +823,12 @@ private struct RelayJobDetailView: View {
         let current = store.currentJob(matching: job)
         return List {
             Section {
+                Text(current.displayTitle)
+                    .font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("neoRelayJobFullTitle")
                 Button {
                     metadataExpanded.toggle()
                 } label: {
@@ -906,8 +917,20 @@ private struct RelayJobDetailView: View {
             }
         }
         .listStyle(.plain)
-        .navigationTitle(job.displayTitle)
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.body.weight(.semibold))
+                        .frame(minWidth: 24, minHeight: 24)
+                }
+                .accessibilityLabel("Back")
+                .accessibilityIdentifier("neoRelayJobBack")
+            }
+        }
         .refreshable {
             await store.refresh(from: master)
             await store.refreshActivity(for: job, from: master)

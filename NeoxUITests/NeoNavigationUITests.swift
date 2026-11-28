@@ -21,6 +21,8 @@ final class NeoNavigationUITests: XCTestCase {
         // SwiftUI List rows are exposed as cells on iOS 26, not otherElements.
         XCTAssertTrue(app.staticTexts["Running"].exists)
         XCTAssertTrue(app.staticTexts["Completed"].exists)
+        XCTAssertTrue(app.staticTexts["lalalic/neo/fixture-8"].exists)
+        XCTAssertFalse(app.staticTexts["#fixture-8"].exists)
 
         let runningRow = app.staticTexts["Running vlog edit"]
         XCTAssertTrue(runningRow.waitForExistence(timeout: 3))
@@ -30,6 +32,8 @@ final class NeoNavigationUITests: XCTestCase {
         runningRow.tap()
         XCTAssertTrue(app.staticTexts["Verified the model orientation using the front photo."]
             .waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["neoRelayJobFullTitle"].label, "Running vlog edit")
+        XCTAssertTrue(app.buttons["neoRelayJobBack"].exists)
         XCTAssertFalse(app.staticTexts["Activity"].exists, "Events do not have a redundant Activity section header")
         XCTAssertFalse(app.staticTexts["Repository"].exists, "Job metadata starts collapsed")
         let metadataToggle = app.buttons["neoRelayJobMetadataToggle"]
@@ -46,6 +50,8 @@ final class NeoNavigationUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Running"].exists,
                        "The detail must not repeat the top Job status")
 
+        app.buttons["neoRelayJobBack"].tap()
+        XCTAssertTrue(app.staticTexts["Running vlog edit"].waitForExistence(timeout: 5))
         app.buttons["neoTopTabReviews"].tap()
         XCTAssertFalse(app.staticTexts["Review Inbox"].exists)
         XCTAssertFalse(app.buttons["markcutReviewRefresh"].exists)
