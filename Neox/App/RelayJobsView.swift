@@ -790,7 +790,8 @@ private struct RelayJobRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: job.lifecycle.symbol)
-                .symbolEffect(.pulse, isActive: job.lifecycle.isRunning && !reduceMotion)
+                .symbolEffect(.rotate.clockwise.wholeSymbol, options: .repeating,
+                              isActive: job.lifecycle.isRunning && !reduceMotion)
                 .foregroundStyle(job.lifecycle.tint)
                 .frame(width: 20)
                 .accessibilityHidden(true)
