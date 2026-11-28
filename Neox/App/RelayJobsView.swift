@@ -823,12 +823,6 @@ private struct RelayJobDetailView: View {
         let current = store.currentJob(matching: job)
         return List {
             Section {
-                Text(current.displayTitle)
-                    .font(.headline)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityIdentifier("neoRelayJobFullTitle")
                 Button {
                     metadataExpanded.toggle()
                 } label: {
@@ -908,19 +902,33 @@ private struct RelayJobDetailView: View {
             }
         }
         .listStyle(.plain)
-        .navigationTitle("")
-        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button { dismiss() } label: {
+        .safeAreaInset(edge: .top, spacing: 0) {
+            Button { dismiss() } label: {
+                HStack(spacing: 6) {
                     Image(systemName: "chevron.left")
                         .font(.body.weight(.semibold))
-                        .frame(minWidth: 24, minHeight: 24)
+                        .frame(width: 32, height: 32)
+                        .background(.quaternary, in: Circle())
+                        .frame(width: 44, height: 44)
+                        .accessibilityHidden(true)
+                    Text(current.displayTitle)
+                        .font(.headline)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .accessibilityLabel("Back")
-                .accessibilityIdentifier("neoRelayJobBack")
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(current.displayTitle)
+            .accessibilityHint("Back to Jobs")
+            .accessibilityIdentifier("neoRelayJobBack")
+            .background(Color(uiColor: .systemBackground))
+            .overlay(alignment: .bottom) { Divider() }
         }
         .refreshable {
             await store.refresh(from: master)

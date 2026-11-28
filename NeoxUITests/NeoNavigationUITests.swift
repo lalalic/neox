@@ -32,8 +32,11 @@ final class NeoNavigationUITests: XCTestCase {
         runningRow.tap()
         XCTAssertTrue(app.staticTexts["Verified the model orientation using the front photo."]
             .waitForExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts["neoRelayJobFullTitle"].label, "Running vlog edit")
-        XCTAssertTrue(app.buttons["neoRelayJobBack"].exists)
+        let header = app.buttons["neoRelayJobBack"]
+        XCTAssertTrue(header.exists)
+        XCTAssertEqual(header.label, "Running vlog edit")
+        XCTAssertGreaterThan(header.frame.width, app.frame.width * 0.9,
+                             "Back action covers the entire header row")
         XCTAssertFalse(app.staticTexts["Activity"].exists, "Events do not have a redundant Activity section header")
         XCTAssertFalse(app.staticTexts["Repository"].exists, "Job metadata starts collapsed")
         let metadataToggle = app.buttons["neoRelayJobMetadataToggle"]
@@ -52,8 +55,14 @@ final class NeoNavigationUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Running"].exists,
                        "The detail must not repeat the top Job status")
 
-        app.buttons["neoRelayJobBack"].tap()
+        header.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
         XCTAssertTrue(app.staticTexts["Running vlog edit"].waitForExistence(timeout: 5))
+        XCTAssertFalse(header.exists)
+        app.staticTexts["Running vlog edit"].tap()
+        XCTAssertTrue(header.waitForExistence(timeout: 5))
+        header.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.5)).tap()
+        XCTAssertTrue(app.staticTexts["Running vlog edit"].waitForExistence(timeout: 5))
+        XCTAssertFalse(header.exists)
         app.buttons["neoTopTabReviews"].tap()
         XCTAssertFalse(app.staticTexts["Review Inbox"].exists)
         XCTAssertFalse(app.buttons["markcutReviewRefresh"].exists)
