@@ -17,6 +17,16 @@ final class UnifiedGatewayRouteTests: XCTestCase {
         XCTAssertNil(UnifiedGatewayRoute.match(method: "PUT", path: "/relay/api/jobs", browserAuthorized: true, bearerAuthorized: true))
     }
 
+    func testExecutionReportIsBrowserPostOnly() {
+        let path = "/relay/api/execution-report"
+        XCTAssertEqual(UnifiedGatewayRoute.match(method: "POST", path: path, browserAuthorized: true, bearerAuthorized: false)?.path, "/api/execution-report")
+        XCTAssertNil(UnifiedGatewayRoute.match(method: "POST", path: path, browserAuthorized: false, bearerAuthorized: true))
+        XCTAssertNil(UnifiedGatewayRoute.match(method: "POST", path: path, browserAuthorized: false, bearerAuthorized: false))
+        for method in ["GET", "PUT", "DELETE"] {
+            XCTAssertNil(UnifiedGatewayRoute.match(method: method, path: path, browserAuthorized: true, bearerAuthorized: true))
+        }
+    }
+
     func testJELHandoffDestinationIsScopedAndNeverAnOpenRedirect() {
         XCTAssertEqual(UnifiedGatewayRoute.dashboardHandoffDestination(repo:nil,id:nil),"/dashboard/")
         XCTAssertEqual(UnifiedGatewayRoute.dashboardHandoffDestination(repo:"owner/neox",id:"767"),"/dashboard/#/jel/owner%2Fneox%7C767")
@@ -227,6 +237,19 @@ final class UnifiedGatewayRouteTests: XCTestCase {
         let auth=try await call("GET","/dashboard/csrf",headers:["Cookie":cookie])
         XCTAssertEqual(auth.0.statusCode,200)
         let csrf=try XCTUnwrap((JSONSerialization.jsonObject(with:auth.1) as? [String:Any])?["csrf"] as? String)
+        // The private report route must never be reachable by anonymous,
+        // bearer-only, cross-origin, or missing-CSRF browser callers.
+        let reportPath="/relay/api/execution-report?job=999999999999&repo=fixture"
+        let anonymousReport=try await call("POST",reportPath,headers:["X-Relay-Report":"1"])
+        XCTAssertEqual(anonymousReport.0.statusCode,401)
+        let bearerReport=try await call("POST",reportPath,headers:["Authorization":"Bearer "+master])
+        XCTAssertEqual(bearerReport.0.statusCode,404)
+        let noCSRF=try await call("POST",reportPath,headers:["Cookie":cookie,"Origin":origin])
+        XCTAssertEqual(noCSRF.0.statusCode,403)
+        let wrongOrigin=try await call("POST",reportPath,headers:["Cookie":cookie,"Origin":"https://untrusted.example","X-Neo-CSRF":csrf])
+        XCTAssertEqual(wrongOrigin.0.statusCode,403)
+        let mixedNoCSRF=try await call("POST",reportPath,headers:["Cookie":cookie,"Authorization":"Bearer "+master,"Origin":origin])
+        XCTAssertEqual(mixedNoCSRF.0.statusCode,403)
         let logout=try await call("POST","/dashboard/logout",headers:["Cookie":cookie,"X-Neo-CSRF":csrf,"Origin":origin])
         XCTAssertEqual(logout.0.statusCode,204)
         let revoked=try await call("GET","/dashboard/csrf",headers:["Cookie":cookie])

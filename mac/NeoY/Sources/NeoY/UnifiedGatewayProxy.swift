@@ -40,6 +40,7 @@ enum UnifiedGatewayRoute {
         "job-action": ["POST"], "task-action": ["POST"],
         "job-state": ["POST"], "task-state": ["POST"],
         "control": ["POST"], "task-command": ["POST"],
+        "execution-report": ["POST"],
         "router-test": ["POST"], "execution-router-rules": ["PUT"],
         "troubleshooter-qa": ["PUT"]
     ]
@@ -325,6 +326,11 @@ enum UnifiedGatewayStream {
             guard let url=components.url else {throw URLError(.badURL)}
             var req=URLRequest(url:url);req.httpMethod=method
             req.setValue("identity", forHTTPHeaderField:"Accept-Encoding")
+            // Only the allowlisted, authenticated browser report POST reaches
+            // this branch. Synthesize intent; never relay client auth headers.
+            if target.path == "/api/execution-report" && method == "POST" {
+                req.setValue("1", forHTTPHeaderField:"X-Relay-Report")
+            }
             if let contentType {req.setValue(contentType, forHTTPHeaderField:"Content-Type")}
             if target.path=="/orchestrator-chat/messages" && method=="POST",
                let idempotencyKey,

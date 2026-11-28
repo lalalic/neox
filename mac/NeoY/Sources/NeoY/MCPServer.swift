@@ -723,7 +723,10 @@ public final class MCPServer {
                          body:nil,extraHeaders:["Cache-Control":"no-store"])
                 return
             }
-            if gatewayBrowser && !gatewayBearer && method != "GET" {
+            // Report generation always requires browser CSRF, even when
+            // the same request also carries a valid mobile Bearer credential.
+            if gatewayBrowser && method != "GET" &&
+                (!gatewayBearer || path == "/relay/api/execution-report") {
                 let host=headers["host"] ?? ""
                 let scheme=isCloudflareProxy || headers["x-forwarded-proto"]=="https" ? "https" : "http"
                 guard headers["origin"]=="\(scheme)://\(host)",
