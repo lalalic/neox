@@ -368,6 +368,45 @@ final class RelayJobsTests: XCTestCase {
         XCTAssertEqual(RelayJobActivityEvent.canonicalHistory([], jobID: "763")?.count, 0)
     }
 
+    func testTaskEventNameUsesReasonEvidencePhaseThenMessage() throws {
+        let base: [String: Any] = ["event_id": "evt-1", "job_id": "763", "type": "task.failed",
+                                   "timestamp": "2026-11-27T22:29:41Z", "message": "task.failed"]
+        let cases: [([String: Any], String)] = [
+            (["reason": "Reason", "evidence": "Evidence", "phase": "Phase"], "Reason"),
+            (["reason": "  ", "evidence": "Evidence", "phase": "Phase"], "Evidence"),
+            (["reason": NSNull(), "evidence": "\u{0007}", "phase": "Phase"], "Phase"),
+            ([:], "task.failed")
+        ]
+        for (data, expected) in cases {
+            var wire = base
+            wire["data"] = data
+            XCTAssertEqual(RelayJobActivityEvent(wire: wire)?.content, expected)
+        }
+        var descriptive = base
+        descriptive["message"] = "Meaningful message"
+        descriptive["data"] = ["reason": "Do not override"]
+        XCTAssertEqual(RelayJobActivityEvent(wire: descriptive)?.content, "Meaningful message")
+        var nonTask = base
+        nonTask["type"] = "job.completed"
+        nonTask["message"] = "job.completed"
+        nonTask["data"] = ["reason": "Do not override"]
+        XCTAssertEqual(RelayJobActivityEvent(wire: nonTask)?.content, "job.completed")
+    }
+
+    func testTimelineAbbreviatesCommitSHAToLastSixWithoutChangingDetailsOrIdentity() throws {
+        let sha1 = "5ed411079c52e2f68eba93e0396448552fc2f485"
+        let sha256 = String(repeating: "a", count: 58) + "123abc"
+        let message = "Verified \(sha1), then \(sha256); short abcdef, UUID 3c40ca4a-c987-416e-a192-dede1178b8ca."
+        let event = try XCTUnwrap(RelayJobActivityEvent(wire: [
+            "event_id": sha1, "job_id": "763", "type": "task.progress",
+            "timestamp": "2026-11-27T22:29:41Z", "message": message
+        ]))
+        XCTAssertEqual(event.content, "Verified c2f485, then 123abc; short abcdef, UUID 3c40ca4a-c987-416e-a192-dede1178b8ca.")
+        XCTAssertEqual(event.id, sha1)
+        XCTAssertTrue(event.details?.contains(sha1) == true)
+        XCTAssertTrue(event.details?.contains(sha256) == true)
+    }
+
     func testCanonicalActivity404DoesNotUseLegacyProjection() async throws {
         let ready = XCTestExpectation(description: "Canonical history fixture ready")
         let listener = try NWListener(using: .tcp, on: .any)

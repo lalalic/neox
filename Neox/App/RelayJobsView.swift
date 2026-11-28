@@ -154,11 +154,17 @@ struct RelayJobActivityEvent: Identifiable, Equatable {
         self.type = type
         self.title = Self.labels[type] ?? type
         let message = (wire["message"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let canonicalMessage = message.flatMap { $0.isEmpty ? nil : $0 }
-            ?? Self.dashboardFallback(data: wire["data"]) ?? "Event received"
-        let cleaned = String(canonicalMessage.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) })
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        self.content = cleaned.isEmpty ? nil : cleaned
+        let canonicalMessage: String
+        if let message, message == type, type.hasPrefix("task.") {
+            let data = wire["data"] as? [String: Any] ?? [:]
+            canonicalMessage = ["reason", "evidence", "phase"].compactMap { key in
+                (data[key] as? String).flatMap(Self.cleanedMessage)
+            }.first ?? message
+        } else {
+            canonicalMessage = message.flatMap(Self.cleanedMessage)
+                ?? Self.dashboardFallback(data: wire["data"]) ?? "Event received"
+        }
+        self.content = Self.cleanedMessage(canonicalMessage).map(Self.abbreviateCommitSHAs)
         self.date = date
         self.taskID = (wire["task_id"] as? String).flatMap(Self.safeIdentifier)
         self.taskLabel = self.taskID.map { "Task \($0)" }
@@ -170,6 +176,24 @@ struct RelayJobActivityEvent: Identifiable, Equatable {
         } else {
             self.details = nil
         }
+    }
+
+    private static func cleanedMessage(_ value: String) -> String? {
+        let cleaned = String(value.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) })
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
+    /// Compact timeline text only; preserve event identities and full audit details.
+    private static func abbreviateCommitSHAs(_ text: String) -> String {
+        guard let expression = try? NSRegularExpression(pattern: "(?<![0-9A-Za-z])(?:[0-9a-fA-F]{64}|[0-9a-fA-F]{40})(?![0-9A-Za-z])") else { return text }
+        var result = text
+        let matches = expression.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        for match in matches.reversed() {
+            guard let range = Range(match.range, in: result) else { continue }
+            result.replaceSubrange(range, with: result[range].suffix(6))
+        }
+        return result
     }
 
     private static func dashboardFallback(data: Any?) -> String? {
