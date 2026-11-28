@@ -564,6 +564,16 @@ final class RelayJobsStore: ObservableObject {
         return "\(id): \(title)"
     }
 
+    func activityIconTint(for event: RelayJobActivityEvent, job: RelayJob) -> Color {
+        guard let id = event.taskID,
+              let title = activityTaskTitles[key(job)]?[id] else { return .secondary }
+        switch title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "troubleshooter": return .red
+        case "final review": return .green
+        default: return .secondary
+        }
+    }
+
     var ordered: [RelayJob] {
         jobs.sorted {
             if $0.isActive != $1.isActive { return $0.isActive }
@@ -862,7 +872,7 @@ private struct RelayJobDetailView: View {
                             HStack(alignment: .top, spacing: 10) {
                                 Image(systemName: event.symbol)
                                     .font(.callout)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(store.activityIconTint(for: event, job: job))
                                     .frame(width: 18)
                                     .accessibilityHidden(true)
                                 VStack(alignment: .leading, spacing: 3) {

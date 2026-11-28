@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 import Network
 @testable import NeoxApp
@@ -503,6 +504,30 @@ final class RelayJobsTests: XCTestCase {
         XCTAssertEqual(store.activityTaskCaption(for: event, job: job), "2443: Prepare video")
         XCTAssertNil(store.activityError(for: job))
         XCTAssertEqual(store.activity(for: job)?.count, 2)
+    }
+
+    func testActivityIconTintUsesExactScopedTaskTitleNotEventType() async throws {
+        let job = try XCTUnwrap(RelayJob(wire: ["id": "765", "repository": "agents-relay", "status": "COMPLETED"]))
+        let other = try XCTUnwrap(RelayJob(wire: ["id": "765", "repository": "neox", "status": "COMPLETED"]))
+        func event(_ taskID: String?, type: String = "task.progress") throws -> RelayJobActivityEvent {
+            var wire: [String: Any] = ["event_id": "event-" + (taskID ?? "job"), "job_id": "765", "type": type,
+                                       "timestamp": "2026-11-27T22:29:41Z"]
+            if let taskID { wire["task_id"] = taskID }
+            return try XCTUnwrap(RelayJobActivityEvent(wire: wire))
+        }
+        let trouble = try event("2454", type: "task.completed")
+        let review = try event("2468", type: "task.failed")
+        let implementation = try event("2450", type: "task.failed")
+        let jobOnly = try event(nil, type: "review.approved")
+        let store = RelayJobsStore(activityOperation: { _ in [trouble, review, implementation, jobOnly] },
+                                  taskTitlesOperation: { _ in ["2454": "Troubleshooter", "2468": "Final Review", "2450": "Fix troubleshooter"] })
+        XCTAssertEqual(store.activityIconTint(for: trouble, job: job), .secondary)
+        await store.refreshActivity(for: job, from: RemoteMCPClient())
+        XCTAssertEqual(store.activityIconTint(for: trouble, job: job), .red)
+        XCTAssertEqual(store.activityIconTint(for: review, job: job), .green)
+        XCTAssertEqual(store.activityIconTint(for: implementation, job: job), .secondary)
+        XCTAssertEqual(store.activityIconTint(for: jobOnly, job: job), .secondary)
+        XCTAssertEqual(store.activityIconTint(for: trouble, job: other), .secondary)
     }
 
     func testActivityUsesCanonicalRedactedMessageInsteadOfLegacyContent() throws {
