@@ -10,7 +10,7 @@ automation and demo tools; domain MCP behavior remains in `Neox/Server/`.
 
 ## Neo Mobile Jobs and activity
 
-The Jobs tab consumes the selected Master's authenticated Chat Gateway rather than Relay storage or untrusted event payloads. Keep active Jobs first, display the durable creation timestamp (not last update), and show only allowlisted lifecycle activity. Offer cancellation only when the gateway explicitly advertises it, confirm the owner's intent, scope the request by exact repository and Job ID, and require an authoritative cancelled readback. Preserve the last successful snapshot during transient gateway failures. Test older gateways with no cancellation capability and cross-repository Job ID collisions. See the Jobs section in README.md and Neo's chat-gateway Skill.
+The Jobs tab consumes the selected Master's authenticated Chat Gateway rather than Relay storage or untrusted event payloads. Keep active Jobs first, display the durable creation timestamp (not last update), and read only the canonical, credential-redacted Dashboard event history from `/relay/api/events` scoped by repository and Job ID. Never fall back to legacy history or synthesize event IDs. Offer cancellation only when the gateway explicitly advertises it, confirm the owner's intent, scope the request by exact repository and Job ID, and require an authoritative cancelled readback. Preserve the last successful snapshot during transient gateway failures. Test older gateways with no cancellation capability and cross-repository Job ID collisions. See the Jobs section in README.md and Neo's chat-gateway Skill.
 
 ## Neo Mobile online status
 

@@ -311,27 +311,20 @@ final class RelayJobsTests: XCTestCase {
         XCTAssertEqual(store.ordered.map(\.id), ["2", "1"])
     }
 
-    func testActivityAllowsOnlyKnownLifecycleFieldsAndDropsUnsafeText() throws {
-        let event = try XCTUnwrap(RelayJobActivityEvent(wire: [
+    func testActivityRequiresCanonicalIdentityAndRejectsLegacyRows() throws {
+        XCTAssertNil(RelayJobActivityEvent(wire: [
             "id": "evt_1", "type": "task.started", "timestamp": "2026-11-08T16:40:00Z",
-            "taskId": "task_8", "message": "private prompt", "error": "secret path"
+            "taskId": "task_8", "content": "old projection"
+        ]))
+        XCTAssertNil(RelayJobActivityEvent(wire: [
+            "event_id": "evt_2", "job_id": "763", "type": "task.progress", "timestamp": "not-a-date"
+        ]))
+        let event = try XCTUnwrap(RelayJobActivityEvent(wire: [
+            "event_id": "evt_3", "job_id": "763", "type": "task.started",
+            "timestamp": "2026-11-08T16:40:00.368Z", "task_id": "task_8"
         ]))
         XCTAssertEqual(event.title, "Task started")
         XCTAssertEqual(event.taskLabel, "Task task_8")
-        XCTAssertFalse(String(describing: event).contains("private prompt"))
-        XCTAssertFalse(String(describing: event).contains("secret path"))
-        XCTAssertNil(RelayJobActivityEvent(wire: [
-            "id": "evt_2", "type": "task.progress", "timestamp": "not-a-date", "message": "do not show"
-        ]))
-        XCTAssertNotNil(RelayJobActivityEvent(wire: [
-            "id": "evt_3", "type": "task.completed", "timestamp": "2026-11-08T16:40:00.368Z"
-        ]))
-        XCTAssertEqual(RelayJobActivityEvent(wire: [
-            "id": "evt_4", "type": "unknown.event", "timestamp": "2026-11-08T16:40:00Z"
-        ])?.title, "unknown.event")
-        XCTAssertEqual(RelayJobActivityEvent(wire: [
-            "id": "evt_5", "type": "job.blocked", "timestamp": "2026-11-08T16:40:00Z"
-        ])?.title, "Job blocked")
     }
 
     func testCanonicalHistoryKeepsIdentityStableOrderDetailsAndLatestSixty() throws {
@@ -375,6 +368,41 @@ final class RelayJobsTests: XCTestCase {
         XCTAssertEqual(RelayJobActivityEvent.canonicalHistory([], jobID: "763")?.count, 0)
     }
 
+    func testCanonicalActivity404DoesNotUseLegacyProjection() async throws {
+        let ready = XCTestExpectation(description: "Canonical history fixture ready")
+        let listener = try NWListener(using: .tcp, on: .any)
+        listener.stateUpdateHandler = { state in
+            if case .ready = state { ready.fulfill() }
+        }
+        listener.newConnectionHandler = { connection in
+            connection.start(queue: .global(qos: .userInitiated))
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 16_384) { data, _, _, _ in
+                let request = String(decoding: data ?? Data(), as: UTF8.self)
+                let canonical = request.hasPrefix("GET /relay/api/events?")
+                    && request.contains("job=763") && request.contains("repo=vlog") && request.contains("limit=60")
+                    && request.lowercased().contains("authorization: bearer fixture-only-test-token")
+                let status = canonical ? "404 Not Found" : "200 OK"
+                let body = canonical ? "{}" : #"{"repository":"vlog","jobId":"763","events":[]}"#
+                let packet = Data("HTTP/1.1 \(status)\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)".utf8)
+                connection.send(content: packet, completion: .contentProcessed { _ in connection.cancel() })
+            }
+        }
+        listener.start(queue: .global(qos: .userInitiated))
+        defer { listener.cancel() }
+        await fulfillment(of: [ready], timeout: 10)
+        let port = try XCTUnwrap(listener.port?.rawValue)
+        let master = RemoteMCPClient(testEndpoint: "http://127.0.0.1:\(port)/mcp", testBearer: "fixture-only-test-token")
+        let job = try XCTUnwrap(RelayJob(wire: ["id": "763", "repository": "vlog", "status": "RUNNING"]))
+        do {
+            _ = try await master.relayJobActivity(job)
+            XCTFail("Canonical 404 must fail, never load legacy history")
+        } catch GatewayRESTError.http(let code) {
+            XCTAssertEqual(code, 404)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testActivityRefreshReplaysWakeDuringFetchAndRetainsSnapshotOnFailure() async throws {
         let job = try XCTUnwrap(RelayJob(wire: ["id": "763", "repository": "vlog", "status": "RUNNING"]))
         let started = expectation(description: "first canonical history fetch started")
@@ -390,7 +418,7 @@ final class RelayJobsTests: XCTestCase {
                 "event_id": "event-\(calls)", "job_id": "763", "type": "task.progress",
                 "timestamp": "2026-11-27T22:29:4\(calls)Z", "message": "Fetch \(calls)"
             ]))
-            return ([event], false)
+            return [event]
         })
         let master = RemoteMCPClient()
         let firstFetch = Task { await store.refreshActivity(for: job, from: master) }
@@ -406,57 +434,17 @@ final class RelayJobsTests: XCTestCase {
         XCTAssertNotNil(store.activityError(for: job))
     }
 
-    func testActivityUsesRedactedGatewayContentInsteadOfEventType() throws {
-        let job = try XCTUnwrap(RelayJob(wire: [
-            "id": "658", "repository": "toyalive-3d", "status": "RUNNING"
+    func testActivityUsesCanonicalRedactedMessageInsteadOfLegacyContent() throws {
+        let job = try XCTUnwrap(RelayJob(wire: ["id": "658", "repository": "toyalive-3d", "status": "RUNNING"]))
+        let event = try XCTUnwrap(RelayJobActivityEvent(wire: [
+            "event_id": "evt_658", "job_id": "658", "type": "task.progress",
+            "timestamp": "2026-11-17T11:12:00Z", "task_id": "1943",
+            "message": "Verified orientation with front photo.\u{0007}",
+            "content": "old projection"
         ]))
-        let content = try XCTUnwrap(RelayJobActivityEvent(wire: [
-            "id": "evt_658", "type": "task.progress",
-            "timestamp": "2026-11-17T11:12:00Z", "taskId": "1943",
-            "content": "Verified orientation with front photo.\u{0007}",
-            "message": "private prompt and token", "data": ["secret": "/private/path"]
-        ]))
-        let store = RelayJobsStore()
-        XCTAssertEqual(store.activityDescription(for: content, job: job), "Verified orientation with front photo.")
-        XCTAssertEqual(content.taskLabel, "Task 1943")
-        XCTAssertEqual(content.symbol, "arrow.trianglehead.2.clockwise.rotate.90")
-        XCTAssertFalse(String(describing: content).contains("private prompt"))
-        let old = try XCTUnwrap(RelayJobActivityEvent(wire: [
-            "id": "older", "type": "task.started", "timestamp": "2026-11-17T11:01:00Z",
-            "taskId": "1943", "message": "private prompt"
-        ]))
-        XCTAssertEqual(store.activityDescription(for: old, job: job), "Task started",
-                       "Old gateways remain safe and usable")
-    }
-
-    func testActivityNeverUsesAgentRoleAsPrimaryDescription() throws {
-        let job = try XCTUnwrap(RelayJob(wire: [
-            "id": "720", "repository": "neox", "status": "RUNNING"
-        ]))
-        let store = RelayJobsStore()
-        let role = try XCTUnwrap(RelayJobActivityEvent(wire: [
-            "id": "role", "type": "task.started",
-            "timestamp": "2026-11-22T21:38:00Z", "taskId": "2242",
-            "content": "implementation"
-        ]))
-        XCTAssertNil(role.content)
-        XCTAssertEqual(store.activityDescription(for: role, job: job), "Task started")
-
-        let detailed = try XCTUnwrap(RelayJobActivityEvent(wire: [
-            "id": "detail", "type": "task.progress",
-            "timestamp": "2026-11-22T21:46:00Z", "taskId": "2242",
-            "content": "Verified the full iOS build and completed two review rounds."
-        ]))
-        XCTAssertEqual(store.activityDescription(for: detailed, job: job),
-                       "Verified the full iOS build and completed two review rounds.")
-        XCTAssertEqual(detailed.taskLabel, "Task 2242")
-
-        let unblocked = try XCTUnwrap(RelayJobActivityEvent(wire: [
-            "id": "unblock", "type": "task.unblocked",
-            "timestamp": "2026-11-22T23:05:00Z", "taskId": "2243"
-        ]))
-        XCTAssertEqual(store.activityDescription(for: unblocked, job: job),
-                       "Task unblocked")
+        XCTAssertEqual(RelayJobsStore().activityDescription(for: event, job: job), "Verified orientation with front photo.")
+        XCTAssertEqual(event.taskLabel, "Task 1943")
+        XCTAssertFalse(String(describing: event).contains("old projection"))
     }
 
     func testActivitySymbolsComeOnlyFromAllowlistedEventTypes() throws {
@@ -478,7 +466,7 @@ final class RelayJobsTests: XCTestCase {
         ]
         for (type, expectedSymbol) in mappings {
             let event = try XCTUnwrap(RelayJobActivityEvent(wire: [
-                "id": type, "type": type, "timestamp": "2026-11-08T16:40:00Z",
+                "event_id": type, "job_id": "763", "type": type, "timestamp": "2026-11-08T16:40:00Z",
                 "symbol": "exclamationmark.triangle"
             ]))
             XCTAssertEqual(event.symbol, expectedSymbol, type)
@@ -510,17 +498,10 @@ final class RelayJobsTests: XCTestCase {
         XCTAssertNil(RelayTimestamp.activityDisplay("not-a-date"))
     }
 
-    func testSourceActivityWithoutEventIdsUsesStableSafeUIIdentity() throws {
-        let row: [String: Any] = [
-            "type": "planner.completed", "timestamp": "2026-11-10T13:50:00Z",
-            "taskId": "883", "details": "/private/secret"
-        ]
-        let event = try XCTUnwrap(RelayJobActivityEvent(wire: row, fallbackID: "597-0"))
-        XCTAssertEqual(event.id, "597-0")
-        XCTAssertEqual(event.title, "Planning completed")
-        XCTAssertEqual(event.taskLabel, "Task 883")
-        XCTAssertFalse(String(describing: event).contains("/private/secret"))
-        XCTAssertNil(RelayJobActivityEvent(wire: row, fallbackID: "bad/id"))
+    func testHistoryDoesNotInventEventIdentity() {
+        XCTAssertNil(RelayJobActivityEvent(wire: [
+            "type": "planner.completed", "job_id": "763", "timestamp": "2026-11-10T13:50:00Z"
+        ]))
     }
 
     func testCancellationRejectsCrossRepositoryReceipt() async throws {

@@ -406,36 +406,17 @@ final class RemoteMCPClient: ObservableObject {
         return titles
     }
 
-    /// Read only allowlisted activity from the authenticated Master. Source
-    /// Canonical history preserves Relay event IDs; 404-only legacy reads keep
-    /// their existing projection and are reported as degraded.
-    func relayJobActivity(_ job: RelayJob) async throws -> (events: [RelayJobActivityEvent], degraded: Bool) {
-        if let rows = try await relayRESTArray("GET", path: "/relay/api/events", query: [
+    /// The selected Master's canonical, credential-redacted Dashboard events are the only history source.
+    func relayJobActivity(_ job: RelayJob) async throws -> [RelayJobActivityEvent] {
+        let rows = try await unifiedGatewayREST().jsonArray("GET", path: "/relay/api/events", query: [
             URLQueryItem(name: "job", value: job.id),
             URLQueryItem(name: "repo", value: job.repository),
             URLQueryItem(name: "limit", value: "60")
-        ]) {
-            guard let events = RelayJobActivityEvent.canonicalHistory(rows, jobID: job.id) else {
-                throw RemoteError.invalidResponse
-            }
-            return (events, false)
+        ])
+        guard let events = RelayJobActivityEvent.canonicalHistory(rows, jobID: job.id) else {
+            throw RemoteError.invalidResponse
         }
-
-        let result: [String: Any]
-        if let rest = try await relayREST("GET", path: "/relay/api/mobile/job-activity",
-            query: [URLQueryItem(name: "id", value: job.id), URLQueryItem(name: "repo", value: job.repository)]) {
-            result = rest
-        } else {
-            result = try await callAuthenticatedTool(chatGatewayProvider, [
-                "command": "chat_job_activity", "args": ["repository": job.repository, "jobId": job.id]
-            ])
-        }
-        guard result["repository"] as? String == job.repository,
-              result["jobId"] as? String == job.id,
-              let rows = result["events"] as? [[String: Any]] else { throw RemoteError.invalidResponse }
-        return (rows.enumerated().compactMap { index, row in
-            RelayJobActivityEvent(wire: row, fallbackID: "\(job.id)-\(index)")
-        }, true)
+        return events
     }
 
     /// Relay's Graph-owned cancellation must reach durable CANCELLED before
@@ -471,14 +452,6 @@ final class RemoteMCPClient: ObservableObject {
         do {
             let rest = try unifiedGatewayREST()
             return try await rest.json(method, path: path, query: query, body: body)
-        } catch GatewayRESTError.http(404) {
-            return nil
-        }
-    }
-
-    private func relayRESTArray(_ method: String, path: String, query: [URLQueryItem] = []) async throws -> [[String: Any]]? {
-        do {
-            return try await unifiedGatewayREST().jsonArray(method, path: path, query: query)
         } catch GatewayRESTError.http(404) {
             return nil
         }

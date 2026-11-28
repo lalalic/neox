@@ -129,10 +129,9 @@ enum RelayJobLifecycle: Equatable {
 }
 
 /// Canonical Relay events are credential-redacted by the authenticated Gateway.
-/// Older gateways continue to use their reduced activity projection.
 struct RelayJobActivityEvent: Identifiable, Equatable {
     let id: String
-    let jobID: String?
+    let jobID: String
     let type: String
     let title: String
     let content: String?
@@ -141,34 +140,29 @@ struct RelayJobActivityEvent: Identifiable, Equatable {
     let taskLabel: String?
     let details: String?
 
-    init?(wire: [String: Any], fallbackID: String? = nil) {
-        guard let rawID = (wire["event_id"] as? String) ?? (wire["id"] as? String) ?? fallbackID,
+    init?(wire: [String: Any]) {
+        guard let rawID = wire["event_id"] as? String,
+              let jobID = wire["job_id"] as? String,
+              !jobID.isEmpty,
               let id = Self.safeIdentifier(rawID),
               let type = wire["type"] as? String,
               !type.isEmpty, type.count <= 128,
               let timestamp = wire["timestamp"] as? String,
               let date = RelayTimestamp.parse(timestamp) else { return nil }
-        self.jobID = wire["job_id"] as? String
+        self.jobID = jobID
         self.id = id
         self.type = type
         self.title = Self.labels[type] ?? type
         let message = (wire["message"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let canonicalMessage = wire["event_id"] == nil ? nil :
-            (message?.isEmpty == false ? message :
-                Self.dashboardFallback(data: wire["data"]) ?? "Event received")
-        let sourceContent = wire["content"] as? String ?? canonicalMessage
-        self.content = sourceContent
-            .map { String($0.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }) }
-            .flatMap { value in
-                let cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                let role = ["implementation", "troubleshooter", "coordinator", "reviewer", "planner", "developer", "worker", "architect"]
-                return cleaned.isEmpty || (wire["event_id"] == nil && role.contains(cleaned.lowercased())) ? nil : cleaned
-            }
+        let canonicalMessage = message.flatMap { $0.isEmpty ? nil : $0 }
+            ?? Self.dashboardFallback(data: wire["data"]) ?? "Event received"
+        let cleaned = String(canonicalMessage.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) })
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        self.content = cleaned.isEmpty ? nil : cleaned
         self.date = date
-        self.taskID = ((wire["task_id"] as? String) ?? (wire["taskId"] as? String)).flatMap(Self.safeIdentifier)
+        self.taskID = (wire["task_id"] as? String).flatMap(Self.safeIdentifier)
         self.taskLabel = self.taskID.map { "Task \($0)" }
-        let detailFields = wire["event_id"] == nil ? [:] :
-            wire.filter { ["level", "status", "message", "data"].contains($0.key) }
+        let detailFields = wire.filter { ["level", "status", "message", "data"].contains($0.key) }
         if !detailFields.isEmpty,
            let bytes = try? JSONSerialization.data(withJSONObject: detailFields, options: [.prettyPrinted, .sortedKeys]),
            let text = String(data: bytes, encoding: .utf8) {
@@ -356,8 +350,7 @@ struct RelayJobsPage {
 final class RelayJobsStore: ObservableObject {
     typealias CancelOperation = (RelayJob) async throws -> RelayJob
     typealias PageOperation = (Int, Int) async throws -> RelayJobsPage
-    typealias ActivityResult = (events: [RelayJobActivityEvent], degraded: Bool)
-    typealias ActivityOperation = (RelayJob) async throws -> ActivityResult
+    typealias ActivityOperation = (RelayJob) async throws -> [RelayJobActivityEvent]
 
     @Published private(set) var jobs: [RelayJob] = []
     @Published private(set) var cancellingIDs = Set<String>()
@@ -371,7 +364,6 @@ final class RelayJobsStore: ObservableObject {
     @Published private(set) var liveRevision = 0
     @Published private(set) var activityLoadingIDs = Set<String>()
     @Published private(set) var activityErrors: [String: String] = [:]
-    @Published private(set) var activityDegradedIDs = Set<String>()
     private var refreshing = false
     private var activityRefreshPendingIDs = Set<String>()
     private var nextOffset = 0
@@ -498,12 +490,10 @@ final class RelayJobsStore: ObservableObject {
         repeat {
             activityRefreshPendingIDs.remove(identity)
             do {
-                let result: ActivityResult
+                let result: [RelayJobActivityEvent]
                 if let activityOperation { result = try await activityOperation(job) }
                 else { result = try await master.relayJobActivity(job) }
-                activities[identity] = result.events
-                if result.degraded { activityDegradedIDs.insert(identity) }
-                else { activityDegradedIDs.remove(identity) }
+                activities[identity] = result
                 activityErrors.removeValue(forKey: identity)
             } catch {
                 activityErrors[identity] = "Unable to load Activity from Neo Master. Retry."
@@ -518,8 +508,6 @@ final class RelayJobsStore: ObservableObject {
     func activityError(for job: RelayJob) -> String? {
         activityErrors[key(job)]
     }
-
-    func activityIsDegraded(_ job: RelayJob) -> Bool { activityDegradedIDs.contains(key(job)) }
 
     func receiveLiveChange() {
         liveRevision &+= 1
@@ -560,9 +548,9 @@ final class RelayJobsStore: ObservableObject {
         ]
         let running = jobs[0]
         let fixture: [String: Any] = [
-            "id": "fixture-progress", "type": "task.progress",
-            "timestamp": "2026-11-17T11:12:00Z", "taskId": "1943",
-            "content": "Verified the model orientation using the front photo."
+            "event_id": "fixture-progress", "job_id": running.id, "type": "task.progress",
+            "timestamp": "2026-11-17T11:12:00Z", "task_id": "1943",
+            "message": "Verified the model orientation using the front photo."
         ]
         if let event = RelayJobActivityEvent(wire: fixture) {
             setActivity([event], for: running)
@@ -812,11 +800,6 @@ private struct RelayJobDetailView: View {
                 }
             }
             Section {
-                if store.activityIsDegraded(job) {
-                    Text("Limited activity history from this older Master")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
                 if store.activity(for: job) != nil, let error = store.activityError(for: job) {
                     Label(error, systemImage: "wifi.exclamationmark")
                         .font(.caption)
