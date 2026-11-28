@@ -30,7 +30,16 @@ final class NeoNavigationUITests: XCTestCase {
         runningRow.tap()
         XCTAssertTrue(app.staticTexts["Verified the model orientation using the front photo."]
             .waitForExistence(timeout: 5))
-        XCTAssertFalse(app.staticTexts["Task progress updated"].exists)
+        XCTAssertFalse(app.staticTexts["Activity"].exists, "Events do not have a redundant Activity section header")
+        XCTAssertFalse(app.staticTexts["Repository"].exists, "Job metadata starts collapsed")
+        let metadataToggle = app.buttons["neoRelayJobMetadataToggle"]
+        XCTAssertTrue(metadataToggle.exists)
+        metadataToggle.tap()
+        XCTAssertTrue(app.staticTexts["Repository"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Created"].exists)
+        metadataToggle.tap()
+        XCTAssertFalse(app.staticTexts["Repository"].exists)
+        XCTAssertTrue(app.staticTexts["Task progress updated"].exists)
         XCTAssertFalse(app.staticTexts["Status"].exists)
         XCTAssertFalse(app.staticTexts["Running"].exists,
                        "The detail must not repeat the top Job status")
@@ -90,6 +99,8 @@ final class NeoNavigationUITests: XCTestCase {
         XCTAssertTrue(waitingRow.waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["Waiting"].exists)
         waitingRow.tap()
+        XCTAssertFalse(app.staticTexts["Repository"].exists, "A newly opened Job starts with metadata collapsed")
+        XCTAssertTrue(app.buttons["neoRelayJobMetadataToggle"].exists)
         XCTAssertFalse(app.staticTexts["Waiting"].exists,
                        "The detail no longer duplicates the Jobs list status")
         XCTAssertFalse(app.staticTexts["Status"].exists)

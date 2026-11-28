@@ -79,6 +79,57 @@ final class UnifiedGatewayRouteTests: XCTestCase {
         XCTAssertNil(store.csrf(cookieHeader: ""))
     }
 
+    func testCanonicalMobileHistoryRouteAndStrictScope() throws {
+        let route = UnifiedGatewayRoute.match(method: "GET", path: "/relay/api/events",
+            browserAuthorized: false, bearerAuthorized: true)
+        XCTAssertEqual(route?.path, "/api/events")
+        XCTAssertNil(UnifiedGatewayRoute.match(method: "POST", path: "/relay/api/events",
+            browserAuthorized: false, bearerAuthorized: true))
+        let valid = [URLQueryItem(name: "job", value: "763"), URLQueryItem(name: "repo", value: "owner/neox"),
+                     URLQueryItem(name: "limit", value: "60")]
+        XCTAssertEqual(UnifiedGatewayMobileHistory.query(valid)?.job, "763")
+        XCTAssertEqual(UnifiedGatewayRoute.match(method: "GET", path: "/relay/api/events",
+            browserAuthorized: true, bearerAuthorized: false)?.path, "/api/events",
+            "Existing browser session routing remains available")
+        XCTAssertTrue(UnifiedGatewayMobileHistory.isMasterOwnerBearer("owner-token", masterToken: "owner-token"))
+        XCTAssertFalse(UnifiedGatewayMobileHistory.isMasterOwnerBearer("oauth-token", masterToken: "owner-token"))
+        XCTAssertFalse(UnifiedGatewayMobileHistory.isMasterOwnerBearer(nil, masterToken: "owner-token"))
+        XCTAssertTrue(UnifiedGatewayMobileHistory.matchesJob(["id": "763", "repository": "owner/neox"],
+                                                               job: "763", repository: "owner/neox"))
+        XCTAssertFalse(UnifiedGatewayMobileHistory.matchesJob(["id": "763", "repository": "other/neox"],
+                                                                job: "763", repository: "owner/neox"))
+        for invalid in [
+            Array(valid.dropLast()), valid + [URLQueryItem(name: "job", value: "763")],
+            [URLQueryItem(name: "job", value: "0763"), valid[1], valid[2]],
+            [valid[0], valid[1], URLQueryItem(name: "limit", value: "61")],
+            [valid[0], URLQueryItem(name: "repo", value: "owner//neox"), valid[2]],
+            valid + [URLQueryItem(name: "task", value: "1")]
+        ] {
+            XCTAssertNil(UnifiedGatewayMobileHistory.query(invalid))
+        }
+    }
+
+    func testMobileHistoryProjectionRedactsNestedCredentialsAndRejectsForeignScope() throws {
+        let row: [String: Any] = [
+            "event_id": "evt-1", "job_id": "763", "task_id": "2443", "type": "task.completed",
+            "timestamp": "2026-11-27T22:29:41.770Z",
+            "message": "Bearer abc.def token=hidden password='two secret words'\n-----BEGIN RSA PRIVATE KEY-----\nprivate bytes\n-----END RSA PRIVATE KEY-----",
+            "data": ["summary": "safe", "nested": ["refreshToken": "hidden"]], "transport": "drop"
+        ]
+        let projected = try XCTUnwrap(UnifiedGatewayMobileHistory.project([row], job: "763"))
+        let output = try XCTUnwrap(projected.first)
+        XCTAssertNil(output["transport"])
+        XCTAssertTrue((output["message"] as? String)?.contains("[REDACTED]") == true)
+        XCTAssertFalse((output["message"] as? String)?.contains("two secret words") == true)
+        XCTAssertFalse((output["message"] as? String)?.contains("private bytes") == true)
+        let data = try XCTUnwrap(output["data"] as? [String: Any])
+        let nested = try XCTUnwrap(data["nested"] as? [String: Any])
+        XCTAssertEqual(nested["refreshToken"] as? String, "[REDACTED]")
+        XCTAssertNil(UnifiedGatewayMobileHistory.project([["event_id": "foreign", "job_id": "764",
+            "type": "task.started", "timestamp": "2026-11-27T22:29:41Z"]], job: "763"))
+        XCTAssertEqual(UnifiedGatewayMobileHistory.project([row, ["type": "missing-id"]], job: "763")?.count, 1)
+    }
+
     func testPersistedCookieAndOneUseTicketSurviveOnlyAuthorizedGrant() throws {
         let root=FileManager.default.temporaryDirectory.appendingPathComponent("dashboard-session-"+UUID().uuidString)
         try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)

@@ -59,6 +59,24 @@ final class UnifiedGatewayREST: NSObject, URLSessionTaskDelegate, @unchecked Sen
 
     @MainActor func json(_ method: String, path: String, query: [URLQueryItem] = [], body: [String: Any]? = nil,
               expectedStatus: Int = 200) async throws -> [String: Any] {
+        guard let object = try await jsonValue(method, path: path, query: query, body: body,
+                                               expectedStatus: expectedStatus) as? [String: Any] else {
+            throw GatewayRESTError.invalidResponse
+        }
+        return object
+    }
+
+    @MainActor func jsonArray(_ method: String, path: String, query: [URLQueryItem] = [],
+                              expectedStatus: Int = 200) async throws -> [[String: Any]] {
+        guard let rows = try await jsonValue(method, path: path, query: query, body: nil,
+                                              expectedStatus: expectedStatus) as? [[String: Any]] else {
+            throw GatewayRESTError.invalidResponse
+        }
+        return rows
+    }
+
+    @MainActor private func jsonValue(_ method: String, path: String, query: [URLQueryItem],
+                                      body: [String: Any]?, expectedStatus: Int) async throws -> Any {
         let request = try await makeRequest(method, path: path, query: query, body: body)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpShouldSetCookies = false
@@ -70,15 +88,13 @@ final class UnifiedGatewayREST: NSObject, URLSessionTaskDelegate, @unchecked Sen
               http.statusCode == expectedStatus else {
             throw GatewayRESTError.http((response as? HTTPURLResponse)?.statusCode ?? 0)
         }
-        guard let obj = try JSONSerialization.jsonObject(with: bytes) as? [String: Any] else {
-            throw GatewayRESTError.invalidResponse
-        }
-        return obj
+        return try JSONSerialization.jsonObject(with: bytes)
     }
 
     /// Bearer-authenticated Relay notifications contain no Job payload, prompts
     /// or event text. The authoritative Jobs/Activity data is re-fetched by REST.
-    @MainActor func relayChanges(onChange: @escaping @MainActor () async -> Void) async throws {
+    @MainActor func relayChanges(onConnected: @escaping @MainActor () async -> Void = {},
+                                 onChange: @escaping @MainActor () async -> Void) async throws {
         var request = try await makeRequest("GET", path: "/relay/api/mobile/events",
                                       query: [], body: nil)
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
@@ -93,6 +109,7 @@ final class UnifiedGatewayREST: NSObject, URLSessionTaskDelegate, @unchecked Sen
               http.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("text/event-stream") == true else {
             throw GatewayRESTError.http((response as? HTTPURLResponse)?.statusCode ?? 0)
         }
+        await onConnected()
         var eventName = ""
         var dataLines: [String] = []
         var wire = GatewaySSELineBuffer(maxLineBytes: 1024)

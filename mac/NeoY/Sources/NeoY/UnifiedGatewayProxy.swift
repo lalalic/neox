@@ -32,7 +32,7 @@ enum UnifiedGatewayRoute {
         "router-test": ["POST"], "execution-router-rules": ["PUT"],
         "troubleshooter-qa": ["PUT"]
     ]
-    private static let mobileReads: Set<String> = ["mobile/jobs", "mobile/job-tasks", "mobile/job-activity", "mobile/events"]
+    private static let mobileReads: Set<String> = ["events", "mobile/jobs", "mobile/job-tasks", "mobile/job-activity", "mobile/events"]
     private static let orchestratorMethods: [String: String] = [
         "messages": "POST", "events": "GET", "pending": "GET",
         "ack": "POST", "attachments": "POST", "health": "GET"
@@ -79,6 +79,78 @@ enum UnifiedGatewayRoute {
             return Target(port: 8769, path: path, requiresModelToken: true, streaming: name == "events")
         }
         return nil
+    }
+}
+
+enum UnifiedGatewayMobileHistory {
+    static func isMasterOwnerBearer(_ bearer: String?, masterToken: String?) -> Bool {
+        guard let bearer, !bearer.isEmpty, let masterToken, !masterToken.isEmpty else { return false }
+        return bearer == masterToken
+    }
+
+    static func matchesJob(_ response: [String: Any], job: String, repository: String) -> Bool {
+        response["id"] as? String == job && response["repository"] as? String == repository
+    }
+
+    static func query(_ items: [URLQueryItem]) -> (job: String, repository: String)? {
+        guard items.count == 3,
+              items.filter({ $0.name == "job" }).count == 1,
+              items.filter({ $0.name == "repo" }).count == 1,
+              items.filter({ $0.name == "limit" }).count == 1,
+              let job = items.first(where: { $0.name == "job" })?.value,
+              job.range(of: "^[1-9][0-9]*$", options: .regularExpression) != nil,
+              let repository = items.first(where: { $0.name == "repo" })?.value,
+              repository.range(of: "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*){0,3}$", options: .regularExpression) != nil,
+              items.first(where: { $0.name == "limit" })?.value == "60" else { return nil }
+        return (job, repository)
+    }
+
+    static func project(_ rows: [[String: Any]], job: String) -> [[String: Any]]? {
+        let fields: Set<String> = ["event_id", "job_id", "task_id", "type", "timestamp", "level", "status", "message", "data"]
+        var output: [[String: Any]] = []
+        for row in rows {
+            guard let id = row["event_id"] as? String, !id.isEmpty,
+                  let type = row["type"] as? String, !type.isEmpty,
+                  let timestamp = row["timestamp"] as? String,
+                  Self.validTimestamp(timestamp) else { continue }
+            guard let eventJob = row["job_id"] as? String else { continue }
+            guard eventJob == job else { return nil }
+            guard let sanitized = redact(row.filter { fields.contains($0.key) }) as? [String: Any] else { return nil }
+            output.append(sanitized)
+        }
+        return output
+    }
+
+    private static func validTimestamp(_ value: String) -> Bool {
+        for options: ISO8601DateFormatter.Options in [[.withInternetDateTime, .withFractionalSeconds], [.withInternetDateTime]] {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = options
+            if formatter.date(from: value) != nil { return true }
+        }
+        return false
+    }
+
+    private static let credentialKeys: Set<String> = ["password", "passwd", "secret", "token", "accesstoken", "refreshtoken", "apikey", "authorization", "cookie", "privatekey", "credential"]
+
+    private static func redact(_ value: Any) -> Any {
+        if let object = value as? [String: Any] {
+            var result: [String: Any] = [:]
+            for (key, item) in object {
+                let normalized = key.lowercased().filter { $0.isLetter || $0.isNumber }
+                result[key] = credentialKeys.contains(normalized) ? "[REDACTED]" : redact(item)
+            }
+            return result
+        }
+        if let values = value as? [Any] { return values.map(redact) }
+        guard let text = value as? String else { return value }
+        let patterns = [
+            "(?i)\\bBearer\\s+[A-Za-z0-9._~+/-]+=*",
+            "-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----",
+            "(?i)\\b(password|passwd|secret|token|access[_-]?token|refresh[_-]?token|api[_-]?key|authorization|cookie|private[_-]?key|credential)\\s*[:=]\\s*(\"[^\"]*\"|'[^']*'|[^\\s,;]+)"
+        ]
+        return patterns.reduce(text) { result, pattern in
+            result.replacingOccurrences(of: pattern, with: "[REDACTED]", options: .regularExpression)
+        }
     }
 }
 

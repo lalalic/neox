@@ -128,43 +128,65 @@ enum RelayJobLifecycle: Equatable {
     var isTerminal: Bool { [.merged, .completed, .succeeded, .failed, .cancelled].contains(self) }
 }
 
-/// Display-safe activity: only the authenticated Gateway's redacted content
-/// field is accepted, never unfiltered source event messages or payloads.
+/// Canonical Relay events are credential-redacted by the authenticated Gateway.
+/// Older gateways continue to use their reduced activity projection.
 struct RelayJobActivityEvent: Identifiable, Equatable {
     let id: String
+    let jobID: String?
     let type: String
     let title: String
     let content: String?
     let date: Date
     let taskID: String?
     let taskLabel: String?
+    let details: String?
 
     init?(wire: [String: Any], fallbackID: String? = nil) {
-        guard let rawID = (wire["id"] as? String) ?? fallbackID,
+        guard let rawID = (wire["event_id"] as? String) ?? (wire["id"] as? String) ?? fallbackID,
               let id = Self.safeIdentifier(rawID),
               let type = wire["type"] as? String,
-              let title = Self.labels[type],
+              !type.isEmpty, type.count <= 128,
               let timestamp = wire["timestamp"] as? String,
               let date = RelayTimestamp.parse(timestamp) else { return nil }
-        let taskID = (wire["taskId"] as? String).flatMap(Self.safeIdentifier)
+        self.jobID = wire["job_id"] as? String
         self.id = id
         self.type = type
-        self.title = title
-        // Only the authenticated Gateway's redacted "content" is accepted.
-        // Arbitrary raw event "message"/"data" must never reach this view.
-        self.content = (wire["content"] as? String)
-            .map { String($0.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }.prefix(320)) }
+        self.title = Self.labels[type] ?? type
+        let message = (wire["message"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let canonicalMessage = wire["event_id"] == nil ? nil :
+            (message?.isEmpty == false ? message :
+                Self.dashboardFallback(data: wire["data"]) ?? "Event received")
+        let sourceContent = wire["content"] as? String ?? canonicalMessage
+        self.content = sourceContent
+            .map { String($0.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }) }
             .flatMap { value in
-                let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !text.isEmpty,
-                      !["implementation", "troubleshooter", "coordinator",
-                        "reviewer", "planner", "developer", "worker", "architect"]
-                        .contains(text.lowercased()) else { return nil }
-                return text
+                let cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                let role = ["implementation", "troubleshooter", "coordinator", "reviewer", "planner", "developer", "worker", "architect"]
+                return cleaned.isEmpty || (wire["event_id"] == nil && role.contains(cleaned.lowercased())) ? nil : cleaned
             }
         self.date = date
-        self.taskID = taskID
-        self.taskLabel = taskID.map { "Task \($0)" }
+        self.taskID = ((wire["task_id"] as? String) ?? (wire["taskId"] as? String)).flatMap(Self.safeIdentifier)
+        self.taskLabel = self.taskID.map { "Task \($0)" }
+        let detailFields = wire["event_id"] == nil ? [:] :
+            wire.filter { ["level", "status", "message", "data"].contains($0.key) }
+        if !detailFields.isEmpty,
+           let bytes = try? JSONSerialization.data(withJSONObject: detailFields, options: [.prettyPrinted, .sortedKeys]),
+           let text = String(data: bytes, encoding: .utf8) {
+            self.details = text
+        } else {
+            self.details = nil
+        }
+    }
+
+    private static func dashboardFallback(data: Any?) -> String? {
+        guard let data = data as? [String: Any] else { return nil }
+        let phase = data["phase"] as? String
+        let evidence = data["evidence"] as? String
+        let next = data["next"] as? String
+        let parts = [phase, evidence.map { "Evidence: \($0)" }, next.map { "Next: \($0)" }]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     private static let labels: [String: String] = [
@@ -210,6 +232,25 @@ struct RelayJobActivityEvent: Identifiable, Equatable {
     private static func safeIdentifier(_ value: String) -> String? {
         guard value.range(of: "^[A-Za-z0-9_.-]{1,64}$", options: .regularExpression) != nil else { return nil }
         return value
+    }
+
+    static func canonicalHistory(_ rows: [[String: Any]], jobID: String) -> [RelayJobActivityEvent]? {
+        var unique: [String: (Int, RelayJobActivityEvent)] = [:]
+        for (index, row) in rows.enumerated() {
+            guard let eventID = row["event_id"] as? String,
+                  let type = row["type"] as? String,
+                  let timestamp = row["timestamp"] as? String,
+                  let eventJob = row["job_id"] as? String,
+                  Self.safeIdentifier(eventID) != nil, !type.isEmpty, RelayTimestamp.parse(timestamp) != nil else { continue }
+            guard eventJob == jobID else { return nil }
+            guard let event = RelayJobActivityEvent(wire: row) else { continue }
+            if let previous = unique[eventID], previous.1.date >= event.date { continue }
+            unique[eventID] = (index, event)
+        }
+        return Array(unique.values.sorted {
+            if $0.1.date != $1.1.date { return $0.1.date > $1.1.date }
+            return $0.0 < $1.0
+        }.prefix(60).map(\.1))
     }
 
 }
@@ -315,6 +356,8 @@ struct RelayJobsPage {
 final class RelayJobsStore: ObservableObject {
     typealias CancelOperation = (RelayJob) async throws -> RelayJob
     typealias PageOperation = (Int, Int) async throws -> RelayJobsPage
+    typealias ActivityResult = (events: [RelayJobActivityEvent], degraded: Bool)
+    typealias ActivityOperation = (RelayJob) async throws -> ActivityResult
 
     @Published private(set) var jobs: [RelayJob] = []
     @Published private(set) var cancellingIDs = Set<String>()
@@ -328,16 +371,21 @@ final class RelayJobsStore: ObservableObject {
     @Published private(set) var liveRevision = 0
     @Published private(set) var activityLoadingIDs = Set<String>()
     @Published private(set) var activityErrors: [String: String] = [:]
+    @Published private(set) var activityDegradedIDs = Set<String>()
     private var refreshing = false
+    private var activityRefreshPendingIDs = Set<String>()
     private var nextOffset = 0
     private let cancelOperation: CancelOperation?
     private let pageOperation: PageOperation?
+    private let activityOperation: ActivityOperation?
 
     private func key(_ job: RelayJob) -> String { "\(job.repository)#\(job.id)" }
 
-    init(cancelOperation: CancelOperation? = nil, pageOperation: PageOperation? = nil) {
+    init(cancelOperation: CancelOperation? = nil, pageOperation: PageOperation? = nil,
+         activityOperation: ActivityOperation? = nil) {
         self.cancelOperation = cancelOperation
         self.pageOperation = pageOperation
+        self.activityOperation = activityOperation
     }
 
     private func fetchPage(from master: RemoteMCPClient, offset: Int) async throws -> RelayJobsPage {
@@ -382,11 +430,15 @@ final class RelayJobsStore: ObservableObject {
     }
 
     private func applyPage(_ page: RelayJobsPage, reset: Bool) {
+        let visible = page.jobs.filter { $0.lifecycle != .cancelled }
         if reset {
-            jobs = page.jobs
+            jobs = visible
         } else {
             var merged = jobs
-            for item in page.jobs {
+            for cancelled in page.jobs where cancelled.lifecycle == .cancelled {
+                merged.removeAll { $0.id == cancelled.id && $0.repository == cancelled.repository }
+            }
+            for item in visible {
                 if let index = merged.firstIndex(where: { $0.id == item.id && $0.repository == item.repository }) {
                     merged[index] = item
                 } else {
@@ -403,7 +455,7 @@ final class RelayJobsStore: ObservableObject {
     }
 
     func applySnapshot(_ snapshot: [RelayJob]) {
-        jobs = snapshot
+        jobs = snapshot.filter { $0.lifecycle != .cancelled }
         hasMore = false
         nextOffset = snapshot.count
         total = snapshot.count
@@ -424,7 +476,6 @@ final class RelayJobsStore: ObservableObject {
             throw RelayJobCancellationError.unconfirmed
         }
         jobs.removeAll { $0.id == response.id && $0.repository == response.repository }
-        jobs.append(response)
     }
 
     func isCancelling(_ job: RelayJob) -> Bool { cancellingIDs.contains(key(job)) }
@@ -432,23 +483,32 @@ final class RelayJobsStore: ObservableObject {
 
     func refreshActivity(for job: RelayJob, from master: RemoteMCPClient) async {
         let identity = key(job)
-        guard !activityLoadingIDs.contains(identity) else { return }
+        guard !activityLoadingIDs.contains(identity) else {
+            activityRefreshPendingIDs.insert(identity)
+            return
+        }
         activityLoadingIDs.insert(identity)
         defer { activityLoadingIDs.remove(identity) }
-        guard master.hasCredential && master.hasConfiguredAddress else {
+        guard activityOperation != nil || (master.hasCredential && master.hasConfiguredAddress) else {
             activityErrors[identity] = "Connect to Neo Master to load Activity."
             return
         }
         // Event summaries come from the authenticated, redacted Relay API.
         // Avoid a secondary title lookup that repeats agent role names.
-        do {
-            let rows = try await master.relayJobActivity(job)
-            activities[identity] = rows.sorted { $0.date > $1.date }
-            activityErrors.removeValue(forKey: identity)
-        } catch {
-            activityErrors[identity] = "Unable to load Activity from Neo Master. Retry."
-            // Keep the last successfully fetched timeline on transient errors.
-        }
+        repeat {
+            activityRefreshPendingIDs.remove(identity)
+            do {
+                let result: ActivityResult
+                if let activityOperation { result = try await activityOperation(job) }
+                else { result = try await master.relayJobActivity(job) }
+                activities[identity] = result.events
+                if result.degraded { activityDegradedIDs.insert(identity) }
+                else { activityDegradedIDs.remove(identity) }
+                activityErrors.removeValue(forKey: identity)
+            } catch {
+                activityErrors[identity] = "Unable to load Activity from Neo Master. Retry."
+            }
+        } while activityRefreshPendingIDs.remove(identity) != nil
     }
 
     func isActivityLoading(_ job: RelayJob) -> Bool {
@@ -459,12 +519,14 @@ final class RelayJobsStore: ObservableObject {
         activityErrors[key(job)]
     }
 
+    func activityIsDegraded(_ job: RelayJob) -> Bool { activityDegradedIDs.contains(key(job)) }
+
     func receiveLiveChange() {
         liveRevision &+= 1
     }
 
     func setActivity(_ events: [RelayJobActivityEvent], for job: RelayJob) {
-        activities[key(job)] = events.sorted { $0.date > $1.date }
+        activities[key(job)] = events
     }
 
     func activity(for job: RelayJob) -> [RelayJobActivityEvent]? { activities[key(job)] }
@@ -604,6 +666,7 @@ struct RelayJobsView: View {
             .listStyle(.plain)
             .navigationDestination(for: RelayJob.self) { job in
                 RelayJobDetailView(job: job, store: store, master: master)
+                    .id("\(job.repository)#\(job.id)")
             }
             .confirmationDialog(
                 "Cancel \(confirmationJob?.displayTitle ?? "Job")?",
@@ -656,10 +719,12 @@ struct RelayJobsView: View {
             while !Task.isCancelled {
                 do {
                     let rest = try master.unifiedGatewayREST()
-                    try await rest.relayChanges {
+                    try await rest.relayChanges(onConnected: {
+                        store.receiveLiveChange()
+                    }, onChange: {
                         await store.refresh(from: master)
                         store.receiveLiveChange()
-                    }
+                    })
                 } catch {
                     // Older Masters may not yet expose this route. Keep the
                     // loaded Jobs usable and retry without switching identity.
@@ -667,8 +732,8 @@ struct RelayJobsView: View {
                 if Task.isCancelled { return }
                 do { try await Task.sleep(for: .seconds(3)) }
                 catch { return }
-                // A reconnect is not an SSE event. Do not silently poll Jobs
-                // and misrepresent a polling result as a live stream update.
+                // A new authenticated stream connection triggers a history
+                // refresh in an open detail so changes during the gap converge.
             }
         }
         .onChange(of: master.connected) { _, isConnected in
@@ -718,6 +783,7 @@ private struct RelayJobDetailView: View {
     let job: RelayJob
     @ObservedObject var store: RelayJobsStore
     @ObservedObject var master: RemoteMCPClient
+    @State private var metadataExpanded = false
 
     var body: some View {
         // NavigationLink captures a snapshot; @ObservedObject ensures the latest
@@ -725,17 +791,41 @@ private struct RelayJobDetailView: View {
         let current = store.currentJob(matching: job)
         return List {
             Section {
-                LabeledContent("Job", value: "#\(current.id)")
-                if !current.repository.isEmpty { LabeledContent("Repository", value: current.repository) }
-                LabeledContent(
-                    "Created",
-                    value: RelayTimestamp.creationDetail(current.createdAt) ?? "Date unavailable"
-                )
-                if let date = RelayTimestamp.parse(current.updatedAt) {
-                    LabeledContent("Last updated", value: date.formatted(date: .abbreviated, time: .shortened))
+                Button {
+                    metadataExpanded.toggle()
+                } label: {
+                    Label(metadataExpanded ? "Hide job details" : "Show job details",
+                          systemImage: metadataExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Shows or hides the job, repository, and timestamps")
+                .accessibilityIdentifier("neoRelayJobMetadataToggle")
+                if metadataExpanded {
+                    LabeledContent("Job", value: "#\(current.id)")
+                    if !current.repository.isEmpty { LabeledContent("Repository", value: current.repository) }
+                    LabeledContent("Created", value: RelayTimestamp.creationDetail(current.createdAt) ?? "Date unavailable")
+                    if let date = RelayTimestamp.parse(current.updatedAt) {
+                        LabeledContent("Last updated", value: date.formatted(date: .abbreviated, time: .shortened))
+                    }
                 }
             }
-            Section("Activity") {
+            Section {
+                if store.activityIsDegraded(job) {
+                    Text("Limited activity history from this older Master")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if store.activity(for: job) != nil, let error = store.activityError(for: job) {
+                    Label(error, systemImage: "wifi.exclamationmark")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Retry Activity") {
+                        Task { await store.refreshActivity(for: job, from: master) }
+                    }
+                    .accessibilityIdentifier("neoRelayActivityRetry")
+                }
                 if let activity = store.activity(for: job) {
                     if activity.isEmpty {
                         ContentUnavailableView("No activity yet", systemImage: "clock.arrow.circlepath")
@@ -754,11 +844,10 @@ private struct RelayJobDetailView: View {
                                         .fixedSize(horizontal: false, vertical: true)
                                     HStack(spacing: 6) {
                                         if event.content != nil {
-                                            Text(event.title)
-                                                .lineLimit(1)
-                                            if event.taskLabel != nil {
-                                                Text("·")
-                                            }
+                                            Text(event.title).lineLimit(1)
+                                        }
+                                        if event.taskLabel != nil && event.content != nil {
+                                            Text("·")
                                         }
                                         if let taskLabel = event.taskLabel {
                                             Text(taskLabel).lineLimit(1)
@@ -769,6 +858,15 @@ private struct RelayJobDetailView: View {
                                     }
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                    if let details = event.details {
+                                        DisclosureGroup("Event details") {
+                                            Text(details)
+                                                .font(.caption.monospaced())
+                                                .textSelection(.enabled)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                        }
+                                        .font(.caption)
+                                    }
                                 }
                             }
                             .accessibilityElement(children: .combine)
