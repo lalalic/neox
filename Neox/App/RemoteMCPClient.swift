@@ -380,15 +380,8 @@ final class RemoteMCPClient: ObservableObject {
     /// Task titles are a distinct sanitized read-only Relay view. Never
     /// transfer prompts, private file paths, objectives or task artifacts.
     func relayJobTasks(_ job: RelayJob) async throws -> [String: String] {
-        let result: [String: Any]
-        if let direct = try await relayREST("GET", path: "/relay/api/mobile/job-tasks",
-            query: [URLQueryItem(name: "id", value: job.id), URLQueryItem(name: "repo", value: job.repository)]) {
-            result = direct
-        } else {
-            result = try await callAuthenticatedTool(chatGatewayProvider, [
-                "command": "chat_job_tasks", "args": ["repository": job.repository, "jobId": job.id]
-            ])
-        }
+        let result = try await unifiedGatewayREST().json("GET", path: "/relay/api/mobile/job-tasks",
+            query: [URLQueryItem(name: "id", value: job.id), URLQueryItem(name: "repo", value: job.repository)])
         guard result["jobId"] as? String == job.id,
               result["repository"] as? String == job.repository,
               let tasks = result["tasks"] as? [[String: Any]], tasks.count <= 500 else {

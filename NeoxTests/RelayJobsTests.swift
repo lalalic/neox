@@ -473,6 +473,32 @@ final class RelayJobsTests: XCTestCase {
         XCTAssertNotNil(store.activityError(for: job))
     }
 
+    func testActivityTaskCaptionUsesScopedTitlesAndKeepsLastGoodTitlesOnFailure() async throws {
+        let job = try XCTUnwrap(RelayJob(wire: ["id": "763", "repository": "vlog", "status": "RUNNING"]))
+        let other = try XCTUnwrap(RelayJob(wire: ["id": "763", "repository": "neox", "status": "RUNNING"]))
+        let event = try XCTUnwrap(RelayJobActivityEvent(wire: ["event_id": "evt", "job_id": "763", "type": "task.progress",
+            "timestamp": "2026-11-27T22:29:41Z", "task_id": "2443"]))
+        let jobEvent = try XCTUnwrap(RelayJobActivityEvent(wire: ["event_id": "job-event", "job_id": "763", "type": "job.created",
+            "timestamp": "2026-11-27T22:29:41Z"]))
+        var calls = 0
+        let store = RelayJobsStore(activityOperation: { _ in [event, jobEvent] }, taskTitlesOperation: { requested in
+            calls += 1
+            if calls == 3 { throw NSError(domain: "titles-fixture", code: 1) }
+            return ["2443": requested.repository == "vlog" ? "Prepare video" : "Review Mobile"]
+        })
+        let master = RemoteMCPClient()
+        XCTAssertEqual(store.activityTaskCaption(for: event, job: job), "2443")
+        XCTAssertNil(store.activityTaskCaption(for: jobEvent, job: job))
+        await store.refreshActivity(for: job, from: master)
+        await store.refreshActivity(for: other, from: master)
+        XCTAssertEqual(store.activityTaskCaption(for: event, job: job), "2443: Prepare video")
+        XCTAssertEqual(store.activityTaskCaption(for: event, job: other), "2443: Review Mobile")
+        await store.refreshActivity(for: job, from: master)
+        XCTAssertEqual(store.activityTaskCaption(for: event, job: job), "2443: Prepare video")
+        XCTAssertNil(store.activityError(for: job))
+        XCTAssertEqual(store.activity(for: job)?.count, 2)
+    }
+
     func testActivityUsesCanonicalRedactedMessageInsteadOfLegacyContent() throws {
         let job = try XCTUnwrap(RelayJob(wire: ["id": "658", "repository": "toyalive-3d", "status": "RUNNING"]))
         let event = try XCTUnwrap(RelayJobActivityEvent(wire: [

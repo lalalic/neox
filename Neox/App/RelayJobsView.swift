@@ -375,6 +375,7 @@ final class RelayJobsStore: ObservableObject {
     typealias CancelOperation = (RelayJob) async throws -> RelayJob
     typealias PageOperation = (Int, Int) async throws -> RelayJobsPage
     typealias ActivityOperation = (RelayJob) async throws -> [RelayJobActivityEvent]
+    typealias TaskTitlesOperation = (RelayJob) async throws -> [String: String]
 
     @Published private(set) var jobs: [RelayJob] = []
     @Published private(set) var cancellingIDs = Set<String>()
@@ -385,6 +386,7 @@ final class RelayJobsStore: ObservableObject {
     @Published private(set) var hasLoaded = false
     @Published private(set) var loadError: String?
     @Published private(set) var activities: [String: [RelayJobActivityEvent]] = [:]
+    @Published private var activityTaskTitles: [String: [String: String]] = [:]
     @Published private(set) var liveRevision = 0
     @Published private(set) var activityLoadingIDs = Set<String>()
     @Published private(set) var activityErrors: [String: String] = [:]
@@ -394,14 +396,16 @@ final class RelayJobsStore: ObservableObject {
     private let cancelOperation: CancelOperation?
     private let pageOperation: PageOperation?
     private let activityOperation: ActivityOperation?
+    private let taskTitlesOperation: TaskTitlesOperation?
 
     private func key(_ job: RelayJob) -> String { "\(job.repository)#\(job.id)" }
 
     init(cancelOperation: CancelOperation? = nil, pageOperation: PageOperation? = nil,
-         activityOperation: ActivityOperation? = nil) {
+         activityOperation: ActivityOperation? = nil, taskTitlesOperation: TaskTitlesOperation? = nil) {
         self.cancelOperation = cancelOperation
         self.pageOperation = pageOperation
         self.activityOperation = activityOperation
+        self.taskTitlesOperation = taskTitlesOperation
     }
 
     private func fetchPage(from master: RemoteMCPClient, offset: Int) async throws -> RelayJobsPage {
@@ -509,8 +513,7 @@ final class RelayJobsStore: ObservableObject {
             activityErrors[identity] = "Connect to Neo Master to load Activity."
             return
         }
-        // Event summaries come from the authenticated, redacted Relay API.
-        // Avoid a secondary title lookup that repeats agent role names.
+        // Keep canonical history independent of the sanitized task-title lookup.
         repeat {
             activityRefreshPendingIDs.remove(identity)
             do {
@@ -519,6 +522,13 @@ final class RelayJobsStore: ObservableObject {
                 else { result = try await master.relayJobActivity(job) }
                 activities[identity] = result
                 activityErrors.removeValue(forKey: identity)
+                if result.contains(where: { $0.taskID != nil }) {
+                    if let taskTitlesOperation {
+                        if let titles = try? await taskTitlesOperation(job) { activityTaskTitles[identity] = titles }
+                    } else if activityOperation == nil {
+                        if let titles = try? await master.relayJobTasks(job) { activityTaskTitles[identity] = titles }
+                    }
+                }
             } catch {
                 activityErrors[identity] = "Unable to load Activity from Neo Master. Retry."
             }
@@ -544,9 +554,13 @@ final class RelayJobsStore: ObservableObject {
     func activity(for job: RelayJob) -> [RelayJobActivityEvent]? { activities[key(job)] }
 
     func activityDescription(for event: RelayJobActivityEvent, job: RelayJob) -> String {
-        // Task titles are often just agent roles (implementation, troubleshooter).
-        // Prefer an owner-redacted event summary, then the action label.
         event.content ?? event.title
+    }
+
+    func activityTaskCaption(for event: RelayJobActivityEvent, job: RelayJob) -> String? {
+        guard let id = event.taskID else { return nil }
+        guard let title = activityTaskTitles[key(job)]?[id], !title.isEmpty else { return id }
+        return "\(id): \(title)"
     }
 
     var ordered: [RelayJob] {
@@ -578,6 +592,7 @@ final class RelayJobsStore: ObservableObject {
         ]
         if let event = RelayJobActivityEvent(wire: fixture) {
             setActivity([event], for: running)
+            activityTaskTitles[key(running)] = ["1943": "Verify model orientation"]
         }
     }
     #endif
@@ -850,14 +865,8 @@ private struct RelayJobDetailView: View {
                                         .lineLimit(4)
                                         .fixedSize(horizontal: false, vertical: true)
                                     HStack(spacing: 6) {
-                                        if event.content != nil {
-                                            Text(event.title).lineLimit(1)
-                                        }
-                                        if event.taskLabel != nil && event.content != nil {
-                                            Text("·")
-                                        }
-                                        if let taskLabel = event.taskLabel {
-                                            Text(taskLabel).lineLimit(1)
+                                        if let caption = store.activityTaskCaption(for: event, job: job) {
+                                            Text(caption).lineLimit(1)
                                         }
                                         Spacer(minLength: 8)
                                         Text(RelayTimestamp.activityDisplay(event.date))
@@ -880,15 +889,12 @@ private struct RelayJobDetailView: View {
                             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                         }
                     }
-                } else if store.isActivityLoading(job) {
-                    ProgressView("Loading activity")
-                        .listRowBackground(Color.clear)
-                } else {
+                } else if !store.isActivityLoading(job), let error = store.activityError(for: job) {
                     VStack(spacing: 12) {
                         ContentUnavailableView(
                             "Activity unavailable",
                             systemImage: "wifi.exclamationmark",
-                            description: Text(store.activityError(for: job) ?? "Activity has not loaded. Retry the request.")
+                            description: Text(error)
                         )
                         Button("Retry Activity") {
                             Task { await store.refreshActivity(for: job, from: master) }
