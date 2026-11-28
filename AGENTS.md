@@ -223,6 +223,8 @@ xcodebuild -project Neox.xcodeproj -scheme NeoxApp -sdk iphonesimulator \
   `store.totalCount` *after* the run — incrementing per-asset double-counts
   on `redo`.
 
+Job list swipe actions include Cancel, Pause and Recover only when the authenticated gateway advertises the corresponding capability. Recover resumes a durably paused Job; use the scoped mobile pause/resume endpoints, reject mismatched receipts and never infer authorization from a display status.
+
 ## Physical iPhone development and verification
 
 **Delivery policy:** When an authorized physical iPhone is available, directly install the intended revision with `apple-delivery` and verify the requested behavior on the device. If no authorized physical iPhone is available, deliver the intended revision via `scripts/testflight.py release --bump` to the configured existing internal TestFlight group, following the Skill's release and compliance gates. This policy authorizes internal TestFlight distribution for requested iOS delivery when no device is available; never publish externally. Verify internal build availability, and mark physical-device acceptance `NOT_RUN` until the device can be tested. A failed local build, signing, install or automation check on an available iPhone is a blocker to diagnose, not a reason to switch to TestFlight.

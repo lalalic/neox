@@ -17,6 +17,16 @@ final class UnifiedGatewayRouteTests: XCTestCase {
         XCTAssertNil(UnifiedGatewayRoute.match(method: "PUT", path: "/relay/api/jobs", browserAuthorized: true, bearerAuthorized: true))
     }
 
+    func testMobilePauseRecoverAreNarrowBearerOnlyRoutes() {
+        for suffix in ["job-pause", "job-resume"] {
+            let path = "/relay/api/mobile/" + suffix
+            XCTAssertEqual(UnifiedGatewayRoute.match(method: "POST", path: path, browserAuthorized: false, bearerAuthorized: true)?.path, "/api/mobile/" + suffix)
+            XCTAssertNil(UnifiedGatewayRoute.match(method: "POST", path: path, browserAuthorized: true, bearerAuthorized: false))
+            XCTAssertNil(UnifiedGatewayRoute.match(method: "GET", path: path, browserAuthorized: false, bearerAuthorized: true))
+        }
+        XCTAssertNil(UnifiedGatewayRoute.match(method: "POST", path: "/relay/api/control", browserAuthorized: false, bearerAuthorized: true))
+    }
+
     func testUnauthenticatedDashboardNavigationRedirectsOnlyHtmlEntryPages() {
         for path in ["/dashboard/", "/dashboard/index.html"] {
             XCTAssertTrue(UnifiedGatewayRoute.needsDashboardLogin(method: "GET", path: path,

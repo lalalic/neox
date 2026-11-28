@@ -12,6 +12,8 @@ struct RelayJob: Identifiable, Equatable, Hashable {
     /// Only the authenticated gateway may advertise this capability.
     /// The actual operation rechecks the durable Job state (no PR is required).
     let gatewayAllowsCancellation: Bool
+    let gatewayAllowsPause: Bool
+    let gatewayAllowsRecovery: Bool
 
     init?(wire: [String: Any]) {
         guard let rawID = wire["id"] as? String,
@@ -25,6 +27,8 @@ struct RelayJob: Identifiable, Equatable, Hashable {
         self.updatedAt = Self.clean(wire["updatedAt"] as? String ?? "", limit: 40) ?? ""
         self.createdAt = Self.clean(wire["createdAt"] as? String ?? "", limit: 40) ?? ""
         self.gatewayAllowsCancellation = wire["cancellable"] as? Bool == true
+        self.gatewayAllowsPause = wire["pausable"] as? Bool == true
+        self.gatewayAllowsRecovery = wire["recoverable"] as? Bool == true
     }
 
     private static func clean(_ raw: String, limit: Int) -> String? {
@@ -46,6 +50,8 @@ struct RelayJob: Identifiable, Equatable, Hashable {
     var canCancel: Bool {
         gatewayAllowsCancellation && lifecycle.isActive
     }
+    var canPause: Bool { gatewayAllowsPause && lifecycle.isActive && lifecycle != .paused }
+    var canRecover: Bool { gatewayAllowsRecovery && lifecycle == .paused }
 }
 
 enum RelayJobLifecycle: Equatable {
@@ -360,6 +366,17 @@ enum RelayJobCancellationError: LocalizedError, Equatable {
     }
 }
 
+enum RelayJobPauseAction: String, CaseIterable {
+    case pause, recover
+
+    var title: String { self == .pause ? "Pause" : "Recover" }
+    var endpoint: String { self == .pause ? "job-pause" : "job-resume" }
+    func allowed(_ job: RelayJob) -> Bool { self == .pause ? job.canPause : job.canRecover }
+    func confirms(_ job: RelayJob) -> Bool {
+        self == .pause ? job.canRecover : (job.lifecycle.isActive || job.lifecycle.isTerminal) && job.lifecycle != .paused && !job.gatewayAllowsRecovery
+    }
+}
+
 private enum RelayJobsFetchError: Error { case notConnected }
 
 /// One server-side page, with an authoritative offset over the unfiltered Relay inventory.
@@ -374,6 +391,7 @@ struct RelayJobsPage {
 @MainActor
 final class RelayJobsStore: ObservableObject {
     typealias CancelOperation = (RelayJob) async throws -> RelayJob
+    typealias PauseOperation = (RelayJob, RelayJobPauseAction) async throws -> RelayJob
     typealias PageOperation = (Int, Int) async throws -> RelayJobsPage
     typealias ActivityOperation = (RelayJob) async throws -> [RelayJobActivityEvent]
     typealias TaskTitlesOperation = (RelayJob) async throws -> [String: String]
@@ -395,6 +413,7 @@ final class RelayJobsStore: ObservableObject {
     private var activityRefreshPendingIDs = Set<String>()
     private var nextOffset = 0
     private let cancelOperation: CancelOperation?
+    private let pauseOperation: PauseOperation?
     private let pageOperation: PageOperation?
     private let activityOperation: ActivityOperation?
     private let taskTitlesOperation: TaskTitlesOperation?
@@ -402,8 +421,10 @@ final class RelayJobsStore: ObservableObject {
     private func key(_ job: RelayJob) -> String { "\(job.repository)#\(job.id)" }
 
     init(cancelOperation: CancelOperation? = nil, pageOperation: PageOperation? = nil,
-         activityOperation: ActivityOperation? = nil, taskTitlesOperation: TaskTitlesOperation? = nil) {
+         activityOperation: ActivityOperation? = nil, taskTitlesOperation: TaskTitlesOperation? = nil,
+         pauseOperation: PauseOperation? = nil) {
         self.cancelOperation = cancelOperation
+        self.pauseOperation = pauseOperation
         self.pageOperation = pageOperation
         self.activityOperation = activityOperation
         self.taskTitlesOperation = taskTitlesOperation
@@ -487,6 +508,7 @@ final class RelayJobsStore: ObservableObject {
     }
 
     func cancel(_ job: RelayJob) async throws {
+        let job = currentJob(matching: job)
         guard job.canCancel, !cancellingIDs.contains(key(job)),
               let cancelOperation else { throw RelayJobCancellationError.unsupported }
         cancellingIDs.insert(key(job))
@@ -497,6 +519,28 @@ final class RelayJobsStore: ObservableObject {
             throw RelayJobCancellationError.unconfirmed
         }
         jobs.removeAll { $0.id == response.id && $0.repository == response.repository }
+    }
+
+    func canPerform(_ action: RelayJobPauseAction, on job: RelayJob) -> Bool {
+        pauseOperation != nil && action.allowed(job)
+    }
+
+    func perform(_ action: RelayJobPauseAction, on requested: RelayJob) async throws {
+        let job = currentJob(matching: requested)
+        let identity = key(job)
+        guard action.allowed(job), !cancellingIDs.contains(identity), let pauseOperation else {
+            throw RelayJobCancellationError.unsupported
+        }
+        cancellingIDs.insert(identity)
+        defer { cancellingIDs.remove(identity) }
+        let receipt = try await pauseOperation(job, action)
+        guard receipt.id == job.id, receipt.repository == job.repository, action.confirms(receipt) else {
+            throw RelayJobCancellationError.unconfirmed
+        }
+        if let index = jobs.firstIndex(where: { key($0) == identity }) {
+            if receipt.lifecycle == .cancelled { jobs.remove(at: index) }
+            else { jobs[index] = receipt }
+        }
     }
 
     func isCancelling(_ job: RelayJob) -> Bool { cancellingIDs.contains(key(job)) }
@@ -614,6 +658,7 @@ struct RelayJobsView: View {
     @StateObject private var store = RelayJobsStore()
     @State private var confirmationJob: RelayJob?
     @State private var failureMessage: String?
+    @State private var failureTitle = "Job not cancelled"
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(master: RemoteMCPClient) {
@@ -637,6 +682,8 @@ struct RelayJobsView: View {
         #endif
         _store = StateObject(wrappedValue: RelayJobsStore(cancelOperation: { job in
             try await master.cancelRelayJob(job)
+        }, pauseOperation: { job, action in
+            try await master.performRelayJobPauseAction(action, job: job)
         }))
     }
 
@@ -655,6 +702,24 @@ struct RelayJobsView: View {
                                 Label("Cancel", systemImage: "xmark.circle")
                             }
                             .disabled(store.isCancelling(job))
+                        }
+                        ForEach(RelayJobPauseAction.allCases, id: \.self) { action in
+                            if store.canPerform(action, on: job) {
+                                Button {
+                                    Task {
+                                        do { try await store.perform(action, on: job) }
+                                        catch {
+                                            failureTitle = "Job action failed"
+                                            failureMessage = "The Master could not confirm \(action.title.lowercased()). Refresh and try again."
+                                        }
+                                        await store.refresh(from: master)
+                                    }
+                                } label: {
+                                    Label(action.title, systemImage: action == .pause ? "pause.circle" : "play.circle")
+                                }
+                                .tint(action == .pause ? .orange : .green)
+                                .disabled(store.isCancelling(job))
+                            }
                         }
                     }
                 }
@@ -720,6 +785,7 @@ struct RelayJobsView: View {
                     Task {
                         do { try await store.cancel(job) }
                         catch {
+                            failureTitle = "Job not cancelled"
                             if let safeError = error as? RelayJobCancellationError {
                                 failureMessage = safeError.errorDescription
                             } else {
@@ -732,7 +798,7 @@ struct RelayJobsView: View {
             } message: {
                 Text("This stops the Job through Relay and cannot be undone.")
             }
-            .alert("Job not cancelled", isPresented: Binding(
+            .alert(failureTitle, isPresented: Binding(
                 get: { failureMessage != nil },
                 set: { if !$0 { failureMessage = nil } }
             )) {

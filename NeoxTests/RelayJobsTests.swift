@@ -600,6 +600,30 @@ final class RelayJobsTests: XCTestCase {
         ]))
     }
 
+    func testPauseRecoverCapabilitiesAndScopedReceipt() async throws {
+        let running = try XCTUnwrap(RelayJob(wire: ["id":"44", "repository":"vlog", "status":"RUNNING", "pausable":true, "recoverable":false]))
+        let paused = try XCTUnwrap(RelayJob(wire: ["id":"44", "repository":"vlog", "status":"PAUSED", "pausable":false, "recoverable":true]))
+        let unsupported = try XCTUnwrap(RelayJob(wire: ["id":"44", "repository":"vlog", "status":"RUNNING"]))
+        let terminal = try XCTUnwrap(RelayJob(wire: ["id":"44", "repository":"vlog", "status":"COMPLETED", "pausable":true, "recoverable":true]))
+        XCTAssertTrue(running.canPause); XCTAssertFalse(running.canRecover)
+        XCTAssertFalse(paused.canPause); XCTAssertTrue(paused.canRecover)
+        XCTAssertFalse(unsupported.canPause); XCTAssertFalse(terminal.canPause); XCTAssertFalse(terminal.canRecover)
+        var calls: [RelayJobPauseAction] = []
+        let store = RelayJobsStore(pauseOperation: { _, action in
+            calls.append(action); return action == .pause ? paused : running
+        })
+        store.applySnapshot([running]); try await store.perform(.pause, on: running)
+        XCTAssertEqual(store.jobs, [paused]); XCTAssertTrue(store.canPerform(.recover, on: paused))
+        do { try await store.perform(.pause, on: running); XCTFail("stale action must be rejected") }
+        catch { XCTAssertEqual(error as? RelayJobCancellationError, .unsupported) }
+        try await store.perform(.recover, on: paused); XCTAssertEqual(store.jobs, [running]); XCTAssertEqual(calls,[.pause,.recover])
+        let wrong = try XCTUnwrap(RelayJob(wire: ["id":"44", "repository":"neox", "status":"PAUSED", "recoverable":true]))
+        let rejected = RelayJobsStore(pauseOperation: { _,_ in wrong }); rejected.applySnapshot([running])
+        do { try await rejected.perform(.pause, on: running); XCTFail("cross-repo receipt") }
+        catch { XCTAssertEqual(error as? RelayJobCancellationError, .unconfirmed) }
+        XCTAssertEqual(rejected.jobs,[running])
+    }
+
     func testCancellationRejectsCrossRepositoryReceipt() async throws {
         let source = try XCTUnwrap(RelayJob(wire: [
             "id": "44", "repository": "owner/neo", "status": "RUNNING", "cancellable": true

@@ -438,6 +438,19 @@ final class RemoteMCPClient: ObservableObject {
         return confirmed
     }
 
+    /// Pause/recover use only the narrow authenticated endpoint and durable readback.
+    func performRelayJobPauseAction(_ action: RelayJobPauseAction, job: RelayJob) async throws -> RelayJob {
+        guard action.allowed(job) else { throw RelayJobCancellationError.unsupported }
+        let result = try await unifiedGatewayREST().json("POST", path: "/relay/api/mobile/\(action.endpoint)",
+            body: ["id": job.id, "repository": job.repository])
+        guard result["pausable"] is Bool, result["recoverable"] is Bool,
+              let receipt = RelayJob(wire: result), receipt.id == job.id,
+              receipt.repository == job.repository, action.confirms(receipt) else {
+            throw RelayJobCancellationError.unconfirmed
+        }
+        return receipt
+    }
+
     /// A legacy gateway returns 404 and remains usable. Never fall back
     /// after an authorization error, mutation failure or uncertain receipt.
     private func relayREST(_ method: String, path: String, query: [URLQueryItem] = [],
